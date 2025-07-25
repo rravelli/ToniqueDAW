@@ -28,7 +28,6 @@ pub struct Workspace {
     from_player_rx: Consumer<ProcessToGuiMsg>,
     // Global state
     pub bpm: f32,
-    pub sample_rate: u32,
     pub playback_position: f32,
     // Navigation state
     grid: WorkspaceGrid,
@@ -70,9 +69,7 @@ impl Workspace {
         while let Ok(msg) = self.from_player_rx.pop() {
             match msg {
                 ProcessToGuiMsg::PlaybackPos(pos) => {
-                    self.playback_position =
-                        self.bpm * (pos as f32) / (self.sample_rate as f32 * 60.);
-
+                    self.playback_position = pos;
                     self.playback_state = PlaybackState::Playing;
                 }
                 ProcessToGuiMsg::Metrics(metrics) => self.metrics = metrics,
@@ -773,7 +770,6 @@ impl Workspace {
             from_player_rx,
             to_player_tx,
             bpm: 120.0,
-            sample_rate: 44100,
             tracks: vec![],
             track_width: 140.,
             sample_preview: None,

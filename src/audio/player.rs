@@ -133,7 +133,7 @@ impl PlayerBackend {
         self.playhead += num_frames;
         let _ = self
             .to_gui_tx
-            .push(ProcessToGuiMsg::PlaybackPos(self.playhead));
+            .push(ProcessToGuiMsg::PlaybackPos(self.bpm * (self.playhead as f32) / (self.sample_rate as f32 * 60.)));
     }
 
     fn handle_messages(&mut self) -> Result<(), Box<dyn std::error::Error>> {
