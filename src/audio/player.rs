@@ -80,60 +80,34 @@ impl PlayerBackend {
 
                 let start = clip_start.max(pos);
                 let end = clip_end.min(pos + num_frames);
-                // reader not ready
-                // if !clip.stream.is_ready().unwrap() {
-                //     println!("Audio not ready {}", clip.audio.name);
-                //     continue;
-                // }
 
                 let clip_playhead = clip.playhead_start() + (start - clip_start);
 
-                // Fix delays
-                // let delta = clip_playhead as i32 - clip.stream.playhead() as i32;
+                let index_start = clip_playhead;
+                let index_end = clip_playhead + (end - start);
+                // compute audio
+                if let Ok(data) = clip.audio.data.lock()
+                    && index_end > index_start
+                {
+                    let mut channels = vec![];
 
-                // if delta > 0 && delta < 50000 {
-                //     clip.stream.read(delta as usize);
-                // } else if delta != 0 {
-                //     clip.stream.seek(clip_playhead, creek::SeekMode::Auto);
-                // }
-
-                // if delta != 0 {
-                //     println!("out of sync {} samples", delta);
-                // }
-
-                if let Ok(data) = clip.audio.data.lock() {
-                    let channel_0 = &data.0[clip_playhead..clip_playhead + (end - start)];
-                    let channel_1 = &data.1[clip_playhead..clip_playhead + (end - start)];
+                    channels.push(&data.0[clip_playhead..clip_playhead + (end - start)]);
+                    if clip.audio.is_stereo {
+                        channels.push(&data.1[clip_playhead..clip_playhead + (end - start)]);
+                    }
 
                     let mut j = 0;
-
                     for i in (start - pos)..(end - pos) {
-                        if j < channel_0.len() {
-                            track_mix[2 * i] += channel_0[j] * track.volume;
+                        if channels.len() > 1 {
+                            track_mix[2 * i] += channels[0][j] * track.volume;
+                            track_mix[2 * i + 1] += channels[1][j] * track.volume;
+                        } else {
+                            track_mix[2 * i] += channels[0][j] * track.volume;
+                            track_mix[2 * i + 1] += channels[0][j] * track.volume;
                         }
-                        if j < channel_1.len() {
-                            track_mix[2 * i + 1] += channel_1[j] * track.volume;
-                        }
-
                         j += 1;
                     }
                 };
-
-                // if let Ok(audio) = clip.stream.read(end - start) {
-                //     for ch in 0..self.channels {
-                //         let mut j = 0;
-                //         let samples = audio.read_channel(ch);
-
-                //         for i in (start - pos)..(end - pos) {
-                //             if j < samples.len() {
-                //                 track_mix[self.channels * i + ch] += samples[j] * track.volume;
-                //                 j += 1;
-                //             } else {
-                //                 println!("Index out of range");
-                //             }
-                //         }
-                //     }
-                // }
             }
             // Update master
             let mut track_metrics = AudioMetrics::new();
@@ -237,7 +211,7 @@ impl PlayerBackend {
                             let start = clip.start_frame.max(self.playhead);
                             seek_position = start - clip.start_frame;
                         }
-                        let _ = clone.stream.seek(seek_position, creek::SeekMode::Auto);
+
                         track.clips.push(clone);
                     }
                 }
@@ -256,7 +230,6 @@ impl PlayerBackend {
                         if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
                             clip.trim_start = trim_start;
                             clip.trim_end = trim_end;
-                            println!("resizing {} [{},{}]", clip.audio.name, trim_start, trim_end);
                             break;
                         }
                     }
@@ -273,6 +246,7 @@ impl PlayerBackend {
     }
 }
 
+// TO BE DELETED
 fn resample_linear(input: &[f32], src_rate: usize, dst_rate: usize) -> Vec<f32> {
     if src_rate == dst_rate {
         return input.to_vec();

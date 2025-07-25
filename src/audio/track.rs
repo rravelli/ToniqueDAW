@@ -32,14 +32,7 @@ impl TrackBackend {
             if clip.start_frame <= position
                 && position <= clip.start_frame + clip.stream.info().num_frames
             {
-                let _ = clip.stream.seek(
-                    position - clip.start_frame + clip.playhead_start(),
-                    creek::SeekMode::Auto,
-                );
             } else if clip.start_frame > position {
-                let _ = clip
-                    .stream
-                    .seek(clip.playhead_start(), creek::SeekMode::Auto);
             }
         }
     }

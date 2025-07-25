@@ -10,7 +10,7 @@ pub struct ClipBackend {
     pub start_frame: usize,
     pub trim_start: f32,
     pub trim_end: f32,
-    // Most important part for audio decoding
+    // To be deleted
     pub stream: Box<ReadDiskStream<SymphoniaDecoder>>,
 }
 
@@ -60,8 +60,6 @@ impl Clone for ClipBackend {
             ReadDiskStream::<SymphoniaDecoder>::new(self.audio.path.clone(), 0, Default::default())
                 .unwrap(),
         );
-        // stream.cache(0, 0);
-        // stream.seek(self.stream.playhead(), creek::SeekMode::Auto);
 
         Self {
             id: self.id.clone(),
