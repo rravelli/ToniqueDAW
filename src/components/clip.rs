@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use egui::{Align2, Color32, FontFamily, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
+use egui::{
+    Align2, Color32, FontFamily, FontId, Galley, Pos2, Rect, Response, Sense, Shape, Stroke, Ui,
+    Vec2, epaint::TextShape, text::Fonts,
+};
 use rtrb::Producer;
 
 use crate::{
@@ -67,6 +70,7 @@ impl UIClip {
     pub fn ui(
         &mut self,
         ui: &mut Ui,
+        shapes: &mut Vec<Shape>,
         pos: Pos2,
         size: Vec2,
         viewport: Rect,
@@ -116,7 +120,6 @@ impl UIClip {
             stroke,
             egui::StrokeKind::Inside,
         );
-
         painter.rect(
             Rect::from_min_size(
                 Pos2::new(pos.x + BORDER_WIDTH, pos.y + BORDER_WIDTH),
@@ -151,7 +154,7 @@ impl UIClip {
                     * (self.trim_end - self.trim_start);
 
             self.waveform.paint(
-                &painter,
+                shapes,
                 waveform_rect,
                 data,
                 start_ratio,

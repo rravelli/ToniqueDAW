@@ -10,7 +10,10 @@ use crate::{
     metrics::{AudioMetrics, GlobalMetrics},
 };
 use eframe::egui::{self, Sense, Stroke};
-use egui::{Color32, Key, Layout, Painter, Pos2, Rect, Response, ScrollArea, StrokeKind, Ui, Vec2};
+use egui::{
+    Align2, Color32, FontId, Key, Layout, Painter, Pos2, Rect, Response, ScrollArea, Shape,
+    StrokeKind, Ui, Vec2,
+};
 use rtrb::{Consumer, Producer};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -92,6 +95,14 @@ impl Workspace {
             }
         }
 
+        ui.painter().text(
+            Pos2::new(ui.max_rect().right() - 3., ui.max_rect().top()),
+            Align2::RIGHT_BOTTOM,
+            format!("{:.0}%", self.metrics.latency * 100.),
+            FontId::default(),
+            Color32::WHITE,
+        );
+
         ui.vertical(|ui| {
             self.navigation_bar(ui);
 
@@ -140,15 +151,22 @@ impl Workspace {
                                     .to_player_tx
                                     .push(GuiToPlayerMsg::SeekTo(self.playback_position));
                             }
+
                             // Do not draw after clips
                             self.resize_handle(ui);
                             self.track_panel(ui);
                             // Draw grid & samples
                             self.grid.paint(&painter, rect);
 
-                            self.paint_clips(ui, rect);
+                            self.paint_clips(ui, &painter, rect);
                             self.paint_tracks(&painter, rect);
-                            self.paint_preview_sample(ui, rect, dragged_audio_info, is_released);
+                            self.paint_preview_sample(
+                                ui,
+                                rect,
+                                dragged_audio_info,
+                                is_released,
+                                &painter,
+                            );
                             self.paint_playback_cursor(&painter, rect);
                             self.handle_multiselect(ui, response);
                             self.scrollbar(rect, &painter, ui);
@@ -294,7 +312,8 @@ impl Workspace {
         });
     }
 
-    fn paint_clips(&mut self, ui: &mut Ui, viewport: egui::Rect) {
+    fn paint_clips(&mut self, ui: &mut Ui, painter: &Painter, viewport: egui::Rect) {
+        let mut shapes = Vec::new();
         let mut y = viewport.top();
         let mut dragged_track_index = None;
         let mut dragged_clip_index = None;
@@ -317,6 +336,7 @@ impl Workspace {
                     if !(x + width < viewport.left() || x > viewport.right()) {
                         let response = clip.ui(
                             ui,
+                            &mut shapes,
                             Pos2::new(x, y),
                             Vec2::new(width, height),
                             viewport,
@@ -348,12 +368,21 @@ impl Workspace {
             y += track.height + HANDLE_HEIGHT;
         }
 
-        self.handle_dragged_clips(ui, dragged_track_index, dragged_clip_index, viewport);
+        self.handle_dragged_clips(
+            ui,
+            &mut shapes,
+            dragged_track_index,
+            dragged_clip_index,
+            viewport,
+        );
+
+        painter.add(shapes);
     }
 
     fn handle_dragged_clips(
         &mut self,
         ui: &mut Ui,
+        shapes: &mut Vec<Shape>,
         dragged_track_index: Option<usize>,
         dragged_clip_index: Option<usize>,
         viewport: Rect,
@@ -390,6 +419,7 @@ impl Workspace {
             drag_state.element.position = snapped_position;
             let _ = drag_state.element.ui(
                 ui,
+                shapes,
                 Pos2::new(x, y),
                 Vec2::new(
                     width,
@@ -521,6 +551,7 @@ impl Workspace {
         rect: egui::Rect,
         dragged_audio_info: Option<AudioInfo>,
         is_released: bool,
+        painter: &Painter,
     ) {
         // Paint Preview sample
         if let Some(audio_info) = dragged_audio_info
@@ -546,11 +577,12 @@ impl Workspace {
                 DEFAULT_TRACK_HEIGHT
             };
             let width = self.grid.duration_to_width(duration, self.bpm);
-
+            let mut shapes = Vec::new();
             if let Some(sample_preview) = self.sample_preview.as_mut() {
                 sample_preview.position = snapped_position;
                 sample_preview.ui(
                     ui,
+                    &mut shapes,
                     Pos2::new(self.grid.beats_to_x(snapped_position, rect), track_y),
                     Vec2::new(width, height),
                     rect,
@@ -560,6 +592,7 @@ impl Workspace {
                     false,
                     &mut self.to_player_tx,
                 );
+                ui.painter().add(shapes);
             }
         };
 
@@ -660,13 +693,18 @@ impl Workspace {
                 TOP_BAR_HEIGHT,
             ),
         );
-        let zoom_response = ui.allocate_rect(zoom_rect, Sense::click_and_drag());
+        let (zoom_response, painter) = ui.allocate_painter(
+            Vec2::new(
+                ui.available_width() - self.track_width - LIMIT_WIDTH,
+                TOP_BAR_HEIGHT,
+            ),
+            Sense::click_and_drag(),
+        );
 
         // Draw the zoom control rectangle
-        ui.painter()
-            .rect_filled(zoom_rect, 0.0, egui::Color32::from_gray(80));
+        painter.rect_filled(zoom_rect, 0.0, egui::Color32::from_gray(80));
 
-        self.draw_labels(ui.painter(), zoom_rect);
+        self.draw_labels(&painter, zoom_rect);
 
         // Change cursor to resize vertical
         if zoom_response.hovered() || zoom_response.dragged() {

@@ -38,6 +38,7 @@ impl AudioMetrics {
 pub struct GlobalMetrics {
     pub master: AudioMetrics,
     pub tracks: DashMap<String, AudioMetrics>,
+    pub latency: f32,
 }
 
 impl GlobalMetrics {
@@ -45,6 +46,7 @@ impl GlobalMetrics {
         Self {
             master: AudioMetrics::new(),
             tracks: DashMap::new(),
+            latency: 0.,
         }
     }
 }

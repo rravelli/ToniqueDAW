@@ -1,5 +1,6 @@
 use rtrb::{Consumer, Producer};
-use std::collections::HashMap;
+use rubato::{Resampler, SincFixedOut, SincInterpolationParameters, SincInterpolationType};
+use std::{collections::HashMap, time::Instant};
 
 use crate::{
     ProcessToGuiMsg,
@@ -44,15 +45,14 @@ impl PlayerBackend {
     }
 
     pub fn mix_audio(&mut self, output: &mut [f32]) {
+        let time_start = Instant::now();
         let _ = self.handle_messages();
         let pos = self.playhead;
         let mut metrics = GlobalMetrics::new();
 
         // Paused
         if self.playback_state == PlaybackState::Paused {
-            for sample in output {
-                *sample = 0.;
-            }
+            output.fill(0.);
             let _ = self.to_gui_tx.push(ProcessToGuiMsg::Metrics(metrics));
             return;
         }
@@ -65,8 +65,10 @@ impl PlayerBackend {
                 || (!self.solo_tracks.is_empty() && !self.solo_tracks.contains(&track_id));
 
             for clip in track.clips.iter_mut() {
+                // global start position
                 let clip_start = clip.start_frame;
-                let clip_end = clip.end();
+                // global end position
+                let clip_end = clip.end(self.sample_rate);
                 // not in range
                 if pos + num_frames < clip_start || clip_end < pos + num_frames {
                     continue;
@@ -77,25 +79,62 @@ impl PlayerBackend {
                 {
                     continue;
                 };
-
+                // start position of the clip in [pos, pos + num_frames]
                 let start = clip_start.max(pos);
+                // end position of the clip in [pos, pos + num_frames]
                 let end = clip_end.min(pos + num_frames);
-
+                // position relative to the clip
                 let clip_playhead = clip.playhead_start() + (start - clip_start);
+                // ratio in sample rates
+                let sample_rate_ratio = clip.audio.sample_rate as f64 / self.sample_rate as f64;
+                // start index to pick inside the clip
+                let start_index = (clip_playhead as f64 * sample_rate_ratio).floor() as usize;
+                // end index to pick inside the clip
+                let end_index =
+                    ((clip_playhead + (end - start)) as f64 * sample_rate_ratio).ceil() as usize;
 
-                let index_start = clip_playhead;
-                let index_end = clip_playhead + (end - start);
                 // compute audio
                 if let Ok(data) = clip.audio.data.lock()
-                    && index_end > index_start
+                    && start_index > end_index
                 {
+                    let mut resampler = SincFixedOut::new(
+                        self.sample_rate as f64 / clip.audio.sample_rate as f64,
+                        10.,
+                        SincInterpolationParameters {
+                            sinc_len: 32,
+                            f_cutoff: 0.70,
+                            oversampling_factor: 16,
+                            interpolation: SincInterpolationType::Nearest,
+                            window: rubato::WindowFunction::Hann,
+                        },
+                        end - pos,
+                        2,
+                    )
+                    .unwrap();
+
                     let mut channels = vec![];
 
-                    channels.push(&data.0[clip_playhead..clip_playhead + (end - start)]);
+                    channels.push(
+                        data.0[start_index.min(data.0.len() - 1)
+                            ..(start_index + resampler.input_frames_next()).min(data.0.len())]
+                            .to_vec(),
+                    );
                     if clip.audio.is_stereo {
-                        channels.push(&data.1[clip_playhead..clip_playhead + (end - start)]);
+                        channels.push(
+                            data.1[start_index.min(data.1.len() - 1)
+                                ..(end_index + resampler.input_frames_next()).min(data.1.len())]
+                                .to_vec(),
+                        );
                     }
-
+                    // resample if needed
+                    if self.sample_rate != clip.audio.sample_rate as usize {
+                        match resampler.process(&channels, None) {
+                            Ok(resampled) => {
+                                channels = resampled;
+                            }
+                            Err(_) => {}
+                        }
+                    }
                     let mut j = 0;
                     for i in (start - pos)..(end - pos) {
                         if channels.len() > 1 {
@@ -118,22 +157,26 @@ impl PlayerBackend {
                 }
                 track_metrics.add_sample(track_mix[i], (i % 2 == 0).into());
             }
-            //  Update metrics
+            // Update metrics
             metrics.tracks.insert(track_id.to_string(), track_metrics);
         }
-
+        // Assign master output buffer
         for (i, sample) in output.iter_mut().enumerate() {
             *sample = master_mix[i];
             metrics
                 .master
                 .add_sample(master_mix[i], (i % 2 == 0).into());
         }
-        let _ = self.to_gui_tx.push(ProcessToGuiMsg::Metrics(metrics));
+        // Send data
+        metrics.latency =
+            time_start.elapsed().as_secs_f32() / (num_frames as f32 / self.sample_rate as f32);
 
+        let _ = self.to_gui_tx.push(ProcessToGuiMsg::Metrics(metrics));
+        let _ = self.to_gui_tx.push(ProcessToGuiMsg::PlaybackPos(
+            self.bpm * (self.playhead as f32) / (self.sample_rate as f32 * 60.),
+        ));
+        // Update playhead
         self.playhead += num_frames;
-        let _ = self
-            .to_gui_tx
-            .push(ProcessToGuiMsg::PlaybackPos(self.bpm * (self.playhead as f32) / (self.sample_rate as f32 * 60.)));
     }
 
     fn handle_messages(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -201,16 +244,13 @@ impl PlayerBackend {
                         clip.start_frame =
                             (position / self.bpm * 60. * self.sample_rate as f32).floor() as usize;
 
-                        let mut clone = clip.clone();
-                        let mut seek_position = 0;
+                        let clone = clip.clone();
+
                         //  if in range to be played seek to position
                         if !(self.playhead + 3000 < clip.start_frame
                             || clip.start_frame + clip.stream.info().num_frames
                                 < self.playhead + 3000)
-                        {
-                            let start = clip.start_frame.max(self.playhead);
-                            seek_position = start - clip.start_frame;
-                        }
+                        {}
 
                         track.clips.push(clone);
                     }
@@ -244,27 +284,4 @@ impl PlayerBackend {
         }
         Ok(())
     }
-}
-
-// TO BE DELETED
-fn resample_linear(input: &[f32], src_rate: usize, dst_rate: usize) -> Vec<f32> {
-    if src_rate == dst_rate {
-        return input.to_vec();
-    }
-
-    let ratio = dst_rate as f64 / src_rate as f64;
-    let mut output = Vec::with_capacity((input.len() as f64 * ratio) as usize);
-
-    for i in 0..((input.len() as f64 * ratio) as usize) {
-        let src_idx = i as f64 / ratio;
-        let idx = src_idx.floor() as usize;
-        let frac = src_idx - idx as f64;
-
-        let a = input.get(idx).copied().unwrap_or(0.0);
-        let b = input.get(idx + 1).copied().unwrap_or(a);
-
-        output.push((1.0 - frac) as f32 * a + frac as f32 * b);
-    }
-
-    output
 }

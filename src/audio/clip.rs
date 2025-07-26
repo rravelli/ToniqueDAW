@@ -49,8 +49,10 @@ impl ClipBackend {
         (self.trim_end * self.stream.info().num_frames as f32).round() as usize
     }
 
-    pub fn end(&self) -> usize {
-        self.start_frame + self.num_frames()
+    pub fn end(&self, sample_rate: usize) -> usize {
+        self.start_frame
+            + (self.num_frames() as f32 * sample_rate as f32 / self.audio.sample_rate as f32)
+                .round() as usize
     }
 }
 

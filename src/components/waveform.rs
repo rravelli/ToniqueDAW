@@ -1,8 +1,8 @@
 use std::sync::MutexGuard;
 
-use egui::{Color32, Painter, Rect};
+use egui::{Color32, Rect, Shape};
 
-const MAX_SEGMENT_SIZE: usize = 150;
+const MAX_SEGMENT_SIZE: usize = 15;
 
 #[derive(Clone)]
 pub struct UIWaveform {}
@@ -14,14 +14,14 @@ impl UIWaveform {
 
     pub fn paint(
         &self,
-        painter: &Painter,
+        shapes: &mut Vec<Shape>,
         rect: Rect,
         data: MutexGuard<'_, (Vec<f32>, Vec<f32>)>,
         start_ratio: f32,
         end_ratio: f32,
         num_samples: u64,
     ) {
-        let mut shapes = vec![];
+        let mut waveform_shapes = vec![];
 
         let start_index = (num_samples as f32 * start_ratio).floor() as usize;
         let end_index = (num_samples as f32 * end_ratio).ceil() as usize;
@@ -61,7 +61,7 @@ impl UIWaveform {
                 i += step;
             }
 
-            shapes.push(egui::Shape::line_segment(
+            waveform_shapes.push(egui::Shape::line_segment(
                 [
                     egui::pos2(rect.min.x + x as f32, center_y + min * rect.height() / 2.),
                     egui::pos2(rect.min.x + x as f32, center_y + max * rect.height() / 2.),
@@ -70,6 +70,6 @@ impl UIWaveform {
             ));
         }
 
-        painter.add(shapes);
+        shapes.extend(waveform_shapes);
     }
 }
