@@ -22,6 +22,6 @@ pub enum GuiToPlayerMsg {
 }
 
 pub enum ProcessToGuiMsg {
-    PlaybackPos(usize),
+    PlaybackPos(f32),
     Metrics(GlobalMetrics),
 }
