@@ -86,7 +86,7 @@ impl Workspace {
                         Align2::RIGHT_BOTTOM,
                         format!("{:.0}%", self.metrics.latency * 100.),
                         FontId::default(),
-                        Color32::WHITE,
+                        ui.visuals().strong_text_color(),
                     );
                     self.navigation_bar(ui);
                     let scroll = ScrollArea::vertical()
