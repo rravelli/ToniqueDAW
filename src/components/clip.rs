@@ -79,6 +79,7 @@ impl UIClip {
         track_id: String,
         selected: bool,
         tx: &mut Producer<GuiToPlayerMsg>,
+        show_waveform: bool,
     ) -> Response {
         let sample_rect = Rect::from_min_max(viewport.clamp(pos), viewport.clamp(pos + size));
         let response = ui.allocate_rect(sample_rect, Sense::all());
@@ -139,7 +140,7 @@ impl UIClip {
             Color32::BLACK,
         );
 
-        if let Ok(data) = self.audio.data.lock() {
+        if show_waveform && let Ok(data) = self.audio.data.lock() {
             let waveform_rect = Rect::from_min_max(
                 Pos2::new(pos.x.max(viewport.left()), pos.y + 12.),
                 Pos2::new((pos.x + size.x).min(viewport.right()), pos.y + size.y),

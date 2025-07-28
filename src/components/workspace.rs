@@ -3,6 +3,7 @@ use crate::{
     analysis::AudioInfo,
     components::{
         clip::UIClip,
+        filepicker::FilePicker,
         grid::{MAX_RIGHT, MIN_LEFT, PIXEL_PER_BEAT, VIEW_WIDTH, WorkspaceGrid},
         track::{DEFAULT_TRACK_HEIGHT, HANDLE_HEIGHT, TrackSoloState, UITrack},
     },
@@ -55,6 +56,8 @@ pub struct Workspace {
     solo_tracks: Vec<String>,
 
     y_offset: f32,
+
+    file_picker: FilePicker,
 }
 
 struct DragState {
@@ -63,139 +66,125 @@ struct DragState {
 }
 
 impl Workspace {
-    pub fn ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        dragged_audio_info: Option<AudioInfo>,
-        is_released: bool,
-    ) {
-        while let Ok(msg) = self.from_player_rx.pop() {
-            match msg {
-                ProcessToGuiMsg::PlaybackPos(pos) => {
-                    self.playback_position = pos;
-                    self.playback_state = PlaybackState::Playing;
-                }
-                ProcessToGuiMsg::Metrics(metrics) => self.metrics = metrics,
-            }
-        }
-
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        self.handle_messages();
         self.watch_inputs(ui);
 
         if self.playback_state == PlaybackState::Playing {
             ui.ctx().request_repaint();
         }
 
-        if ui.input(|i| i.key_pressed(egui::Key::Space)) {
-            if self.playback_state == PlaybackState::Playing {
-                let _ = self.to_player_tx.push(GuiToPlayerMsg::Pause);
-                self.playback_state = PlaybackState::Paused
-            } else {
-                let _ = self.to_player_tx.push(GuiToPlayerMsg::Play);
-                self.playback_state = PlaybackState::Playing;
-            }
-        }
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), ui.available_height()),
+            Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                let (dragged_audio_info, is_released) =
+                    self.file_picker.ui(ui, &mut self.to_player_tx);
+                ui.vertical(|ui| {
+                    ui.painter().text(
+                        Pos2::new(ui.max_rect().right() - 3., ui.max_rect().top()),
+                        Align2::RIGHT_BOTTOM,
+                        format!("{:.0}%", self.metrics.latency * 100.),
+                        FontId::default(),
+                        Color32::WHITE,
+                    );
+                    self.navigation_bar(ui);
+                    let scroll = ScrollArea::vertical()
+                        .id_salt("workspace-scrollbar")
+                        .max_height(ui.available_height())
+                        .show(ui, |ui| {
+                            let mut height = 100.;
+                            for track in self.tracks.iter() {
+                                height += track.height + HANDLE_HEIGHT;
+                            }
 
-        ui.painter().text(
-            Pos2::new(ui.max_rect().right() - 3., ui.max_rect().top()),
-            Align2::RIGHT_BOTTOM,
-            format!("{:.0}%", self.metrics.latency * 100.),
-            FontId::default(),
-            Color32::WHITE,
-        );
+                            ui.allocate_ui_with_layout(
+                                Vec2::new(ui.available_width(), height.max(ui.available_height())),
+                                Layout::left_to_right(egui::Align::Min),
+                                |ui| {
+                                    // Grid area
+                                    let (response, painter) = ui.allocate_painter(
+                                        egui::Vec2::new(
+                                            ui.available_width() - self.track_width - LIMIT_WIDTH,
+                                            ui.available_height(),
+                                        ),
+                                        Sense::click_and_drag(),
+                                    );
 
-        ui.vertical(|ui| {
-            self.navigation_bar(ui);
+                                    let rect = response.rect;
 
-            let scroll = ScrollArea::vertical()
-                .id_salt("workspace-scrollbar")
-                .max_height(ui.available_height())
-                .show(ui, |ui| {
-                    let mut height = 100.;
-                    for track in self.tracks.iter() {
-                        height += track.height + HANDLE_HEIGHT;
-                    }
+                                    if response.clicked() {
+                                        self.selected_clips = vec![];
+                                        self.selected_track = None;
+                                        let _ =
+                                            self.to_player_tx.push(GuiToPlayerMsg::PausePreview());
+                                        self.file_picker.preview_state = PlaybackState::Paused;
+                                    }
+                                    let scroll_delta = ui.input(|i| i.smooth_scroll_delta.x);
 
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(ui.available_width(), height.max(ui.available_height())),
-                        Layout::left_to_right(egui::Align::Min),
+                                    if scroll_delta != 0.
+                                        && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
+                                        && rect.contains(mouse_pos)
+                                    {
+                                        self.grid.scroll(-scroll_delta);
+                                    }
+
+                                    if response.double_clicked()
+                                        && let Some(mouse_pos) =
+                                            ui.ctx().input(|i| i.pointer.hover_pos())
+                                    {
+                                        self.playback_position =
+                                            self.grid.x_to_beats(mouse_pos.x, rect);
+                                        let _ = self
+                                            .to_player_tx
+                                            .push(GuiToPlayerMsg::SeekTo(self.playback_position));
+                                    }
+
+                                    // Do not draw after clips
+                                    self.resize_handle(ui);
+                                    self.track_panel(ui);
+                                    // Draw grid & clips
+                                    self.grid.paint(&painter, rect);
+                                    self.paint_clips(ui, &painter, rect);
+                                    self.paint_tracks(&painter, rect);
+                                    self.paint_preview_sample(
+                                        ui,
+                                        rect,
+                                        dragged_audio_info,
+                                        is_released,
+                                        &painter,
+                                    );
+                                    self.paint_playback_cursor(&painter, rect);
+                                    self.handle_multiselect(ui, response);
+                                    self.scrollbar(rect, &painter, ui);
+                                },
+                            )
+                        });
+                    self.y_offset = scroll.state.offset.y;
+
+                    ui.allocate_ui_at_rect(
+                        Rect::from_min_size(
+                            Pos2::new(
+                                scroll.inner_rect.left(),
+                                scroll.inner_rect.bottom() - self.master_track.height,
+                            ),
+                            Vec2::new(scroll.inner_rect.width(), self.master_track.height),
+                        ),
                         |ui| {
-                            // Grid area
-                            let (response, painter) = ui.allocate_painter(
-                                egui::Vec2::new(
-                                    ui.available_width() - self.track_width - LIMIT_WIDTH,
-                                    ui.available_height(),
-                                ),
-                                Sense::click_and_drag(),
-                            );
-
-                            let rect = response.rect;
-
-                            if response.clicked() {
-                                self.selected_clips = vec![];
-                                self.selected_track = None;
-                            }
-                            let scroll_delta = ui.input(|i| i.smooth_scroll_delta.x);
-
-                            if scroll_delta != 0.
-                                && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
-                                && rect.contains(mouse_pos)
-                            {
-                                self.grid.scroll(-scroll_delta);
-                            }
-
-                            if response.double_clicked()
-                                && let Some(mouse_pos) = ui.ctx().input(|i| i.pointer.hover_pos())
-                            {
-                                self.playback_position = self.grid.x_to_beats(mouse_pos.x, rect);
-                                let _ = self
-                                    .to_player_tx
-                                    .push(GuiToPlayerMsg::SeekTo(self.playback_position));
-                            }
-
-                            // Do not draw after clips
-                            self.resize_handle(ui);
-                            self.track_panel(ui);
-                            // Draw grid & samples
-                            self.grid.paint(&painter, rect);
-
-                            self.paint_clips(ui, &painter, rect);
-                            self.paint_tracks(&painter, rect);
-                            self.paint_preview_sample(
-                                ui,
-                                rect,
-                                dragged_audio_info,
-                                is_released,
-                                &painter,
-                            );
-                            self.paint_playback_cursor(&painter, rect);
-                            self.handle_multiselect(ui, response);
-                            self.scrollbar(rect, &painter, ui);
+                            ui.horizontal(|ui| {
+                                ui.add_space(ui.available_width() - self.track_width);
+                                self.master_track.ui(
+                                    ui,
+                                    self.metrics.master.clone(),
+                                    TrackSoloState::NotSoloing,
+                                    false,
+                                );
+                            })
                         },
                     )
                 });
-            self.y_offset = scroll.state.offset.y;
-
-            ui.allocate_ui_at_rect(
-                Rect::from_min_size(
-                    Pos2::new(
-                        scroll.inner_rect.left(),
-                        scroll.inner_rect.bottom() - self.master_track.height,
-                    ),
-                    Vec2::new(scroll.inner_rect.width(), self.master_track.height),
-                ),
-                |ui| {
-                    ui.horizontal(|ui| {
-                        ui.add_space(ui.available_width() - self.track_width);
-                        self.master_track.ui(
-                            ui,
-                            self.metrics.master.clone(),
-                            TrackSoloState::NotSoloing,
-                            false,
-                        );
-                    })
-                },
-            )
-        });
+            },
+        );
     }
 
     fn scrollbar(&mut self, rect: Rect, painter: &Painter, ui: &mut Ui) {
@@ -345,6 +334,7 @@ impl Workspace {
                             track.id.clone(),
                             self.selected_clips.contains(&clip.id()),
                             &mut self.to_player_tx,
+                            !track.closed,
                         );
 
                         if response.clicked() {
@@ -415,7 +405,11 @@ impl Workspace {
             let snapped_position = self.grid.snap_at_grid(new_position);
 
             let x = self.grid.beats_to_x(snapped_position, viewport);
-
+            let show_waveform = if let Some(t) = t {
+                !self.tracks[t].closed
+            } else {
+                true
+            };
             drag_state.element.position = snapped_position;
             let _ = drag_state.element.ui(
                 ui,
@@ -435,6 +429,7 @@ impl Workspace {
                 "".to_string(),
                 false,
                 &mut self.to_player_tx,
+                show_waveform,
             );
             // clip released
             if !ui.input(|i| i.pointer.primary_down()) {
@@ -463,6 +458,16 @@ impl Workspace {
     fn watch_inputs(&mut self, ui: &mut Ui) {
         let mut new_selected = vec![];
         let mut updated = false;
+
+        if ui.input(|i| i.key_pressed(egui::Key::Space)) {
+            if self.playback_state == PlaybackState::Playing {
+                let _ = self.to_player_tx.push(GuiToPlayerMsg::Pause);
+                self.playback_state = PlaybackState::Paused
+            } else {
+                let _ = self.to_player_tx.push(GuiToPlayerMsg::Play);
+                self.playback_state = PlaybackState::Playing;
+            }
+        }
 
         if ui.input(|i| i.key_pressed(Key::D) && i.modifiers.ctrl) {
             // Duplicate clips
@@ -529,10 +534,10 @@ impl Workspace {
             for (mut clip, track) in added_clip {
                 clip.trim_start_at(self.playback_position, self.bpm);
                 let _ = self.to_player_tx.push(GuiToPlayerMsg::AddClip(
-                    clip.id(),
+                    self.tracks[track].id.clone(),
                     clip.audio.path.clone(),
                     clip.position,
-                    self.tracks[track].id.clone(),
+                    clip.id(),
                     clip.trim_start,
                     clip.trim_end,
                 ));
@@ -576,6 +581,11 @@ impl Workspace {
             } else {
                 DEFAULT_TRACK_HEIGHT
             };
+            let show_waveform = if let Some(t) = track_index {
+                !self.tracks[t].closed
+            } else {
+                true
+            };
             let width = self.grid.duration_to_width(duration, self.bpm);
             let mut shapes = Vec::new();
             if let Some(sample_preview) = self.sample_preview.as_mut() {
@@ -591,6 +601,7 @@ impl Workspace {
                     "".to_string(),
                     false,
                     &mut self.to_player_tx,
+                    show_waveform,
                 );
                 ui.painter().add(shapes);
             }
@@ -706,21 +717,15 @@ impl Workspace {
 
         self.draw_labels(&painter, zoom_rect);
 
-        // Change cursor to resize vertical
-        if zoom_response.hovered() || zoom_response.dragged() {
+        // Handle zoom
+        if zoom_response.hovered() {
             ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ResizeVertical);
-        }
-
-        // Handle mouse drag to change zoom, centered at mouse x
-        if zoom_response.dragged() {
-            // Mouse position relative to zoom_rect
             let mouse_x = zoom_response
-                .interact_pointer_pos()
+                .hover_pos()
                 .map(|pos| pos.x - zoom_rect.left())
                 .unwrap_or(VIEW_WIDTH / 2.0);
-
             self.grid
-                .zoom_and_drag_at(mouse_x, zoom_response.drag_delta());
+                .zoom_and_drag_at(mouse_x, ui.input(|i| i.smooth_scroll_delta));
         }
     }
 
@@ -800,6 +805,21 @@ impl Workspace {
         }
     }
 
+    fn handle_messages(&mut self) {
+        while let Ok(msg) = self.from_player_rx.pop() {
+            match msg {
+                ProcessToGuiMsg::PlaybackPos(pos) => {
+                    self.playback_position = pos;
+                    self.playback_state = PlaybackState::Playing;
+                }
+                ProcessToGuiMsg::Metrics(metrics) => self.metrics = metrics,
+                ProcessToGuiMsg::PreviewPos(pos) => {
+                    self.file_picker.preview_position = pos;
+                }
+            }
+        }
+    }
+
     pub fn new(
         to_player_tx: Producer<GuiToPlayerMsg>,
         from_player_rx: Consumer<ProcessToGuiMsg>,
@@ -822,6 +842,7 @@ impl Workspace {
             solo_tracks: vec![],
             selected_track: None,
             y_offset: 0.,
+            file_picker: FilePicker::new(),
         }
     }
 }

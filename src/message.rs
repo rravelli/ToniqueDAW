@@ -7,6 +7,9 @@ pub enum GuiToPlayerMsg {
     Play,
     Pause,
     SeekTo(f32),
+    PlayPreview(PathBuf),
+    PausePreview(),
+    SeekPreview(usize),
     // Track messages
     AddTrack(String),
     RemoveTrack(String),
@@ -23,5 +26,6 @@ pub enum GuiToPlayerMsg {
 
 pub enum ProcessToGuiMsg {
     PlaybackPos(f32),
+    PreviewPos(usize),
     Metrics(GlobalMetrics),
 }

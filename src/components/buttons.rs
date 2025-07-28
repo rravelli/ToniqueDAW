@@ -1,11 +1,17 @@
 use egui::{Color32, Sense, Vec2};
 
-pub fn left_aligned_selectable(ui: &mut egui::Ui, text: impl ToString) -> egui::Response {
+pub fn left_aligned_selectable(
+    ui: &mut egui::Ui,
+    text: impl ToString,
+    selected: bool,
+) -> egui::Response {
     let (response, painter) =
         ui.allocate_painter(Vec2::new(ui.available_width(), 16.0), Sense::all());
 
-    let bg_color = if response.hovered() {
-        Color32::from_gray(60)
+    let bg_color = if selected {
+        Color32::from_gray(70)
+    } else if response.hovered() {
+        Color32::from_gray(40)
     } else {
         Color32::from_gray(30)
     };

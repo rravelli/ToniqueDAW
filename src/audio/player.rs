@@ -4,7 +4,7 @@ use std::{collections::HashMap, time::Instant};
 
 use crate::{
     ProcessToGuiMsg,
-    audio::{clip::ClipBackend, track::TrackBackend},
+    audio::{clip::ClipBackend, preview::PreviewBackend, track::TrackBackend},
     components::workspace::PlaybackState,
     message::GuiToPlayerMsg,
     metrics::{AudioMetrics, GlobalMetrics},
@@ -17,9 +17,11 @@ pub struct PlayerBackend {
     sample_rate: usize,
 
     playhead: usize,
+    preview: PreviewBackend,
 
     // current state
     playback_state: PlaybackState,
+    preview_state: PlaybackState,
     tracks: HashMap<String, TrackBackend>,
     bpm: f32,
     solo_tracks: Vec<String>,
@@ -41,22 +43,49 @@ impl PlayerBackend {
             sample_rate,
             tracks: HashMap::new(),
             solo_tracks: vec![],
+            preview: PreviewBackend::new(),
+            preview_state: PlaybackState::Paused,
         }
     }
 
     pub fn mix_audio(&mut self, output: &mut [f32]) {
+        // Reset output
+        output.fill(0.);
+        // Start timer
         let time_start = Instant::now();
         let _ = self.handle_messages();
         let pos = self.playhead;
         let mut metrics = GlobalMetrics::new();
+        let num_frames = output.len() / self.channels;
+
+        // Preview
+        if self.preview_state == PlaybackState::Playing {
+            if let Some(data) = self.preview.read(num_frames, self.sample_rate) {
+                let num_channels = data.len();
+                for ch in 0..num_channels {
+                    for (i, sample) in data[ch].iter().enumerate() {
+                        output[2 * i + ch] = *sample;
+                        if num_channels == 1 {
+                            output[2 * i + 1] = *sample;
+                        }
+                    }
+                }
+
+                if let Some(stream) = &self.preview.stream {
+                    let _ = self
+                        .to_gui_tx
+                        .push(ProcessToGuiMsg::PreviewPos(stream.playhead()));
+                }
+            }
+        }
 
         // Paused
         if self.playback_state == PlaybackState::Paused {
-            output.fill(0.);
+            metrics.latency =
+                time_start.elapsed().as_secs_f32() / (num_frames as f32 / self.sample_rate as f32);
             let _ = self.to_gui_tx.push(ProcessToGuiMsg::Metrics(metrics));
             return;
         }
-        let num_frames = output.len() / self.channels;
         let mut master_mix = vec![0.; output.len()];
 
         for (track_id, track) in self.tracks.iter_mut() {
@@ -95,15 +124,15 @@ impl PlayerBackend {
 
                 // compute audio
                 if let Ok(data) = clip.audio.data.lock()
-                    && start_index > end_index
+                    && start_index < end_index
                 {
                     let mut resampler = SincFixedOut::new(
                         self.sample_rate as f64 / clip.audio.sample_rate as f64,
                         10.,
                         SincInterpolationParameters {
-                            sinc_len: 32,
+                            sinc_len: 16,
                             f_cutoff: 0.70,
-                            oversampling_factor: 16,
+                            oversampling_factor: 8,
                             interpolation: SincInterpolationType::Nearest,
                             window: rubato::WindowFunction::Hann,
                         },
@@ -160,9 +189,10 @@ impl PlayerBackend {
             // Update metrics
             metrics.tracks.insert(track_id.to_string(), track_metrics);
         }
+
         // Assign master output buffer
         for (i, sample) in output.iter_mut().enumerate() {
-            *sample = master_mix[i];
+            *sample += master_mix[i];
             metrics
                 .master
                 .add_sample(master_mix[i], (i % 2 == 0).into());
@@ -184,6 +214,7 @@ impl PlayerBackend {
             match msg {
                 GuiToPlayerMsg::Play => {
                     self.playback_state = PlaybackState::Playing;
+                    self.preview_state = PlaybackState::Paused;
                 }
                 GuiToPlayerMsg::Pause => {
                     self.playback_state = PlaybackState::Paused;
@@ -279,6 +310,17 @@ impl PlayerBackend {
                 }
                 GuiToPlayerMsg::RemoveTrack(id) => {
                     self.tracks.remove(&id);
+                }
+                // Preview
+                GuiToPlayerMsg::PlayPreview(file) => {
+                    if self.playback_state == PlaybackState::Paused {
+                        self.preview.play(file);
+                        self.preview_state = PlaybackState::Playing
+                    }
+                }
+                GuiToPlayerMsg::PausePreview() => self.preview_state = PlaybackState::Paused,
+                GuiToPlayerMsg::SeekPreview(pos) => {
+                    self.preview.seek(pos);
                 }
             }
         }

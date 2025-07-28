@@ -3,13 +3,12 @@ use egui::{Frame, Margin, Pos2};
 use rtrb::{Consumer, Producer};
 
 use crate::{
-    components::{filepicker::FilePicker, workspace::Workspace},
+    components::workspace::Workspace,
     message::{GuiToPlayerMsg, ProcessToGuiMsg},
 };
 
 pub struct ToniqueApp {
     workspace: Workspace,
-    file_picker: FilePicker,
 }
 
 impl ToniqueApp {
@@ -19,10 +18,7 @@ impl ToniqueApp {
         _cc: &eframe::CreationContext<'_>,
     ) -> Self {
         let workspace = Workspace::new(to_player_tx, from_player_rx);
-        Self {
-            file_picker: FilePicker::new(),
-            workspace,
-        }
+        Self { workspace }
     }
 }
 impl eframe::App for ToniqueApp {
@@ -40,14 +36,7 @@ impl eframe::App for ToniqueApp {
                     "FPS: {:.1}",
                     1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
                 ));
-                ui.allocate_ui_with_layout(
-                    Vec2::new(ui.available_width(), ui.available_height()),
-                    Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        let (dragged_audio_info, is_released) = self.file_picker.ui(ui);
-                        self.workspace.ui(ui, dragged_audio_info, is_released);
-                    },
-                );
+                self.workspace.ui(ui);
             });
     }
 }

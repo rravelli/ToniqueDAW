@@ -1,14 +1,18 @@
 use std::{ffi::OsStr, fs, path::PathBuf};
 
 use eframe::egui;
-use egui::{Sense, TextEdit};
+use egui::{Color32, Pos2, Sense, Shape, Stroke, TextEdit, Ui, Vec2};
 use rfd::FileDialog;
+use rtrb::Producer;
 
 use crate::{
     analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,
-    components::buttons::left_aligned_selectable,
+    components::{
+        buttons::left_aligned_selectable, waveform::UIWaveform, workspace::PlaybackState,
+    },
     config::{load_work_dir, save_work_dir},
+    message::GuiToPlayerMsg,
 };
 
 #[derive(Clone)]
@@ -105,10 +109,12 @@ pub struct FilePicker {
     dir: Vec<File>,
     search: Option<File>,
     search_query: String,
-
+    waveform: UIWaveform,
+    selected: Option<AudioInfo>,
+    pub preview_position: usize,
+    pub preview_state: PlaybackState,
     // Layout
     width: f32,
-
     is_released: bool,
 }
 
@@ -131,11 +137,23 @@ impl FilePicker {
             search: None,
             is_released: false,
             search_query: "".to_string(),
+            waveform: UIWaveform::new(),
+            selected: None,
+            preview_position: 0,
+            preview_state: PlaybackState::Paused,
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) -> (Option<AudioInfo>, bool) {
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        tx: &mut Producer<GuiToPlayerMsg>,
+    ) -> (Option<AudioInfo>, bool) {
         let mut dragged_audio_info = None;
+
+        if self.preview_state == PlaybackState::Playing {
+            ui.ctx().request_repaint();
+        }
 
         ui.vertical(|ui| {
             ui.set_width(self.width);
@@ -162,21 +180,41 @@ impl FilePicker {
             //     }
             // });
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                if !self.search_query.is_empty()
-                    && let Some(file) = &mut self.search
-                {
-                    let (audio_info, is_released) = Self::show_buttons(ui, file, 0);
-                    dragged_audio_info = audio_info;
-                    self.is_released = is_released;
-                } else {
-                    for dir in self.dir.iter_mut() {
-                        let (audio_info, is_released) = Self::show_buttons(ui, dir, 0);
+            let mut new_selected = None;
+            egui::ScrollArea::vertical()
+                .max_height(ui.available_height() - 50.)
+                .show(ui, |ui| {
+                    ui.set_min_height(ui.available_height());
+                    if !self.search_query.is_empty()
+                        && let Some(file) = &mut self.search
+                    {
+                        let (audio_info, is_released, selected_info) =
+                            Self::show_buttons(ui, file, 0, self.selected.clone().map(|f| f.path));
                         dragged_audio_info = audio_info;
                         self.is_released = is_released;
+                        new_selected = selected_info;
+                    } else {
+                        for dir in self.dir.iter_mut() {
+                            let (audio_info, is_released, selected_info) = Self::show_buttons(
+                                ui,
+                                dir,
+                                0,
+                                self.selected.clone().map(|f| f.path),
+                            );
+                            dragged_audio_info = audio_info;
+                            self.is_released = is_released;
+                            new_selected = selected_info;
+                        }
                     }
-                }
-            });
+                });
+
+            if let Some(info) = new_selected {
+                let _ = tx.push(GuiToPlayerMsg::PlayPreview(info.path.clone()));
+                self.preview_state = PlaybackState::Playing;
+                self.preview_position = 0;
+                self.selected = Some(info);
+            }
+            self.preview(ui, tx);
         });
         self.resize_handle(ui);
 
@@ -187,10 +225,12 @@ impl FilePicker {
         ui: &mut egui::Ui,
         f: &mut File,
         depth: usize,
-    ) -> (Option<AudioInfo>, bool) {
+        selected: Option<PathBuf>,
+    ) -> (Option<AudioInfo>, bool, Option<AudioInfo>) {
         let is_dir = f.entry.is_dir();
         let mut audio_info = None;
         let mut is_released = false;
+        let mut selected_info = None;
 
         let extension = if let Some(ext) = &f.entry.extension() {
             ext.to_str().unwrap()
@@ -216,16 +256,19 @@ impl FilePicker {
 
         let clone = f.entry.clone();
         let name = clone.file_name().unwrap().to_string_lossy();
-
-        let label_response =
-            left_aligned_selectable(ui, format!("{}{} {}", " ".repeat(depth * 2), icon, name));
+        let is_selected = selected.clone().is_some_and(|f| f == clone);
+        let label_response = left_aligned_selectable(
+            ui,
+            format!("{}{} {}", " ".repeat(depth * 2), icon, name),
+            is_selected,
+        );
 
         // On click
         if label_response.clicked() {
             if is_dir {
                 f.open = !f.open;
             } else if is_audio {
-                AUDIO_ANALYSIS_CACHE.get_or_analyze(f.entry.clone());
+                selected_info = AUDIO_ANALYSIS_CACHE.get_or_analyze(f.entry.clone());
             }
         };
 
@@ -246,18 +289,61 @@ impl FilePicker {
             let children = f.get_children();
 
             for child in children {
-                let (child_audio_info, released) = Self::show_buttons(ui, child, depth + 1);
+                let (child_audio_info, released, child_selected) =
+                    Self::show_buttons(ui, child, depth + 1, selected.clone());
                 if child_audio_info.is_some() {
                     audio_info = child_audio_info;
+                }
+                if child_selected.is_some() {
+                    selected_info = child_selected;
                 }
                 is_released = is_released || released;
             }
         }
 
-        (audio_info, is_released)
+        (audio_info, is_released, selected_info)
     }
 
-    fn resize_handle(&mut self, ui: &mut egui::Ui) {
+    fn preview(&mut self, ui: &mut Ui, tx: &mut Producer<GuiToPlayerMsg>) {
+        let (response, painter) = ui.allocate_painter(Vec2::new(self.width, 50.), Sense::click());
+        let rect = response.rect;
+        if let Some(info) = &self.selected
+            && let Ok(data) = info.data.lock()
+        {
+            if response.clicked()
+                && let Some(mouse_pos) = response.interact_pointer_pos()
+            {
+                let _ = tx.push(GuiToPlayerMsg::SeekPreview(
+                    ((mouse_pos.x - rect.left()) / rect.width() * info.num_samples.unwrap() as f32)
+                        .round() as usize,
+                ));
+            }
+
+            painter.rect_filled(response.rect, 0., Color32::WHITE);
+            let mut shapes = vec![];
+            self.waveform.paint(
+                &mut shapes,
+                response.rect,
+                data,
+                0.,
+                1.,
+                info.num_samples.unwrap(),
+            );
+            let x = response.rect.left()
+                + self.preview_position as f32 / info.num_samples.unwrap() as f32
+                    * response.rect.width();
+            shapes.push(Shape::line_segment(
+                [
+                    Pos2::new(x, response.rect.top()),
+                    Pos2::new(x, response.rect.bottom()),
+                ],
+                Stroke::new(1.0, Color32::BLACK),
+            ));
+            painter.add(shapes);
+        }
+    }
+
+    fn resize_handle(&mut self, ui: &mut Ui) {
         let (response, painter) =
             ui.allocate_painter(egui::Vec2::new(6., ui.available_height()), Sense::drag());
 
