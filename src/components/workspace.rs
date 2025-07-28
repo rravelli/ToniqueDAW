@@ -502,11 +502,10 @@ impl Workspace {
             } else {
                 for track in self.tracks.iter_mut() {
                     track.delete_ids(self.selected_clips.clone());
-                    for id in self.selected_clips.clone() {
-                        let _ = self
-                            .to_player_tx
-                            .push(GuiToPlayerMsg::RemoveClip(id, track.id.clone()));
-                    }
+
+                    let _ = self
+                        .to_player_tx
+                        .push(GuiToPlayerMsg::RemoveClip(self.selected_clips.clone()));
                 }
             };
         } else if ui.input(|i| i.key_pressed(Key::K) && i.modifiers.ctrl) {

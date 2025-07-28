@@ -164,6 +164,7 @@ impl PlayerBackend {
                             Err(_) => {}
                         }
                     }
+
                     let mut j = 0;
                     for i in (start - pos)..(end - pos) {
                         if channels.len() > 1 {
@@ -250,10 +251,9 @@ impl PlayerBackend {
                         ));
                     }
                 }
-                GuiToPlayerMsg::RemoveClip(clip_id, track_id) => {
-                    let track = self.tracks.get_mut(&track_id);
-                    if let Some(track) = track {
-                        track.remove_clip(clip_id);
+                GuiToPlayerMsg::RemoveClip(ids) => {
+                    for (_, track) in self.tracks.iter_mut() {
+                        track.clips.retain(|clip| !ids.contains(&clip.id));
                     }
                 }
                 // Move clip to new track and new position

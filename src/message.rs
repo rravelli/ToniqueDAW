@@ -19,7 +19,7 @@ pub enum GuiToPlayerMsg {
 
     // Clip messages
     AddClip(String, PathBuf, f32, String, f32, f32), // (track_id, file_path, start_position, clip_id, trim_start, trim_end)
-    RemoveClip(String, String),                      // clip id, track id
+    RemoveClip(Vec<String>),                         // Vec<clip id>
     MoveClip(String, String, f32),                   // clip id, track id, position
     ResizeClip(String, f32, f32),                    // clip_id, trim_start, trim_end
 }

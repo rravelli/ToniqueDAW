@@ -79,7 +79,7 @@ impl UITrack {
                 new_samples.push(clip.clone());
                 continue;
             }
-            let _ = tx.push(GuiToPlayerMsg::RemoveClip(clip.id(), self.id.clone()));
+            let _ = tx.push(GuiToPlayerMsg::RemoveClip(vec![clip.id()]));
             // Sample overlaps before new clip
             if clip.position < start {
                 let mut trimmed = clip.clone_with_new_id();
