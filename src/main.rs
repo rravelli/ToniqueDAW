@@ -27,7 +27,6 @@ fn main() {
             let mut fonts = egui::FontDefinitions::default();
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Fill);
-            cc.egui_ctx.debug_on_hover();
             cc.egui_ctx.set_fonts(fonts);
             cc.egui_ctx.set_visuals(Visuals {
                 window_corner_radius: 1.into(),
