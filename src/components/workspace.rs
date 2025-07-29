@@ -25,6 +25,7 @@ pub enum PlaybackState {
 
 const TOP_BAR_HEIGHT: f32 = 30.;
 const LIMIT_WIDTH: f32 = 3.;
+const DEFAULT_CLIP_COLOR: Color32 = Color32::GRAY;
 
 pub struct Workspace {
     // Communicate
@@ -335,6 +336,7 @@ impl Workspace {
                             self.selected_clips.contains(&clip.id()),
                             &mut self.to_player_tx,
                             !track.closed,
+                            track.color,
                         );
 
                         if response.clicked() {
@@ -427,9 +429,14 @@ impl Workspace {
                 &self.grid,
                 self.bpm,
                 "".to_string(),
-                false,
+                true,
                 &mut self.to_player_tx,
                 show_waveform,
+                if let Some(t) = t {
+                        self.tracks[t].color
+                    } else {
+                        DEFAULT_CLIP_COLOR
+                    },
             );
             // clip released
             if !ui.input(|i| i.pointer.primary_down()) {
@@ -601,6 +608,7 @@ impl Workspace {
                     false,
                     &mut self.to_player_tx,
                     show_waveform,
+                    DEFAULT_CLIP_COLOR,
                 );
                 ui.painter().add(shapes);
             }

@@ -24,9 +24,6 @@ pub struct UIClip {
     // Position in beat
     pub position: f32,
 
-    // Customisation
-    color: Color32,
-
     pub trim_start: f32,
     pub trim_end: f32,
 
@@ -38,7 +35,6 @@ impl UIClip {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             audio,
-            color: Color32::RED,
             position,
             trim_start: 0.,
             trim_end: 1.,
@@ -80,6 +76,7 @@ impl UIClip {
         selected: bool,
         tx: &mut Producer<GuiToPlayerMsg>,
         show_waveform: bool,
+        color: Color32,
     ) -> Response {
         let sample_rect = Rect::from_min_max(viewport.clamp(pos), viewport.clamp(pos + size));
         let response = ui.allocate_rect(sample_rect, Sense::all());
@@ -111,13 +108,13 @@ impl UIClip {
         let stroke = if selected {
             Stroke::new(BORDER_WIDTH, Color32::WHITE)
         } else {
-            Stroke::new(BORDER_WIDTH, self.color)
+            Stroke::new(BORDER_WIDTH, color)
         };
 
         painter.rect(
             Rect::from_min_size(pos, size),
             2.0,
-            self.color.gamma_multiply(0.8),
+            color.gamma_multiply(0.8),
             stroke,
             egui::StrokeKind::Inside,
         );
@@ -127,7 +124,7 @@ impl UIClip {
                 Vec2::new(size.x - 2. * BORDER_WIDTH, 12.0 - BORDER_WIDTH),
             ),
             2.0,
-            self.color,
+            color,
             Stroke::NONE,
             egui::StrokeKind::Inside,
         );
