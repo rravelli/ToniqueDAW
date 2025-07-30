@@ -133,11 +133,12 @@ impl UITrack {
         metrics: AudioMetrics,
         solo: TrackSoloState,
         selected: bool,
-    ) -> (bool, bool, bool, bool) {
+    ) -> (bool, bool, bool, bool, bool) {
         let mut mute_changed = false;
         let mut volume_changed = false;
         let mut solo_clicked = false;
         let mut clicked = false;
+        let mut double_clicked = false;
         let res = Frame::new()
             .fill(Color32::from_gray(30)) // Background color (optional)
             .stroke(Stroke::new(STROKE_WIDTH, Color32::from_gray(50))) // Border thickness and color
@@ -207,6 +208,7 @@ impl UITrack {
                                 }
                             });
                             clicked = response.clicked();
+                            double_clicked = response.double_clicked();
                         });
                     response.context_menu(|ui| {
                         self.context_menu(ui);
@@ -256,7 +258,13 @@ impl UITrack {
         );
 
         self.dragger(ui);
-        (mute_changed, volume_changed, solo_clicked, clicked)
+        (
+            mute_changed,
+            volume_changed,
+            solo_clicked,
+            clicked,
+            double_clicked,
+        )
     }
 
     fn context_menu(&mut self, ui: &mut Ui) {

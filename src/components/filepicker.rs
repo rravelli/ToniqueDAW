@@ -114,7 +114,6 @@ pub struct FilePicker {
     pub preview_position: usize,
     pub preview_state: PlaybackState,
     // Layout
-    width: f32,
     is_released: bool,
 }
 
@@ -133,7 +132,7 @@ impl FilePicker {
 
         Self {
             dir,
-            width: 200.,
+
             search: None,
             is_released: false,
             search_query: "".to_string(),
@@ -154,9 +153,9 @@ impl FilePicker {
         if self.preview_state == PlaybackState::Playing {
             ui.ctx().request_repaint();
         }
-
+        ui.set_width(ui.available_width());
         ui.vertical(|ui| {
-            ui.set_width(self.width);
+            // ui.set_width(self.width);
             if ui.button("Select folder").clicked() {
                 let picked_dir = FileDialog::new().pick_folder();
                 if let Some(path) = picked_dir {
@@ -216,7 +215,6 @@ impl FilePicker {
             }
             self.preview(ui, tx);
         });
-        self.resize_handle(ui);
 
         (dragged_audio_info, self.is_released)
     }
@@ -305,7 +303,8 @@ impl FilePicker {
     }
 
     fn preview(&mut self, ui: &mut Ui, tx: &mut Producer<GuiToPlayerMsg>) {
-        let (response, painter) = ui.allocate_painter(Vec2::new(self.width, 50.), Sense::click());
+        let (response, painter) =
+            ui.allocate_painter(Vec2::new(ui.available_width(), 50.), Sense::click());
         let rect = response.rect;
         if let Some(info) = &self.selected
             && let Ok(data) = info.data.lock()
@@ -340,22 +339,6 @@ impl FilePicker {
                 Stroke::new(1.0, Color32::BLACK),
             ));
             painter.add(shapes);
-        }
-    }
-
-    fn resize_handle(&mut self, ui: &mut Ui) {
-        let (response, painter) =
-            ui.allocate_painter(egui::Vec2::new(6., ui.available_height()), Sense::drag());
-
-        painter.rect_filled(response.rect, 0., egui::Color32::from_gray(40));
-
-        if response.hovered() {
-            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ResizeHorizontal);
-        }
-
-        if response.dragged() {
-            self.width += response.drag_delta().x;
-            self.width = self.width.clamp(40., 500.);
         }
     }
 }

@@ -3,6 +3,7 @@ use crate::{
     analysis::AudioInfo,
     components::{
         clip::UIClip,
+        effect_view::UIEffectView,
         filepicker::FilePicker,
         grid::{MAX_RIGHT, MIN_LEFT, PIXEL_PER_BEAT, VIEW_WIDTH, WorkspaceGrid},
         track::{DEFAULT_TRACK_HEIGHT, HANDLE_HEIGHT, TrackSoloState, UITrack},
@@ -12,8 +13,8 @@ use crate::{
 };
 use eframe::egui::{self, Sense, Stroke};
 use egui::{
-    Align2, Color32, FontId, Key, Layout, Painter, Pos2, Rect, Response, ScrollArea, Shape,
-    StrokeKind, Ui, Vec2,
+    Align2, Color32, Context, FontId, Frame, Key, Layout, Margin, Painter, Pos2, Rangef, Rect,
+    Response, ScrollArea, Shape, StrokeKind, Ui, Vec2,
 };
 use rtrb::{Consumer, Producer};
 
@@ -59,6 +60,9 @@ pub struct Workspace {
     y_offset: f32,
 
     file_picker: FilePicker,
+    effect_view: UIEffectView,
+
+    bottom_panel_open: bool,
 }
 
 struct DragState {
@@ -67,7 +71,44 @@ struct DragState {
 }
 
 impl Workspace {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn show(&mut self, ctx: &Context) {
+        let mut dragged_audio_info = None;
+        let mut is_released = false;
+
+        egui::TopBottomPanel::bottom("bottom-panel")
+            .height_range(Rangef::new(10., 400.))
+            .resizable(true)
+            .show_animated(ctx, self.bottom_panel_open, |ui| {
+                ui.set_height(ui.available_height());
+                ui.label("Hello");
+            });
+
+        egui::SidePanel::left("left-pannel")
+            .min_width(10.)
+            .max_width(400.)
+            .default_width(220.)
+            .show_animated(ctx, true, |ui| {
+                (dragged_audio_info, is_released) = self.file_picker.ui(ui, &mut self.to_player_tx)
+            });
+
+        egui::CentralPanel::default()
+            .frame(Frame::central_panel(&ctx.style()).inner_margin(Margin::ZERO))
+            .show(ctx, |ui| {
+                egui::warn_if_debug_build(ui);
+                ui.label(format!(
+                    "FPS: {:.1}",
+                    1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
+                ));
+                self.ui(ui, dragged_audio_info, is_released);
+            });
+    }
+
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        dragged_audio_info: Option<AudioInfo>,
+        is_released: bool,
+    ) {
         self.handle_messages();
         self.watch_inputs(ui);
 
@@ -79,8 +120,9 @@ impl Workspace {
             Vec2::new(ui.available_width(), ui.available_height()),
             Layout::left_to_right(egui::Align::Center),
             |ui| {
-                let (dragged_audio_info, is_released) =
-                    self.file_picker.ui(ui, &mut self.to_player_tx);
+                // let (dragged_audio_info, is_released) =
+                //     self.file_picker.ui(ui, &mut self.to_player_tx);
+
                 ui.vertical(|ui| {
                     ui.painter().text(
                         Pos2::new(ui.max_rect().right() - 3., ui.max_rect().top()),
@@ -250,7 +292,7 @@ impl Workspace {
                 };
                 let selected = self.selected_track.clone().is_some_and(|id| id == track.id);
                 // Render track
-                let (mute_changed, volume_changed, solo_clicked, clicked) =
+                let (mute_changed, volume_changed, solo_clicked, clicked, double_clicked) =
                     track.ui(ui, metrics, solo, selected);
                 // Track events
                 if mute_changed {
@@ -280,6 +322,9 @@ impl Workspace {
                     } else {
                         self.selected_track = Some(track.id.clone());
                     }
+                }
+                if double_clicked {
+                    self.bottom_panel_open = !self.bottom_panel_open;
                 }
             }
         });
@@ -433,10 +478,10 @@ impl Workspace {
                 &mut self.to_player_tx,
                 show_waveform,
                 if let Some(t) = t {
-                        self.tracks[t].color
-                    } else {
-                        DEFAULT_CLIP_COLOR
-                    },
+                    self.tracks[t].color
+                } else {
+                    DEFAULT_CLIP_COLOR
+                },
             );
             // clip released
             if !ui.input(|i| i.pointer.primary_down()) {
@@ -549,6 +594,8 @@ impl Workspace {
                 ));
                 self.tracks[track].clips.push(clip);
             }
+        } else if ui.input(|i| i.key_pressed(Key::J) && i.modifiers.ctrl) {
+            self.bottom_panel_open = !self.bottom_panel_open;
         }
 
         if updated {
@@ -850,6 +897,8 @@ impl Workspace {
             selected_track: None,
             y_offset: 0.,
             file_picker: FilePicker::new(),
+            bottom_panel_open: false,
+            effect_view: UIEffectView::new(),
         }
     }
 }
