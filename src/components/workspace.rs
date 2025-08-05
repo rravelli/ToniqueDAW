@@ -75,6 +75,16 @@ impl Workspace {
         let mut dragged_audio_info = None;
         let mut is_released = false;
 
+        egui::TopBottomPanel::top("top-bar")
+            .resizable(false)
+            .show(ctx, |ui| {
+                self.top_bar
+                    .ui(ui, self.playback_state, self.bpm, &mut |new| {
+                        let _ = self.to_player_tx.push(GuiToPlayerMsg::UpdateBPM(new));
+                        self.bpm = new;
+                    });
+            });
+
         egui::TopBottomPanel::bottom("bottom-panel")
             .height_range(Rangef::new(10., 400.))
             .resizable(true)
