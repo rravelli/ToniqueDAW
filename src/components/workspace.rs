@@ -210,7 +210,6 @@ impl Workspace {
                                         rect,
                                         dragged_audio_info,
                                         is_released,
-                                        &painter,
                                     );
                                     self.paint_playback_cursor(&painter, rect);
                                     self.handle_multiselect(ui, response);
@@ -220,14 +219,14 @@ impl Workspace {
                         });
                     self.y_offset = scroll.state.offset.y;
 
-                    ui.allocate_ui_at_rect(
-                        Rect::from_min_size(
+                    ui.scope_builder(
+                        egui::UiBuilder::new().max_rect(Rect::from_min_size(
                             Pos2::new(
                                 scroll.inner_rect.left(),
                                 scroll.inner_rect.bottom() - self.master_track.height,
                             ),
                             Vec2::new(scroll.inner_rect.width(), self.master_track.height),
-                        ),
+                        )),
                         |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_space(ui.available_width() - self.track_width);
@@ -239,7 +238,7 @@ impl Workspace {
                                 );
                             })
                         },
-                    )
+                    );
                 });
             },
         );
@@ -640,7 +639,6 @@ impl Workspace {
         rect: egui::Rect,
         dragged_audio_info: Option<AudioInfo>,
         is_released: bool,
-        painter: &Painter,
     ) {
         // Paint Preview sample
         if let Some(audio_info) = dragged_audio_info
