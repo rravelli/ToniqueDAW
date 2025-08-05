@@ -1,9 +1,9 @@
-use eframe::egui::{self, Layout, Vec2};
-use egui::{Frame, Margin, Pos2};
+use eframe::egui::Vec2;
+use egui::Margin;
 use rtrb::{Consumer, Producer};
 
 use crate::{
-    components::{filepicker::FilePicker, workspace::Workspace},
+    components::workspace::Workspace,
     message::{GuiToPlayerMsg, ProcessToGuiMsg},
 };
 

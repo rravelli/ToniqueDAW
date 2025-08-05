@@ -1,20 +1,10 @@
 use crate::{
-    components::{
-        effect::{self, UIEffect, UIEffectContent},
-        effects::{create_effect_from_id, equalizer::EqualizerEffect},
-        left_panel::{DragPayload, DraggedItem},
-        track::UITrack,
-    },
+    components::{left_panel::DragPayload, track::UITrack},
     message::GuiToPlayerMsg,
     metrics::AudioMetrics,
 };
-use egui::{
-    Color32, Frame, Key, Layout, Margin, Pos2, RichText, ScrollArea, Separator, Stroke, Ui, Vec2,
-};
-use fundsp::{
-    hacker::lowpass,
-    hacker32::{lowpass_hz, pass, shared, var},
-};
+use egui::{Color32, Frame, Key, Layout, Margin, RichText, ScrollArea, Separator, Stroke, Ui};
+
 use rtrb::Producer;
 
 pub const BOTTOM_BAR_HEIGHT: f32 = 20.;
@@ -59,7 +49,7 @@ impl UIBottomPanel {
             && let Some(index) = self.insert_index
             && let DragPayload::Effect(effect_id) = *payload
         {
-            track.add_effect(effect_id, 0, tx);
+            track.add_effect(effect_id, index, tx);
         }
 
         self.top_bar(ui, track);
