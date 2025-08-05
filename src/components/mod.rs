@@ -1,7 +1,11 @@
+mod bottom_panel;
 mod buttons;
 mod clip;
+mod effect;
+mod effects;
 pub(crate) mod filepicker;
 mod grid;
+mod left_panel;
 mod loudness_meter;
 mod top_bar;
 mod track;

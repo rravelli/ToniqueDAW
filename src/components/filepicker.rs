@@ -153,8 +153,9 @@ impl FilePicker {
         if self.preview_state == PlaybackState::Playing {
             ui.ctx().request_repaint();
         }
-        ui.set_width(ui.available_width());
+        ui.set_min_size(ui.available_size());
         ui.vertical(|ui| {
+            ui.set_height(ui.available_height());
             // ui.set_width(self.width);
             if ui.button("Select folder").clicked() {
                 let picked_dir = FileDialog::new().pick_folder();
