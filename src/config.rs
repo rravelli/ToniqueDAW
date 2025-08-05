@@ -2,9 +2,27 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
-#[derive(Serialize, Deserialize)]
 struct Config {
     last_dir: String,
+}
+
+impl Serialize for Config {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.last_dir)
+    }
+}
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let last_dir = String::deserialize(deserializer)?;
+        Ok(Config { last_dir })
+    }
 }
 
 fn get_config_path() -> Option<PathBuf> {
