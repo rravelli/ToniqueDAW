@@ -1,7 +1,7 @@
 use std::{ffi::OsStr, fs, path::PathBuf};
 
 use eframe::egui;
-use egui::{Color32, Pos2, Sense, Shape, Stroke, TextEdit, Ui, Vec2};
+use egui::{Color32, Pos2, Sense, Shape, Stroke, Ui, Vec2};
 use rfd::FileDialog;
 use rtrb::Producer;
 

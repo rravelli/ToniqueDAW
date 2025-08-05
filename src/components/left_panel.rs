@@ -5,7 +5,7 @@ use crate::{
     analysis::AudioInfo,
     components::{
         buttons::left_aligned_selectable,
-        effect::{UIEffect, UIEffectContent},
+        effect::UIEffectContent,
         effects::{EffectId, equalizer::EqualizerEffect},
         filepicker::FilePicker,
     },

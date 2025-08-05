@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use egui::{
-    Align2, Color32, FontFamily, FontId, Galley, Pos2, Rect, Response, Sense, Shape, Stroke, Ui,
-    Vec2, epaint::TextShape, text::Fonts,
+    Align2, Color32, FontFamily, FontId, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2,
 };
 use rtrb::Producer;
 

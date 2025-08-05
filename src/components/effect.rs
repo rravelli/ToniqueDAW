@@ -1,6 +1,6 @@
 use egui::{
     Button, Color32, Frame, InnerResponse, Label, Margin, Rect, Response, RichText, Sense, Stroke,
-    Ui, UiBuilder, Vec2,
+    Ui, Vec2,
 };
 use fundsp::hacker::AudioUnit;
 use rtrb::Producer;
