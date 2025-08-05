@@ -167,13 +167,56 @@ impl TrackBackend {
         None
     }
 
-    pub fn seek(&mut self, position: usize) {
-        for clip in self.clips.iter_mut() {
-            if clip.start_frame <= position
-                && position <= clip.start_frame + clip.stream.info().num_frames
-            {
-            } else if clip.start_frame > position {
+    pub fn add_node(&mut self, id: String, node: Box<dyn AudioUnit>, index: usize) {
+        // let node_id = self.net.chain(node.clone());
+
+        let node_id = self.net.push(node.clone());
+
+        if index > 0 {
+            let id1 = self.node_order[index - 1];
+            self.net.connect(id1, 0, node_id, 0);
+            self.net.connect(id1, 1, node_id, 1);
+        } else {
+            self.net.connect_input(0, node_id, 0);
+            self.net.connect_input(1, node_id, 1);
+        }
+
+        if index < self.node_order.len() {
+            let id2 = self.node_order[index];
+            self.net.connect(node_id, 0, id2, 0);
+            self.net.connect(node_id, 1, id2, 1);
+        } else {
+            self.net.connect_output(node_id, 0, 0);
+            self.net.connect_output(node_id, 1, 1);
+        }
+
+        self.id_hash.insert(id.clone(), node_id.clone());
+        self.units.insert(node_id.clone(), node.clone());
+        self.node_order.insert(index, node_id);
+        self.net.commit();
+    }
+
+    pub fn remove_node(&mut self, id: String) {
+        if let Some(node_id) = self.id_hash.get(&id) {
+            self.net.remove_link(*node_id);
+            self.net.commit();
+            self.units.remove(&node_id);
+            self.node_order.retain(|n| *node_id != *n);
+        }
+        // make sure to remove id to avoid a deadlock
+        self.id_hash.remove(&id);
+    }
+
+    pub fn set_node_enabled(&mut self, id: String, enabled: bool) {
+        if let Some(node_id) = self.id_hash.get(&id) {
+            if enabled && let Some(unit) = self.units.get(&(*node_id)) {
+                self.net
+                    .crossfade(*node_id, Fade::Smooth, 0.01, unit.clone());
+            } else {
+                self.net
+                    .crossfade(*node_id, Fade::Smooth, 0.01, Box::new(pass() | pass()));
             }
+            self.net.commit();
         }
     }
 }

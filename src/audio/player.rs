@@ -238,6 +238,24 @@ impl PlayerBackend {
                 GuiToPlayerMsg::SeekPreview(pos) => {
                     self.preview.seek(pos);
                 }
+                GuiToPlayerMsg::UpdateBPM(bpm) => {
+                    self.bpm = bpm;
+                }
+                GuiToPlayerMsg::AddNode(track_id, index, effect_id, node) => {
+                    if let Some(track) = self.tracks.get_mut(&track_id) {
+                        track.add_node(effect_id, node, index);
+                    }
+                }
+                GuiToPlayerMsg::RemoveNode(track_id, effect_id) => {
+                    if let Some(track) = self.tracks.get_mut(&track_id) {
+                        track.remove_node(effect_id);
+                    }
+                }
+                GuiToPlayerMsg::SetNodeEnabled(track_id, effect_id, enabled) => {
+                    if let Some(track) = self.tracks.get_mut(&track_id) {
+                        track.set_node_enabled(effect_id, enabled);
+                    }
+                }
             }
         }
         Ok(())
