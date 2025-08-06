@@ -79,17 +79,23 @@ impl UIEffect {
 
         let response = Frame::new()
             .fill(ui.visuals().faint_bg_color)
-            .stroke(Stroke::new(2.0, stroke_color))
+            .stroke(Stroke::new(1.0 / ui.pixels_per_point(), stroke_color))
             .corner_radius(2.0)
             .show(ui, |ui| {
-                ui.set_height(ui.available_height());
-                ui.vertical(|ui| {
-                    ui.set_width(self.content.width());
-                    let bar_response = self.top_bar(ui, tx);
-                    self.content.ui(ui, metrics, self.enabled, tx);
-                    bar_response
-                })
-                .inner
+                Frame::new()
+                    .corner_radius(2.0)
+                    .stroke(Stroke::new(2.0, Color32::from_gray(100)))
+                    .show(ui, |ui| {
+                        ui.set_height(ui.available_height());
+                        ui.vertical(|ui| {
+                            ui.set_width(self.content.width());
+                            let bar_response = self.top_bar(ui, tx);
+                            self.content.ui(ui, metrics, self.enabled, tx);
+                            bar_response
+                        })
+                        .inner
+                    })
+                    .inner
             });
 
         response
@@ -143,11 +149,14 @@ impl UIEffect {
                         ));
                     };
                     ui.add_space(4.0);
-                    ui.add(Label::new(
-                        RichText::new(self.name.clone())
-                            .size(8.0)
-                            .color(Color32::from_gray(20)),
-                    ));
+                    ui.add(
+                        Label::new(
+                            RichText::new(self.name.clone())
+                                .size(8.0)
+                                .color(Color32::from_gray(20)),
+                        )
+                        .selectable(false),
+                    );
                 });
             });
         response
