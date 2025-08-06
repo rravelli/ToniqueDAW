@@ -1,13 +1,18 @@
 use egui::{
-    Align2, Color32, FontId, Frame, Pos2, Rect, Response, RichText, Sense, Stroke, TextEdit, Ui,
-    Vec2,
+    Align2, Color32, FontId, Frame, Label, Pos2, Rect, Response, RichText, Sense, Stroke, TextEdit,
+    Ui, Vec2,
 };
 use rand::Rng;
 use rtrb::Producer;
 use std::ops::RangeInclusive;
 
 use crate::{
-    components::{clip::UIClip, loudness_meter::LoudnessMeter},
+    components::{
+        clip::UIClip,
+        effect::UIEffect,
+        effects::{EffectId, create_effect_from_id},
+        loudness_meter::LoudnessMeter,
+    },
     message::GuiToPlayerMsg,
     metrics::AudioMetrics,
 };
@@ -35,6 +40,7 @@ pub struct UITrack {
     pub volume: f32,
     pub closed: bool,
     pub color: Color32,
+    effects: Vec<UIEffect>,
     // volume in DB
     gain: f32,
     prev_height: f32,
@@ -63,6 +69,7 @@ impl UITrack {
             loudness_meter: LoudnessMeter {},
             color,
             edit: false,
+            effects: vec![],
         }
     }
 
@@ -127,17 +134,47 @@ impl UITrack {
         self.clips = new_clips;
     }
 
+    pub fn add_effect(&mut self, id: EffectId, index: usize, tx: &mut Producer<GuiToPlayerMsg>) {
+        let effect = create_effect_from_id(id);
+        let _ = tx.push(GuiToPlayerMsg::AddNode(
+            self.id.clone(),
+            index,
+            effect.id(),
+            effect.get_unit(),
+        ));
+
+        self.effects
+            .insert(index, UIEffect::new(effect, self.id.clone()));
+    }
+
+    pub fn remove_effects(&mut self, indexes: &Vec<usize>, tx: &mut Producer<GuiToPlayerMsg>) {
+        let mut new_effects = Vec::new();
+        for (i, effect) in self.effects.iter().enumerate() {
+            if !indexes.contains(&i) {
+                new_effects.push(effect.clone());
+            } else {
+                let _ = tx.push(GuiToPlayerMsg::RemoveNode(self.id.clone(), effect.id()));
+            }
+        }
+        self.effects = new_effects;
+    }
+
+    pub fn effects_mut(&mut self) -> &mut [UIEffect] {
+        &mut self.effects
+    }
+
     pub fn ui(
         &mut self,
         ui: &mut Ui,
         metrics: AudioMetrics,
         solo: TrackSoloState,
         selected: bool,
-    ) -> (bool, bool, bool, bool) {
+    ) -> (bool, bool, bool, bool, bool, Response) {
         let mut mute_changed = false;
         let mut volume_changed = false;
         let mut solo_clicked = false;
         let mut clicked = false;
+        let mut double_clicked = false;
         let res = Frame::new()
             .fill(Color32::from_gray(30)) // Background color (optional)
             .stroke(Stroke::new(STROKE_WIDTH, Color32::from_gray(50))) // Border thickness and color
@@ -185,10 +222,14 @@ impl UITrack {
                                         }
                                     }
                                 } else {
-                                    ui.label(
-                                        RichText::new(self.name.clone())
-                                            .color(Color32::from_gray(20))
-                                            .size(9.),
+                                    ui.add(
+                                        Label::new(
+                                            RichText::new(self.name.clone())
+                                                .color(Color32::from_gray(20))
+                                                .size(9.),
+                                        )
+                                        .truncate()
+                                        .selectable(false),
                                     );
                                 }
 
@@ -207,6 +248,7 @@ impl UITrack {
                                 }
                             });
                             clicked = response.clicked();
+                            double_clicked = response.double_clicked();
                         });
                     response.context_menu(|ui| {
                         self.context_menu(ui);
@@ -256,7 +298,14 @@ impl UITrack {
         );
 
         self.dragger(ui);
-        (mute_changed, volume_changed, solo_clicked, clicked)
+        (
+            mute_changed,
+            volume_changed,
+            solo_clicked,
+            clicked,
+            double_clicked,
+            res.response,
+        )
     }
 
     fn context_menu(&mut self, ui: &mut Ui) {

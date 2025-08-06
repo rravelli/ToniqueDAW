@@ -2,9 +2,11 @@ use crate::{
     ProcessToGuiMsg,
     analysis::AudioInfo,
     components::{
+        bottom_panel::{BOTTOM_BAR_HEIGHT, UIBottomPanel},
         clip::UIClip,
-        filepicker::FilePicker,
         grid::{MAX_RIGHT, MIN_LEFT, PIXEL_PER_BEAT, VIEW_WIDTH, WorkspaceGrid},
+        left_panel::{DragPayload, UILeftPanel},
+        top_bar::UITopBar,
         track::{DEFAULT_TRACK_HEIGHT, HANDLE_HEIGHT, TrackSoloState, UITrack},
     },
     message::GuiToPlayerMsg,
@@ -12,8 +14,8 @@ use crate::{
 };
 use eframe::egui::{self, Sense, Stroke};
 use egui::{
-    Align2, Color32, FontId, Key, Layout, Painter, Pos2, Rect, Response, ScrollArea, Shape,
-    StrokeKind, Ui, Vec2,
+    Align2, Color32, Context, FontId, Frame, Key, Layout, Margin, Painter, Pos2, Rangef, Rect,
+    Response, ScrollArea, Shape, StrokeKind, Ui, Vec2,
 };
 use rtrb::{Consumer, Producer};
 
@@ -21,6 +23,11 @@ use rtrb::{Consumer, Producer};
 pub enum PlaybackState {
     Paused,
     Playing,
+}
+
+struct DragState {
+    element: UIClip,
+    mouse_origin: Pos2,
 }
 
 const TOP_BAR_HEIGHT: f32 = 30.;
@@ -58,16 +65,67 @@ pub struct Workspace {
 
     y_offset: f32,
 
-    file_picker: FilePicker,
-}
-
-struct DragState {
-    element: UIClip,
-    mouse_origin: Pos2,
+    bottom_panel: UIBottomPanel,
+    left_panel: UILeftPanel,
+    top_bar: UITopBar,
 }
 
 impl Workspace {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn show(&mut self, ctx: &Context) {
+        let mut dragged_audio_info = None;
+        let mut is_released = false;
+
+        egui::TopBottomPanel::top("top-bar")
+            .resizable(false)
+            .show(ctx, |ui| {
+                self.top_bar
+                    .ui(ui, self.playback_state, self.bpm, &mut |new| {
+                        let _ = self.to_player_tx.push(GuiToPlayerMsg::UpdateBPM(new));
+                        self.bpm = new;
+                    });
+            });
+
+        egui::TopBottomPanel::bottom("bottom-panel")
+            .height_range(Rangef::new(10. + BOTTOM_BAR_HEIGHT, 400.))
+            .resizable(true)
+            .frame(Frame::new().inner_margin(Margin::ZERO))
+            .show_animated(ctx, self.bottom_panel.open, |ui| {
+                ui.set_height(ui.available_height());
+                if let Some(id) = self.selected_track.clone()
+                    && let Some(track) = self.tracks.iter_mut().find(|t| t.id == id)
+                    && let Some(metrics) = &mut self.metrics.tracks.get_mut(&id)
+                {
+                    self.bottom_panel
+                        .ui(ui, track, metrics, &mut self.to_player_tx);
+                }
+            });
+
+        egui::SidePanel::left("left-pannel")
+            .min_width(10.)
+            .max_width(400.)
+            .default_width(220.)
+            .show_animated(ctx, true, |ui| {
+                (dragged_audio_info, is_released) = self.left_panel.ui(ui, &mut self.to_player_tx);
+            });
+
+        egui::CentralPanel::default()
+            .frame(Frame::central_panel(&ctx.style()).inner_margin(Margin::ZERO))
+            .show(ctx, |ui| {
+                egui::warn_if_debug_build(ui);
+                ui.label(format!(
+                    "FPS: {:.1}",
+                    1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
+                ));
+                self.ui(ui, dragged_audio_info, is_released);
+            });
+    }
+
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        dragged_audio_info: Option<AudioInfo>,
+        is_released: bool,
+    ) {
         self.handle_messages();
         self.watch_inputs(ui);
 
@@ -79,8 +137,6 @@ impl Workspace {
             Vec2::new(ui.available_width(), ui.available_height()),
             Layout::left_to_right(egui::Align::Center),
             |ui| {
-                let (dragged_audio_info, is_released) =
-                    self.file_picker.ui(ui, &mut self.to_player_tx);
                 ui.vertical(|ui| {
                     ui.painter().text(
                         Pos2::new(ui.max_rect().right() - 3., ui.max_rect().top()),
@@ -119,7 +175,8 @@ impl Workspace {
                                         self.selected_track = None;
                                         let _ =
                                             self.to_player_tx.push(GuiToPlayerMsg::PausePreview());
-                                        self.file_picker.preview_state = PlaybackState::Paused;
+                                        self.left_panel.file_browser.preview_state =
+                                            PlaybackState::Paused;
                                     }
                                     let scroll_delta = ui.input(|i| i.smooth_scroll_delta.x);
 
@@ -153,7 +210,6 @@ impl Workspace {
                                         rect,
                                         dragged_audio_info,
                                         is_released,
-                                        &painter,
                                     );
                                     self.paint_playback_cursor(&painter, rect);
                                     self.handle_multiselect(ui, response);
@@ -163,14 +219,14 @@ impl Workspace {
                         });
                     self.y_offset = scroll.state.offset.y;
 
-                    ui.allocate_ui_at_rect(
-                        Rect::from_min_size(
+                    ui.scope_builder(
+                        egui::UiBuilder::new().max_rect(Rect::from_min_size(
                             Pos2::new(
                                 scroll.inner_rect.left(),
                                 scroll.inner_rect.bottom() - self.master_track.height,
                             ),
                             Vec2::new(scroll.inner_rect.width(), self.master_track.height),
-                        ),
+                        )),
                         |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_space(ui.available_width() - self.track_width);
@@ -182,7 +238,7 @@ impl Workspace {
                                 );
                             })
                         },
-                    )
+                    );
                 });
             },
         );
@@ -250,8 +306,14 @@ impl Workspace {
                 };
                 let selected = self.selected_track.clone().is_some_and(|id| id == track.id);
                 // Render track
-                let (mute_changed, volume_changed, solo_clicked, clicked) =
-                    track.ui(ui, metrics, solo, selected);
+                let (
+                    mute_changed,
+                    volume_changed,
+                    solo_clicked,
+                    clicked,
+                    double_clicked,
+                    track_res,
+                ) = track.ui(ui, metrics, solo, selected);
                 // Track events
                 if mute_changed {
                     let _ = self
@@ -281,6 +343,23 @@ impl Workspace {
                         self.selected_track = Some(track.id.clone());
                     }
                 }
+                // Open bottom panel
+                if double_clicked {
+                    if let Some(selected_id) = self.selected_track.clone()
+                        && *selected_id == track.id
+                    {
+                        self.bottom_panel.open = !self.bottom_panel.open;
+                    } else {
+                        self.bottom_panel.open = true;
+                        self.selected_track = Some(track.id.clone())
+                    }
+                }
+                // // Insert effects
+                if let Some(payload) = track_res.dnd_release_payload::<DragPayload>()
+                    && let DragPayload::Effect(id) = *payload
+                {
+                    track.add_effect(id, 0, &mut self.to_player_tx);
+                }
             }
         });
 
@@ -309,7 +388,7 @@ impl Workspace {
         let mut dragged_clip_index = None;
 
         for (track_index, track) in self.tracks.iter_mut().enumerate() {
-            let height = track.clone().height;
+            let height = track.height;
             if y + track.height < viewport.top() + self.y_offset
                 || y > self.y_offset + viewport.height() + viewport.top()
             {
@@ -394,7 +473,7 @@ impl Workspace {
                 mouse_origin: Pos2::new(mouse_pos.x - x, mouse_pos.y - y),
             })
         }
-        // render draggin objects
+        // render dragging objects
         if let Some(mut drag_state) = self.drag_state.take()
             && let Some(duration) = drag_state.element.duration()
             && let Some(mouse_pos) = mouse_pos
@@ -433,10 +512,10 @@ impl Workspace {
                 &mut self.to_player_tx,
                 show_waveform,
                 if let Some(t) = t {
-                        self.tracks[t].color
-                    } else {
-                        DEFAULT_CLIP_COLOR
-                    },
+                    self.tracks[t].color
+                } else {
+                    DEFAULT_CLIP_COLOR
+                },
             );
             // clip released
             if !ui.input(|i| i.pointer.primary_down()) {
@@ -452,7 +531,7 @@ impl Workspace {
 
                 let _ = self.to_player_tx.push(GuiToPlayerMsg::MoveClip(
                     drag_state.element.id(),
-                    self.tracks[track_index].clone().id,
+                    self.tracks[track_index].id.clone(),
                     drag_state.element.position,
                 ));
                 self.drag_state = None;
@@ -504,17 +583,13 @@ impl Workspace {
             .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
         {
             // Delete
-            if let Some(track_id) = self.selected_track.take() {
-                self.delete_track(track_id);
-            } else {
-                for track in self.tracks.iter_mut() {
-                    track.delete_ids(self.selected_clips.clone());
+            for track in self.tracks.iter_mut() {
+                track.delete_ids(self.selected_clips.clone());
 
-                    let _ = self
-                        .to_player_tx
-                        .push(GuiToPlayerMsg::RemoveClip(self.selected_clips.clone()));
-                }
-            };
+                let _ = self
+                    .to_player_tx
+                    .push(GuiToPlayerMsg::RemoveClip(self.selected_clips.clone()));
+            }
         } else if ui.input(|i| i.key_pressed(Key::K) && i.modifiers.ctrl) {
             // Cut clips
             let mut added_clip = vec![];
@@ -549,6 +624,8 @@ impl Workspace {
                 ));
                 self.tracks[track].clips.push(clip);
             }
+        } else if ui.input(|i| i.key_pressed(Key::J) && i.modifiers.ctrl) {
+            self.bottom_panel.open = !self.bottom_panel.open;
         }
 
         if updated {
@@ -562,7 +639,6 @@ impl Workspace {
         rect: egui::Rect,
         dragged_audio_info: Option<AudioInfo>,
         is_released: bool,
-        painter: &Painter,
     ) {
         // Paint Preview sample
         if let Some(audio_info) = dragged_audio_info
@@ -620,7 +696,7 @@ impl Workspace {
         {
             // remove preview
             self.sample_preview = None;
-            // add sample
+            // add clip
             if rect.contains(mouse_pos) {
                 let (track_index, _) = self.find_track_at(rect, mouse_pos.y);
                 let index;
@@ -664,6 +740,7 @@ impl Workspace {
     fn paint_tracks(&self, painter: &Painter, rect: Rect) {
         let mut y = rect.top();
         let solo = !self.solo_tracks.is_empty();
+
         for track in self.tracks.iter() {
             if !self.solo_tracks.contains(&track.id) && (track.muted || solo) {
                 painter.rect_filled(
@@ -821,7 +898,7 @@ impl Workspace {
                 }
                 ProcessToGuiMsg::Metrics(metrics) => self.metrics = metrics,
                 ProcessToGuiMsg::PreviewPos(pos) => {
-                    self.file_picker.preview_position = pos;
+                    self.left_panel.file_browser.preview_position = pos;
                 }
             }
         }
@@ -849,7 +926,9 @@ impl Workspace {
             solo_tracks: vec![],
             selected_track: None,
             y_offset: 0.,
-            file_picker: FilePicker::new(),
+            left_panel: UILeftPanel::new(),
+            bottom_panel: UIBottomPanel::new(),
+            top_bar: UITopBar::new(),
         }
     }
 }

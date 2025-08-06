@@ -1,5 +1,4 @@
 use rtrb::{Consumer, Producer};
-use rubato::{Resampler, SincFixedOut, SincInterpolationParameters, SincInterpolationType};
 use std::{collections::HashMap, time::Instant};
 
 use crate::{
@@ -83,101 +82,20 @@ impl PlayerBackend {
         if self.playback_state == PlaybackState::Paused {
             metrics.latency =
                 time_start.elapsed().as_secs_f32() / (num_frames as f32 / self.sample_rate as f32);
+
+            for (track_id, _) in self.tracks.iter() {
+                metrics.tracks.insert(track_id.clone(), AudioMetrics::new());
+            }
             let _ = self.to_gui_tx.push(ProcessToGuiMsg::Metrics(metrics));
             return;
         }
         let mut master_mix = vec![0.; output.len()];
 
         for (track_id, track) in self.tracks.iter_mut() {
-            let mut track_mix = vec![0.; output.len()];
             let disabled = (track.muted && !self.solo_tracks.contains(&track_id))
                 || (!self.solo_tracks.is_empty() && !self.solo_tracks.contains(&track_id));
 
-            for clip in track.clips.iter_mut() {
-                // global start position
-                let clip_start = clip.start_frame;
-                // global end position
-                let clip_end = clip.end(self.sample_rate);
-                // not in range
-                if pos + num_frames < clip_start || clip_end < pos + num_frames {
-                    continue;
-                }
-                // not ready
-                if let Ok(ready) = clip.audio.ready.lock()
-                    && !*ready
-                {
-                    continue;
-                };
-                // start position of the clip in [pos, pos + num_frames]
-                let start = clip_start.max(pos);
-                // end position of the clip in [pos, pos + num_frames]
-                let end = clip_end.min(pos + num_frames);
-                // position relative to the clip
-                let clip_playhead = clip.playhead_start() + (start - clip_start);
-                // ratio in sample rates
-                let sample_rate_ratio = clip.audio.sample_rate as f64 / self.sample_rate as f64;
-                // start index to pick inside the clip
-                let start_index = (clip_playhead as f64 * sample_rate_ratio).floor() as usize;
-                // end index to pick inside the clip
-                let end_index =
-                    ((clip_playhead + (end - start)) as f64 * sample_rate_ratio).ceil() as usize;
-
-                // compute audio
-                if let Ok(data) = clip.audio.data.lock()
-                    && start_index < end_index
-                {
-                    let mut resampler = SincFixedOut::new(
-                        self.sample_rate as f64 / clip.audio.sample_rate as f64,
-                        10.,
-                        SincInterpolationParameters {
-                            sinc_len: 16,
-                            f_cutoff: 0.70,
-                            oversampling_factor: 8,
-                            interpolation: SincInterpolationType::Nearest,
-                            window: rubato::WindowFunction::Hann,
-                        },
-                        end - pos,
-                        2,
-                    )
-                    .unwrap();
-
-                    let mut channels = vec![];
-
-                    channels.push(
-                        data.0[start_index.min(data.0.len() - 1)
-                            ..(start_index + resampler.input_frames_next()).min(data.0.len())]
-                            .to_vec(),
-                    );
-                    if clip.audio.is_stereo {
-                        channels.push(
-                            data.1[start_index.min(data.1.len() - 1)
-                                ..(end_index + resampler.input_frames_next()).min(data.1.len())]
-                                .to_vec(),
-                        );
-                    }
-                    // resample if needed
-                    if self.sample_rate != clip.audio.sample_rate as usize {
-                        match resampler.process(&channels, None) {
-                            Ok(resampled) => {
-                                channels = resampled;
-                            }
-                            Err(_) => {}
-                        }
-                    }
-
-                    let mut j = 0;
-                    for i in (start - pos)..(end - pos) {
-                        if channels.len() > 1 {
-                            track_mix[2 * i] += channels[0][j] * track.volume;
-                            track_mix[2 * i + 1] += channels[1][j] * track.volume;
-                        } else {
-                            track_mix[2 * i] += channels[0][j] * track.volume;
-                            track_mix[2 * i + 1] += channels[0][j] * track.volume;
-                        }
-                        j += 1;
-                    }
-                };
-            }
+            let track_mix = track.process(pos, num_frames, self.sample_rate);
             // Update master
             let mut track_metrics = AudioMetrics::new();
 
@@ -198,6 +116,7 @@ impl PlayerBackend {
                 .master
                 .add_sample(master_mix[i], (i % 2 == 0).into());
         }
+
         // Send data
         metrics.latency =
             time_start.elapsed().as_secs_f32() / (num_frames as f32 / self.sample_rate as f32);
@@ -222,9 +141,6 @@ impl PlayerBackend {
                 }
                 GuiToPlayerMsg::SeekTo(position) => {
                     let frames = (position / self.bpm * 60. * self.sample_rate as f32) as usize;
-                    for (_, track) in self.tracks.iter_mut() {
-                        track.seek(frames);
-                    }
                     self.playhead = frames;
                 }
                 GuiToPlayerMsg::AddTrack(id) => {
@@ -321,6 +237,24 @@ impl PlayerBackend {
                 GuiToPlayerMsg::PausePreview() => self.preview_state = PlaybackState::Paused,
                 GuiToPlayerMsg::SeekPreview(pos) => {
                     self.preview.seek(pos);
+                }
+                GuiToPlayerMsg::UpdateBPM(bpm) => {
+                    self.bpm = bpm;
+                }
+                GuiToPlayerMsg::AddNode(track_id, index, effect_id, node) => {
+                    if let Some(track) = self.tracks.get_mut(&track_id) {
+                        track.add_node(effect_id, node, index);
+                    }
+                }
+                GuiToPlayerMsg::RemoveNode(track_id, effect_id) => {
+                    if let Some(track) = self.tracks.get_mut(&track_id) {
+                        track.remove_node(effect_id);
+                    }
+                }
+                GuiToPlayerMsg::SetNodeEnabled(track_id, effect_id, enabled) => {
+                    if let Some(track) = self.tracks.get_mut(&track_id) {
+                        track.set_node_enabled(effect_id, enabled);
+                    }
                 }
             }
         }

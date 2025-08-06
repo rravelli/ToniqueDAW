@@ -1,4 +1,4 @@
-use egui::{Color32, Stroke, Visuals};
+use egui::{Color32, FontFamily, Stroke, Visuals};
 use rtrb::RingBuffer;
 
 use crate::message::{GuiToPlayerMsg, ProcessToGuiMsg};
@@ -25,8 +25,28 @@ fn main() {
         eframe::NativeOptions::default(),
         Box::new(|cc| {
             let mut fonts = egui::FontDefinitions::default();
-            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Fill);
+
+            fonts.font_data.insert(
+                "phosphor".into(),
+                egui_phosphor::Variant::Regular.font_data().into(),
+            );
+
+            fonts.font_data.insert(
+                "phosphor_fill".into(),
+                egui_phosphor::Variant::Fill.font_data().into(),
+            );
+            fonts.families.insert(
+                FontFamily::Name("phosphor_fill".into()),
+                vec!["phosphor_fill".into()],
+            );
+            fonts.families.insert(
+                FontFamily::Name("phosphor_regular".into()),
+                vec!["phosphor".into()],
+            );
+            if let Some(font_keys) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                font_keys.insert(1, "phosphor_fill".into());
+            }
+
             cc.egui_ctx.set_fonts(fonts);
             cc.egui_ctx.set_visuals(Visuals {
                 window_corner_radius: 1.into(),

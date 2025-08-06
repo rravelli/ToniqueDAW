@@ -1,5 +1,5 @@
-use eframe::egui::{self, Layout, Vec2};
-use egui::{Frame, Margin, Pos2};
+use eframe::egui::Vec2;
+use egui::Margin;
 use rtrb::{Consumer, Producer};
 
 use crate::{
@@ -28,15 +28,6 @@ impl eframe::App for ToniqueApp {
             style.spacing.window_margin = Margin::ZERO
         });
 
-        egui::CentralPanel::default()
-            .frame(Frame::central_panel(&ctx.style()).inner_margin(Margin::ZERO))
-            .show(ctx, |ui| {
-                egui::warn_if_debug_build(ui);
-                ui.label(format!(
-                    "FPS: {:.1}",
-                    1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
-                ));
-                self.workspace.ui(ui);
-            });
+        self.workspace.show(ctx);
     }
 }
