@@ -1,8 +1,8 @@
 use std::f32::consts::PI;
 
-use egui::{Color32, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
+use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use fundsp::{
-    hacker::{AudioUnit, Setting, shared},
+    hacker::{AudioUnit, shared},
     hacker32::{lowpass, pass, var},
     shared::Shared,
 };
@@ -107,7 +107,7 @@ impl UIEffectContent for EqualizerEffect {
         ui: &mut Ui,
         metrics: &mut AudioMetrics,
         enabled: bool,
-        tx: &mut Producer<GuiToPlayerMsg>,
+        _: &mut Producer<GuiToPlayerMsg>,
     ) {
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::all());
         let full_rect = response.rect;
