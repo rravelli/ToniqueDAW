@@ -1,3 +1,18 @@
+# Fixes
+
+- Fix backend out of sync when changing BPM
+- Fix artefacts in preview when resampling
+- Fix bottom scrollbar behavior
+- Fix waveform jittering
+- Fix incorrect clip trimming because of min clip size ratio
+- Fix wrong curve for the equalizer effect
+
+# Refactor
+
+- Split workspace into smaller chunks
+- Use built-in dnd for clips
+- Rethink clip trim start and end for better precision
+
 # Small Term Goals
 
 - Improve UI/UX!!
@@ -8,6 +23,9 @@
 - Handle multi-selecting correctly
 - Handle errors in player
 - Add audio warping and pitch shifting
+- Add beat detection
+- Save project
+- Ctrl-z/Ctrl-y support
 
 # Long term goals
 
