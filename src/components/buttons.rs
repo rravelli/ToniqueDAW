@@ -7,16 +7,21 @@ pub fn left_aligned_selectable(
     text: impl ToString,
     selected: bool,
 ) -> egui::Response {
-    let (response, painter) =
-        ui.allocate_painter(Vec2::new(ui.available_width(), 16.0), Sense::all());
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), 16.0),
+        Sense::click_and_drag(),
+    );
 
-    let bg_color = if selected {
+    // Register this widget for interaction (focus, keyboard, etc)
+
+    let bg_color = if selected || response.has_focus() {
         Color32::from_gray(70)
     } else if response.hovered() {
         Color32::from_gray(40)
     } else {
         Color32::from_gray(30)
     };
+    let painter = ui.painter_at(rect);
 
     painter.rect_filled(response.rect, 0., bg_color);
 
@@ -32,8 +37,6 @@ pub fn left_aligned_selectable(
         galley,
         Color32::WHITE,
     );
-
-    // ui.painter().add(shape)
 
     response
 }
