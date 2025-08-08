@@ -11,7 +11,6 @@ use crate::{
     message::GuiToPlayerMsg,
 };
 
-const MIN_TRIM_RATIO: f32 = 1e-2;
 const PADDING_TEXT: f32 = 4.;
 const BORDER_WIDTH: f32 = 1.;
 
@@ -87,6 +86,7 @@ impl UIClip {
             grid,
             Rect::from_min_size(Pos2::new(pos.x - 2.0, pos.y), Vec2::new(4., size.y)),
             bpm,
+            viewport,
         );
 
         resized = resized || left_resize.drag_stopped();
@@ -100,6 +100,7 @@ impl UIClip {
                     Vec2::new(4., size.y),
                 ),
                 bpm,
+                viewport,
             );
             resized = resized || right_resize.drag_stopped();
         }
@@ -189,15 +190,17 @@ impl UIClip {
 
     pub fn trim_start_at(&mut self, beats: f32, bpm: f32) {
         let duration = self.audio.duration.unwrap().as_secs_f32() * bpm / 60.;
-        self.trim_start += (beats - self.position) / duration;
-        self.position = beats;
-        self.trim_start = self.trim_start.clamp(0., self.trim_end - MIN_TRIM_RATIO);
+        let clamped_beats = beats.clamp(self.position - duration * self.trim_start, self.end(bpm));
+        self.trim_start += (clamped_beats - self.position) / duration;
+        self.position = clamped_beats;
+
+        self.trim_start = self.trim_start.clamp(0., 1.);
     }
 
     pub fn trim_end_at(&mut self, beats: f32, bpm: f32) {
         let duration = self.audio.duration.unwrap().as_secs_f32() * bpm / 60.;
         self.trim_end = (beats - self.position) / duration + self.trim_start;
-        self.trim_end = self.trim_end.clamp(self.trim_start + MIN_TRIM_RATIO, 1.);
+        self.trim_end = self.trim_end.clamp(0., 1.);
     }
 
     fn left_resize_handle(
@@ -206,19 +209,25 @@ impl UIClip {
         grid: &WorkspaceGrid,
         rect: Rect,
         bpm: f32,
+        viewport: Rect,
     ) -> Response {
         let response = ui.allocate_rect(rect, Sense::drag());
 
-        if response.dragged() {
+        if response.dragged()
+            && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
+        {
             let delta = response.drag_delta().x;
+            self.trim_start_at(
+                grid.snap_at_grid(grid.x_to_beats(mouse_pos.x, viewport)),
+                bpm,
+            );
+            // let prev_val = self.trim_start;
+            // self.trim_start += delta / grid.duration_to_width(self.audio.duration.unwrap(), bpm);
+            // self.trim_start = self.trim_start.clamp(0., 1.);
 
-            let prev_val = self.trim_start;
-            self.trim_start += delta / grid.duration_to_width(self.audio.duration.unwrap(), bpm);
-            self.trim_start = self.trim_start.clamp(0., self.trim_end - MIN_TRIM_RATIO);
-
-            self.position +=
-                (self.trim_start - prev_val) * self.audio.duration.unwrap().as_secs_f32() / 60.
-                    * bpm
+            // self.position +=
+            //     (self.trim_start - prev_val) * self.audio.duration.unwrap().as_secs_f32() / 60.
+            //         * bpm
         }
 
         if response.hovered() {
@@ -234,14 +243,20 @@ impl UIClip {
         grid: &WorkspaceGrid,
         rect: Rect,
         bpm: f32,
+        viewport: Rect,
     ) -> Response {
         let response = ui.allocate_rect(rect, Sense::drag());
 
-        if response.dragged() {
+        if response.dragged()
+            && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
+        {
             let delta = response.drag_delta().x;
-
-            self.trim_end += delta / grid.duration_to_width(self.audio.duration.unwrap(), bpm);
-            self.trim_end = self.trim_end.clamp(self.trim_start + MIN_TRIM_RATIO, 1.);
+            self.trim_end_at(
+                grid.snap_at_grid(grid.x_to_beats(mouse_pos.x, viewport)),
+                bpm,
+            );
+            // self.trim_end += delta / grid.duration_to_width(self.audio.duration.unwrap(), bpm);
+            // self.trim_end = self.trim_end.clamp(0., 1.);
         }
 
         if response.hovered() {
