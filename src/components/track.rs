@@ -182,7 +182,7 @@ impl UITrack {
                 ui.style_mut().spacing.item_spacing = Vec2::new(2.0, 2.0);
                 ui.set_height(self.height - 2. * STROKE_WIDTH);
                 ui.set_width(ui.available_width());
-                ui.horizontal_top(|ui| {
+                let horizontal_response = ui.horizontal_top(|ui| {
                     let response = ui.interact(
                         Rect::from_min_size(
                             ui.next_widget_position(),
@@ -191,94 +191,23 @@ impl UITrack {
                                 self.height - 2. * PADDING - 2. * STROKE_WIDTH,
                             ),
                         ),
-                        ui.make_persistent_id(format!("sense-click-{}", self.id)),
-                        Sense::click(),
+                        ui.make_persistent_id(format!("track-{}", self.id)),
+                        Sense::click_and_drag(),
                     );
                     let mut frame_color = self.color;
                     if selected {
                         frame_color = frame_color.blend(Color32::from_black_alpha(40));
                     }
-
-                    Frame::new()
-                        .fill(frame_color)
-                        .inner_margin(Vec2::new(PADDING, PADDING))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width() - 50.);
-                            ui.set_height(self.height - 2. * PADDING - 2. * STROKE_WIDTH);
-                            ui.horizontal(|ui| {
-                                self.open_button(ui);
-                                if self.edit {
-                                    let text_edit = ui.add(
-                                        TextEdit::singleline(&mut self.name)
-                                            .font(FontId::new(9., egui::FontFamily::Proportional))
-                                            .background_color(Color32::from_black_alpha(20))
-                                            .text_color(Color32::from_gray(20))
-                                            .desired_width(ui.available_width() - 40.),
-                                    );
-                                    if text_edit.lost_focus() {
-                                        self.edit = false;
-                                        if self.name.is_empty() {
-                                            self.name = "Audio Track".to_string();
-                                        }
-                                    }
-                                } else {
-                                    ui.add(
-                                        Label::new(
-                                            RichText::new(self.name.clone())
-                                                .color(Color32::from_gray(20))
-                                                .size(9.),
-                                        )
-                                        .truncate()
-                                        .selectable(false),
-                                    );
-                                }
-
-                                if ui
-                                    .small_button(
-                                        RichText::new(egui_phosphor::regular::PAINT_BRUSH).size(8.),
-                                    )
-                                    .clicked()
-                                {
-                                    let mut rng = rand::rng();
-                                    self.color = Color32::from_rgb(
-                                        rng.random_range(0..=255),
-                                        rng.random_range(0..=255),
-                                        rng.random_range(0..=255),
-                                    )
-                                }
-                            });
-                            clicked = response.clicked();
-                            double_clicked = response.double_clicked();
-                        });
+                    self.header_ui(ui, frame_color);
                     response.context_menu(|ui| {
                         self.context_menu(ui);
                     });
-                    Frame::new()
-                        .inner_margin(Vec2::new(0., PADDING))
-                        .show(ui, |ui| {
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    let mute_btn = self.mute_button(ui);
-                                    let solo_res =
-                                        self.solo_button(ui, matches!(solo, TrackSoloState::Solo));
-
-                                    if mute_btn.clicked() {
-                                        self.muted = !self.muted;
-                                        mute_changed = true;
-                                    };
-
-                                    if solo_res.clicked() {
-                                        solo_clicked = true;
-                                    }
-                                });
-                                if !self.closed {
-                                    let prev_gain = self.gain;
-                                    self.gain_slider(ui, RangeInclusive::new(-40., 5.));
-                                    volume_changed = prev_gain != self.gain;
-                                }
-                            });
-                        });
+                    clicked = response.clicked();
+                    double_clicked = response.double_clicked();
+                    (mute_changed, solo_clicked, volume_changed) = self.control_ui(ui, &solo);
+                    response
                 });
+                horizontal_response.inner
             });
 
         let loudness_rect = Rect::from_min_size(
@@ -296,7 +225,6 @@ impl UITrack {
             self.muted && !matches!(solo, TrackSoloState::Solo)
                 || matches!(solo, TrackSoloState::Soloing),
         );
-
         self.dragger(ui);
         (
             mute_changed,
@@ -304,7 +232,7 @@ impl UITrack {
             solo_clicked,
             clicked,
             double_clicked,
-            res.response,
+            res.inner,
         )
     }
 
@@ -316,6 +244,89 @@ impl UITrack {
             let _ = ui.button("Delete");
             let _ = ui.button("Duplicate");
         });
+    }
+
+    fn header_ui(&mut self, ui: &mut Ui, color: Color32) {
+        Frame::new()
+            .fill(color)
+            .inner_margin(Vec2::new(PADDING, PADDING))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width() - 50.);
+                ui.set_height(self.height - 2. * PADDING - 2. * STROKE_WIDTH);
+                ui.horizontal(|ui| {
+                    self.open_button(ui);
+                    if self.edit {
+                        let text_edit = ui.add(
+                            TextEdit::singleline(&mut self.name)
+                                .font(FontId::new(9., egui::FontFamily::Proportional))
+                                .background_color(Color32::from_black_alpha(20))
+                                .text_color(Color32::from_gray(20))
+                                .desired_width(ui.available_width() - 40.),
+                        );
+                        if text_edit.lost_focus() {
+                            self.edit = false;
+                            if self.name.is_empty() {
+                                self.name = "Audio Track".to_string();
+                            }
+                        }
+                    } else {
+                        ui.add(
+                            Label::new(
+                                RichText::new(self.name.clone())
+                                    .color(Color32::from_gray(20))
+                                    .size(9.),
+                            )
+                            .truncate()
+                            .selectable(false),
+                        );
+                    }
+
+                    if ui
+                        .small_button(RichText::new(egui_phosphor::regular::PAINT_BRUSH).size(8.))
+                        .clicked()
+                    {
+                        let mut rng = rand::rng();
+                        self.color = Color32::from_rgb(
+                            rng.random_range(0..=255),
+                            rng.random_range(0..=255),
+                            rng.random_range(0..=255),
+                        )
+                    }
+                });
+            });
+    }
+
+    fn control_ui(&mut self, ui: &mut Ui, solo: &TrackSoloState) -> (bool, bool, bool) {
+        let mut mute_changed = false;
+        let mut solo_clicked = false;
+        let mut volume_changed = false;
+        Frame::new()
+            .inner_margin(Vec2::new(0., PADDING))
+            .show(ui, |ui| {
+                ui.set_width(50. - 2. * PADDING);
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        let mute_btn = self.mute_button(ui);
+                        let solo_res = self.solo_button(ui, matches!(solo, TrackSoloState::Solo));
+
+                        if mute_btn.clicked() {
+                            self.muted = !self.muted;
+                            mute_changed = true;
+                        };
+
+                        if solo_res.clicked() {
+                            solo_clicked = true;
+                        }
+                    });
+                    if !self.closed {
+                        let prev_gain = self.gain;
+                        self.gain_slider(ui, RangeInclusive::new(-40., 5.));
+                        volume_changed = prev_gain != self.gain;
+                    }
+                });
+            });
+
+        (mute_changed, solo_clicked, volume_changed)
     }
 
     fn mute_button(&mut self, ui: &mut Ui) -> Response {
