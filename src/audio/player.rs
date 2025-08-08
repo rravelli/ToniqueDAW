@@ -237,6 +237,7 @@ impl PlayerBackend {
                 GuiToPlayerMsg::PausePreview() => self.preview_state = PlaybackState::Paused,
                 GuiToPlayerMsg::SeekPreview(pos) => {
                     self.preview.seek(pos);
+                    self.preview_state = PlaybackState::Playing
                 }
                 GuiToPlayerMsg::UpdateBPM(bpm) => {
                     self.bpm = bpm;
