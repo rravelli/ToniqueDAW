@@ -24,6 +24,9 @@ impl PreviewBackend {
 
     pub fn play(&mut self, file: PathBuf) {
         if self.file.clone().is_some_and(|f| f == file) {
+            if let Some(stream) = &mut self.stream {
+                let _ = stream.seek(0, creek::SeekMode::Auto);
+            }
             return;
         }
 

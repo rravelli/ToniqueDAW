@@ -72,9 +72,6 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn show(&mut self, ctx: &Context) {
-        let mut dragged_audio_info = None;
-        let mut is_released = false;
-
         egui::TopBottomPanel::top("top-bar")
             .resizable(false)
             .show(ctx, |ui| {
@@ -103,9 +100,20 @@ impl Workspace {
         egui::SidePanel::left("left-pannel")
             .min_width(10.)
             .max_width(400.)
+            .frame(
+                Frame::new()
+                    .inner_margin(Margin {
+                        bottom: 0,
+                        left: 0,
+                        right: 1,
+                        top: 0,
+                    })
+                    .fill(ctx.style().visuals.panel_fill)
+                    .corner_radius(4.0),
+            )
             .default_width(220.)
             .show_animated(ctx, true, |ui| {
-                (dragged_audio_info, is_released) = self.left_panel.ui(ui, &mut self.to_player_tx);
+                self.left_panel.ui(ui, &mut self.to_player_tx);
             });
 
         egui::CentralPanel::default()
@@ -116,16 +124,11 @@ impl Workspace {
                     "FPS: {:.1}",
                     1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
                 ));
-                self.ui(ui, dragged_audio_info, is_released);
+                self.ui(ui);
             });
     }
 
-    pub fn ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        dragged_audio_info: Option<AudioInfo>,
-        is_released: bool,
-    ) {
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.handle_messages();
         self.watch_inputs(ui);
 
@@ -197,6 +200,22 @@ impl Workspace {
                                             .to_player_tx
                                             .push(GuiToPlayerMsg::SeekTo(self.playback_position));
                                     }
+                                    let mut dragged_audio = None;
+                                    let mut is_released = false;
+                                    if let Some(payload) =
+                                        response.dnd_hover_payload::<DragPayload>()
+                                        && let DragPayload::File(audio) = payload.as_ref()
+                                    {
+                                        dragged_audio = Some(audio.clone());
+                                    }
+
+                                    if let Some(payload) =
+                                        response.dnd_release_payload::<DragPayload>()
+                                        && let DragPayload::File(audio) = payload.as_ref()
+                                    {
+                                        dragged_audio = Some(audio.clone());
+                                        is_released = true;
+                                    }
 
                                     // Do not draw after clips
                                     self.resize_handle(ui);
@@ -205,12 +224,7 @@ impl Workspace {
                                     self.grid.paint(&painter, rect);
                                     self.paint_clips(ui, &painter, rect);
                                     self.paint_tracks(&painter, rect);
-                                    self.paint_preview_sample(
-                                        ui,
-                                        rect,
-                                        dragged_audio_info,
-                                        is_released,
-                                    );
+                                    self.paint_preview_sample(ui, rect, dragged_audio, is_released);
                                     self.paint_playback_cursor(&painter, rect);
                                     self.handle_multiselect(ui, response);
                                     self.scrollbar(rect, &painter, ui);
