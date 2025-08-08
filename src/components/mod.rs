@@ -3,7 +3,7 @@ mod buttons;
 mod clip;
 mod effect;
 mod effects;
-pub(crate) mod filepicker;
+mod filebrowser;
 mod grid;
 mod left_panel;
 mod loudness_meter;
