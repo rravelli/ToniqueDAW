@@ -8,9 +8,10 @@ use crate::{
         left_panel::{DragPayload, UILeftPanel},
         top_bar::UITopBar,
         track::{DEFAULT_TRACK_HEIGHT, HANDLE_HEIGHT, TrackSoloState, UITrack},
+        track_manager::TrackManager,
     },
     message::GuiToPlayerMsg,
-    metrics::{AudioMetrics, GlobalMetrics},
+    metrics::GlobalMetrics,
 };
 use eframe::egui::{self, Sense, Stroke};
 use egui::{
@@ -45,23 +46,20 @@ pub struct Workspace {
     grid: WorkspaceGrid,
 
     // Layout
-    track_width: f32,
     multiselect_start: Option<Pos2>,
 
-    // Tracks in the workspace
-    tracks: Vec<UITrack>,
+    // Manage tracks in the workspace
+    track_manager: TrackManager,
     master_track: UITrack,
     sample_preview: Option<UIClip>,
 
     drag_state: Option<DragState>,
 
     selected_clips: Vec<String>,
-    selected_track: Option<String>,
 
     playback_state: PlaybackState,
 
     metrics: GlobalMetrics,
-    solo_tracks: Vec<String>,
 
     y_offset: f32,
 
@@ -88,8 +86,8 @@ impl Workspace {
             .frame(Frame::new().inner_margin(Margin::ZERO))
             .show_animated(ctx, self.bottom_panel.open, |ui| {
                 ui.set_height(ui.available_height());
-                if let Some(id) = self.selected_track.clone()
-                    && let Some(track) = self.tracks.iter_mut().find(|t| t.id == id)
+                if let Some(id) = self.track_manager.selected_track.clone()
+                    && let Some(track) = self.track_manager.tracks.iter_mut().find(|t| t.id == id)
                     && let Some(metrics) = &mut self.metrics.tracks.get_mut(&id)
                 {
                     self.bottom_panel
@@ -119,11 +117,6 @@ impl Workspace {
         egui::CentralPanel::default()
             .frame(Frame::central_panel(&ctx.style()).inner_margin(Margin::ZERO))
             .show(ctx, |ui| {
-                egui::warn_if_debug_build(ui);
-                ui.label(format!(
-                    "FPS: {:.1}",
-                    1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
-                ));
                 self.ui(ui);
             });
     }
@@ -142,10 +135,20 @@ impl Workspace {
             |ui| {
                 ui.vertical(|ui| {
                     ui.painter().text(
-                        Pos2::new(ui.max_rect().right() - 3., ui.max_rect().top()),
+                        Pos2::new(ui.max_rect().right() - 3., ui.max_rect().top() + 16.),
                         Align2::RIGHT_BOTTOM,
                         format!("{:.0}%", self.metrics.latency * 100.),
-                        FontId::default(),
+                        FontId::new(10., egui::FontFamily::Proportional),
+                        ui.visuals().strong_text_color(),
+                    );
+                    ui.painter().text(
+                        Pos2::new(ui.max_rect().right() - 3., ui.max_rect().top() + 28.),
+                        Align2::RIGHT_BOTTOM,
+                        format!(
+                            "FPS: {:.1}",
+                            1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
+                        ),
+                        FontId::new(10., egui::FontFamily::Proportional),
                         ui.visuals().strong_text_color(),
                     );
                     self.navigation_bar(ui);
@@ -154,7 +157,7 @@ impl Workspace {
                         .max_height(ui.available_height())
                         .show(ui, |ui| {
                             let mut height = 100.;
-                            for track in self.tracks.iter() {
+                            for track in self.track_manager.tracks.iter() {
                                 height += track.height + HANDLE_HEIGHT;
                             }
 
@@ -165,7 +168,9 @@ impl Workspace {
                                     // Grid area
                                     let (response, painter) = ui.allocate_painter(
                                         egui::Vec2::new(
-                                            ui.available_width() - self.track_width - LIMIT_WIDTH,
+                                            ui.available_width()
+                                                - self.track_manager.track_width
+                                                - LIMIT_WIDTH,
                                             ui.available_height(),
                                         ),
                                         Sense::click_and_drag(),
@@ -175,7 +180,7 @@ impl Workspace {
 
                                     if response.clicked() {
                                         self.selected_clips = vec![];
-                                        self.selected_track = None;
+                                        self.track_manager.selected_track = None;
                                         let _ =
                                             self.to_player_tx.push(GuiToPlayerMsg::PausePreview());
                                         self.left_panel.file_browser.preview_state =
@@ -219,11 +224,16 @@ impl Workspace {
 
                                     // Do not draw after clips
                                     self.resize_handle(ui);
-                                    self.track_panel(ui);
+                                    self.track_manager.track_panel(
+                                        ui,
+                                        &mut self.metrics,
+                                        &mut self.bottom_panel,
+                                        &mut self.to_player_tx,
+                                    );
                                     // Draw grid & clips
                                     self.grid.paint(&painter, rect);
                                     self.paint_clips(ui, &painter, rect);
-                                    self.paint_tracks(&painter, rect);
+                                    self.track_manager.paint_tracks(&painter, rect);
                                     self.paint_preview_sample(ui, rect, dragged_audio, is_released);
                                     self.paint_playback_cursor(&painter, rect);
                                     self.handle_multiselect(ui, response);
@@ -243,7 +253,7 @@ impl Workspace {
                         )),
                         |ui| {
                             ui.horizontal(|ui| {
-                                ui.add_space(ui.available_width() - self.track_width);
+                                ui.add_space(ui.available_width() - self.track_manager.track_width);
                                 self.master_track.ui(
                                     ui,
                                     self.metrics.master.clone(),
@@ -294,105 +304,9 @@ impl Workspace {
         }
 
         if response.dragged() {
-            self.track_width -= response.drag_delta().x;
-            self.track_width = self.track_width.clamp(30., 300.);
+            self.track_manager.track_width -= response.drag_delta().x;
+            self.track_manager.track_width = self.track_manager.track_width.clamp(30., 300.);
         }
-    }
-
-    // Tracks
-    fn track_panel(&mut self, ui: &mut egui::Ui) {
-        let res = ui.vertical(|ui| {
-            ui.set_width(self.track_width);
-            // ui.add_space(TOP_BAR_HEIGHT);
-            for track in self.tracks.iter_mut() {
-                let metrics = self.metrics.tracks.get(&track.id);
-                let metrics = if let Some(metrics) = metrics {
-                    metrics.value().clone()
-                } else {
-                    AudioMetrics::new()
-                };
-                let solo = if self.solo_tracks.is_empty() {
-                    TrackSoloState::NotSoloing
-                } else if self.solo_tracks.contains(&track.id) {
-                    TrackSoloState::Solo
-                } else {
-                    TrackSoloState::Soloing
-                };
-                let selected = self.selected_track.clone().is_some_and(|id| id == track.id);
-                // Render track
-                let (
-                    mute_changed,
-                    volume_changed,
-                    solo_clicked,
-                    clicked,
-                    double_clicked,
-                    track_res,
-                ) = track.ui(ui, metrics, solo, selected);
-                // Track events
-                if mute_changed {
-                    let _ = self
-                        .to_player_tx
-                        .push(GuiToPlayerMsg::MuteTrack(track.id.clone(), track.muted));
-                };
-                if volume_changed {
-                    let _ = self.to_player_tx.push(GuiToPlayerMsg::ChangeTrackVolume(
-                        track.id.clone(),
-                        track.volume,
-                    ));
-                }
-                if solo_clicked {
-                    self.solo_tracks = if self.solo_tracks.contains(&track.id) {
-                        vec![]
-                    } else {
-                        vec![track.id.clone()]
-                    };
-                    let _ = self
-                        .to_player_tx
-                        .push(GuiToPlayerMsg::SoloTracks(self.solo_tracks.clone()));
-                }
-                if clicked {
-                    if selected {
-                        self.selected_track = None;
-                    } else {
-                        self.selected_track = Some(track.id.clone());
-                    }
-                }
-                // Open bottom panel
-                if double_clicked {
-                    if let Some(selected_id) = self.selected_track.clone()
-                        && *selected_id == track.id
-                    {
-                        self.bottom_panel.open = !self.bottom_panel.open;
-                    } else {
-                        self.bottom_panel.open = true;
-                        self.selected_track = Some(track.id.clone())
-                    }
-                }
-                // // Insert effects
-                if let Some(payload) = track_res.dnd_release_payload::<DragPayload>()
-                    && let DragPayload::Effect(id) = *payload
-                {
-                    track.add_effect(id, 0, &mut self.to_player_tx);
-                }
-            }
-        });
-
-        // context menu
-        ui.interact(
-            Rect::from_min_size(
-                res.response.rect.left_bottom(),
-                Vec2::new(self.track_width, ui.available_height()),
-            ),
-            "tracks".into(),
-            Sense::click(),
-        )
-        .context_menu(|ui| {
-            if ui.button("Add track").clicked() {
-                let name = format!("Track {}", self.tracks.len() + 1).to_string();
-                self.create_track(name.as_str());
-                ui.close();
-            }
-        });
     }
 
     fn paint_clips(&mut self, ui: &mut Ui, painter: &Painter, viewport: egui::Rect) {
@@ -401,7 +315,7 @@ impl Workspace {
         let mut dragged_track_index = None;
         let mut dragged_clip_index = None;
 
-        for (track_index, track) in self.tracks.iter_mut().enumerate() {
+        for (track_index, track) in self.track_manager.tracks.iter_mut().enumerate() {
             let height = track.height;
             if y + track.height < viewport.top() + self.y_offset
                 || y > self.y_offset + viewport.height() + viewport.top()
@@ -479,8 +393,8 @@ impl Workspace {
             && let Some(s) = dragged_clip_index
             && let Some(mouse_pos) = mouse_pos
         {
-            let clip = self.tracks[old_track].clips.remove(s);
-            let (_, y) = self.find_track_at(viewport, mouse_pos.y);
+            let clip = self.track_manager.tracks[old_track].clips.remove(s);
+            let (_, y) = self.track_manager.find_track_at(viewport, mouse_pos.y);
             let x = self.grid.beats_to_x(clip.position, viewport);
             self.drag_state = Some(DragState {
                 element: clip,
@@ -492,7 +406,7 @@ impl Workspace {
             && let Some(duration) = drag_state.element.duration()
             && let Some(mouse_pos) = mouse_pos
         {
-            let (t, y) = self.find_track_at(viewport, mouse_pos.y);
+            let (t, y) = self.track_manager.find_track_at(viewport, mouse_pos.y);
             let width = self.grid.duration_to_width(duration, self.bpm);
             let new_position = self
                 .grid
@@ -501,7 +415,7 @@ impl Workspace {
 
             let x = self.grid.beats_to_x(snapped_position, viewport);
             let show_waveform = if let Some(t) = t {
-                !self.tracks[t].closed
+                !self.track_manager.tracks[t].closed
             } else {
                 true
             };
@@ -513,7 +427,7 @@ impl Workspace {
                 Vec2::new(
                     width,
                     if let Some(t) = t {
-                        self.tracks[t].height
+                        self.track_manager.tracks[t].height
                     } else {
                         DEFAULT_TRACK_HEIGHT
                     },
@@ -526,7 +440,7 @@ impl Workspace {
                 &mut self.to_player_tx,
                 show_waveform,
                 if let Some(t) = t {
-                    self.tracks[t].color
+                    self.track_manager.tracks[t].color
                 } else {
                     DEFAULT_CLIP_COLOR
                 },
@@ -537,15 +451,20 @@ impl Workspace {
                 let track_index = if let Some(track_index) = t {
                     track_index
                 } else {
-                    self.create_track("Audio Track");
-                    self.tracks.len() - 1
+                    self.track_manager
+                        .create_track("Audio Track", &mut self.to_player_tx);
+                    self.track_manager.tracks.len() - 1
                 };
 
-                self.tracks[track_index].add_clip(clone, self.bpm, &mut self.to_player_tx);
+                self.track_manager.tracks[track_index].add_clip(
+                    clone,
+                    self.bpm,
+                    &mut self.to_player_tx,
+                );
 
                 let _ = self.to_player_tx.push(GuiToPlayerMsg::MoveClip(
                     drag_state.element.id(),
-                    self.tracks[track_index].id.clone(),
+                    self.track_manager.tracks[track_index].id.clone(),
                     drag_state.element.position,
                 ));
                 self.drag_state = None;
@@ -572,7 +491,7 @@ impl Workspace {
         if ui.input(|i| i.key_pressed(Key::D) && i.modifiers.ctrl) {
             // Duplicate clips
             for id in self.selected_clips.iter() {
-                for track in self.tracks.iter_mut() {
+                for track in self.track_manager.tracks.iter_mut() {
                     let clip = track.clips.iter().find(|c| c.id() == *id);
                     if let Some(clip) = clip {
                         let mut duplicated_clip = clip.clone_with_new_id();
@@ -597,7 +516,7 @@ impl Workspace {
             .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
         {
             // Delete
-            for track in self.tracks.iter_mut() {
+            for track in self.track_manager.tracks.iter_mut() {
                 track.delete_ids(self.selected_clips.clone());
 
                 let _ = self
@@ -608,7 +527,7 @@ impl Workspace {
             // Cut clips
             let mut added_clip = vec![];
 
-            for (index, track) in self.tracks.iter_mut().enumerate() {
+            for (index, track) in self.track_manager.tracks.iter_mut().enumerate() {
                 for clip in track.clips.iter_mut() {
                     if clip.position < self.playback_position
                         && self.playback_position < clip.end(self.bpm)
@@ -629,14 +548,14 @@ impl Workspace {
             for (mut clip, track) in added_clip {
                 clip.trim_start_at(self.playback_position, self.bpm);
                 let _ = self.to_player_tx.push(GuiToPlayerMsg::AddClip(
-                    self.tracks[track].id.clone(),
+                    self.track_manager.tracks[track].id.clone(),
                     clip.audio.path.clone(),
                     clip.position,
                     clip.id(),
                     clip.trim_start,
                     clip.trim_end,
                 ));
-                self.tracks[track].clips.push(clip);
+                self.track_manager.tracks[track].clips.push(clip);
             }
         } else if ui.input(|i| i.key_pressed(Key::J) && i.modifiers.ctrl) {
             self.bottom_panel.open = !self.bottom_panel.open;
@@ -671,14 +590,14 @@ impl Workspace {
             let mouse_y = mouse_pos.y;
 
             // Find corresponding track
-            let (track_index, track_y) = self.find_track_at(rect, mouse_y);
+            let (track_index, track_y) = self.track_manager.find_track_at(rect, mouse_y);
             let height = if let Some(t) = track_index {
-                self.tracks[t].height
+                self.track_manager.tracks[t].height
             } else {
                 DEFAULT_TRACK_HEIGHT
             };
             let show_waveform = if let Some(t) = track_index {
-                !self.tracks[t].closed
+                !self.track_manager.tracks[t].closed
             } else {
                 true
             };
@@ -712,85 +631,32 @@ impl Workspace {
             self.sample_preview = None;
             // add clip
             if rect.contains(mouse_pos) {
-                let (track_index, _) = self.find_track_at(rect, mouse_pos.y);
+                let (track_index, _) = self.track_manager.find_track_at(rect, mouse_pos.y);
                 let index;
                 if let Some(track_index) = track_index {
                     index = track_index;
                 } else {
                     // Create new track
-                    self.create_track("Audio Track");
-                    index = self.tracks.len() - 1;
+                    self.track_manager
+                        .create_track("Audio Track", &mut self.to_player_tx);
+                    index = self.track_manager.tracks.len() - 1;
                 }
                 let id = preview.id();
                 let _ = self.to_player_tx.push(GuiToPlayerMsg::AddClip(
-                    self.tracks[index].id.clone(),
+                    self.track_manager.tracks[index].id.clone(),
                     preview.audio.path.clone(),
                     preview.position,
                     id,
                     preview.trim_start,
                     preview.trim_end,
                 ));
-                self.tracks[index].add_clip(preview, self.bpm, &mut self.to_player_tx);
-            }
-        }
-    }
-
-    fn create_track(&mut self, name: &str) {
-        let id = uuid::Uuid::new_v4().to_string();
-        self.tracks.push(UITrack::new(&id, name));
-        let _ = self.to_player_tx.push(GuiToPlayerMsg::AddTrack(id));
-    }
-
-    fn delete_track(&mut self, id: String) {
-        for (i, track) in self.tracks.iter().enumerate() {
-            if track.id == id {
-                self.tracks.remove(i);
-                let _ = self.to_player_tx.push(GuiToPlayerMsg::RemoveTrack(id));
-                break;
-            }
-        }
-    }
-
-    fn paint_tracks(&self, painter: &Painter, rect: Rect) {
-        let mut y = rect.top();
-        let solo = !self.solo_tracks.is_empty();
-
-        for track in self.tracks.iter() {
-            if !self.solo_tracks.contains(&track.id) && (track.muted || solo) {
-                painter.rect_filled(
-                    Rect::from_min_max(
-                        Pos2::new(rect.left(), y),
-                        Pos2::new(rect.right(), y + track.height),
-                    ),
-                    0.,
-                    Color32::from_black_alpha(70),
+                self.track_manager.tracks[index].add_clip(
+                    preview,
+                    self.bpm,
+                    &mut self.to_player_tx,
                 );
             }
-            y += track.height;
-            painter.line(
-                vec![
-                    Pos2::new(rect.left(), y + HANDLE_HEIGHT / 2.),
-                    Pos2::new(rect.right(), y + HANDLE_HEIGHT / 2.),
-                ],
-                Stroke::new(HANDLE_HEIGHT, Color32::from_gray(40)),
-            );
-            y += HANDLE_HEIGHT
         }
-    }
-
-    fn find_track_at(&self, rect: Rect, y_pos: f32) -> (Option<usize>, f32) {
-        // y position of the top of the track
-        let mut track_y = rect.top();
-        let mut index = None;
-        for (i, track) in self.tracks.iter().enumerate() {
-            if y_pos <= track_y + track.height {
-                index = Some(i);
-                break;
-            }
-            track_y += track.height + HANDLE_HEIGHT;
-        }
-
-        (index, track_y)
     }
 
     fn navigation_bar(&mut self, ui: &mut Ui) {
@@ -798,13 +664,13 @@ impl Workspace {
         let zoom_rect = egui::Rect::from_min_size(
             egui::pos2(ui.min_rect().left(), ui.min_rect().top()),
             egui::vec2(
-                ui.available_width() - self.track_width - LIMIT_WIDTH,
+                ui.available_width() - self.track_manager.track_width - LIMIT_WIDTH,
                 TOP_BAR_HEIGHT,
             ),
         );
         let (zoom_response, painter) = ui.allocate_painter(
             Vec2::new(
-                ui.available_width() - self.track_width - LIMIT_WIDTH,
+                ui.available_width() - self.track_manager.track_width - LIMIT_WIDTH,
                 TOP_BAR_HEIGHT,
             ),
             Sense::click_and_drag(),
@@ -889,7 +755,7 @@ impl Workspace {
                 StrokeKind::Inside,
             );
             self.selected_clips = vec![];
-            for tracks in self.tracks.iter() {
+            for tracks in self.track_manager.tracks.iter() {
                 for clip in tracks.clips.iter() {
                     let start_x = self.grid.beats_to_x(clip.position, response.rect);
                     let end_x = self.grid.beats_to_x(clip.end(self.bpm), response.rect);
@@ -926,8 +792,6 @@ impl Workspace {
             from_player_rx,
             to_player_tx,
             bpm: 120.0,
-            tracks: vec![],
-            track_width: 140.,
             sample_preview: None,
             grid: WorkspaceGrid::new(),
             drag_state: None,
@@ -936,9 +800,9 @@ impl Workspace {
             playback_state: PlaybackState::Paused,
             metrics: GlobalMetrics::new(),
             multiselect_start: None,
+            track_manager: TrackManager::new(),
             master_track: UITrack::new("master", "Master"),
-            solo_tracks: vec![],
-            selected_track: None,
+
             y_offset: 0.,
             left_panel: UILeftPanel::new(),
             bottom_panel: UIBottomPanel::new(),
