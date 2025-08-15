@@ -110,7 +110,6 @@ impl UIClip {
         } else {
             Stroke::new(BORDER_WIDTH, color)
         };
-
         painter.rect(
             Rect::from_min_size(pos, size),
             2.0,
@@ -138,6 +137,7 @@ impl UIClip {
         );
 
         if show_waveform && let Ok(data) = self.audio.data.lock() {
+            let mut shapes = Vec::new();
             let waveform_rect = Rect::from_min_max(
                 Pos2::new(pos.x.max(viewport.left()), pos.y + 12.),
                 Pos2::new((pos.x + size.x).min(viewport.right()), pos.y + size.y),
@@ -152,13 +152,14 @@ impl UIClip {
                     * (self.trim_end - self.trim_start);
 
             self.waveform.paint(
-                shapes,
+                &mut shapes,
                 waveform_rect,
                 data,
                 start_ratio,
                 end_ratio,
                 self.audio.num_samples.unwrap(),
             );
+            painter.add(shapes);
         };
 
         if let Ok(ready) = self.audio.ready.lock()
@@ -216,18 +217,10 @@ impl UIClip {
         if response.dragged()
             && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
         {
-            let delta = response.drag_delta().x;
             self.trim_start_at(
-                grid.snap_at_grid(grid.x_to_beats(mouse_pos.x, viewport)),
+                grid.snap_at_grid_with_default(grid.x_to_beats(mouse_pos.x, viewport)),
                 bpm,
             );
-            // let prev_val = self.trim_start;
-            // self.trim_start += delta / grid.duration_to_width(self.audio.duration.unwrap(), bpm);
-            // self.trim_start = self.trim_start.clamp(0., 1.);
-
-            // self.position +=
-            //     (self.trim_start - prev_val) * self.audio.duration.unwrap().as_secs_f32() / 60.
-            //         * bpm
         }
 
         if response.hovered() {
@@ -250,13 +243,10 @@ impl UIClip {
         if response.dragged()
             && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
         {
-            let delta = response.drag_delta().x;
             self.trim_end_at(
-                grid.snap_at_grid(grid.x_to_beats(mouse_pos.x, viewport)),
+                grid.snap_at_grid_with_default(grid.x_to_beats(mouse_pos.x, viewport)),
                 bpm,
             );
-            // self.trim_end += delta / grid.duration_to_width(self.audio.duration.unwrap(), bpm);
-            // self.trim_end = self.trim_end.clamp(0., 1.);
         }
 
         if response.hovered() {

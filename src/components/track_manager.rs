@@ -5,7 +5,7 @@ use crate::{
     components::{
         bottom_panel::UIBottomPanel,
         left_panel::DragPayload,
-        track::{HANDLE_HEIGHT, TrackSoloState, UITrack},
+        track::{DEFAULT_TRACK_HEIGHT, HANDLE_HEIGHT, TrackSoloState, UITrack},
     },
     message::GuiToPlayerMsg,
     metrics::{AudioMetrics, GlobalMetrics},
@@ -42,6 +42,19 @@ impl TrackManager {
                 break;
             }
         }
+    }
+
+    pub fn get_track_y(&self, track_index: usize, viewport: Rect) -> f32 {
+        let mut y = viewport.top();
+        let mut curr_index = 0;
+        for track in self.tracks.iter() {
+            if curr_index == track_index {
+                return y;
+            }
+            curr_index += 1;
+            y += track.height + HANDLE_HEIGHT;
+        }
+        return (track_index - curr_index) as f32 * (DEFAULT_TRACK_HEIGHT + HANDLE_HEIGHT) + y;
     }
 
     pub fn paint_tracks(&self, painter: &Painter, viewport: Rect) {
