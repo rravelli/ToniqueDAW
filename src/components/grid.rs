@@ -6,10 +6,12 @@ pub const VIEW_WIDTH: f32 = 1280.;
 pub const PIXEL_PER_BEAT: f32 = 10.;
 pub const SNAP_DELTA: f32 = 0.2;
 pub const MAX_RIGHT: f32 = 50000.;
-pub const MIN_LEFT: f32 = -1.;
+pub const MIN_LEFT: f32 = -32.;
 
+const XL: f32 = 7000.;
 const LG: f32 = 1200.;
 const MD: f32 = 200.;
+const SM: f32 = 100.;
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceGrid {
@@ -20,7 +22,7 @@ pub struct WorkspaceGrid {
 impl WorkspaceGrid {
     pub fn new() -> Self {
         Self {
-            left: 0.,
+            left: MIN_LEFT,
             right: 1000.,
         }
     }
@@ -39,22 +41,44 @@ impl WorkspaceGrid {
             .max(0.)
     }
 
-    pub fn snap_at_grid(&self, beats: f32) -> f32 {
+    pub fn snap_at_grid(&self, beats: f32) -> Option<f32> {
+        self.snap_at_grid_with_threshold(beats, SNAP_DELTA)
+    }
+
+    pub fn snap_at_grid_with_default(&self, beats: f32) -> f32 {
+        if let Some(snapped) = self.snap_at_grid(beats) {
+            snapped
+        } else {
+            beats
+        }
+    }
+
+    pub fn snap_at_grid_with_threshold_default(&self, beats: f32, threshold: f32) -> f32 {
+        if let Some(snapped) = self.snap_at_grid_with_threshold(beats, threshold) {
+            snapped
+        } else {
+            beats
+        }
+    }
+
+    pub fn snap_at_grid_with_threshold(&self, beats: f32, threshold: f32) -> Option<f32> {
         let delta = self.right - self.left;
         let grid_size = if delta > LG {
             4.
         } else if delta > MD {
             1.
-        } else {
+        } else if delta > SM {
             1. / 4.
+        } else {
+            1. / 8.
         };
 
         let nearest_position = (beats / grid_size).round() * grid_size;
 
-        if (beats - nearest_position).abs() / grid_size < SNAP_DELTA {
-            nearest_position
+        if (beats - nearest_position).abs() / grid_size < threshold {
+            Some(nearest_position)
         } else {
-            beats
+            None
         }
     }
     /*
@@ -91,7 +115,7 @@ impl WorkspaceGrid {
         // Find the first grid line to draw (leftmost visible)
         let start_x = rect.left() - (self.left * VIEW_WIDTH / delta % grid_step);
         let mut x = start_x;
-        let mut beat = (self.left / PIXEL_PER_BEAT) as usize;
+        let mut beat = (self.left / PIXEL_PER_BEAT) as i32;
 
         while x < rect.right() {
             let stroke_width = if beat % 4 == 0 {
@@ -100,7 +124,7 @@ impl WorkspaceGrid {
                 1.0 // Normal grid line
             };
 
-            if delta < LG || beat % 4 == 0 {
+            if beat >= 0 && (delta < LG || (delta < XL && beat % 4 == 0) || beat % 16 == 0) {
                 painter.line_segment(
                     [
                         egui::Pos2::new(x, rect.top()),
@@ -122,7 +146,7 @@ impl WorkspaceGrid {
         let delta = self.right - self.left;
         let factor = if delta < 30. {
             32.
-        } else if delta < 40. {
+        } else if delta < SM {
             8.
         } else {
             4.
@@ -145,6 +169,53 @@ impl WorkspaceGrid {
                 Stroke::new(stroke_width, grid_color),
             );
             x += grid_step;
+        }
+    }
+
+    pub fn draw_labels(&self, painter: &egui::Painter, rect: egui::Rect) {
+        let delta = self.right - self.left;
+        let grid_step = PIXEL_PER_BEAT * VIEW_WIDTH / delta as f32; // 10 pixels per grid line
+        let grid_color = egui::Color32::from_gray(90);
+
+        // Find the first grid line to draw (leftmost visible)
+        let start_x = rect.left() - (self.left as f32 * VIEW_WIDTH / delta as f32 % grid_step);
+        let mut x = start_x;
+        let mut beat = (self.left / PIXEL_PER_BEAT) as i32;
+
+        while x < rect.right() {
+            if beat >= 0
+                && (delta < MD
+                    || (delta < 1500. && beat % 4 == 0)
+                    || (delta < XL && beat % 16 == 0)
+                    || beat % (4 * 16) == 0)
+            {
+                painter.line_segment(
+                    [
+                        egui::Pos2::new(x, rect.bottom() - 6.0),
+                        egui::Pos2::new(x, rect.bottom()),
+                    ],
+                    Stroke::new(1., grid_color),
+                );
+                let bar = beat.div_euclid(4);
+                let sub_beat = beat % 4;
+                // let sub_sub_beat =
+
+                let text = if sub_beat == 0 {
+                    format!("{}", bar + 1)
+                } else {
+                    format!("{}.{}", bar + 1, sub_beat + 1)
+                };
+
+                painter.text(
+                    egui::Pos2::new(x, rect.bottom() - 8.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    text,
+                    egui::FontId::new(7.0, egui::FontFamily::Monospace),
+                    egui::Color32::WHITE,
+                );
+            }
+            x += grid_step;
+            beat += 1;
         }
     }
 }

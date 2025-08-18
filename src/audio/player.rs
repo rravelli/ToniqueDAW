@@ -167,6 +167,17 @@ impl PlayerBackend {
                         ));
                     }
                 }
+                GuiToPlayerMsg::AddClips(clips) => {
+                    for clip in &clips {
+                        if let Some(track) = self.tracks.get_mut(&clip.track_id) {
+                            track.clips.push(ClipBackend::from_command(
+                                clip,
+                                self.bpm,
+                                self.sample_rate,
+                            ));
+                        }
+                    }
+                }
                 GuiToPlayerMsg::RemoveClip(ids) => {
                     for (_, track) in self.tracks.iter_mut() {
                         track.clips.retain(|clip| !ids.contains(&clip.id));

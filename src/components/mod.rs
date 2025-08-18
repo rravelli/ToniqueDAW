@@ -9,5 +9,6 @@ mod left_panel;
 mod loudness_meter;
 mod top_bar;
 mod track;
+mod track_manager;
 mod waveform;
 pub(crate) mod workspace;
