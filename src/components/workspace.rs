@@ -1,4 +1,4 @@
-use std::{f32::INFINITY, sync::Arc};
+use std::f32::INFINITY;
 
 use crate::{
     ProcessToGuiMsg,
@@ -19,7 +19,7 @@ use crate::{
 use eframe::egui::{self, Sense, Stroke};
 use egui::{
     Align2, Color32, Context, FontId, Frame, Key, Layout, Margin, Painter, Pos2, Rangef, Rect,
-    Response, ScrollArea, Shape, StrokeKind, Ui, Vec2,
+    Response, ScrollArea, StrokeKind, Ui, Vec2,
 };
 use rtrb::{Consumer, Producer};
 
@@ -286,7 +286,7 @@ impl Workspace {
                                     );
                                     // Draw grid & clips
                                     self.grid.paint(&painter, viewport_rect);
-                                    self.paint_clips(ui, &painter, viewport_rect);
+                                    self.paint_clips(ui, viewport_rect);
                                     self.track_manager.paint_tracks(&painter, viewport_rect);
                                     self.paint_preview_sample(
                                         ui,
@@ -368,8 +368,7 @@ impl Workspace {
         }
     }
 
-    fn paint_clips(&mut self, ui: &mut Ui, painter: &Painter, viewport: egui::Rect) {
-        let mut shapes = Vec::new();
+    fn paint_clips(&mut self, ui: &mut Ui, viewport: egui::Rect) {
         let mut y = viewport.top();
         let mut dragged_track_index = None;
         let mut dragged_clip_index = None;
@@ -392,7 +391,6 @@ impl Workspace {
                     if !(x + width < viewport.left() || x > viewport.right()) {
                         let response = clip.ui(
                             ui,
-                            &mut shapes,
                             Pos2::new(x, y),
                             Vec2::new(width, height),
                             viewport,
@@ -427,21 +425,12 @@ impl Workspace {
             y += track.height + HANDLE_HEIGHT;
         }
 
-        self.handle_dragged_clips(
-            ui,
-            &mut shapes,
-            dragged_track_index,
-            dragged_clip_index,
-            viewport,
-        );
-
-        painter.add(shapes);
+        self.handle_dragged_clips(ui, dragged_track_index, dragged_clip_index, viewport);
     }
 
     fn handle_dragged_clips(
         &mut self,
         ui: &mut Ui,
-        shapes: &mut Vec<Shape>,
         dragged_track_index: Option<usize>,
         dragged_clip_index: Option<usize>,
         viewport: Rect,
@@ -561,7 +550,6 @@ impl Workspace {
                     // Render clip
                     let _ = element.clip.ui(
                         ui,
-                        shapes,
                         Pos2::new(x, y),
                         size,
                         viewport,
@@ -763,12 +751,11 @@ impl Workspace {
                 true
             };
             let width = self.grid.duration_to_width(duration, self.bpm);
-            let mut shapes = Vec::new();
+
             if let Some(sample_preview) = self.sample_preview.as_mut() {
                 sample_preview.position = snapped_position;
                 sample_preview.ui(
                     ui,
-                    &mut shapes,
                     Pos2::new(self.grid.beats_to_x(snapped_position, rect), track_y),
                     Vec2::new(width, height),
                     rect,
@@ -780,7 +767,6 @@ impl Workspace {
                     show_waveform,
                     DEFAULT_CLIP_COLOR,
                 );
-                ui.painter().add(shapes);
             }
         };
 

@@ -1,8 +1,6 @@
 use std::time::Duration;
 
-use egui::{
-    Align2, Color32, FontFamily, FontId, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2,
-};
+use egui::{Align2, Color32, FontFamily, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
 use rtrb::Producer;
 
 use crate::{
@@ -64,7 +62,6 @@ impl UIClip {
     pub fn ui(
         &mut self,
         ui: &mut Ui,
-        shapes: &mut Vec<Shape>,
         pos: Pos2,
         size: Vec2,
         viewport: Rect,

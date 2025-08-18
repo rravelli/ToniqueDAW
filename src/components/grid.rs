@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Rect, Stroke, Vec2};
 
 pub const VIEW_WIDTH: f32 = 1280.;
 pub const PIXEL_PER_BEAT: f32 = 10.;
