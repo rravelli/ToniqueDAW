@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use creek::{ReadDiskStream, SymphoniaDecoder};
 
-use crate::{analysis::AudioInfo, cache::AUDIO_ANALYSIS_CACHE};
+use crate::{analysis::AudioInfo, cache::AUDIO_ANALYSIS_CACHE, message::CreateClipCommand};
 
 pub struct ClipBackend {
     pub id: String,
@@ -53,6 +53,16 @@ impl ClipBackend {
         self.start_frame
             + (self.num_frames() as f32 * sample_rate as f32 / self.audio.sample_rate as f32)
                 .round() as usize
+    }
+
+    pub fn from_command(command: &CreateClipCommand, bpm: f32, sample_rate: usize) -> Self {
+        Self::new(
+            command.clip_id.clone(),
+            command.file_path.clone(),
+            (command.position / bpm * 60. * sample_rate as f32).floor() as usize,
+            command.trim_start,
+            command.trim_end,
+        )
     }
 }
 

@@ -1,4 +1,4 @@
-use std::f32::INFINITY;
+use std::{f32::INFINITY, sync::Arc};
 
 use crate::{
     ProcessToGuiMsg,
@@ -39,13 +39,39 @@ struct DragState {
     elements: Vec<ClipDragState>,
     duplicate: bool,
     min_track_delta: i32,
-    dragged_id: String,
 }
 #[derive(Clone)]
 struct ClipDragState {
     clip: UIClip,
     mouse_delta: Pos2,
     track_index_delta: i32,
+}
+
+#[derive(Debug, Clone)]
+struct Selection {
+    pub clip_ids: Vec<String>,
+    pub bounds: Option<SelectionBounds>,
+}
+#[derive(Debug, Clone, Copy)]
+struct SelectionBounds {
+    pub start_track_index: usize,
+    pub start_pos: f32,
+    pub end_track_index: usize,
+    pub end_pos: f32,
+}
+
+impl Selection {
+    pub fn reset(&mut self) {
+        self.bounds = None;
+        self.clip_ids.clear();
+    }
+
+    pub fn new() -> Self {
+        Self {
+            bounds: None,
+            clip_ids: vec![],
+        }
+    }
 }
 
 const TOP_BAR_HEIGHT: f32 = 30.;
@@ -71,7 +97,7 @@ pub struct Workspace {
 
     drag_state: Option<DragState>,
 
-    selected_clips: Vec<String>,
+    selected_clips: Selection,
 
     playback_state: PlaybackState,
 
@@ -195,7 +221,7 @@ impl Workspace {
                                     let viewport_rect = response.rect;
 
                                     if response.clicked() {
-                                        self.selected_clips = vec![];
+                                        self.selected_clips.reset();
                                         self.track_manager.selected_track = None;
                                         let _ =
                                             self.to_player_tx.push(GuiToPlayerMsg::PausePreview());
@@ -373,17 +399,18 @@ impl Workspace {
                             &self.grid,
                             self.bpm,
                             track.id.clone(),
-                            self.selected_clips.contains(&clip.id()),
+                            self.selected_clips.clip_ids.contains(&clip.id()),
                             &mut self.to_player_tx,
                             !track.closed,
                             track.color,
                         );
 
                         if response.clicked() {
-                            if self.selected_clips.contains(&clip.id()) {
-                                self.selected_clips = vec![];
+                            if self.selected_clips.clip_ids.contains(&clip.id()) {
+                                self.selected_clips.reset();
                             } else {
-                                self.selected_clips = vec![clip.id()];
+                                self.selected_clips.bounds = None;
+                                self.selected_clips.clip_ids = vec![clip.id()];
                             }
                         }
 
@@ -428,9 +455,10 @@ impl Workspace {
         {
             // id of dragged clip
             let dragged_id = self.track_manager.tracks[old_track].clips[s].id();
-
-            if !self.selected_clips.contains(&dragged_id) {
-                self.selected_clips = vec![self.track_manager.tracks[old_track].clips[s].id()];
+            self.selected_clips.bounds = None;
+            if !self.selected_clips.clip_ids.contains(&dragged_id) {
+                self.selected_clips.clip_ids =
+                    vec![self.track_manager.tracks[old_track].clips[s].id()];
             }
             let mut elements = Vec::new();
             let mut new_selected_clips = Vec::new();
@@ -439,7 +467,7 @@ impl Workspace {
             let mut min_track_delta = 0;
             for (track_index, track) in self.track_manager.tracks.clone().iter().enumerate() {
                 for clip in track.clips.iter() {
-                    if self.selected_clips.contains(&clip.id()) {
+                    if self.selected_clips.clip_ids.contains(&clip.id()) {
                         let new_clip = if duplicate {
                             clip.clone_with_new_id()
                         } else {
@@ -462,12 +490,11 @@ impl Workspace {
                 }
                 y += track.height + HANDLE_HEIGHT;
             }
-            self.selected_clips = new_selected_clips;
+            self.selected_clips.clip_ids = new_selected_clips;
             self.drag_state = Some(DragState {
                 elements,
                 duplicate,
                 min_track_delta,
-                dragged_id,
             });
         }
         // Render clips while dragging
@@ -493,6 +520,7 @@ impl Workspace {
                     beat_delta = pos - new_position;
                 }
             }
+            // No clip are snapped
             if beat_delta == INFINITY {
                 beat_delta = 0.;
             }
@@ -609,38 +637,52 @@ impl Workspace {
 
         if ui.input(|i| i.key_pressed(Key::D) && i.modifiers.ctrl) {
             // Duplicate clips
-            for id in self.selected_clips.iter() {
-                for track in self.track_manager.tracks.iter_mut() {
+            for track in self.track_manager.tracks.iter_mut() {
+                let mut new_clips = Vec::new();
+                for id in self.selected_clips.clip_ids.iter() {
                     let clip = track.clips.iter().find(|c| c.id() == *id);
                     if let Some(clip) = clip {
                         let mut duplicated_clip = clip.clone_with_new_id();
-                        duplicated_clip.position = clip.end(self.bpm);
-                        new_selected.push(duplicated_clip.id().clone());
-                        let _ = self.to_player_tx.push(GuiToPlayerMsg::AddClip(
-                            track.id.clone(),
-                            duplicated_clip.audio.path.clone(),
-                            duplicated_clip.position,
-                            duplicated_clip.id(),
-                            duplicated_clip.trim_start,
-                            duplicated_clip.trim_end,
-                        ));
-                        track.add_clip(duplicated_clip, self.bpm, &mut self.to_player_tx);
 
+                        if let Some(bounds) = self.selected_clips.bounds {
+                            duplicated_clip.trim_start_at(
+                                bounds.start_pos.max(duplicated_clip.position),
+                                self.bpm,
+                            );
+                            duplicated_clip.trim_end_at(
+                                bounds.end_pos.min(duplicated_clip.end(self.bpm)),
+                                self.bpm,
+                            );
+                            duplicated_clip.position += bounds.end_pos - bounds.start_pos;
+                        } else {
+                            duplicated_clip.position = clip.end(self.bpm);
+                        }
+                        new_selected.push(duplicated_clip.id().clone());
+                        new_clips.push(duplicated_clip);
                         updated = true;
-                        break;
                     }
                 }
+                // Update track with new clips
+                if new_clips.len() > 0 {
+                    track.add_clips(new_clips, self.bpm, &mut self.to_player_tx);
+                }
+            }
+
+            if let Some(bounds) = &mut self.selected_clips.bounds {
+                let bound_size = bounds.end_pos - bounds.start_pos;
+                bounds.start_pos = bounds.end_pos;
+                bounds.end_pos += bound_size;
             }
         } else if ui
             .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
         {
             // Delete
             for track in self.track_manager.tracks.iter_mut() {
-                track.delete_ids(self.selected_clips.clone());
+                track.delete_ids(self.selected_clips.clip_ids.clone());
 
-                let _ = self
-                    .to_player_tx
-                    .push(GuiToPlayerMsg::RemoveClip(self.selected_clips.clone()));
+                let _ = self.to_player_tx.push(GuiToPlayerMsg::RemoveClip(
+                    self.selected_clips.clip_ids.clone(),
+                ));
             }
         } else if ui.input(|i| i.key_pressed(Key::K) && i.modifiers.ctrl) {
             // Cut clips
@@ -650,8 +692,8 @@ impl Workspace {
                 for clip in track.clips.iter_mut() {
                     if clip.position < self.playback_position
                         && self.playback_position < clip.end(self.bpm)
-                        && (self.selected_clips.is_empty()
-                            || self.selected_clips.contains(&clip.id()))
+                        && (self.selected_clips.clip_ids.is_empty()
+                            || self.selected_clips.clip_ids.contains(&clip.id()))
                     {
                         added_clip.push((clip.clone_with_new_id(), index));
                         clip.trim_end_at(self.playback_position, self.bpm);
@@ -681,7 +723,7 @@ impl Workspace {
         }
 
         if updated {
-            self.selected_clips = new_selected;
+            self.selected_clips.clip_ids = new_selected;
         }
     }
 
@@ -798,7 +840,7 @@ impl Workspace {
         // Draw the zoom control rectangle
         painter.rect_filled(zoom_rect, 0.0, egui::Color32::from_gray(80));
 
-        self.grid.draw_labels(&painter, zoom_rect, self.bpm);
+        self.grid.draw_labels(&painter, zoom_rect);
 
         // Handle zoom
         if zoom_response.hovered() {
@@ -857,7 +899,13 @@ impl Workspace {
 
             let mut min_point = Pos2::ZERO;
             let mut max_point = Pos2::ZERO;
-            self.selected_clips = vec![];
+            self.selected_clips.reset();
+            self.selected_clips.bounds = Some(SelectionBounds {
+                start_track_index: min_index,
+                start_pos: min_pos,
+                end_track_index: max_index,
+                end_pos: max_pos,
+            });
             let mut y = response.rect.top();
             for (track_index, track) in self.track_manager.tracks.iter().enumerate() {
                 if track_index == min_index {
@@ -866,8 +914,8 @@ impl Workspace {
                 if min_index <= track_index && track_index <= max_index {
                     for clip in track.clips.iter() {
                         let end = clip.end(self.bpm);
-                        if end > min_pos && clip.position < max_pos {
-                            self.selected_clips.push(clip.id());
+                        if end >= min_pos && clip.position < max_pos {
+                            self.selected_clips.clip_ids.push(clip.id());
                         }
                     }
                 }
@@ -883,6 +931,30 @@ impl Workspace {
                 select_rect,
                 0.,
                 Stroke::new(1. / ui.pixels_per_point(), Color32::from_white_alpha(250)),
+                StrokeKind::Inside,
+            );
+        }
+
+        if let Some(bounds) = self.selected_clips.bounds {
+            let min_point = Pos2::new(
+                self.grid.beats_to_x(bounds.start_pos, response.rect),
+                self.track_manager
+                    .get_track_y(bounds.start_track_index, response.rect),
+            );
+
+            let max_point = Pos2::new(
+                self.grid.beats_to_x(bounds.end_pos, response.rect),
+                self.track_manager
+                    .get_track_y(bounds.end_track_index, response.rect)
+                    + self.track_manager.tracks[bounds.end_track_index].height,
+            );
+            let rect = Rect::from_min_max(min_point, max_point);
+            let painter = ui.painter_at(rect);
+            painter.rect(
+                rect,
+                2.0,
+                Color32::LIGHT_BLUE.gamma_multiply(0.1),
+                Stroke::new(1. / ui.pixels_per_point(), Color32::WHITE),
                 StrokeKind::Inside,
             );
         }
@@ -915,7 +987,7 @@ impl Workspace {
             sample_preview: None,
             grid: WorkspaceGrid::new(),
             drag_state: None,
-            selected_clips: vec![],
+            selected_clips: Selection::new(),
             playback_position: 0.,
             playback_state: PlaybackState::Paused,
             metrics: GlobalMetrics::new(),

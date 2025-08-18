@@ -16,7 +16,7 @@ mod waveform;
 
 fn main() {
     let (to_gui_tx, from_process_rx) = RingBuffer::<ProcessToGuiMsg>::new(256);
-    let (to_process_tx, from_gui_rx) = RingBuffer::<GuiToPlayerMsg>::new(64);
+    let (to_process_tx, from_gui_rx) = RingBuffer::<GuiToPlayerMsg>::new(256);
 
     let _cpal_stream = output::spawn_cpal_stream(to_gui_tx, from_gui_rx);
 

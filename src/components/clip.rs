@@ -8,7 +8,7 @@ use rtrb::Producer;
 use crate::{
     analysis::AudioInfo,
     components::{grid::WorkspaceGrid, waveform::UIWaveform},
-    message::GuiToPlayerMsg,
+    message::{CreateClipCommand, GuiToPlayerMsg},
 };
 
 const PADDING_TEXT: f32 = 4.;
@@ -260,5 +260,16 @@ impl UIClip {
         let mut clone = self.clone();
         clone.id = uuid::Uuid::new_v4().to_string();
         clone
+    }
+
+    pub fn to_command(&self, track_id: String) -> CreateClipCommand {
+        CreateClipCommand {
+            track_id,
+            clip_id: self.id.clone(),
+            file_path: self.audio.path.clone(),
+            position: self.position,
+            trim_start: self.trim_start,
+            trim_end: self.trim_end,
+        }
     }
 }

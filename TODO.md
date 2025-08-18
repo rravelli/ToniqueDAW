@@ -4,13 +4,11 @@
 - Fix artefacts in preview when resampling
 - Fix bottom scrollbar behavior
 - Fix waveform jittering
-- Fix incorrect clip trimming because of min clip size ratio
 - Fix wrong curve for the equalizer effect
 
 # Refactor
 
-- Split workspace into smaller chunks
-- Use built-in dnd for clips
+- Split workspace into smaller files
 - Rethink clip trim start and end for better precision
 
 # Small Term Goals

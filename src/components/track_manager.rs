@@ -1,9 +1,10 @@
-use egui::{Color32, Key, Painter, Pos2, Rect, Sense, Stroke, Vec2};
+use egui::{Button, Color32, Key, Label, Painter, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use rtrb::Producer;
 
 use crate::{
     components::{
         bottom_panel::UIBottomPanel,
+        clip::UIClip,
         left_panel::DragPayload,
         track::{DEFAULT_TRACK_HEIGHT, HANDLE_HEIGHT, TrackSoloState, UITrack},
     },
@@ -185,7 +186,7 @@ impl TrackManager {
                         self.selected_track = Some(track.id.clone())
                     }
                 }
-                // // Insert effects
+                // Insert effects
                 if let Some(payload) = track_res.dnd_release_payload::<DragPayload>()
                     && let DragPayload::Effect(id) = *payload
                 {

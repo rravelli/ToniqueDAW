@@ -19,8 +19,9 @@ use crate::{
 
 pub const DEFAULT_TRACK_HEIGHT: f32 = 60.;
 const STROKE_WIDTH: f32 = 0.5;
-const PADDING: f32 = 4.;
-const CLOSED_HEIGHT: f32 = 2. * (STROKE_WIDTH + PADDING) + 20.;
+const PADDING: f32 = 2.;
+const BUTTON_SIZE: f32 = 17.;
+const CLOSED_HEIGHT: f32 = 2. * (STROKE_WIDTH + PADDING) + BUTTON_SIZE;
 const METER_WIDTH: f32 = 8.;
 pub const HANDLE_HEIGHT: f32 = 3.0;
 
@@ -71,6 +72,60 @@ impl UITrack {
             edit: false,
             effects: vec![],
         }
+    }
+    /**
+    Add clips to this track by making sure no overlap
+    occurs. Updates at the same time the audio thread
+    */
+    pub fn add_clips(
+        &mut self,
+        added_clips: Vec<UIClip>,
+        bpm: f32,
+        tx: &mut Producer<GuiToPlayerMsg>,
+    ) {
+        let mut deleted_clips = Vec::new();
+        let mut created_clips = Vec::new();
+
+        // Fix overlap
+        for added_clip in added_clips.iter() {
+            let mut new_clips = vec![];
+            let start = added_clip.position;
+            let end = added_clip.end(bpm);
+
+            for clip in self.clips.iter() {
+                // No overlap
+                if clip.position > end || clip.end(bpm) < start {
+                    new_clips.push(clip.clone());
+                    continue;
+                }
+                deleted_clips.push(clip.id());
+                // Sample overlaps before new clip
+                if clip.position < start {
+                    let mut trimmed = clip.clone_with_new_id();
+                    trimmed.trim_end_at(start, bpm);
+
+                    created_clips.push(trimmed.to_command(self.id.clone()));
+                    new_clips.push(trimmed);
+                }
+
+                // Sample overlaps after new clip
+                if clip.end(bpm) > end {
+                    let mut trimmed = clip.clone_with_new_id();
+                    trimmed.trim_start_at(end, bpm);
+
+                    created_clips.push(trimmed.to_command(self.id.clone()));
+                    new_clips.push(trimmed);
+                }
+            }
+            self.clips = new_clips;
+        }
+        for added_clip in added_clips.iter() {
+            created_clips.push(added_clip.to_command(self.id.clone()));
+            self.clips.push(added_clip.clone());
+        }
+
+        let _ = tx.push(GuiToPlayerMsg::AddClips(created_clips));
+        let _ = tx.push(GuiToPlayerMsg::RemoveClip(deleted_clips));
     }
 
     // Add sample and fixes collisions
@@ -331,21 +386,25 @@ impl UITrack {
 
     fn mute_button(&mut self, ui: &mut Ui) -> Response {
         ui.add(
-            egui::Button::new(RichText::new("M").size(8.)).fill(if self.muted {
-                ui.visuals().selection.bg_fill
-            } else {
-                ui.visuals().widgets.inactive.bg_fill
-            }),
+            egui::Button::new(RichText::new("M").size(6.))
+                .fill(if self.muted {
+                    ui.visuals().selection.bg_fill
+                } else {
+                    ui.visuals().widgets.inactive.bg_fill
+                })
+                .min_size(Vec2::new(BUTTON_SIZE, BUTTON_SIZE)),
         )
     }
 
     fn solo_button(&mut self, ui: &mut Ui, solo: bool) -> Response {
         ui.add(
-            egui::Button::new(RichText::new("S").size(8.)).fill(if solo {
-                ui.visuals().selection.bg_fill
-            } else {
-                ui.visuals().widgets.inactive.bg_fill
-            }),
+            egui::Button::new(RichText::new("S").size(6.))
+                .fill(if solo {
+                    ui.visuals().selection.bg_fill
+                } else {
+                    ui.visuals().widgets.inactive.bg_fill
+                })
+                .min_size(Vec2::new(BUTTON_SIZE, BUTTON_SIZE)),
         )
     }
 
@@ -356,7 +415,7 @@ impl UITrack {
             egui_phosphor::fill::CARET_DOWN
         };
         let response = ui.add(
-            egui::Button::new(RichText::new(icon).color(Color32::from_gray(20)).size(7.))
+            egui::Button::new(RichText::new(icon).color(Color32::from_gray(20)).size(6.))
                 .small()
                 .min_size(Vec2::new(14., 14.))
                 .fill(Color32::TRANSPARENT)
@@ -377,7 +436,7 @@ impl UITrack {
     }
 
     fn gain_slider(&mut self, ui: &mut Ui, range: std::ops::RangeInclusive<f32>) -> Response {
-        let desired_size = egui::vec2(32., 20.);
+        let desired_size = egui::vec2(2. * BUTTON_SIZE + 1., 20.);
         let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
 
         if response.dragged() {

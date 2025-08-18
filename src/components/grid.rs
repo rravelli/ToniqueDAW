@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use egui::{Rect, Stroke, Vec2};
+use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 pub const VIEW_WIDTH: f32 = 1280.;
 pub const PIXEL_PER_BEAT: f32 = 10.;
@@ -172,7 +172,7 @@ impl WorkspaceGrid {
         }
     }
 
-    pub fn draw_labels(&self, painter: &egui::Painter, rect: egui::Rect, bpm: f32) {
+    pub fn draw_labels(&self, painter: &egui::Painter, rect: egui::Rect) {
         let delta = self.right - self.left;
         let grid_step = PIXEL_PER_BEAT * VIEW_WIDTH / delta as f32; // 10 pixels per grid line
         let grid_color = egui::Color32::from_gray(90);
@@ -192,9 +192,9 @@ impl WorkspaceGrid {
                 painter.line_segment(
                     [
                         egui::Pos2::new(x, rect.bottom() - 6.0),
-                        egui::Pos2::new(x, rect.bottom() - 2.0),
+                        egui::Pos2::new(x, rect.bottom()),
                     ],
-                    Stroke::new(2., grid_color),
+                    Stroke::new(1., grid_color),
                 );
                 let bar = beat.div_euclid(4);
                 let sub_beat = beat % 4;
@@ -205,22 +205,12 @@ impl WorkspaceGrid {
                 } else {
                     format!("{}.{}", bar + 1, sub_beat + 1)
                 };
-                let time = beat as f32 * 60. / bpm;
-                let seconds = time.rem_euclid(60.);
-                let minutes = time.floor() as usize / 60;
 
                 painter.text(
-                    egui::Pos2::new(x, rect.top() + 2.0),
-                    egui::Align2::CENTER_TOP,
-                    format!("{:0>2}:{:.1}", minutes, seconds),
-                    egui::FontId::new(6.0, egui::FontFamily::Monospace),
-                    egui::Color32::WHITE,
-                );
-                painter.text(
                     egui::Pos2::new(x, rect.bottom() - 8.0),
-                    egui::Align2::CENTER_BOTTOM,
+                    egui::Align2::LEFT_BOTTOM,
                     text,
-                    egui::FontId::new(8.0, egui::FontFamily::Monospace),
+                    egui::FontId::new(7.0, egui::FontFamily::Monospace),
                     egui::Color32::WHITE,
                 );
             }
