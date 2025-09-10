@@ -1,6 +1,3 @@
-use rtrb::{Consumer, Producer};
-use std::{collections::HashMap, time::Instant};
-
 use crate::{
     ProcessToGuiMsg,
     audio::{clip::ClipBackend, preview::PreviewBackend, track::TrackBackend},
@@ -8,6 +5,9 @@ use crate::{
     message::GuiToPlayerMsg,
     metrics::{AudioMetrics, GlobalMetrics},
 };
+use rayon::prelude::*;
+use rtrb::{Consumer, Producer};
+use std::{collections::HashMap, time::Instant};
 
 pub struct PlayerBackend {
     to_gui_tx: Producer<ProcessToGuiMsg>,
@@ -60,16 +60,11 @@ impl PlayerBackend {
         // Preview
         if self.preview_state == PlaybackState::Playing {
             if let Some(data) = self.preview.read(num_frames, self.sample_rate) {
-                let num_channels = data.len();
-                for ch in 0..num_channels {
+                for ch in 0..2 {
                     for (i, sample) in data[ch].iter().enumerate() {
                         output[2 * i + ch] = *sample;
-                        if num_channels == 1 {
-                            output[2 * i + 1] = *sample;
-                        }
                     }
                 }
-
                 if let Some(stream) = &self.preview.stream {
                     let _ = self
                         .to_gui_tx
@@ -91,23 +86,34 @@ impl PlayerBackend {
         }
         let mut master_mix = vec![0.; output.len()];
 
-        for (track_id, track) in self.tracks.iter_mut() {
-            let disabled = (track.muted && !self.solo_tracks.contains(&track_id))
-                || (!self.solo_tracks.is_empty() && !self.solo_tracks.contains(&track_id));
+        // Collect tracks
+        let tracks: Vec<_> = self.tracks.values_mut().collect();
 
-            let track_mix = track.process(pos, num_frames, self.sample_rate);
-            // Update master
+        let s = Instant::now();
+        tracks.into_par_iter().for_each(|track| {
             let mut track_metrics = AudioMetrics::new();
 
-            for i in 0..track_mix.len() {
-                if !disabled {
-                    master_mix[i] += track_mix[i];
-                }
-                track_metrics.add_sample(track_mix[i], (i % 2 == 0).into());
+            track.process(pos, num_frames, self.sample_rate);
+
+            // Compute metrics
+            for i in 0..track.mix.len() {
+                track_metrics.add_sample(track.mix[i], (i % 2 == 0).into());
             }
-            // Update metrics
-            metrics.tracks.insert(track_id.to_string(), track_metrics);
+        });
+
+        for track in self.tracks.values() {
+            if !track.disabled(&self.solo_tracks) {
+                for i in 0..track.mix.len() {
+                    master_mix[i] += track.mix[i];
+                }
+            }
+            metrics
+                .tracks
+                .insert(track.id.clone(), track.metrics.clone());
         }
+        let first = s.elapsed();
+
+        println!("Time {:?}", first);
 
         // Assign master output buffer
         for (i, sample) in output.iter_mut().enumerate() {
@@ -203,12 +209,6 @@ impl PlayerBackend {
                             (position / self.bpm * 60. * self.sample_rate as f32).floor() as usize;
 
                         let clone = clip.clone();
-
-                        //  if in range to be played seek to position
-                        if !(self.playhead + 3000 < clip.start_frame
-                            || clip.start_frame + clip.stream.info().num_frames
-                                < self.playhead + 3000)
-                        {}
 
                         track.clips.push(clone);
                     }
