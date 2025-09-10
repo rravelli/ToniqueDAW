@@ -5,6 +5,9 @@ use rustfft::{FftPlanner, num_complex::Complex};
 pub struct AudioMetrics {
     peak: [f32; 2],
     rms: [f32; 2],
+    prev_rms: [f32; 2],
+    /// Smoothing factor
+    alpha: f32,
     pub samples: [Vec<f32>; 2],
 }
 
@@ -13,8 +16,20 @@ impl AudioMetrics {
         Self {
             peak: [0., 0.],
             rms: [0., 0.],
+            prev_rms: [0., 0.],
+            alpha: 0.6,
             samples: [vec![], vec![]],
         }
+    }
+
+    pub fn reset(&mut self) {
+        if !self.samples[0].is_empty() {
+            self.prev_rms = self.get_rms();
+        }
+        self.peak = [0., 0.];
+        self.rms = [0., 0.];
+        self.samples[0].clear();
+        self.samples[1].clear();
     }
 
     pub fn add_sample(&mut self, value: f32, channel: usize) {
@@ -51,12 +66,24 @@ impl AudioMetrics {
         spectrum
     }
 
-    pub fn get_rms(&self) -> [f32; 2] {
+    fn compute_rms(&self) -> [f32; 2] {
         let num_sample = self.samples[0].len();
         [
             (self.rms[0] / num_sample as f32).sqrt(),
             (self.rms[1] / num_sample as f32).sqrt(),
         ]
+    }
+
+    fn smooth(&self, val: [f32; 2], prev: [f32; 2]) -> [f32; 2] {
+        [
+            self.alpha * val[0] + (1. - self.alpha) * prev[0],
+            self.alpha * val[1] + (1. - self.alpha) * prev[1],
+        ]
+    }
+
+    pub fn get_rms(&self) -> [f32; 2] {
+        // smooth rms
+        self.smooth(self.compute_rms(), self.prev_rms)
     }
 
     pub fn get_peak(&self) -> [f32; 2] {
