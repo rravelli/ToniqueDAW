@@ -89,7 +89,6 @@ impl PlayerBackend {
         // Collect tracks
         let tracks: Vec<_> = self.tracks.values_mut().collect();
 
-        let s = Instant::now();
         tracks.into_par_iter().for_each(|track| {
             let mut track_metrics = AudioMetrics::new();
 
@@ -111,9 +110,6 @@ impl PlayerBackend {
                 .tracks
                 .insert(track.id.clone(), track.metrics.clone());
         }
-        let first = s.elapsed();
-
-        println!("Time {:?}", first);
 
         // Assign master output buffer
         for (i, sample) in output.iter_mut().enumerate() {
