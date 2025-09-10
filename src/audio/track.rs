@@ -1,26 +1,31 @@
-use dashmap::DashMap;
 use fundsp::{
     MAX_BUFFER_SIZE,
     hacker::{AudioUnit, BufferArray, Fade, NetBackend, pass},
     hacker32::U2,
     net::{Net, NodeId},
 };
-use rubato::{Resampler, SincFixedOut, SincInterpolationParameters, SincInterpolationType};
 
-use crate::audio::clip::ClipBackend;
+use std::collections::HashMap;
 
+use crate::{audio::clip::ClipBackend, metrics::AudioMetrics};
+
+/// Track struct for the audio threads. Process each clips and effects for that track.
 pub struct TrackBackend {
     pub id: String,
     pub volume: f32,
-    // Sorted by start position for quick access
+
     pub clips: Vec<ClipBackend>,
     pub muted: bool,
     pub net: Net,
 
+    // Effects related
     backend: NetBackend,
-    id_hash: DashMap<String, NodeId>,
-    units: DashMap<NodeId, Box<dyn AudioUnit>>,
+    id_hash: HashMap<String, NodeId>,
+    units: HashMap<NodeId, Box<dyn AudioUnit>>,
     node_order: Vec<NodeId>,
+
+    pub metrics: AudioMetrics,
+    pub mix: Vec<f32>,
 }
 
 impl TrackBackend {
@@ -39,21 +44,26 @@ impl TrackBackend {
             muted: false,
             backend,
             net,
-            id_hash: DashMap::new(),
-            units: DashMap::new(),
+            id_hash: HashMap::new(),
+            units: HashMap::new(),
             node_order: Vec::new(),
+            metrics: AudioMetrics::new(),
+            mix: Vec::new(),
         }
     }
 
-    pub fn process(&mut self, pos: usize, num_frames: usize, sample_rate: usize) -> Vec<f32> {
-        let mut mix = vec![0.; num_frames * 2];
+    pub fn process(&mut self, pos: usize, num_frames: usize, sample_rate: usize) {
+        // Reset buffers
+        self.mix.fill(0.);
+        self.mix.resize(num_frames * 2, 0.);
+        self.metrics.reset();
+
+        // Render all clips into self.mix
         for clip in self.clips.iter_mut() {
-            // global start position
             let clip_start = clip.start_frame;
-            // global end position
             let clip_end = clip.end(sample_rate);
             // not in range
-            if pos + num_frames < clip_start || clip_end < pos + num_frames {
+            if pos > clip_end || clip_start > pos + num_frames {
                 continue;
             }
             // not ready
@@ -62,102 +72,48 @@ impl TrackBackend {
             {
                 continue;
             };
-            // start position of the clip in [pos, pos + num_frames]
-            let start = clip_start.max(pos);
-            // end position of the clip in [pos, pos + num_frames]
-            let end = clip_end.min(pos + num_frames);
-            // position relative to the clip
-            let clip_playhead = clip.playhead_start() + (start - clip_start);
-            // ratio in sample rates
-            let sample_rate_ratio = clip.audio.sample_rate as f64 / sample_rate as f64;
-            // start index to pick inside the clip
-            let start_index = (clip_playhead as f64 * sample_rate_ratio).floor() as usize;
-            // end index to pick inside the clip
-            let end_index =
-                ((clip_playhead + (end - start)) as f64 * sample_rate_ratio).ceil() as usize;
 
-            // compute audio
-            if let Ok(data) = clip.audio.data.lock()
-                && start_index < end_index
-            {
-                let mut resampler = SincFixedOut::<f32>::new(
-                    sample_rate as f64 / clip.audio.sample_rate as f64,
-                    10.,
-                    SincInterpolationParameters {
-                        sinc_len: 16,
-                        f_cutoff: 0.70,
-                        oversampling_factor: 8,
-                        interpolation: SincInterpolationType::Nearest,
-                        window: rubato::WindowFunction::Hann,
-                    },
-                    end - pos,
-                    2,
-                )
-                .unwrap();
-
-                let mut channels = vec![];
-
-                channels.push(
-                    data.0[start_index.min(data.0.len() - 1)
-                        ..(start_index + resampler.input_frames_next()).min(data.0.len())]
-                        .to_vec(),
-                );
-                if clip.audio.is_stereo {
-                    channels.push(
-                        data.1[start_index.min(data.1.len() - 1)
-                            ..(end_index + resampler.input_frames_next()).min(data.1.len())]
-                            .to_vec(),
-                    );
-                }
-
-                // resample if needed
-                if sample_rate != clip.audio.sample_rate as usize {
-                    match resampler.process(&channels, None) {
-                        Ok(resampled) => {
-                            channels = resampled;
-                        }
-                        Err(_) => {}
-                    }
-                }
-
-                let mut j = 0;
-
-                for i in (start - pos)..(end - pos) {
-                    if j < channels[0].len() {
-                        if channels.len() > 1 {
-                            mix[2 * i] = channels[0][j] * self.volume;
-                            mix[2 * i + 1] += channels[1][j] * self.volume;
-                        } else {
-                            mix[2 * i] += channels[0][j] * self.volume;
-                            mix[2 * i + 1] += channels[0][j] * self.volume;
-                        }
-                    }
-                    j += 1;
-                }
-            };
+            clip.render_block(&mut self.mix, pos, num_frames, sample_rate);
         }
-        self.process_effects(&mut mix);
-        mix
+
+        if self.net.size() > 0 {
+            self.process_effects();
+        }
+        // Update volume
+        for (i, s) in self.mix.iter_mut().enumerate() {
+            *s *= self.volume;
+            self.metrics.add_sample(*s, (i % 2 == 0).into());
+        }
     }
 
-    fn process_effects(&mut self, mix: &mut Vec<f32>) {
+    fn process_effects(&mut self) {
         let mut input = BufferArray::<U2>::new();
         let mut output = BufferArray::<U2>::new();
-        // Create chunks of MAX_BUFFER_SIZE per channel
-        for (chunk_index, chunk) in mix.clone().chunks(2 * MAX_BUFFER_SIZE).enumerate() {
+
+        for chunk in self.mix.chunks_mut(2 * MAX_BUFFER_SIZE) {
             let size = chunk.len() / 2;
-            for (i, s) in chunk.iter().enumerate() {
-                input.set_f32(i % 2, i / 2, *s);
+
+            // Fill input (deinterleave)
+            for i in 0..size {
+                input.set_f32(0, i, chunk[2 * i]);
+                input.set_f32(1, i, chunk[2 * i + 1]);
             }
-            // process effects
+
+            // Process effects
             self.backend
                 .process(size, &input.buffer_ref(), &mut output.buffer_mut());
-            // copy the values
+
+            // Write back (re-interleave)
             for i in 0..size {
-                mix[2 * chunk_index * MAX_BUFFER_SIZE + 2 * i] = output.at_f32(0, i);
-                mix[2 * chunk_index * MAX_BUFFER_SIZE + 2 * i + 1] = output.at_f32(1, i);
+                chunk[2 * i] = output.at_f32(0, i);
+                chunk[2 * i + 1] = output.at_f32(1, i);
             }
         }
+    }
+
+    pub fn disabled(&self, solo_tracks: &Vec<String>) -> bool {
+        (self.muted && !solo_tracks.contains(&self.id))
+            || (!solo_tracks.is_empty() && !solo_tracks.contains(&self.id))
     }
 
     pub fn remove_clip(&mut self, id: String) -> Option<ClipBackend> {
@@ -168,8 +124,6 @@ impl TrackBackend {
     }
 
     pub fn add_node(&mut self, id: String, node: Box<dyn AudioUnit>, index: usize) {
-        // let node_id = self.net.chain(node.clone());
-
         let node_id = self.net.push(node.clone());
 
         if index > 0 {

@@ -1,8 +1,8 @@
 use crate::message::GuiToPlayerMsg;
 use crate::{audio::player::PlayerBackend, message::ProcessToGuiMsg};
+use cpal::BufferSize;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rtrb::{Consumer, Producer};
-// Change here
 
 pub fn spawn_cpal_stream(
     to_gui_tx: Producer<ProcessToGuiMsg>,
@@ -21,10 +21,8 @@ pub fn spawn_cpal_stream(
     let config = cpal::StreamConfig {
         channels: 2,
         sample_rate,
-        buffer_size: cpal::BufferSize::Default,
+        buffer_size: BufferSize::Default,
     };
-
-    // let mut process = Process::new(to_gui_tx, from_gui_rx);
 
     let mut player = PlayerBackend::new(to_gui_tx, from_gui_rx, sample_rate.0 as usize);
 
