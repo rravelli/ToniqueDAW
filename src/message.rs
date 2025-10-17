@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use fundsp::hacker::AudioUnit;
 
@@ -29,9 +29,21 @@ pub enum GuiToPlayerMsg {
     // Clip messages
     AddClip(String, PathBuf, f32, String, f32, f32), // (track_id, file_path, start_position, clip_id, trim_start, trim_end)
     AddClips(Vec<CreateClipCommand>),
-    RemoveClip(Vec<String>),       // Vec<clip id>
-    MoveClip(String, String, f32), // clip id, track id, position
-    ResizeClip(String, f32, f32),  // clip_id, trim_start, trim_end
+    RemoveClip(Vec<String>),           // Vec<clip id>
+    MoveClip(String, String, f32),     // clip id, track id, position
+    ResizeClip(String, f32, f32, f32), // clip_id, trim_start, trim_end
+    ResizeClips {
+        track_id: String,
+        clips: HashMap<String, (f32, f32)>,
+    },
+    DuplicateTrack {
+        /// Track id to duplicate
+        id: String,
+        /// The duplicated track id
+        new_id: String,
+        /// Mapping between clips and duplicated clips ids
+        clip_map: HashMap<String, String>,
+    },
 }
 
 pub enum ProcessToGuiMsg {

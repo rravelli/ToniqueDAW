@@ -2,11 +2,13 @@ use crate::message::GuiToPlayerMsg;
 use crate::{audio::player::PlayerBackend, message::ProcessToGuiMsg};
 use cpal::BufferSize;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
 use rtrb::{Consumer, Producer};
 
 pub fn spawn_cpal_stream(
     to_gui_tx: Producer<ProcessToGuiMsg>,
     from_gui_rx: Consumer<GuiToPlayerMsg>,
+    midi_rx: Consumer<Vec<u8>>,
 ) -> cpal::Stream {
     // Setup cpal audio output
 
@@ -24,7 +26,7 @@ pub fn spawn_cpal_stream(
         buffer_size: BufferSize::Default,
     };
 
-    let mut player = PlayerBackend::new(to_gui_tx, from_gui_rx, sample_rate.0 as usize);
+    let mut player = PlayerBackend::new(to_gui_tx, from_gui_rx, midi_rx, sample_rate.0 as usize);
 
     let stream = device
         .build_output_stream(
