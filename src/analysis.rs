@@ -39,7 +39,6 @@ pub struct AudioInfo {
     pub ready: Arc<Mutex<bool>>,
     pub sample_rate: u32,
     pub channels: u16,
-    pub is_stereo: bool,
     pub codec: String,
     pub bit_depth: Option<u32>,
     pub num_samples: Option<u64>,
@@ -78,8 +77,6 @@ pub fn get_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoErr
         .ok_or(AudioInfoError::MissingChannels)?
         .count() as u16;
 
-    let is_stereo = channels == 2;
-
     let duration = codec_params
         .n_frames
         .map(|frames| Duration::from_secs_f64(frames as f64 / sample_rate as f64));
@@ -99,7 +96,6 @@ pub fn get_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoErr
         duration,
         sample_rate,
         channels,
-        is_stereo,
         codec: format!("{:?}", codec_params.codec),
         bit_depth: codec_params.bits_per_sample,
         num_samples: codec_params.n_frames,

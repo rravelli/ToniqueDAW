@@ -1,9 +1,17 @@
 use crate::{
     ProcessToGuiMsg,
-    audio::{clip::ClipBackend, preview::PreviewBackend, track::TrackBackend},
-    components::workspace::PlaybackState,
+    audio::{
+        clip::ClipBackend,
+        preview::PreviewBackend,
+        track::{TrackBackend, TrackKind, audio::AudioTrackData},
+    },
     message::GuiToPlayerMsg,
     metrics::{AudioMetrics, GlobalMetrics},
+    ui::workspace::PlaybackState,
+};
+use fundsp::{
+    hacker::{AudioUnit, envelope, lowpass_hz},
+    hacker32::sine_hz,
 };
 use rayon::prelude::*;
 use rtrb::{Consumer, Producer};
@@ -12,6 +20,8 @@ use std::{collections::HashMap, time::Instant};
 pub struct PlayerBackend {
     to_gui_tx: Producer<ProcessToGuiMsg>,
     from_gui_rx: Consumer<GuiToPlayerMsg>,
+    midi_rx: Consumer<Vec<u8>>,
+
     channels: usize,
     sample_rate: usize,
 
@@ -24,17 +34,46 @@ pub struct PlayerBackend {
     tracks: HashMap<String, TrackBackend>,
     bpm: f32,
     solo_tracks: Vec<String>,
+
+    _notes: HashMap<u8, Box<dyn AudioUnit>>,
+}
+
+pub fn piano_voice(freq: f32, velocity: f32) -> impl AudioUnit {
+    // ADSR envelope
+    let env = envelope(|t| {
+        if t < 0.01 {
+            // Attack
+            t / 0.01
+        } else {
+            // Exponential decay
+            (-(t - 0.01) * 5.0).exp()
+        }
+    }) * velocity;
+
+    // Harmonic-rich oscillator
+    let osc = sine_hz(freq)                  // fundamental
+        + 0.5 * sine_hz(freq * 2.0)          // octave
+        + 0.3 * sine_hz(freq * 3.0)          // fifth above octave
+        + 0.2 * sine_hz(freq * 4.0) // second octave
+         + 0.05 * sine_hz(freq * 2.01)
+         + 0.05 * sine_hz(freq * 2.02); // second octave
+
+    // Apply envelope to osc
+    (osc * env) >> lowpass_hz(2000.0, 1.0)
+    // mellow filter
 }
 
 impl PlayerBackend {
     pub fn new(
         to_gui_tx: Producer<ProcessToGuiMsg>,
         from_gui_rx: Consumer<GuiToPlayerMsg>,
+        midi_rx: Consumer<Vec<u8>>,
         sample_rate: usize,
     ) -> Self {
         Self {
             to_gui_tx,
             from_gui_rx,
+            midi_rx,
             channels: 2,
             playhead: 0,
             bpm: 120.,
@@ -44,6 +83,7 @@ impl PlayerBackend {
             solo_tracks: vec![],
             preview: PreviewBackend::new(),
             preview_state: PlaybackState::Paused,
+            _notes: HashMap::new(),
         }
     }
 
@@ -73,6 +113,45 @@ impl PlayerBackend {
             }
         }
 
+        while let Ok(e) = self.midi_rx.pop() {
+            if e.len() >= 3 {
+                let event_type = e[0];
+                let note = e[1];
+                let vel = e[2];
+                let freq = 440.0 * 2f32.powf((note as f32 - 69.0) / 12.0);
+                let velocity = 0.3;
+
+                match event_type {
+                    // Note On
+                    0x90 => {
+                        if vel == 0 {
+                            self._notes.remove(&note);
+                        } else {
+                            let mut unit = piano_voice(freq, velocity);
+                            unit.set_sample_rate(self.sample_rate as f64);
+                            self._notes.insert(note, Box::new(unit));
+                        }
+
+                        println!("Playing note freq {}Hz", freq);
+                    }
+                    // Note Off
+                    0x80 => {
+                        self._notes.remove(&note);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        for frame in 0..num_frames {
+            for (_, unit) in self._notes.iter_mut() {
+                let s = unit.get_mono();
+
+                output[2 * frame] += s;
+                output[2 * frame + 1] += s;
+            }
+        }
+
         // Paused
         if self.playback_state == PlaybackState::Paused {
             metrics.latency =
@@ -81,6 +160,7 @@ impl PlayerBackend {
             for (track_id, _) in self.tracks.iter() {
                 metrics.tracks.insert(track_id.clone(), AudioMetrics::new());
             }
+            metrics.tracks.insert("master".into(), AudioMetrics::new());
             let _ = self.to_gui_tx.push(ProcessToGuiMsg::Metrics(metrics));
             return;
         }
@@ -118,6 +198,9 @@ impl PlayerBackend {
                 .master
                 .add_sample(master_mix[i], (i % 2 == 0).into());
         }
+        metrics
+            .tracks
+            .insert("master".into(), metrics.master.clone());
 
         // Send data
         metrics.latency =
@@ -146,7 +229,9 @@ impl PlayerBackend {
                     self.playhead = frames;
                 }
                 GuiToPlayerMsg::AddTrack(id) => {
-                    let track = TrackBackend::new(id.clone(), 1.0);
+                    let track =
+                        TrackBackend::new(id.clone(), 1.0, TrackKind::Audio(AudioTrackData::new()));
+
                     self.tracks.insert(id, track);
                 }
                 GuiToPlayerMsg::AddClip(
@@ -159,8 +244,10 @@ impl PlayerBackend {
                 ) => {
                     let track = self.tracks.get_mut(&track_id);
                     // Find the track by ID and add a sample to it
-                    if let Some(track) = track {
-                        track.clips.push(ClipBackend::new(
+                    if let Some(track) = track
+                        && let TrackKind::Audio(data) = &mut track.kind
+                    {
+                        data.clips.push(ClipBackend::new(
                             clip_id,
                             file_path,
                             (position / self.bpm * 60. * self.sample_rate as f32).floor() as usize,
@@ -171,8 +258,10 @@ impl PlayerBackend {
                 }
                 GuiToPlayerMsg::AddClips(clips) => {
                     for clip in &clips {
-                        if let Some(track) = self.tracks.get_mut(&clip.track_id) {
-                            track.clips.push(ClipBackend::from_command(
+                        if let Some(track) = self.tracks.get_mut(&clip.track_id)
+                            && let TrackKind::Audio(data) = &mut track.kind
+                        {
+                            data.clips.push(ClipBackend::from_command(
                                 clip,
                                 self.bpm,
                                 self.sample_rate,
@@ -182,10 +271,11 @@ impl PlayerBackend {
                 }
                 GuiToPlayerMsg::RemoveClip(ids) => {
                     for (_, track) in self.tracks.iter_mut() {
-                        track.clips.retain(|clip| !ids.contains(&clip.id));
+                        if let TrackKind::Audio(data) = &mut track.kind {
+                            data.clips.retain(|clip| !ids.contains(&clip.id));
+                        }
                     }
                 }
-                // Move clip to new track and new position
                 GuiToPlayerMsg::MoveClip(clip_id, track_id, position) => {
                     let mut previous_clip = None;
                     for (_, track) in self.tracks.iter_mut() {
@@ -200,13 +290,14 @@ impl PlayerBackend {
 
                     if let Some(track) = new_track
                         && let Some(clip) = previous_clip.as_mut()
+                        && let TrackKind::Audio(data) = &mut track.kind
                     {
                         clip.start_frame =
                             (position / self.bpm * 60. * self.sample_rate as f32).floor() as usize;
 
                         let clone = clip.clone();
 
-                        track.clips.push(clone);
+                        data.clips.push(clone);
                     }
                 }
                 GuiToPlayerMsg::MuteTrack(track_id, value) => {
@@ -219,11 +310,16 @@ impl PlayerBackend {
                         track.volume = value;
                     }
                 }
-                GuiToPlayerMsg::ResizeClip(clip_id, trim_start, trim_end) => {
+                GuiToPlayerMsg::ResizeClip(clip_id, trim_start, trim_end, position) => {
                     for (_, track) in self.tracks.iter_mut() {
-                        if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
+                        if let TrackKind::Audio(data) = &mut track.kind
+                            && let Some(clip) =
+                                data.clips.iter_mut().find(|clip| clip.id == clip_id)
+                        {
                             clip.trim_start = trim_start;
                             clip.trim_end = trim_end;
+                            clip.start_frame = (position / self.bpm * 60. * self.sample_rate as f32)
+                                .floor() as usize;
                             break;
                         }
                     }
@@ -233,8 +329,8 @@ impl PlayerBackend {
                 }
                 GuiToPlayerMsg::RemoveTrack(id) => {
                     self.tracks.remove(&id);
+                    self.solo_tracks.retain(|solo| *solo != *id);
                 }
-                // Preview
                 GuiToPlayerMsg::PlayPreview(file) => {
                     if self.playback_state == PlaybackState::Paused {
                         self.preview.play(file);
@@ -263,6 +359,29 @@ impl PlayerBackend {
                     if let Some(track) = self.tracks.get_mut(&track_id) {
                         track.set_node_enabled(effect_id, enabled);
                     }
+                }
+                GuiToPlayerMsg::ResizeClips { track_id, clips } => {
+                    if let Some(track) = self.tracks.get_mut(&track_id)
+                        && let TrackKind::Audio(data) = &mut track.kind
+                    {
+                        for clip in data.clips.iter_mut() {
+                            if let Some((start, end)) = clips.get(&clip.id) {
+                                clip.trim_start = *start;
+                                clip.trim_end = *end;
+                            }
+                        }
+                    }
+                }
+                GuiToPlayerMsg::DuplicateTrack {
+                    id,
+                    new_id,
+                    clip_map,
+                } => {
+                    let Some(track) = self.tracks.get(&id) else {
+                        return Ok(());
+                    };
+                    let new_track = track.duplicate(&new_id, clip_map);
+                    self.tracks.insert(new_id, new_track);
                 }
             }
         }

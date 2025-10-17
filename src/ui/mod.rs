@@ -1,0 +1,13 @@
+mod buttons;
+mod clip;
+pub mod effect;
+pub mod effects;
+mod filebrowser;
+pub mod font;
+mod grid;
+pub mod panels;
+mod track;
+mod track_manager;
+mod waveform;
+mod widget;
+pub(crate) mod workspace;

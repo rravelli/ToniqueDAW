@@ -1,5 +1,5 @@
-use dashmap::DashMap;
 use rustfft::{FftPlanner, num_complex::Complex};
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct AudioMetrics {
@@ -94,7 +94,7 @@ impl AudioMetrics {
 #[derive(Clone)]
 pub struct GlobalMetrics {
     pub master: AudioMetrics,
-    pub tracks: DashMap<String, AudioMetrics>,
+    pub tracks: HashMap<String, AudioMetrics>,
     pub latency: f32,
 }
 
@@ -102,7 +102,7 @@ impl GlobalMetrics {
     pub fn new() -> Self {
         Self {
             master: AudioMetrics::new(),
-            tracks: DashMap::new(),
+            tracks: HashMap::new(),
             latency: 0.,
         }
     }
