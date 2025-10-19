@@ -1,11 +1,10 @@
 use crate::{
-    ProcessToGuiMsg,
+    GuiToPlayerMsg, ProcessToGuiMsg,
     audio::{
         clip::ClipBackend,
         preview::PreviewBackend,
         track::{TrackBackend, TrackKind, audio::AudioTrackData},
     },
-    message::GuiToPlayerMsg,
     metrics::{AudioMetrics, GlobalMetrics},
     ui::workspace::PlaybackState,
 };

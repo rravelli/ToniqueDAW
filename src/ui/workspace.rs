@@ -4,10 +4,10 @@ use crate::{
     cache::AUDIO_ANALYSIS_CACHE,
     core::{
         clip::ClipCore,
+        message::GuiToPlayerMsg,
         state::ToniqueProjectState,
         track::{TrackCore, TrackSoloState},
     },
-    message::GuiToPlayerMsg,
     ui::{
         clip::UIClipv2,
         grid::{MAX_RIGHT, MIN_LEFT, VIEW_WIDTH, WorkspaceGrid},

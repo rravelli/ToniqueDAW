@@ -4,6 +4,7 @@ mod tests;
 use crate::{
     core::{
         clip::ClipCore,
+        message::{GuiToPlayerMsg, ProcessToGuiMsg},
         services::track::TrackService,
         state::action::{
             AddClipsAction, AddTrackAction, BatchAction, CutClipAction, DeleteClipsAction,
@@ -12,7 +13,6 @@ use crate::{
         },
         track::{MutableTrackCore, TrackCore, TrackReferenceCore},
     },
-    message::{GuiToPlayerMsg, ProcessToGuiMsg},
     metrics::GlobalMetrics,
     ui::{effect::UIEffect, effects::EffectId, workspace::PlaybackState},
 };

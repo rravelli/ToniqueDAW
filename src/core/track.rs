@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    core::clip::ClipCore,
-    message::GuiToPlayerMsg,
+    core::{clip::ClipCore, message::GuiToPlayerMsg},
     ui::{
         effect::UIEffect,
         effects::{EffectId, create_effect_from_id},

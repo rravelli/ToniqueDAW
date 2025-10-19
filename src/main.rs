@@ -1,20 +1,18 @@
+use crate::{
+    audio::midi::spawn_midi_thread,
+    core::message::{GuiToPlayerMsg, ProcessToGuiMsg},
+    ui::font::get_fonts,
+};
 use eframe::NativeOptions;
 use egui::{Color32, Stroke, Visuals};
 use rtrb::RingBuffer;
 use std::sync::Arc;
-
-use crate::{
-    audio::midi::spawn_midi_thread,
-    message::{GuiToPlayerMsg, ProcessToGuiMsg},
-    ui::font::get_fonts,
-};
 
 mod analysis;
 mod audio;
 mod cache;
 mod config;
 mod core;
-mod message;
 mod metrics;
 mod output;
 mod ui;

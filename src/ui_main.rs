@@ -3,7 +3,7 @@ use egui::{Color32, CornerRadius, Margin, Shadow, Stroke};
 use rtrb::{Consumer, Producer};
 
 use crate::{
-    message::{GuiToPlayerMsg, ProcessToGuiMsg},
+    core::message::{GuiToPlayerMsg, ProcessToGuiMsg},
     ui::workspace::Workspace,
 };
 

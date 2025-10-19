@@ -1,9 +1,7 @@
-use crate::{
-    core::{
-        clip::ClipCore,
-        track::{MutableTrackCore, TrackCore, TrackReferenceCore, TrackSoloState},
-    },
+use crate::core::{
+    clip::ClipCore,
     message::GuiToPlayerMsg,
+    track::{MutableTrackCore, TrackCore, TrackReferenceCore, TrackSoloState},
 };
 use rtrb::Producer;
 use std::collections::HashMap;
@@ -307,53 +305,6 @@ impl TrackService {
         (created_clips, deleted_clips)
     }
 
-    // pub fn move_clips(
-    //     &mut self,
-    //     moved_clips: HashMap<String, (String, f32)>,
-    //     bpm: f32,
-    //     tx: &mut Producer<GuiToPlayerMsg>,
-    // ) {
-    //     // 1. Regroup clips per destination track
-    //     let mut grouped: HashMap<String, Vec<(String, f32)>> = HashMap::new();
-    //     for (clip_id, (to_track, new_pos)) in &moved_clips {
-    //         grouped
-    //             .entry(to_track.clone())
-    //             .or_default()
-    //             .push((clip_id.clone(), *new_pos));
-    //     }
-    //     // 2. Collect clips to move out of source tracks
-    //     let mut clips_to_move: Vec<(ClipCore, String)> = Vec::new(); // (clip, from_track_id)
-    //     for (clip_id, (to_track, _)) in &moved_clips {
-    //         if let Some((from_track_id, clip)) = self.find_clip(clip_id) {
-    //             clips_to_move.push((clip.clone(), from_track_id.clone()));
-    //         }
-    //     }
-    //     // 3. Remove them from their source tracks
-    //     for (clip, from_track) in &clips_to_move {
-    //         if let Some(track) = self.tracks.get_mut(from_track) {
-    //             track.delete_clips(&vec![clip.id.clone()], tx);
-    //         }
-    //     }
-    //     let mut created_map = HashMap::new();
-    //     let mut deleted_map = HashMap::new();
-    //     let mut deleted_clips = Vec::new();
-    //     let mut created_clips = Vec::new();
-    //     // 4. Add clips to tracks
-    //     for (to_track, clips) in grouped {
-    //         deleted_clips.clear();
-    //         created_clips.clear();
-    //         if let Some(track) = self.tracks.get_mut(&to_track) {
-    //             // track._fix_overlaps(, bpm, &mut deleted_clips, &mut created_clips);
-    //         }
-    //         // created_clips.extend();
-    //         if created_clips.len() > 0 {
-    //             created_map.insert(&to_track, created_clips);
-    //         }
-    //         if deleted_clips.len() > 0 {
-    //             deleted_map.insert(&to_track, deleted_clips);
-    //         }
-    //     }
-    // }
     /// Move a clip identified by `id` to given track and position.
     /// Use this function if you are sure no overlap can happen when moving the track.
     pub fn move_clip_skip_overlap_check(

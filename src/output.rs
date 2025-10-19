@@ -1,8 +1,7 @@
-use crate::message::GuiToPlayerMsg;
-use crate::{audio::player::PlayerBackend, message::ProcessToGuiMsg};
+use crate::audio::player::PlayerBackend;
+use crate::core::message::{GuiToPlayerMsg, ProcessToGuiMsg};
 use cpal::BufferSize;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-
 use rtrb::{Consumer, Producer};
 
 pub fn spawn_cpal_stream(
