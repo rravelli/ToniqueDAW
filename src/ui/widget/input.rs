@@ -65,7 +65,6 @@ impl NumberInput {
         let (res, painter) = ui.allocate_painter(self.size, Sense::click());
         let rect = res.rect;
         let curr_color = self.bg_color;
-
         // Paint widget
         painter.rect_filled(rect, 1.0, curr_color);
 
@@ -149,6 +148,8 @@ impl NumberInput {
             res1.request_focus();
             self.value -= 1.0;
         }
+        // Make sure the input has the correct size
+        ui.allocate_rect(rect, Sense::empty());
 
         return res;
     }
