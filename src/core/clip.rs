@@ -1,8 +1,8 @@
-use crate::{analysis::AudioInfo, message::CreateClipCommand};
-use std::time::Duration;
+use crate::analysis::AudioInfo;
+use std::{fmt::Debug, time::Duration};
 
 /// A clip representing an audio file placed on a track
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ClipCore {
     pub id: String,
     /// Audio metadata
@@ -64,15 +64,16 @@ impl ClipCore {
                 * bpm
                 * (self.trim_end - self.trim_start)
     }
+}
 
-    pub fn into_command(self, track_id: String) -> CreateClipCommand {
-        CreateClipCommand {
-            clip_id: self.id,
-            file_path: self.audio.path,
-            position: self.position,
-            track_id,
-            trim_end: self.trim_end,
-            trim_start: self.trim_start,
-        }
+impl Debug for ClipCore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClipCore")
+            .field("id", &self.id)
+            .field("audio", &self.audio.name)
+            .field("position", &self.position)
+            .field("trim_start", &self.trim_start)
+            .field("trim_end", &self.trim_end)
+            .finish()
     }
 }

@@ -1,17 +1,23 @@
-use std::path::PathBuf;
-
-use rtrb::{Consumer, Producer};
-
+mod action;
+#[cfg(test)]
+mod tests;
 use crate::{
     core::{
         clip::ClipCore,
         services::track::TrackService,
+        state::action::{
+            AddClipsAction, AddTrackAction, BatchAction, CutClipAction, DeleteClipsAction,
+            DeleteTrackAction, DuplicateClipAction, DuplicateTrackAction, MoveClipAction,
+            ProjectStateAction, ResizeClipAction, SetMutableTrackAction, SetVolumeAction,
+        },
         track::{MutableTrackCore, TrackCore, TrackReferenceCore},
     },
     message::{GuiToPlayerMsg, ProcessToGuiMsg},
     metrics::GlobalMetrics,
     ui::{effect::UIEffect, effects::EffectId, workspace::PlaybackState},
 };
+use rtrb::{Consumer, Producer};
+use std::{mem::take, path::PathBuf};
 
 #[derive(Clone, Debug)]
 enum ProjectStatePendingAction {
@@ -32,12 +38,15 @@ pub struct ToniqueProjectState {
     // Should be private in the future
     pub tx: Producer<GuiToPlayerMsg>,
     rx: Consumer<ProcessToGuiMsg>,
+    // History management
+    undo_stack: Vec<Box<dyn ProjectStateAction>>,
+    redo_stack: Vec<Box<dyn ProjectStateAction>>,
+    batching: bool,
+    batch_buffer: Vec<Box<dyn ProjectStateAction>>,
 }
 
 impl ToniqueProjectState {
     pub fn new(tx: Producer<GuiToPlayerMsg>, rx: Consumer<ProcessToGuiMsg>) -> Self {
-        let mut master = TrackCore::new();
-        master.mutable.name = "Master".into();
         Self {
             bpm: 120.,
             playback_position: 0.,
@@ -49,6 +58,10 @@ impl ToniqueProjectState {
             pending_actions: Vec::new(),
             tx,
             rx,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            batching: false,
+            batch_buffer: Vec::new(),
         }
     }
     /// Update each frame the state
@@ -105,18 +118,19 @@ impl ToniqueProjectState {
         self.preview_position
     }
     // Tracks
-    /// Add track at the last position
+    /// Add track at the last position. Shortcut for `add_track_at``
     pub fn add_track(&mut self, track: TrackCore) {
-        self.track_service
-            .insert(track, self.track_service.length(), &mut self.tx);
+        self.add_track_at(track, self.track_service.length());
     }
     /// Add track at specific index
     pub fn add_track_at(&mut self, track: TrackCore, index: usize) {
-        self.track_service.insert(track, index, &mut self.tx);
+        let action = AddTrackAction::new(track, index);
+        self.apply_action(Box::new(action));
     }
-    /// Duplicate track
+    /// Duplicate track. New track is inserted after the current track.
     pub fn duplicate_track(&mut self, id: &String) {
-        self.track_service.duplicate(id, &mut self.tx);
+        let action = DuplicateTrackAction::new(id);
+        self.apply_action(Box::new(action));
     }
     /// Delete a track
     pub fn delete_track(&mut self, id: &String) {
@@ -124,52 +138,57 @@ impl ToniqueProjectState {
             .push(ProjectStatePendingAction::DeleteTrack { id: id.clone() });
     }
     // Clips
+    /// Add clips and fix all overlaps on the track.
     pub fn add_clips(&mut self, track_id: &String, clips: Vec<ClipCore>) {
-        if let Some(track) = self.track_service.get(track_id) {
-            track.add_clips(&clips, self.bpm, &mut self.tx);
-        }
+        let action = AddClipsAction::new(clips, track_id);
+        self.apply_action(Box::new(action));
     }
-    pub fn move_clip(&mut self, id: &String, to_track: &String, to_pos: f32) {
-        self.track_service
-            .move_clip(id, to_track, to_pos, self.bpm, &mut self.tx);
+    /// Move clip to a new position and a new track fixing all overlaps on this track.
+    pub fn move_clip(&mut self, id: &String, to_track: &String, to_pos: f32, ignore: &Vec<String>) {
+        let action = MoveClipAction::new(id, to_track, to_pos, ignore);
+        self.apply_action(Box::new(action));
     }
+    /// Delete clips for their ids
     pub fn delete_clips(&mut self, ids: &Vec<String>) {
-        self.track_service.delete_clips(ids, &mut self.tx);
+        let action = DeleteClipsAction::new(ids);
+        self.apply_action(Box::new(action));
     }
-    pub fn cut_clip_at(
-        &mut self,
-        track_id: &String,
-        position: f32,
-    ) -> Option<(ClipCore, ClipCore)> {
-        if let Some(track) = self.track_service.get(track_id) {
-            track.cut_clip_at(position, self.bpm, &mut self.tx)
-        } else {
-            None
-        }
+    /// Cut clip located at position on given track. Does nothing it there is no clip.
+    pub fn cut_clip_at(&mut self, track_id: &String, position: f32) {
+        let action = CutClipAction::new(track_id, position);
+        self.apply_action(Box::new(action));
     }
-    pub fn duplicate_clips(
-        &mut self,
-        ids: &Vec<String>,
-        bounds: Option<(f32, f32)>,
-    ) -> Vec<ClipCore> {
-        self.track_service
-            .duplicate_clips(ids, bounds, self.bpm, &mut self.tx)
+    /// Duplicate clips fixing all overlaps on the tracks.
+    pub fn duplicate_clips(&mut self, ids: &Vec<String>, bounds: Option<(f32, f32)>) {
+        let action = DuplicateClipAction::new(ids, bounds);
+        self.apply_action(Box::new(action));
     }
+    /// TODO: Action
+    /// Resize clip without computing overlap checks.
+    /// Use `commit_resize_clip` to apply overlap checks and add to undo stack.
     pub fn resize_clip(&mut self, id: &String, start: f32, end: f32, pos: f32) {
         self.track_service
-            .resize_clip(id, start, end, pos, self.bpm, &mut self.tx)
+            .resize_clip_skip_overlap_check(id, start, end, pos, &mut self.tx);
+    }
+    /// Resize clip and perform overlap checks
+    pub fn commit_resize_clip(&mut self, id: &String, start: f32, end: f32, pos: f32) {
+        let action = ResizeClipAction::new(id, start, end, pos);
+        self.apply_action(Box::new(action));
     }
     /// Add a effect to the track
+    /// TODO: Action
     pub fn add_effect(&mut self, id: &String, effect_id: EffectId, index: usize) {
         if let Some(track) = self.track_service.get(id) {
             track.add_effect(effect_id, index, &mut self.tx);
         }
     }
+    /// TODO: Action
     pub fn remove_effects(&mut self, id: &String, indexes: &Vec<usize>) {
         if let Some(track) = self.track_service.get(id) {
             track.remove_effects(indexes, &mut self.tx);
         }
     }
+    /// TODO: Action
     pub fn effects_mut(&mut self, id: &String) -> Option<&mut [UIEffect]> {
         if let Some(track) = self.track_service.get(id) {
             Some(track.effects_mut())
@@ -177,24 +196,32 @@ impl ToniqueProjectState {
             None
         }
     }
-    /// Set individual track volume
+    /// Set individual track volume. Changes are not saved in undo stack.
     pub fn set_volume(&mut self, id: String, volume: f32) {
-        self.track_service.set_volume(id, volume, &mut self.tx);
+        self.track_service.set_volume(&id, volume, &mut self.tx);
     }
+    /// Set track volume and save in undo stack given `old_volume`.
+    pub fn commit_volume(&mut self, id: String, old_volume: f32, new_volume: f32) {
+        let action = SetVolumeAction::new(id, old_volume, new_volume);
+        self.apply_action(Box::new(action));
+    }
+    /// Mute or unmute this track
     pub fn set_mute(&mut self, id: String, mute: bool) {
         self.track_service.set_mute(id, mute, &mut self.tx);
     }
+    /// Toggle the solo button.
     pub fn toggle_solo(&mut self, id: String, modifier_pressed: bool) {
         self.track_service
             .toggle_solo(id, modifier_pressed, &mut self.tx);
     }
+    /// Set track selected
     pub fn select_track(&mut self, id: &String) {
         self.track_service.select(&id);
     }
+    ///
     pub fn deselect(&mut self) {
         self.track_service.selected_tracks.clear();
     }
-
     pub fn selected_track(&self) -> Option<TrackReferenceCore> {
         self.track_service.selected_track()
     }
@@ -211,11 +238,70 @@ impl ToniqueProjectState {
     pub fn track_len(&self) -> usize {
         self.track_service.length()
     }
-    pub fn track_mut(&mut self, id: String) -> &mut MutableTrackCore {
+    /// Get mutable fields from track to be changed in place. Use `self.commit_track_mut` to update the undo stack.
+    pub fn track_mut(&mut self, id: &String) -> &mut MutableTrackCore {
         self.track_service.get_mut(id)
+    }
+    /// Commit changes made to the track mutable fields.
+    pub fn commit_track_mut(&mut self, id: &String) {
+        if let Some(track) = self.track_service.get(id) {
+            let action =
+                SetMutableTrackAction::new(id, track.old_mutable.clone(), track.mutable.clone());
+            self.apply_action(Box::new(action));
+        }
     }
     pub fn track_from_index(&self, index: usize) -> Option<TrackReferenceCore> {
         self.track_service.from_index(index)
+    }
+
+    // History management
+    /// Apply a `ProjectStateAction` and adds it to the stack
+    fn apply_action(&mut self, mut action: Box<dyn ProjectStateAction>) {
+        if self.batching {
+            self.batch_buffer.push(action);
+            return;
+        }
+        println!("Applying {}", action.name());
+        action.apply(self);
+        self.undo_stack.push(action);
+        self.redo_stack.clear();
+    }
+    /// Create a batch of actions. All actions made from this point are not applied but saved to a buffer.
+    /// Use `commit_batch` to apply them.
+    pub fn begin_batch(&mut self) {
+        self.batching = true;
+    }
+    /// Apply changes saved in the batch buffer. New actions are no longer saved in the buffer.
+    pub fn commmit_batch(&mut self) {
+        self.batching = false;
+        let batch = std::mem::take(&mut self.batch_buffer);
+        let action = BatchAction::new(batch);
+        self.apply_action(Box::new(action));
+        self.batch_buffer.clear();
+    }
+    /// Undo last action. Does nothing if there is no action.
+    pub fn undo(&mut self) {
+        if let Some(mut action) = self.undo_stack.pop() {
+            println!("Undoing {}", action.name());
+            action.undo(self);
+            self.redo_stack.push(action);
+        }
+    }
+    /// Redo last action. Does nothing if there is no action.
+    pub fn redo(&mut self) {
+        if let Some(mut action) = self.redo_stack.pop() {
+            println!("Redoing {}", action.name());
+            action.apply(self);
+            self.undo_stack.push(action);
+        }
+    }
+    /// Whether there is still actions to undo
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+    /// Whether there is still actions to redo
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
     }
 
     // Handle messages received from the audio thread
@@ -231,12 +317,14 @@ impl ToniqueProjectState {
             }
         }
     }
-
+    /// To make sure some action do not conflict, pending actions are handled during state updates
     fn handle_pending_actions(&mut self) {
-        for action in self.pending_actions.iter() {
-            match action {
+        let pendings = take(&mut self.pending_actions);
+        for pending in pendings {
+            match pending {
                 ProjectStatePendingAction::DeleteTrack { id } => {
-                    self.track_service.delete(&id, &mut self.tx);
+                    let action = DeleteTrackAction::new(&id);
+                    self.apply_action(Box::new(action));
                 }
             }
         }
