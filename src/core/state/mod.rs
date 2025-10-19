@@ -5,6 +5,7 @@ use crate::{
     core::{
         clip::ClipCore,
         message::{GuiToPlayerMsg, ProcessToGuiMsg},
+        metrics::GlobalMetrics,
         services::track::TrackService,
         state::action::{
             AddClipsAction, AddTrackAction, BatchAction, CutClipAction, DeleteClipsAction,
@@ -13,7 +14,6 @@ use crate::{
         },
         track::{MutableTrackCore, TrackCore, TrackReferenceCore},
     },
-    metrics::GlobalMetrics,
     ui::{effect::UIEffect, effects::EffectId, workspace::PlaybackState},
 };
 use rtrb::{Consumer, Producer};

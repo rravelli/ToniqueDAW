@@ -1,4 +1,4 @@
-use crate::metrics::AudioMetrics;
+use crate::core::metrics::AudioMetrics;
 use egui::{Color32, Painter, Pos2, Rect, Sense, Vec2, Widget};
 
 const RANGE: f32 = 60.;

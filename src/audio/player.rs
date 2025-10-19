@@ -5,7 +5,7 @@ use crate::{
         preview::PreviewBackend,
         track::{TrackBackend, TrackKind, audio::AudioTrackData},
     },
-    metrics::{AudioMetrics, GlobalMetrics},
+    core::metrics::{AudioMetrics, GlobalMetrics},
     ui::workspace::PlaybackState,
 };
 use fundsp::{

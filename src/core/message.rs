@@ -1,4 +1,4 @@
-use crate::{core::clip::ClipCore, metrics::GlobalMetrics};
+use crate::core::{clip::ClipCore, metrics::GlobalMetrics};
 use fundsp::hacker::AudioUnit;
 use std::{collections::HashMap, fmt::Debug, path::PathBuf};
 

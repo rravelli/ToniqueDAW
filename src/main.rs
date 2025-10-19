@@ -13,7 +13,6 @@ mod audio;
 mod cache;
 mod config;
 mod core;
-mod metrics;
 mod output;
 mod ui;
 mod ui_main;
