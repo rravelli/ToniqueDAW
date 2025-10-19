@@ -5,7 +5,7 @@ use symphonia::default::get_probe;
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use crate::waveform::load_audio;
@@ -35,8 +35,8 @@ impl From<symphonia::core::errors::Error> for AudioInfoError {
 pub struct AudioInfo {
     pub name: String,
     pub duration: Option<Duration>,
-    pub data: Arc<Mutex<(Vec<f32>, Vec<f32>)>>,
-    pub ready: Arc<Mutex<bool>>,
+    pub data: Arc<RwLock<(Vec<f32>, Vec<f32>)>>,
+    pub ready: Arc<RwLock<bool>>,
     pub sample_rate: u32,
     pub channels: u16,
     pub codec: String,
@@ -81,9 +81,9 @@ pub fn get_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoErr
         .n_frames
         .map(|frames| Duration::from_secs_f64(frames as f64 / sample_rate as f64));
 
-    let data = Arc::new(Mutex::new((Vec::new(), Vec::new())));
+    let data = Arc::new(RwLock::new((Vec::new(), Vec::new())));
     let data_ref = data.clone();
-    let analyzed = Arc::new(Mutex::new(false));
+    let analyzed = Arc::new(RwLock::new(false));
     let ready_clone = analyzed.clone();
     let p = path.as_ref().to_string_lossy().to_string();
 

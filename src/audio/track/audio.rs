@@ -21,7 +21,7 @@ impl Processor for AudioTrackData {
                 continue;
             }
             // not ready
-            if let Ok(ready) = clip.audio.ready.lock()
+            if let Ok(ready) = clip.audio.ready.read()
                 && !*ready
             {
                 continue;
