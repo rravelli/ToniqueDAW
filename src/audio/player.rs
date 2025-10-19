@@ -216,7 +216,9 @@ impl PlayerBackend {
 
     fn handle_messages(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         while let Ok(msg) = self.from_gui_rx.pop() {
-            println!("\x1b[1m\x1b[34mOutput Thread: {:?}\x1b[0m", msg);
+            if cfg!(debug_assertions) {
+                println!("\x1b[1m\x1b[34mOutput Thread: {:?}\x1b[0m", msg);
+            }
             match msg {
                 GuiToPlayerMsg::Play => {
                     self.playback_state = PlaybackState::Playing;

@@ -163,7 +163,6 @@ impl ToniqueProjectState {
         let action = DuplicateClipAction::new(ids, bounds);
         self.apply_action(Box::new(action));
     }
-    /// TODO: Action
     /// Resize clip without computing overlap checks.
     /// Use `commit_resize_clip` to apply overlap checks and add to undo stack.
     pub fn resize_clip(&mut self, id: &String, start: f32, end: f32, pos: f32) {
@@ -261,7 +260,9 @@ impl ToniqueProjectState {
             self.batch_buffer.push(action);
             return;
         }
-        println!("Applying {}", action.name());
+        if cfg!(debug_assertions) {
+            println!("Applying {}", action.name());
+        }
         action.apply(self);
         self.undo_stack.push(action);
         self.redo_stack.clear();
@@ -282,7 +283,9 @@ impl ToniqueProjectState {
     /// Undo last action. Does nothing if there is no action.
     pub fn undo(&mut self) {
         if let Some(mut action) = self.undo_stack.pop() {
-            println!("Undoing {}", action.name());
+            if cfg!(debug_assertions) {
+                println!("Undoing {}", action.name());
+            }
             action.undo(self);
             self.redo_stack.push(action);
         }
@@ -290,7 +293,9 @@ impl ToniqueProjectState {
     /// Redo last action. Does nothing if there is no action.
     pub fn redo(&mut self) {
         if let Some(mut action) = self.redo_stack.pop() {
-            println!("Redoing {}", action.name());
+            if cfg!(debug_assertions) {
+                println!("Redoing {}", action.name());
+            }
             action.apply(self);
             self.undo_stack.push(action);
         }

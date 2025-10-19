@@ -653,8 +653,6 @@ impl Workspace {
     }
 
     fn handle_hot_keys(&mut self, ui: &mut Ui) {
-        let mut new_selected = vec![];
-        let mut updated = false;
         // If other element focused do not check
         if ui.memory(|m| m.focused().is_some()) {
             return;
@@ -675,10 +673,7 @@ impl Workspace {
                     &self.selected_clips.clip_ids,
                     self.selected_clips.bounds.map(|b| (b.start_pos, b.end_pos)),
                 );
-
-                // new_selected.extend(new_clips.iter().map(|c| c.id.clone()));
-                updated = true;
-
+                self.selected_clips.clip_ids.clear();
                 if let Some(bounds) = &mut self.selected_clips.bounds {
                     let bound_size = bounds.end_pos - bounds.start_pos;
                     bounds.start_pos = bounds.end_pos;
@@ -713,10 +708,6 @@ impl Workspace {
         } else if ui.input(|i| i.modifiers.ctrl && i.key_pressed(Key::Y)) {
             // Redo
             self.state.redo();
-        }
-
-        if updated {
-            self.selected_clips.clip_ids = new_selected;
         }
     }
 

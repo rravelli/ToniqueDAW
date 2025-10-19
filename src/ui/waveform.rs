@@ -1,4 +1,4 @@
-use std::sync::{MutexGuard, RwLockReadGuard};
+use std::sync::RwLockReadGuard;
 
 use egui::{Color32, Rect, Shape};
 
