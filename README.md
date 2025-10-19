@@ -13,3 +13,5 @@ cargo run
 ```bash
 cargo run --release
 ```
+
+[![codecov](https://codecov.io/github/rravelli/ToniqueDAW/graph/badge.svg?token=R3Y36TXT7D)](https://codecov.io/github/rravelli/ToniqueDAW)
