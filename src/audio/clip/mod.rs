@@ -108,8 +108,8 @@ impl ClipBackend {
             self.resampler_output_buffer[1][..(max_range - min_range)]
                 .copy_from_slice(&self.resampler_cache_buffer[1][min_range..max_range]);
 
-            self.resampler_cache_buffer[0].clear();
-            self.resampler_cache_buffer[1].clear();
+            self.resampler_cache_buffer[0].drain(min_range..max_range);
+            self.resampler_cache_buffer[1].drain(min_range..max_range);
         }
         // Update resampler sample rate ratio
         let _ = self
