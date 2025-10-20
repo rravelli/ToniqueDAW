@@ -80,15 +80,14 @@ impl PreviewBackend {
             let mut output_len = buffer_len;
             if buffer_len > 0 {
                 // Copy proper range of the buffer
-                let min_range = 0;
-                let max_range = buffer_len.min(num_frames + min_range);
-                output[0][..(max_range - min_range)]
-                    .copy_from_slice(&self.buffer[0][min_range..max_range]);
-                output[1][..(max_range - min_range)]
-                    .copy_from_slice(&self.buffer[1][min_range..max_range]);
+                let max_range = buffer_len.min(num_frames);
+                output[0][..max_range]
+                    .copy_from_slice(&self.buffer[0][..max_range]);
+                output[1][..max_range]
+                    .copy_from_slice(&self.buffer[1][..max_range]);
                 // Remove copied samples from the buffer
-                self.buffer[0].drain(min_range..max_range);
-                self.buffer[1].drain(min_range..max_range);
+                self.buffer[0].drain(0..max_range);
+                self.buffer[1].drain(0..max_range);
             }
 
             let input_frames = self.resampler.input_frames_next();
