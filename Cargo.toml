@@ -1,5 +1,5 @@
 [package]
-name = "music-daw"
+name = "tonique_daw"
 version = "0.1.0"
 authors = ["Rémi Ravelli <remi.ravelli@gmail.com>"]
 edition = "2024"

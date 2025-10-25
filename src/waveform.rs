@@ -1,5 +1,5 @@
 use std::fs::File;
-
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::DecoderOptions;
@@ -79,12 +79,10 @@ fn normalize_buffer(audio_buf: AudioBufferRef, sample_buffer: &mut Vec<f32>, cha
     }
 }
 
-use std::sync::{Arc, Mutex};
-
 pub fn load_audio(
     path: String,
-    shared_data: Arc<Mutex<(Vec<f32>, Vec<f32>)>>,
-    ready: Arc<Mutex<bool>>,
+    shared_data: Arc<RwLock<(Vec<f32>, Vec<f32>)>>,
+    ready: Arc<RwLock<bool>>,
 ) -> Result<(), String> {
     let start = Instant::now();
     // Open the audio file
@@ -138,23 +136,26 @@ pub fn load_audio(
                 }
                 // Append data chunk by chunk
                 if buffer_0.len() > CHUNK_SIZE || buffer_1.len() > CHUNK_SIZE {
-                    let mut data = shared_data.lock().unwrap();
-                    data.0.extend(buffer_0.clone());
-                    data.1.extend(buffer_1.clone());
-                    buffer_0 = Vec::new();
-                    buffer_1 = Vec::new();
+                    if let Ok(mut data) = shared_data.write() {
+                        data.0.extend(buffer_0.clone());
+                        data.1.extend(buffer_1.clone());
+                    };
+                    buffer_0.clear();
+                    buffer_1.clear();
                 }
             }
             Err(e) => eprintln!("Error decoding audio packet: {}", e),
         }
     }
     // Add missing data
-    let mut data = shared_data.lock().unwrap();
-    data.0.extend(buffer_0.clone());
-    data.1.extend(buffer_1.clone());
+    if let Ok(mut data) = shared_data.write() {
+        data.0.extend(buffer_0.clone());
+        data.1.extend(buffer_1.clone());
+    };
     // Now ready
-    let mut ready = ready.lock().unwrap();
-    *ready = true;
+    if let Ok(mut ready) = ready.write() {
+        *ready = true;
+    }
     let duration = start.elapsed();
     println!("Finished {} in: {:?}", path, duration);
 

@@ -1,12 +1,11 @@
 use crate::{
-    ProcessToGuiMsg,
+    GuiToPlayerMsg, ProcessToGuiMsg,
     audio::{
         clip::ClipBackend,
         preview::PreviewBackend,
         track::{TrackBackend, TrackKind, audio::AudioTrackData},
     },
-    message::GuiToPlayerMsg,
-    metrics::{AudioMetrics, GlobalMetrics},
+    core::metrics::{AudioMetrics, GlobalMetrics},
     ui::workspace::PlaybackState,
 };
 use fundsp::{
@@ -216,6 +215,9 @@ impl PlayerBackend {
 
     fn handle_messages(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         while let Ok(msg) = self.from_gui_rx.pop() {
+            if cfg!(debug_assertions) {
+                println!("\x1b[1m\x1b[34mOutput Thread: {:?}\x1b[0m", msg);
+            }
             match msg {
                 GuiToPlayerMsg::Play => {
                     self.playback_state = PlaybackState::Playing;
@@ -256,16 +258,18 @@ impl PlayerBackend {
                         ));
                     }
                 }
-                GuiToPlayerMsg::AddClips(clips) => {
-                    for clip in &clips {
-                        if let Some(track) = self.tracks.get_mut(&clip.track_id)
+                GuiToPlayerMsg::AddClips(map) => {
+                    for (track_id, clips) in map {
+                        if let Some(track) = self.tracks.get_mut(&track_id)
                             && let TrackKind::Audio(data) = &mut track.kind
                         {
-                            data.clips.push(ClipBackend::from_command(
-                                clip,
-                                self.bpm,
-                                self.sample_rate,
-                            ));
+                            for clip in clips {
+                                data.clips.push(ClipBackend::from_clipcore(
+                                    &clip,
+                                    self.bpm,
+                                    self.sample_rate,
+                                ));
+                            }
                         }
                     }
                 }

@@ -1,5 +1,5 @@
 use crate::{
-    metrics::AudioMetrics,
+    core::metrics::AudioMetrics,
     ui::{buttons::paint_circle_button, effect::UIEffectContent},
 };
 use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};

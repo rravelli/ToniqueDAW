@@ -1,8 +1,8 @@
-use std::sync::MutexGuard;
+use std::sync::RwLockReadGuard;
 
 use egui::{Color32, Rect, Shape};
 
-const MAX_SEGMENT_SIZE: usize = 200;
+const MAX_SEGMENT_SIZE: usize = 15;
 
 #[derive(Clone)]
 pub struct UIWaveform {}
@@ -16,7 +16,7 @@ impl UIWaveform {
         &self,
         shapes: &mut Vec<Shape>,
         rect: Rect,
-        data: MutexGuard<'_, (Vec<f32>, Vec<f32>)>,
+        data: RwLockReadGuard<'_, (Vec<f32>, Vec<f32>)>,
         start_ratio: f32,
         end_ratio: f32,
         num_samples: u64,
@@ -66,7 +66,7 @@ impl UIWaveform {
                     egui::pos2(rect.min.x + x as f32, center_y + min * rect.height() / 2.),
                     egui::pos2(rect.min.x + x as f32, center_y + max * rect.height() / 2.),
                 ],
-                egui::Stroke::new(1., Color32::BLACK),
+                egui::Stroke::new(1.5, Color32::BLACK),
             ));
         }
 

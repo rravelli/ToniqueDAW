@@ -1,10 +1,7 @@
 pub mod midi;
-
-use std::path::PathBuf;
-
+use crate::{analysis::AudioInfo, cache::AUDIO_ANALYSIS_CACHE, core::clip::ClipCore};
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType};
-
-use crate::{analysis::AudioInfo, cache::AUDIO_ANALYSIS_CACHE, message::CreateClipCommand};
+use std::path::PathBuf;
 
 const RESAMPLER_CHUNK_SIZE: usize = 1024;
 
@@ -123,7 +120,7 @@ impl ClipBackend {
             let chunk_size = self.resampler.input_frames_next();
             let input_size = chunk_size.min(end_index.saturating_sub(self.playhead));
             // Copy data to input buffer
-            if let Ok(data) = self.audio.data.lock() {
+            if let Ok(data) = self.audio.data.read() {
                 self.input_buffer[0].resize(chunk_size, 0.);
                 self.input_buffer[1].resize(chunk_size, 0.);
 
@@ -217,7 +214,7 @@ impl ClipBackend {
         let end_offset = ((end - playhead) as f64 * sample_rate_ratio).floor() as usize;
 
         if sample_rate as u32 == self.audio.sample_rate {
-            if let Ok(data) = self.audio.data.lock() {
+            if let Ok(data) = self.audio.data.read() {
                 let frames = end_offset - start_offset;
                 let data_start = start_index;
                 let data_end = data_start + frames;
@@ -275,13 +272,13 @@ impl ClipBackend {
                 .floor() as usize
     }
 
-    pub fn from_command(command: &CreateClipCommand, bpm: f32, sample_rate: usize) -> Self {
+    pub fn from_clipcore(clip: &ClipCore, bpm: f32, sample_rate: usize) -> Self {
         Self::new(
-            command.clip_id.clone(),
-            command.file_path.clone(),
-            (command.position / bpm * 60. * sample_rate as f32).floor() as usize,
-            command.trim_start,
-            command.trim_end,
+            clip.id.clone(),
+            clip.audio.path.clone(),
+            (clip.position / bpm * 60. * sample_rate as f32).floor() as usize,
+            clip.trim_start,
+            clip.trim_end,
         )
     }
 }

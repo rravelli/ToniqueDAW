@@ -1,4 +1,4 @@
-use crate::metrics::AudioMetrics;
+use crate::core::metrics::AudioMetrics;
 use egui::{
     Button, Color32, Frame, InnerResponse, Label, Margin, Rect, Response, RichText, Sense, Stroke,
     Ui, Vec2,

@@ -30,6 +30,7 @@ pub const HANDLE_HEIGHT: f32 = 3.0;
 #[derive(Debug, Clone)]
 pub struct UITrack {
     gain: f32,
+    old_volume: f32,
     prev_height: f32,
     edit: bool,
     arm: bool,
@@ -43,6 +44,7 @@ impl UITrack {
             arm: false,
             edit: false,
             gain: 0.,
+            old_volume: 1.0,
             prev_height: DEFAULT_TRACK_HEIGHT,
         }
     }
@@ -109,8 +111,8 @@ impl UITrack {
                     ui.horizontal(|ui| {
                         ui.set_height(BUTTON_SIZE);
 
-                        let track_mut = state.track_mut(track.id.clone());
-                        self.open_button(ui, track_mut);
+                        // let track_mut = state.track_mut(&track.id);
+                        self.open_button(ui, track, state);
 
                         let text_width =
                             ui.available_width() - 4. * PADDING - 3. * BUTTON_SIZE - METER_WIDTH;
@@ -118,12 +120,12 @@ impl UITrack {
                         if text_width > 0. {
                             ui.scope(|ui| {
                                 ui.set_width(text_width);
-                                self.text_ui(ui, track, &mut track_mut.name);
+                                self.text_ui(ui, track, state);
                             });
                         }
                         // Track controls
                         let mute_res = self.mute_button(ui, is_solo, track);
-                        let solo_res = self.solo_button(ui, is_solo, &mut track_mut.color);
+                        let solo_res = self.solo_button(ui, is_solo, track);
                         let arm_res = self.arm_button(ui);
 
                         if mute_res.clicked() {
@@ -136,7 +138,7 @@ impl UITrack {
                             self.arm = !self.arm;
                         }
                     });
-                    let track_mut = state.track_mut(track.id.clone());
+                    let track_mut = state.track_mut(&track.id);
                     // Extra controls
                     if !track_mut.closed {
                         let prev_gain = self.gain;
@@ -160,19 +162,24 @@ impl UITrack {
                 });
             });
         });
-        let track_mut = state.track_mut(track.id.clone());
         // Drag area
-        self.dragger(ui, track_mut);
+        self.dragger(ui, track, state);
 
         // Save temporary state
         ui.data_mut(|w| w.insert_temp(id, self.clone()));
         frame_res.response
     }
 
-    fn text_ui(&mut self, ui: &mut Ui, track: &TrackReferenceCore, name: &mut String) {
+    fn text_ui(
+        &mut self,
+        ui: &mut Ui,
+        track: &TrackReferenceCore,
+        state: &mut ToniqueProjectState,
+    ) {
         if self.edit {
+            let track_mut = state.track_mut(&track.id);
             let text_edit = ui.add(
-                TextEdit::singleline(name)
+                TextEdit::singleline(&mut track_mut.name)
                     .font(FontId::new(9., egui::FontFamily::Proportional))
                     .background_color(Color32::from_black_alpha(20))
                     .text_color(Color32::WHITE)
@@ -185,12 +192,13 @@ impl UITrack {
             if text_edit.lost_focus() {
                 self.edit = false;
                 self._edit_lost_focus = false;
-                if name.is_empty() {
-                    *name = "Audio Track".to_string();
+                if track_mut.name.is_empty() {
+                    track_mut.name = "Audio Track".to_string();
                 }
+                state.commit_track_mut(&track.id);
             }
         } else {
-            let formatted_name = parse_name(name, track.index);
+            let formatted_name = parse_name(&track.name, track.index);
             ui.add(
                 Label::new(RichText::new(formatted_name).color(Color32::WHITE).size(9.))
                     .truncate()
@@ -227,12 +235,13 @@ impl UITrack {
                     .clicked()
                 {
                     let mut rng = rand::rng();
-                    let track_mut = state.track_mut(track.id.clone());
+                    let track_mut = state.track_mut(&track.id);
                     track_mut.color = Color32::from_rgb(
                         rng.random_range(0..=255),
                         rng.random_range(0..=255),
                         rng.random_range(0..=255),
-                    )
+                    );
+                    state.commit_track_mut(&track.id);
                 }
                 ui.add(ContextMenuSeparator::new());
                 if ui
@@ -261,9 +270,9 @@ impl UITrack {
         )
     }
 
-    fn solo_button(&mut self, ui: &mut Ui, solo: bool, color: &Color32) -> Response {
+    fn solo_button(&mut self, ui: &mut Ui, solo: bool, track: &TrackReferenceCore) -> Response {
         ui.add(SquareButton::new("S").sized(BUTTON_SIZE).fill(if solo {
-            *color
+            track.color
         } else {
             ui.visuals().widgets.inactive.bg_fill
         }))
@@ -281,7 +290,13 @@ impl UITrack {
         )
     }
 
-    fn open_button(&mut self, ui: &mut Ui, track_mut: &mut MutableTrackCore) -> Response {
+    fn open_button(
+        &mut self,
+        ui: &mut Ui,
+        track: &TrackReferenceCore,
+        state: &mut ToniqueProjectState,
+    ) -> Response {
+        let track_mut = state.track_mut(&track.id);
         let icon = if track_mut.closed {
             egui_phosphor::fill::CARET_RIGHT
         } else {
@@ -317,16 +332,27 @@ impl UITrack {
     ) -> Response {
         let desired_size = egui::vec2(2. * BUTTON_SIZE + 1., 20.);
         let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
+        self.gain = 20. * track.volume.log10();
 
         if response.dragged() {
             let delta = response.drag_delta().x;
             self.gain += delta * (range.end() - range.start()) / rect.width();
             self.gain = self.gain.clamp(*range.start(), *range.end());
+            state.set_volume(track.id.clone(), 10f32.powf(self.gain / 20.));
             response.mark_changed();
+        }
+
+        if response.drag_stopped() {
+            let new_volume = 10f32.powf(self.gain / 20.);
+            state.commit_volume(track.id.clone(), self.old_volume, new_volume);
+            self.old_volume = new_volume;
         }
 
         if response.double_clicked() {
             self.gain = 0.;
+            state.commit_volume(track.id.clone(), self.old_volume, 1.0);
+            self.old_volume = 1.0;
+            response.mark_changed();
         }
 
         if response.hovered() {
@@ -363,12 +389,16 @@ impl UITrack {
             Color32::WHITE,
         );
 
-        state.set_volume(track.id.clone(), 10f32.powf(self.gain / 20.));
-
         response
     }
 
-    fn dragger(&mut self, ui: &mut Ui, track_mut: &mut MutableTrackCore) {
+    fn dragger(
+        &mut self,
+        ui: &mut Ui,
+        track: &TrackReferenceCore,
+        state: &mut ToniqueProjectState,
+    ) {
+        let track_mut = state.track_mut(&track.id);
         let (_, mut response) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), HANDLE_HEIGHT),
             Sense::drag(),

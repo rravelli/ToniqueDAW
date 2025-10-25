@@ -342,7 +342,7 @@ impl FileBrowser {
                 let rect = response.rect;
 
                 if let Some(info) = &self.selected_audio
-                    && let Ok(data) = info.data.lock()
+                    && let Ok(data) = info.data.read()
                 {
                     if response.clicked()
                         && let Some(mouse_pos) = response.interact_pointer_pos()

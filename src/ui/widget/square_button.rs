@@ -1,4 +1,4 @@
-use egui::{Align2, Color32, CursorIcon, FontId, Sense, Stroke, Vec2, Widget};
+use egui::{Align2, Color32, CursorIcon, FontId, RichText, Sense, Stroke, Vec2, Widget};
 
 pub struct SquareButton {
     size: f32,
@@ -7,16 +7,19 @@ pub struct SquareButton {
     text: String,
     text_color: Color32,
     font: FontId,
+    // Tooltip
+    tooltip_text: String,
 }
 
 impl SquareButton {
-    pub fn new(text: &str) -> Self {
+    pub fn new(text: impl ToString) -> Self {
         Self {
             size: 15.,
             bg_color: Color32::from_gray(100),
-            text: text.into(),
+            text: text.to_string(),
             font: FontId::proportional(8.),
             text_color: Color32::WHITE,
+            tooltip_text: "".to_string(),
         }
     }
     pub fn fill(mut self, bg: Color32) -> Self {
@@ -33,6 +36,10 @@ impl SquareButton {
     }
     pub fn sized(mut self, size: f32) -> Self {
         self.size = size;
+        self
+    }
+    pub fn tooltip(mut self, text: impl ToString) -> Self {
+        self.tooltip_text = text.to_string();
         self
     }
 }
@@ -62,6 +69,14 @@ impl Widget for SquareButton {
         );
         // Update response
         res = res.on_hover_cursor(CursorIcon::PointingHand);
+
+        if !self.tooltip_text.is_empty() {
+            res = res.on_hover_text(
+                RichText::new(self.tooltip_text)
+                    .color(Color32::WHITE)
+                    .font(FontId::new(8., egui::FontFamily::Proportional)),
+            )
+        }
 
         res
     }

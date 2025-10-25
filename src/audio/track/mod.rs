@@ -2,22 +2,20 @@ pub mod audio;
 pub mod bus;
 pub mod midi;
 
+use crate::{
+    audio::{
+        clip::ClipBackend,
+        track::{audio::AudioTrackData, bus::BusTrackData, midi::MidiTrackData},
+    },
+    core::metrics::AudioMetrics,
+};
 use fundsp::{
     MAX_BUFFER_SIZE,
     hacker::{AudioUnit, BufferArray, Fade, NetBackend, pass},
     hacker32::U2,
     net::{Net, NodeId},
 };
-
 use std::collections::HashMap;
-
-use crate::{
-    audio::{
-        clip::ClipBackend,
-        track::{audio::AudioTrackData, bus::BusTrackData, midi::MidiTrackData},
-    },
-    metrics::AudioMetrics,
-};
 
 trait Processor {
     fn process(&mut self, pos: usize, num_frames: usize, sample_rate: usize, mix: &mut Vec<f32>);
@@ -86,7 +84,7 @@ impl TrackBackend {
             TrackKind::Audio(audio_track_data) => {
                 audio_track_data.process(pos, num_frames, sample_rate, &mut self.mix)
             }
-            TrackKind::Midi(midi_track_data) => todo!(),
+            TrackKind::Midi(_) => todo!(),
             TrackKind::Bus(bus_track_data) => {
                 bus_track_data.process(pos, num_frames, sample_rate, &mut self.mix)
             }
@@ -204,8 +202,8 @@ impl TrackBackend {
                     };
                 }
             }
-            TrackKind::Midi(midi_track_data) => {}
-            TrackKind::Bus(bus_track_data) => {}
+            TrackKind::Midi(_) => {}
+            TrackKind::Bus(_) => {}
         }
         clone
     }

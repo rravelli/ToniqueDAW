@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    core::clip::ClipCore,
-    message::{CreateClipCommand, GuiToPlayerMsg},
+    core::{clip::ClipCore, message::GuiToPlayerMsg},
     ui::{
         effect::UIEffect,
         effects::{EffectId, create_effect_from_id},
@@ -29,6 +28,7 @@ pub struct TrackCore {
     /// TODO Should not mix ui in the state
     effects: Vec<UIEffect>,
     pub mutable: MutableTrackCore,
+    pub old_mutable: MutableTrackCore,
 }
 
 impl TrackCore {
@@ -37,9 +37,10 @@ impl TrackCore {
             id: uuid::Uuid::new_v4().to_string(),
             clips: vec![],
             muted: false,
-            volume: 0.,
+            volume: 1.,
             arm: false,
             mutable: MutableTrackCore::new(),
+            old_mutable: MutableTrackCore::new(),
             effects: vec![],
         }
     }
@@ -75,17 +76,28 @@ impl TrackCore {
     pub fn get_mutable_fields(&mut self) -> &mut MutableTrackCore {
         &mut self.mutable
     }
+    /// Add clips in the track without any overlap check.
+    /// Do not use if you are not sure of whether the clip overlap with other clips.
+    pub fn add_clips_skip_overlap_check(
+        &mut self,
+        clips: Vec<ClipCore>,
+        tx: &mut Producer<GuiToPlayerMsg>,
+    ) {
+        let mut map = HashMap::new();
+        self.clips.extend(clips.clone());
+        map.insert(self.id.clone(), clips);
+        let _ = tx.push(GuiToPlayerMsg::AddClips(map));
+    }
 
-    /**
-    Add clips to this track by making sure no overlap
-    occurs. Updates at the same time the audio thread
-    */
+    /// Add clips to this track by making sure no overlap occurs.
+    /// Updates at the same time the audio thread.
+    /// Returns created and deleted clips in the process.
     pub fn add_clips(
         &mut self,
         added_clips: &Vec<ClipCore>,
         bpm: f32,
         tx: &mut Producer<GuiToPlayerMsg>,
-    ) {
+    ) -> (Vec<ClipCore>, Vec<ClipCore>) {
         let mut deleted_clips = Vec::new();
         let mut created_clips = Vec::new();
 
@@ -97,17 +109,17 @@ impl TrackCore {
 
             for clip in self.clips.iter() {
                 // No overlap
-                if clip.position > end || clip.end(bpm) < start {
+                if clip.position >= end || clip.end(bpm) <= start {
                     new_clips.push(clip.clone());
                     continue;
                 }
-                deleted_clips.push(clip.id.clone());
+                deleted_clips.push(clip.clone());
                 // Sample overlaps before new clip
                 if clip.position < start {
                     let mut trimmed = clip.clone_with_new_id();
                     trimmed.trim_end_at(start, bpm);
 
-                    created_clips.push(trimmed.clone().into_command(self.id.clone()));
+                    created_clips.push(trimmed.clone());
                     new_clips.push(trimmed);
                 }
 
@@ -116,19 +128,30 @@ impl TrackCore {
                     let mut trimmed = clip.clone_with_new_id();
                     trimmed.trim_start_at(end, bpm);
 
-                    created_clips.push(trimmed.clone().into_command(self.id.clone()));
+                    created_clips.push(trimmed.clone());
                     new_clips.push(trimmed);
                 }
             }
             self.clips = new_clips;
         }
-        for added_clip in added_clips.iter() {
-            created_clips.push(added_clip.clone().into_command(self.id.clone()));
-            self.clips.push(added_clip.clone());
+        created_clips.extend(added_clips.clone());
+        let mut created_map = HashMap::new();
+        created_map.insert(self.id.clone(), created_clips.clone());
+        self.clips.extend(added_clips.clone());
+
+        let _ = tx.push(GuiToPlayerMsg::AddClips(created_map));
+        if deleted_clips.len() > 0 {
+            let _ = tx.push(GuiToPlayerMsg::RemoveClip(
+                deleted_clips.iter().map(|c| c.id.clone()).collect(),
+            ));
         }
 
-        let _ = tx.push(GuiToPlayerMsg::AddClips(created_clips));
-        let _ = tx.push(GuiToPlayerMsg::RemoveClip(deleted_clips));
+        (created_clips, deleted_clips)
+    }
+
+    pub fn delete_clips(&mut self, ids: &Vec<String>, tx: &mut Producer<GuiToPlayerMsg>) {
+        self.clips.retain(|clip| !ids.contains(&clip.id));
+        let _ = tx.push(GuiToPlayerMsg::RemoveClip(ids.clone()));
     }
 
     /// Fix overlaps so that no clips overlaps **added_clip**    
@@ -136,8 +159,9 @@ impl TrackCore {
         &mut self,
         added_clip: &ClipCore,
         bpm: f32,
-        deleted_clips: &mut Vec<String>,
-        created_clips: &mut Vec<CreateClipCommand>,
+        deleted_clips: &mut Vec<ClipCore>,
+        created_clips: &mut Vec<ClipCore>,
+        ignore: &Vec<String>,
     ) {
         // Vec of clips after update
         let mut new_clips = vec![];
@@ -145,17 +169,20 @@ impl TrackCore {
         let end = added_clip.end(bpm);
         for clip in self.clips.iter() {
             // No overlap or clip already added
-            if (clip.position > end || clip.end(bpm) < start) || clip.id == added_clip.id {
+            if (clip.position > end || clip.end(bpm) < start)
+                || clip.id == added_clip.id
+                || ignore.contains(&clip.id)
+            {
                 new_clips.push(clip.clone());
                 continue;
             }
-            deleted_clips.push(clip.id.clone());
+            deleted_clips.push(clip.clone());
             // Sample overlaps before new clip
             if clip.position < start {
                 let mut trimmed = clip.clone_with_new_id();
                 trimmed.trim_end_at(start, bpm);
 
-                created_clips.push(trimmed.clone().into_command(self.id.clone()));
+                created_clips.push(trimmed.clone());
                 new_clips.push(trimmed);
             }
 
@@ -164,7 +191,7 @@ impl TrackCore {
                 let mut trimmed = clip.clone_with_new_id();
                 trimmed.trim_start_at(end, bpm);
 
-                created_clips.push(trimmed.clone().into_command(self.id.clone()));
+                created_clips.push(trimmed.clone());
                 new_clips.push(trimmed);
             }
         }
@@ -176,21 +203,22 @@ impl TrackCore {
         position: f32,
         bpm: f32,
         tx: &mut Producer<GuiToPlayerMsg>,
-    ) -> Option<(ClipCore, ClipCore)> {
+    ) -> Option<(ClipCore, ClipCore, ClipCore)> {
         let mut found_clip = None;
         // Find corresponding clip
         for clip in self.clips.iter_mut() {
             if clip.position < position && position < clip.end(bpm) {
+                let original = clip.clone();
                 // Create right clip
                 let mut right_clip = clip.clone_with_new_id();
                 right_clip.trim_start_at(position, bpm);
                 // Resize left clip
                 clip.trim_end_at(position, bpm);
-                found_clip = Some((clip.clone(), right_clip.clone()));
+                found_clip = Some((original, clip.clone(), right_clip.clone()));
                 break;
             }
         }
-        if let Some((left_clip, right_clip)) = found_clip {
+        if let Some((original, left_clip, right_clip)) = found_clip {
             // Uppdate audio thread
             let _ = tx.push(GuiToPlayerMsg::AddClip(
                 self.id.clone(),
@@ -208,7 +236,7 @@ impl TrackCore {
             ));
             // Add new clip
             self.clips.push(right_clip.clone());
-            return Some((left_clip, right_clip));
+            return Some((original, left_clip, right_clip));
         }
         None
     }
@@ -219,8 +247,9 @@ impl TrackCore {
         bounds: Option<(f32, f32)>,
         bpm: f32,
         tx: &mut Producer<GuiToPlayerMsg>,
-    ) -> Vec<ClipCore> {
-        let mut new_clips = Vec::new();
+    ) -> (Vec<ClipCore>, Vec<ClipCore>) {
+        let mut created_clips = Vec::new();
+        let mut deleted_clips = Vec::new();
         for id in ids {
             let clip = self.clips.iter().find(|c| c.id == *id);
             if let Some(clip) = clip {
@@ -233,15 +262,17 @@ impl TrackCore {
                 } else {
                     duplicated_clip.position = clip.end(bpm);
                 }
-                new_clips.push(duplicated_clip);
+                created_clips.push(duplicated_clip);
             }
         }
         // Update track with new clips
-        if new_clips.len() > 0 {
-            self.add_clips(&new_clips, bpm, tx);
+        if !created_clips.is_empty() {
+            let (created, deleted) = self.add_clips(&created_clips, bpm, tx);
+            created_clips = created;
+            deleted_clips.extend(deleted);
         }
 
-        new_clips
+        (created_clips, deleted_clips)
     }
 
     pub fn duplicate(&self) -> (Self, HashMap<String, String>) {
@@ -258,6 +289,29 @@ impl TrackCore {
         }
 
         (clone, map)
+    }
+
+    pub fn resize_clip_skip_overlap_check(
+        &mut self,
+        id: &String,
+        trim_start: f32,
+        trim_end: f32,
+        position: f32,
+        tx: &mut Producer<GuiToPlayerMsg>,
+    ) {
+        let Some(clip) = self.clips.iter_mut().find(|c| &c.id == id) else {
+            return;
+        };
+        clip.trim_start = trim_start;
+        clip.trim_end = trim_end;
+        clip.position = position;
+
+        let _ = tx.push(GuiToPlayerMsg::ResizeClip(
+            id.clone(),
+            trim_start,
+            trim_end,
+            position,
+        ));
     }
 
     // Effect management
@@ -313,7 +367,7 @@ impl TrackReferenceCore {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MutableTrackCore {
     pub name: String,
     pub height: f32,
