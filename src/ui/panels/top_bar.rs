@@ -73,11 +73,11 @@ impl UITopBar {
             })
             .sized(25.)
             .font(FontId::new(
-                15.,
+                12.,
                 egui::FontFamily::Name(PHOSPHOR_FILL.into()),
             ))
             .fill(if playback_state == PlaybackState::Playing {
-                Color32::from_gray(200)
+                Color32::from_gray(220)
             } else {
                 PRIMARY_BUTTON_COLOR
             })
@@ -90,11 +90,11 @@ impl UITopBar {
             SquareButton::new(egui_phosphor::fill::CIRCLE)
                 .sized(25.)
                 .font(FontId::new(
-                    13.,
+                    12.,
                     egui::FontFamily::Name(PHOSPHOR_FILL.into()),
                 ))
                 .fill(PRIMARY_BUTTON_COLOR)
-                .color(Color32::from_rgb(170, 10, 10))
+                .color(Color32::from_gray(30))
                 .tooltip("Record"),
         );
     }
