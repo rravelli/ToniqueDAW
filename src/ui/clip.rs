@@ -15,11 +15,11 @@ const BORDER_WIDTH: f32 = 2.;
 const HEADER_HEIGHT: f32 = 16.;
 const MIN_HANDLE_WIDTH: f32 = 20.;
 #[derive(Clone)]
-pub struct UIClipv2 {
+pub struct UIClip {
     waveform: UIWaveform,
 }
 
-impl UIClipv2 {
+impl UIClip {
     pub fn new() -> Self {
         Self {
             waveform: UIWaveform::new(),

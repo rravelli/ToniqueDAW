@@ -9,7 +9,7 @@ use crate::{
         track::{TrackCore, TrackSoloState},
     },
     ui::{
-        clip::UIClipv2,
+        clip::UIClip,
         grid::{MAX_RIGHT, MIN_LEFT, VIEW_WIDTH, WorkspaceGrid},
         panels::{
             bottom_panel::{BOTTOM_BAR_HEIGHT, UIBottomPanel},
@@ -113,7 +113,6 @@ impl Workspace {
         if self.state.playback_state() == PlaybackState::Playing {
             ctx.request_repaint();
         }
-
         egui::TopBottomPanel::top("top-bar")
             .resizable(false)
             .frame(
@@ -171,13 +170,6 @@ impl Workspace {
             Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.vertical(|ui| {
-                    // ui.painter().text(
-                    //     Pos2::new(ui.max_rect().right() - 3., ui.max_rect().top() + 16.),
-                    //     Align2::RIGHT_BOTTOM,
-                    //     format!("{:.0}%", self.state.metrics.latency * 100.),
-                    //     FontId::new(10., egui::FontFamily::Proportional),
-                    //     ui.visuals().strong_text_color(),
-                    // );
                     ui.painter().text(
                         Pos2::new(ui.max_rect().right() - 3., ui.max_rect().top() + 28.),
                         Align2::RIGHT_BOTTOM,
@@ -217,7 +209,6 @@ impl Workspace {
 
                                     if response.clicked() {
                                         self.selected_clips.reset();
-                                        self.state.deselect();
                                         self.state.pause_preview();
                                     }
                                     let scroll_delta = ui.input(|i| i.smooth_scroll_delta.x);
@@ -369,7 +360,27 @@ impl Workspace {
                 y += track.height + HANDLE_HEIGHT;
                 continue;
             }
-            for clip in track.clips.iter() {
+            // Track hitbox
+            if ui.input(|i| {
+                i.pointer.primary_clicked()
+                    && i.pointer.hover_pos().is_some_and(|pos| {
+                        viewport.left() <= pos.x
+                            && pos.x <= viewport.right()
+                            && y <= pos.y
+                            && pos.y <= y + track.height
+                    })
+            }) {
+                self.state.select_track(&track.id);
+            };
+
+            for mut clip in track.clips.clone() {
+                if let Some((id, start, end, pos)) = &self.state.resized_clip
+                    && clip.id == *id
+                {
+                    clip.trim_start = *start;
+                    clip.trim_end = *end;
+                    clip.position = *pos;
+                }
                 if let Some(duration) = clip.duration() {
                     let width = self.grid.duration_to_width(duration, self.state.bpm());
                     let x = self.grid.beats_to_x(clip.position, viewport);
@@ -386,14 +397,14 @@ impl Workspace {
                             track.color
                         };
                         // Render ui
-                        let response = UIClipv2::new().ui(
+                        let response = UIClip::new().ui(
                             ui,
                             pos,
                             size,
                             viewport,
                             &self.grid,
                             !dragged && self.selected_clips.clip_ids.contains(&clip.id),
-                            clip,
+                            &clip,
                             &mut self.state,
                             !track.closed,
                             color,
@@ -586,7 +597,7 @@ impl Workspace {
                     let pos = Pos2::new(x, y);
                     let size = Vec2::new(width, height);
                     // Render Clip
-                    UIClipv2::new().ui(
+                    UIClip::new().ui(
                         ui,
                         pos,
                         size,
@@ -644,7 +655,7 @@ impl Workspace {
                     // self.state.add_clips(track_id, clips);
                 } else {
                 }
-                self.state.commmit_batch();
+                self.state.commit_batch();
                 self.drag_state = None;
             } else if !drag_state.duplicate || ui.input(|i| i.modifiers.ctrl) {
                 self.drag_state = Some(drag_state);
@@ -753,7 +764,7 @@ impl Workspace {
                 sample_preview.position = snapped_position;
                 let pos = Pos2::new(self.grid.beats_to_x(snapped_position, rect), track_y);
                 let size = Vec2::new(width, height);
-                UIClipv2::new().ui(
+                UIClip::new().ui(
                     ui,
                     pos,
                     size,

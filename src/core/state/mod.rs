@@ -1,4 +1,5 @@
 mod action;
+mod services;
 #[cfg(test)]
 mod tests;
 use crate::{
@@ -6,12 +7,12 @@ use crate::{
         clip::ClipCore,
         message::{GuiToPlayerMsg, ProcessToGuiMsg},
         metrics::GlobalMetrics,
-        services::track::TrackService,
         state::action::{
             AddClipsAction, AddTrackAction, BatchAction, CutClipAction, DeleteClipsAction,
             DeleteTrackAction, DuplicateClipAction, DuplicateTrackAction, MoveClipAction,
             ProjectStateAction, ResizeClipAction, SetMutableTrackAction, SetVolumeAction,
         },
+        state::services::track::TrackService,
         track::{MutableTrackCore, TrackCore, TrackReferenceCore},
     },
     ui::{effect::UIEffect, effects::EffectId, workspace::PlaybackState},
@@ -35,14 +36,16 @@ pub struct ToniqueProjectState {
     track_service: TrackService,
     // Pending
     pending_actions: Vec<ProjectStatePendingAction>,
-    // Should be private in the future
-    pub tx: Producer<GuiToPlayerMsg>,
+
+    tx: Producer<GuiToPlayerMsg>,
     rx: Consumer<ProcessToGuiMsg>,
     // History management
     undo_stack: Vec<Box<dyn ProjectStateAction>>,
     redo_stack: Vec<Box<dyn ProjectStateAction>>,
     batching: bool,
     batch_buffer: Vec<Box<dyn ProjectStateAction>>,
+
+    pub resized_clip: Option<(String, f32, f32, f32)>,
 }
 
 impl ToniqueProjectState {
@@ -62,6 +65,7 @@ impl ToniqueProjectState {
             redo_stack: Vec::new(),
             batching: false,
             batch_buffer: Vec::new(),
+            resized_clip: None,
         }
     }
     /// Update each frame the state
@@ -165,12 +169,14 @@ impl ToniqueProjectState {
     }
     /// Resize clip without computing overlap checks.
     /// Use `commit_resize_clip` to apply overlap checks and add to undo stack.
-    pub fn resize_clip(&mut self, id: &String, start: f32, end: f32, pos: f32) {
-        self.track_service
-            .resize_clip_skip_overlap_check(id, start, end, pos, &mut self.tx);
+    pub fn resize_clip(&mut self, id: &str, start: f32, end: f32, pos: f32) {
+        // self.track_service
+        //     .resize_clip_skip_overlap_check(id, start, end, pos, &mut self.tx);
+        self.resized_clip = Some((id.to_string(), start, end, pos));
     }
     /// Resize clip and perform overlap checks
-    pub fn commit_resize_clip(&mut self, id: &String, start: f32, end: f32, pos: f32) {
+    pub fn commit_resize_clip(&mut self, id: &str, start: f32, end: f32, pos: f32) {
+        self.resized_clip = None;
         let action = ResizeClipAction::new(id, start, end, pos);
         self.apply_action(Box::new(action));
     }
@@ -273,7 +279,7 @@ impl ToniqueProjectState {
         self.batching = true;
     }
     /// Apply changes saved in the batch buffer. New actions are no longer saved in the buffer.
-    pub fn commmit_batch(&mut self) {
+    pub fn commit_batch(&mut self) {
         self.batching = false;
         let batch = std::mem::take(&mut self.batch_buffer);
         let action = BatchAction::new(batch);

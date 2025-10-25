@@ -93,15 +93,20 @@ impl TrackManager {
         });
 
         // context menu
-        ui.interact(
+        let res = ui.interact(
             Rect::from_min_size(
                 res.response.rect.left_bottom(),
                 Vec2::new(self.track_width, ui.available_height()),
             ),
             "tracks".into(),
             Sense::click(),
-        )
-        .context_menu(|ui| {
+        );
+
+        if res.clicked() {
+            state.deselect();
+        }
+
+        res.context_menu(|ui| {
             if ui.add(ContextMenuButton::new(PLUS, "Add track")).clicked() {
                 state.add_track(TrackCore::new());
                 ui.close();
