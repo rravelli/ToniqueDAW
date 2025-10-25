@@ -459,7 +459,7 @@ pub struct ResizeClipAction {
 }
 
 impl ResizeClipAction {
-    pub fn new(id: &String, start: f32, end: f32, pos: f32) -> Self {
+    pub fn new(id: &str, start: f32, end: f32, pos: f32) -> Self {
         Self {
             id: id.to_string(),
             start,
