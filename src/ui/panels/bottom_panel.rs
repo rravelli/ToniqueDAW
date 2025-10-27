@@ -3,12 +3,14 @@ use crate::{
     ui::panels::left_panel::DragPayload,
     utils::parse_name,
 };
-use egui::{Color32, Frame, Key, Layout, Margin, RichText, ScrollArea, Separator, Stroke, Ui};
+use egui::{
+    Color32, Context, Frame, Key, Layout, Margin, Rangef, RichText, ScrollArea, Separator, Stroke,
+    Ui,
+};
 
 pub const BOTTOM_BAR_HEIGHT: f32 = 20.;
 
 pub struct UIBottomPanel {
-    pub open: bool,
     selected: Vec<usize>,
     offset: f32,
     insert_index: Option<usize>,
@@ -18,10 +20,23 @@ impl UIBottomPanel {
     pub fn new() -> Self {
         Self {
             selected: vec![],
-            open: false,
             offset: 0.,
             insert_index: None,
         }
+    }
+
+    pub fn show(&mut self, ctx: &Context, state: &mut ToniqueProjectState) {
+        egui::TopBottomPanel::bottom("bottom-panel")
+            .height_range(Rangef::new(50. + BOTTOM_BAR_HEIGHT, 400.))
+            .resizable(true)
+            .frame(Frame::new().inner_margin(Margin::ZERO))
+            .show_animated(ctx, state.bottom_panel_open, |ui| {
+                ui.set_height(ui.available_height());
+
+                if let Some(selected) = state.selected_track() {
+                    self.ui(ui, selected, state);
+                }
+            });
     }
 
     pub fn ui(&mut self, ui: &mut Ui, track: TrackReferenceCore, state: &mut ToniqueProjectState) {

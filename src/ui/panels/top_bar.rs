@@ -1,16 +1,19 @@
-use egui::{Color32, FontId, Layout, Pos2, Rangef, Response, Sense, Stroke, Ui, Vec2};
+use egui::{
+    Color32, Context, FontFamily, FontId, Frame, Layout, Margin, Pos2, Rangef, Response, Sense,
+    Stroke, Ui, Vec2,
+};
+use egui_phosphor::{fill::SIDEBAR_SIMPLE, regular::RECORD};
 
 use crate::{
-    core::state::ToniqueProjectState,
+    core::state::{PlaybackState, ToniqueProjectState},
     ui::{
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
+        theme::PRIMARY_COLOR,
         widget::{input::NumberInput, square_button::SquareButton},
-        workspace::PlaybackState,
     },
 };
-
+const BUTTON_SIZE: f32 = 22.;
 const PRIMARY_BUTTON_COLOR: Color32 = Color32::from_gray(150);
-const SECONDARY_BUTTON_COLOR: Color32 = Color32::from_gray(100);
 const WAVE_LOW: Color32 = Color32::from_gray(60);
 const WAVE_HIGH: Color32 = Color32::BLACK;
 
@@ -21,17 +24,31 @@ pub struct UITopBar {
 impl UITopBar {
     pub fn new() -> Self {
         Self {
-            bpm_input: NumberInput::new(Vec2::new(50., 25.))
+            bpm_input: NumberInput::new(Vec2::new(50., BUTTON_SIZE))
                 .fill(PRIMARY_BUTTON_COLOR)
                 .text_color(Color32::from_gray(30))
                 .with_range(Rangef::new(10., 1000.)),
         }
     }
 
+    pub fn show(&mut self, ctx: &Context, state: &mut ToniqueProjectState) {
+        egui::TopBottomPanel::top("top-bar")
+            .resizable(false)
+            .frame(
+                Frame::new()
+                    .fill(Color32::from_gray(40))
+                    .inner_margin(Margin::same(4)),
+            )
+            .show(ctx, |ui| {
+                self.ui(ui, state);
+            });
+    }
+
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
-            self.metronome_ui(ui);
+            self.sidebar_ui(ui, state);
+            self.metronome_ui(ui, state);
             if self.play_button_ui(ui, state.playback_state()).clicked() {
                 if state.playback_state() == PlaybackState::Playing {
                     state.pause();
@@ -54,6 +71,7 @@ impl UITopBar {
                     state.undo();
                 };
                 self.usage_ui(ui, state);
+                self.fps_ui(ui);
                 self.waveform_ui(ui, state);
             });
         });
@@ -71,13 +89,13 @@ impl UITopBar {
             } else {
                 "Play"
             })
-            .sized(25.)
+            .square(BUTTON_SIZE)
             .font(FontId::new(
                 12.,
                 egui::FontFamily::Name(PHOSPHOR_FILL.into()),
             ))
             .fill(if playback_state == PlaybackState::Playing {
-                Color32::from_gray(220)
+                PRIMARY_COLOR
             } else {
                 PRIMARY_BUTTON_COLOR
             })
@@ -87,10 +105,10 @@ impl UITopBar {
 
     fn record_button_ui(&mut self, ui: &mut Ui) {
         ui.add(
-            SquareButton::new(egui_phosphor::fill::CIRCLE)
-                .sized(25.)
+            SquareButton::new(RECORD)
+                .square(BUTTON_SIZE)
                 .font(FontId::new(
-                    12.,
+                    14.,
                     egui::FontFamily::Name(PHOSPHOR_FILL.into()),
                 ))
                 .fill(PRIMARY_BUTTON_COLOR)
@@ -99,17 +117,63 @@ impl UITopBar {
         );
     }
 
-    fn metronome_ui(&mut self, ui: &mut Ui) -> Response {
-        ui.add(
-            SquareButton::new(egui_phosphor::fill::METRONOME)
-                .sized(25.)
+    fn sidebar_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
+        let res = ui.add(
+            SquareButton::ghost(SIDEBAR_SIMPLE)
+                .square(BUTTON_SIZE)
                 .font(FontId::new(
                     15.,
-                    egui::FontFamily::Name(PHOSPHOR_REGULAR.into()),
+                    if state.left_panel_open {
+                        egui::FontFamily::Name(PHOSPHOR_FILL.into())
+                    } else {
+                        egui::FontFamily::Name(PHOSPHOR_REGULAR.into())
+                    },
                 ))
-                .fill(SECONDARY_BUTTON_COLOR)
-                .color(Color32::from_gray(30)),
-        )
+                .color(if state.left_panel_open {
+                    PRIMARY_COLOR
+                } else {
+                    Color32::from_gray(180)
+                }),
+        );
+
+        if res.clicked() {
+            state.left_panel_open = !state.left_panel_open;
+        };
+
+        res
+    }
+
+    fn metronome_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
+        let click = state.metronome()
+            && matches!(state.playback_state(), PlaybackState::Playing)
+            && state.playback_position() % 1.0 < 0.5;
+        let res = ui.add(
+            SquareButton::new(egui_phosphor::fill::METRONOME)
+                .square(BUTTON_SIZE)
+                .font(FontId::new(
+                    15.,
+                    if state.metronome() {
+                        FontFamily::Name(PHOSPHOR_FILL.into())
+                    } else {
+                        egui::FontFamily::Name(PHOSPHOR_REGULAR.into())
+                    },
+                ))
+                .fill(if state.metronome() {
+                    PRIMARY_COLOR
+                } else {
+                    PRIMARY_BUTTON_COLOR
+                })
+                .color(if click {
+                    Color32::from_black_alpha(70)
+                } else {
+                    Color32::from_gray(30)
+                }),
+        );
+        if res.clicked() {
+            state.toggle_metronome();
+        }
+
+        res
     }
 
     fn waveform_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
@@ -158,8 +222,8 @@ impl UITopBar {
 
     fn usage_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
         ui.add(
-            SquareButton::new(format!("{:.0}%", state.metrics.latency * 100.))
-                .sized(25.)
+            SquareButton::new(format!("{:.0}%", (state.metrics.latency * 100.).round()))
+                .square(BUTTON_SIZE)
                 .font(FontId::new(10., egui::FontFamily::Proportional))
                 .fill(PRIMARY_BUTTON_COLOR)
                 .color(Color32::from_gray(30))
@@ -167,17 +231,29 @@ impl UITopBar {
         )
     }
 
+    fn fps_ui(&mut self, ui: &mut Ui) -> Response {
+        ui.add(
+            SquareButton::new(format!(
+                "{:.0}",
+                1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
+            ))
+            .square(BUTTON_SIZE)
+            .font(FontId::new(10., egui::FontFamily::Proportional))
+            .fill(PRIMARY_BUTTON_COLOR)
+            .color(Color32::from_gray(30))
+            .tooltip("FPS"),
+        )
+    }
+
     fn undo_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
         ui.add_enabled(
             state.can_undo(),
-            SquareButton::new(egui_phosphor::fill::ARROW_U_UP_LEFT)
-                .sized(25.)
+            SquareButton::ghost(egui_phosphor::fill::ARROW_U_UP_LEFT)
+                .square(BUTTON_SIZE)
                 .font(FontId::new(
                     15.,
                     egui::FontFamily::Name(PHOSPHOR_REGULAR.into()),
                 ))
-                .fill(PRIMARY_BUTTON_COLOR)
-                .color(Color32::from_gray(30))
                 .tooltip("Undo"),
         )
     }
@@ -185,14 +261,12 @@ impl UITopBar {
     fn redo_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
         ui.add_enabled(
             state.can_redo(),
-            SquareButton::new(egui_phosphor::fill::ARROW_U_UP_RIGHT)
-                .sized(25.)
+            SquareButton::ghost(egui_phosphor::fill::ARROW_U_UP_RIGHT)
+                .square(BUTTON_SIZE)
                 .font(FontId::new(
                     15.,
                     egui::FontFamily::Name(PHOSPHOR_REGULAR.into()),
                 ))
-                .fill(PRIMARY_BUTTON_COLOR)
-                .color(Color32::from_gray(30))
                 .tooltip("Redo"),
         )
     }

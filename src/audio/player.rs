@@ -2,15 +2,14 @@ use crate::{
     GuiToPlayerMsg, ProcessToGuiMsg,
     audio::{
         clip::ClipBackend,
+        metronome::MetronomeBackend,
         preview::PreviewBackend,
         track::{TrackBackend, TrackKind, audio::AudioTrackData},
     },
-    core::metrics::{AudioMetrics, GlobalMetrics},
-    ui::workspace::PlaybackState,
-};
-use fundsp::{
-    hacker::{AudioUnit, envelope, lowpass_hz},
-    hacker32::sine_hz,
+    core::{
+        metrics::{AudioMetrics, GlobalMetrics},
+        state::PlaybackState,
+    },
 };
 use rayon::prelude::*;
 use rtrb::{Consumer, Producer};
@@ -19,7 +18,7 @@ use std::{collections::HashMap, time::Instant};
 pub struct PlayerBackend {
     to_gui_tx: Producer<ProcessToGuiMsg>,
     from_gui_rx: Consumer<GuiToPlayerMsg>,
-    midi_rx: Consumer<Vec<u8>>,
+    _midi_rx: Consumer<Vec<u8>>,
 
     channels: usize,
     sample_rate: usize,
@@ -33,33 +32,7 @@ pub struct PlayerBackend {
     tracks: HashMap<String, TrackBackend>,
     bpm: f32,
     solo_tracks: Vec<String>,
-
-    _notes: HashMap<u8, Box<dyn AudioUnit>>,
-}
-
-pub fn piano_voice(freq: f32, velocity: f32) -> impl AudioUnit {
-    // ADSR envelope
-    let env = envelope(|t| {
-        if t < 0.01 {
-            // Attack
-            t / 0.01
-        } else {
-            // Exponential decay
-            (-(t - 0.01) * 5.0).exp()
-        }
-    }) * velocity;
-
-    // Harmonic-rich oscillator
-    let osc = sine_hz(freq)                  // fundamental
-        + 0.5 * sine_hz(freq * 2.0)          // octave
-        + 0.3 * sine_hz(freq * 3.0)          // fifth above octave
-        + 0.2 * sine_hz(freq * 4.0) // second octave
-         + 0.05 * sine_hz(freq * 2.01)
-         + 0.05 * sine_hz(freq * 2.02); // second octave
-
-    // Apply envelope to osc
-    (osc * env) >> lowpass_hz(2000.0, 1.0)
-    // mellow filter
+    metronome: MetronomeBackend,
 }
 
 impl PlayerBackend {
@@ -72,7 +45,7 @@ impl PlayerBackend {
         Self {
             to_gui_tx,
             from_gui_rx,
-            midi_rx,
+            _midi_rx: midi_rx,
             channels: 2,
             playhead: 0,
             bpm: 120.,
@@ -82,7 +55,7 @@ impl PlayerBackend {
             solo_tracks: vec![],
             preview: PreviewBackend::new(),
             preview_state: PlaybackState::Paused,
-            _notes: HashMap::new(),
+            metronome: MetronomeBackend::new(),
         }
     }
 
@@ -109,45 +82,6 @@ impl PlayerBackend {
                         .to_gui_tx
                         .push(ProcessToGuiMsg::PreviewPos(stream.playhead()));
                 }
-            }
-        }
-
-        while let Ok(e) = self.midi_rx.pop() {
-            if e.len() >= 3 {
-                let event_type = e[0];
-                let note = e[1];
-                let vel = e[2];
-                let freq = 440.0 * 2f32.powf((note as f32 - 69.0) / 12.0);
-                let velocity = 0.3;
-
-                match event_type {
-                    // Note On
-                    0x90 => {
-                        if vel == 0 {
-                            self._notes.remove(&note);
-                        } else {
-                            let mut unit = piano_voice(freq, velocity);
-                            unit.set_sample_rate(self.sample_rate as f64);
-                            self._notes.insert(note, Box::new(unit));
-                        }
-
-                        println!("Playing note freq {}Hz", freq);
-                    }
-                    // Note Off
-                    0x80 => {
-                        self._notes.remove(&note);
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        for frame in 0..num_frames {
-            for (_, unit) in self._notes.iter_mut() {
-                let s = unit.get_mono();
-
-                output[2 * frame] += s;
-                output[2 * frame + 1] += s;
             }
         }
 
@@ -211,6 +145,16 @@ impl PlayerBackend {
         ));
         // Update playhead
         self.playhead += num_frames;
+
+        if self.metronome.enabled && self.playback_state == PlaybackState::Playing {
+            self.metronome.render(
+                output,
+                num_frames,
+                self.sample_rate,
+                self.playhead,
+                self.bpm,
+            );
+        }
     }
 
     fn handle_messages(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -386,6 +330,9 @@ impl PlayerBackend {
                     };
                     let new_track = track.duplicate(&new_id, clip_map);
                     self.tracks.insert(new_id, new_track);
+                }
+                GuiToPlayerMsg::ToggleMetronome(value) => {
+                    self.metronome.enabled = value;
                 }
             }
         }

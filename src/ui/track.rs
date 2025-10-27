@@ -1,10 +1,10 @@
 use crate::{
     core::{
         state::ToniqueProjectState,
-        track::{MutableTrackCore, TrackCore, TrackReferenceCore},
+        track::{MutableTrackCore, TRACK_CLOSED_HEIGHT, TrackCore, TrackReferenceCore},
     },
     ui::widget::{
-        context_menu::{ContextMenuButton, ContextMenuSeparator},
+        context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
         meter::LoudnessMeter as Meter,
         rectangle::Rectangle,
         square_button::SquareButton,
@@ -15,7 +15,10 @@ use egui::{
     Align2, Color32, FontId, Frame, Label, Margin, Pos2, Rect, Response, RichText, Sense, Stroke,
     TextEdit, Ui, Vec2, epaint::MarginF32,
 };
-use egui_phosphor::fill::{CIRCLE, COPY, CURSOR_TEXT, PALETTE, PLUS, TRASH};
+use egui_phosphor::{
+    fill::{CIRCLE, COPY, CURSOR_TEXT, PALETTE, PLUS, TRASH},
+    regular::{MUSIC_NOTE_SIMPLE, TEXT_T},
+};
 use rand::Rng;
 use std::ops::RangeInclusive;
 
@@ -23,7 +26,6 @@ pub const DEFAULT_TRACK_HEIGHT: f32 = 60.;
 const STROKE_WIDTH: f32 = 0.5;
 const PADDING: f32 = 2.;
 const BUTTON_SIZE: f32 = 15.;
-pub const CLOSED_HEIGHT: f32 = 22.;
 const METER_WIDTH: f32 = 8.;
 pub const HANDLE_HEIGHT: f32 = 3.0;
 
@@ -80,8 +82,10 @@ impl UITrack {
             let actual_height = track.height - 2. * PADDING - 2. * STROKE_WIDTH;
             ui.set_width(ui.available_width());
             ui.set_height(actual_height);
+            ui.spacing_mut().interact_size.y = 18.0;
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
+
                 // Left Side: Rectangle
                 ui.add(
                     Rectangle::new(Vec2::new(4., actual_height)).fill(if !muted {
@@ -215,10 +219,8 @@ impl UITrack {
     ) {
         Frame::new().show(ui, |ui| {
             ui.vertical(|ui| {
-                if ui
-                    .add(ContextMenuButton::new(CURSOR_TEXT, "Rename"))
-                    .clicked()
-                {
+                ui.add(ContextMenuLabel::new(parse_name(&track.name, track.index)));
+                if ui.add(ContextMenuButton::new(TEXT_T, "Rename")).clicked() {
                     self.edit = true;
                 };
                 if ui
@@ -257,7 +259,7 @@ impl UITrack {
     fn mute_button(&mut self, ui: &mut Ui, solo: bool, track: &TrackReferenceCore) -> Response {
         ui.add(
             SquareButton::new("M")
-                .sized(BUTTON_SIZE)
+                .square(BUTTON_SIZE)
                 .fill(if track.muted {
                     if solo {
                         Color32::from_rgb(60, 40, 20)
@@ -271,7 +273,7 @@ impl UITrack {
     }
 
     fn solo_button(&mut self, ui: &mut Ui, solo: bool, track: &TrackReferenceCore) -> Response {
-        ui.add(SquareButton::new("S").sized(BUTTON_SIZE).fill(if solo {
+        ui.add(SquareButton::new("S").square(BUTTON_SIZE).fill(if solo {
             track.color
         } else {
             ui.visuals().widgets.inactive.bg_fill
@@ -280,8 +282,8 @@ impl UITrack {
 
     fn arm_button(&mut self, ui: &mut Ui) -> Response {
         ui.add(
-            SquareButton::new(CIRCLE)
-                .sized(BUTTON_SIZE)
+            SquareButton::new(MUSIC_NOTE_SIMPLE)
+                .square(BUTTON_SIZE)
                 .fill(if self.arm {
                     Color32::from_rgb(220, 30, 30)
                 } else {
@@ -305,7 +307,7 @@ impl UITrack {
         let response = ui.add(
             SquareButton::new(icon)
                 .fill(Color32::from_gray(80))
-                .sized(BUTTON_SIZE),
+                .square(BUTTON_SIZE),
         );
         if response.clicked() {
             self.toggle_open(track_mut);
@@ -317,7 +319,7 @@ impl UITrack {
     fn toggle_open(&mut self, track_mut: &mut MutableTrackCore) {
         track_mut.closed = !track_mut.closed;
         if track_mut.closed {
-            track_mut.height = CLOSED_HEIGHT;
+            track_mut.height = TRACK_CLOSED_HEIGHT;
         } else {
             track_mut.height = self.prev_height;
         }
@@ -409,7 +411,7 @@ impl UITrack {
         }
         if response.dragged() && !track_mut.closed {
             track_mut.height += response.drag_delta().y;
-            track_mut.height = track_mut.height.clamp(CLOSED_HEIGHT + 25., 400.);
+            track_mut.height = track_mut.height.clamp(TRACK_CLOSED_HEIGHT + 25., 400.);
             self.prev_height = track_mut.height;
         }
     }

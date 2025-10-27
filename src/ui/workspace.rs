@@ -10,7 +10,6 @@ use crate::{
     },
     ui::{
         clip::UIClip,
-        grid::{MAX_RIGHT, MIN_LEFT, VIEW_WIDTH, WorkspaceGrid},
         panels::{
             bottom_panel::{BOTTOM_BAR_HEIGHT, UIBottomPanel},
             left_panel::{DragPayload, UILeftPanel},
@@ -128,7 +127,7 @@ impl Workspace {
             .height_range(Rangef::new(50. + BOTTOM_BAR_HEIGHT, 400.))
             .resizable(true)
             .frame(Frame::new().inner_margin(Margin::ZERO))
-            .show_animated(ctx, self.bottom_panel.open, |ui| {
+            .show_animated(ctx, self.state.bottom_panel_open, |ui| {
                 ui.set_height(ui.available_height());
 
                 if let Some(selected) = self.state.selected_track() {
@@ -402,7 +401,6 @@ impl Workspace {
                             pos,
                             size,
                             viewport,
-                            &self.grid,
                             !dragged && self.selected_clips.clip_ids.contains(&clip.id),
                             &clip,
                             &mut self.state,
@@ -449,7 +447,7 @@ impl Workspace {
                 && let DragPayload::Effect(_) = *payload
             {
                 painter.rect_filled(track_rect, 1., Color32::from_white_alpha(100));
-                self.bottom_panel.open = true;
+                self.state.bottom_panel_open = true;
                 self.state.select_track(&track.id);
             }
             if let Some(pointer) = ui.input(|r| r.pointer.hover_pos())
@@ -602,7 +600,6 @@ impl Workspace {
                         pos,
                         size,
                         viewport,
-                        &self.grid,
                         true,
                         &element.clip,
                         &mut self.state,
@@ -712,7 +709,7 @@ impl Workspace {
             }
         } else if ui.input(|i| i.key_pressed(Key::J) && i.modifiers.ctrl) {
             // Close bottom panel
-            self.bottom_panel.open = !self.bottom_panel.open;
+            // self.bottom_panel.open = !self.bottom_panel.open;
         } else if ui.input(|i| i.modifiers.ctrl && i.key_pressed(Key::Z)) {
             // Undo
             self.state.undo();
@@ -769,7 +766,6 @@ impl Workspace {
                     pos,
                     size,
                     rect,
-                    &self.grid,
                     false,
                     &sample_preview,
                     &mut self.state,

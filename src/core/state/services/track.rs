@@ -1,7 +1,7 @@
 use crate::core::{
     clip::ClipCore,
     message::GuiToPlayerMsg,
-    track::{MutableTrackCore, TrackCore, TrackReferenceCore, TrackSoloState},
+    track::{MutableTrackCore, TRACK_CLOSED_HEIGHT, TrackCore, TrackReferenceCore, TrackSoloState},
 };
 use rtrb::Producer;
 use std::collections::HashMap;
@@ -460,6 +460,13 @@ impl TrackService {
             if let Some(track) = self.tracks.get_mut(&track_id) {
                 track.add_clips_skip_overlap_check(clips, tx);
             }
+        }
+    }
+
+    pub fn set_all_close(&mut self, close: bool) {
+        for track in self.tracks.values_mut() {
+            track.mutable.closed = close;
+            track.mutable.height = TRACK_CLOSED_HEIGHT;
         }
     }
 

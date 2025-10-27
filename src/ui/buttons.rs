@@ -12,8 +12,6 @@ pub fn left_aligned_selectable(
         Sense::click_and_drag(),
     );
 
-    // Register this widget for interaction (focus, keyboard, etc)
-
     let bg_color = if selected || response.has_focus() {
         Color32::from_gray(70)
     } else if response.hovered() {

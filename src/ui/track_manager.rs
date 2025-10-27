@@ -1,4 +1,4 @@
-use egui::{Rect, Sense, Vec2};
+use egui::{Rect, Sense, Vec2, vec2};
 use egui_phosphor::fill::PLUS;
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
         widget::context_menu::ContextMenuButton,
     },
 };
-
+#[deprecated]
 pub struct TrackManager {
     pub track_width: f32,
 }
@@ -23,6 +23,7 @@ impl TrackManager {
         Self { track_width: 140. }
     }
 
+    #[deprecated]
     pub fn get_track_y(
         &self,
         track_index: usize,
@@ -69,7 +70,7 @@ impl TrackManager {
         state: &mut ToniqueProjectState,
     ) {
         let res = ui.vertical(|ui| {
-            ui.set_width(self.track_width);
+            ui.set_width(ui.available_width());
 
             let tracks: Vec<_> = state.tracks().collect();
 
@@ -78,9 +79,7 @@ impl TrackManager {
                 // Open bottom panel
                 if response.double_clicked() {
                     if track.selected {
-                        bottom_panel.open = !bottom_panel.open;
                     } else {
-                        bottom_panel.open = true;
                     }
                 }
                 // Insert effects
@@ -92,22 +91,29 @@ impl TrackManager {
             }
         });
 
-        // context menu
-        let res = ui.interact(
-            Rect::from_min_size(
-                res.response.rect.left_bottom(),
-                Vec2::new(self.track_width, ui.available_height()),
-            ),
-            "tracks".into(),
+        let (_, res) = ui.allocate_at_least(
+            vec2(ui.available_width(), ui.available_height().max(200.)),
             Sense::click(),
         );
+        // context menu
+        // let res = ui.interact(
+        //     Rect::from_min_size(
+        //         res.response.rect.left_bottom(),
+        //         Vec2::new(self.track_width, ui.available_height()),
+        //     ),
+        //     "tracks".into(),
+        //     Sense::click(),
+        // );
 
         if res.clicked() {
             state.deselect();
         }
 
         res.context_menu(|ui| {
-            if ui.add(ContextMenuButton::new(PLUS, "Add track")).clicked() {
+            if ui
+                .add(ContextMenuButton::new(PLUS, "Add audio track"))
+                .clicked()
+            {
                 state.add_track(TrackCore::new());
                 ui.close();
             }

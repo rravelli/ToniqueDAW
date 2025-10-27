@@ -2,16 +2,17 @@ use crate::{
     analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,
     config::{load_work_dir, save_work_dir},
-    core::state::ToniqueProjectState,
+    core::state::{PlaybackState, ToniqueProjectState},
     ui::{
-        buttons::left_aligned_selectable, panels::left_panel::DragPayload, waveform::UIWaveform,
-        workspace::PlaybackState,
+        buttons::left_aligned_selectable, font::PHOSPHOR_FILL, panels::left_panel::DragPayload,
+        waveform::UIWaveform, widget::square_button::SquareButton,
     },
 };
 use egui::{
-    Color32, CursorIcon, Frame, Key, Label, Pos2, Rect, Response, RichText, ScrollArea, Sense,
-    Shape, Spinner, Stroke, Ui, Vec2, mutex::Mutex,
+    Color32, CursorIcon, FontId, Frame, Key, Label, Pos2, Rect, Response, RichText, ScrollArea,
+    Sense, Shape, Spinner, Stroke, Ui, Vec2, mutex::Mutex,
 };
+use egui_phosphor::fill::FOLDER_PLUS;
 use rfd::FileDialog;
 use std::{ffi::OsStr, fs::read_dir, ops::Range, path::PathBuf, sync::Arc, thread};
 
@@ -307,7 +308,17 @@ impl FileBrowser {
     }
 
     fn choose_dir_button(&mut self, ui: &mut Ui) {
-        if ui.button("Select folder").clicked() {
+        if ui
+            .add(
+                SquareButton::ghost(FOLDER_PLUS)
+                    .square(20.)
+                    .font(FontId::new(
+                        15.,
+                        egui::FontFamily::Name(PHOSPHOR_FILL.into()),
+                    )),
+            )
+            .clicked()
+        {
             let picked_dir = FileDialog::new().pick_folder();
             if let Some(path) = picked_dir {
                 save_work_dir(&path.to_str().unwrap());
@@ -363,6 +374,7 @@ impl FileBrowser {
                         0.,
                         1.,
                         info.num_samples.unwrap(),
+                        info.channels >= 2,
                     );
                     let x = response.rect.left()
                         + state.preview_position() as f32 / info.num_samples.unwrap() as f32

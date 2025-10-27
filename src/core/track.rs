@@ -17,6 +17,8 @@ pub enum TrackSoloState {
     NotSoloing,
     Solo,
 }
+
+pub const TRACK_CLOSED_HEIGHT: f32 = 22.;
 /// A track containing multiple clips
 #[derive(Clone, Debug)]
 pub struct TrackCore {

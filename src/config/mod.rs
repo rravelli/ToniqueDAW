@@ -1,6 +1,7 @@
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
+pub mod hotkeys;
 
 struct Config {
     last_dir: String,
