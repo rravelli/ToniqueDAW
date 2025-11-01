@@ -1,6 +1,10 @@
 use crate::core::{clip::ClipCore, metrics::GlobalMetrics};
 use fundsp::hacker::AudioUnit;
+use rtrb::{Consumer, Producer};
 use std::{collections::HashMap, fmt::Debug, path::PathBuf};
+
+pub type GuiToAudioTx = Producer<GuiToPlayerMsg>;
+pub type AudioToGuiRx = Consumer<ProcessToGuiMsg>;
 
 pub enum GuiToPlayerMsg {
     // Playback control messages
@@ -42,6 +46,8 @@ pub enum GuiToPlayerMsg {
         /// Mapping between clips and duplicated clips ids
         clip_map: HashMap<String, String>,
     },
+    // Metronome
+    ToggleMetronome(bool),
 }
 
 pub enum ProcessToGuiMsg {
@@ -71,7 +77,7 @@ impl Debug for GuiToPlayerMsg {
                 .field(arg0)
                 .field(arg1)
                 .finish(),
-            Self::AddNode(arg0, arg1, arg2, arg3) => f
+            Self::AddNode(arg0, arg1, arg2, _) => f
                 .debug_tuple("AddNode")
                 .field(arg0)
                 .field(arg1)
@@ -125,6 +131,7 @@ impl Debug for GuiToPlayerMsg {
                 .field("new_id", new_id)
                 .field("clip_map", clip_map)
                 .finish(),
+            Self::ToggleMetronome(val) => f.debug_tuple("ToggleMetronome").field(val).finish(),
         }
     }
 }

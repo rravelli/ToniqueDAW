@@ -1,7 +1,10 @@
 use crate::core::{
     clip::ClipCore,
     message::GuiToPlayerMsg,
-    track::{MutableTrackCore, TrackCore, TrackReferenceCore, TrackSoloState},
+    track::{
+        DEFAULT_TRACK_HEIGHT, MutableTrackCore, TRACK_CLOSED_HEIGHT, TrackCore, TrackReferenceCore,
+        TrackSoloState,
+    },
 };
 use rtrb::Producer;
 use std::collections::HashMap;
@@ -108,6 +111,14 @@ impl TrackService {
         self.order.insert(index, track.id.clone());
         self.tracks.insert(track.id.clone(), track);
     }
+    /// Move track specified by id to position `new_index`
+    pub fn move_track(&mut self, id: &str, new_index: usize) {
+        if let Some(old_index) = self.order.iter().position(|i| *i == id) {
+            let id2 = self.order[new_index].clone();
+            self.order[new_index] = id.to_string();
+            self.order[old_index] = id2;
+        };
+    }
     /// Delete a track from its `id`. Returns the deleted track and its position if the track was found.
     pub fn delete(
         &mut self,
@@ -118,6 +129,10 @@ impl TrackService {
         let track = self.tracks.get(id)?.clone();
 
         self.order.remove(pos);
+        if self.selected_tracks.contains(&id) && !self.order.is_empty() {
+            let index = pos.saturating_sub(1);
+            self.selected_tracks = vec![self.order[index].clone()];
+        }
         self.selected_tracks.retain(|sel| sel != id);
         self.solo_tracks.retain(|sel| sel != id);
         self.tracks.remove(id);
@@ -440,6 +455,7 @@ impl TrackService {
         // Insert the new track into tracks and order
         self.tracks.insert(new_id.clone(), new_track);
         self.order.insert(index + 1, new_id.clone());
+        self.select(&new_id);
 
         // Update audio thread
         let _ = tx.push(GuiToPlayerMsg::DuplicateTrack {
@@ -460,6 +476,18 @@ impl TrackService {
             if let Some(track) = self.tracks.get_mut(&track_id) {
                 track.add_clips_skip_overlap_check(clips, tx);
             }
+        }
+    }
+
+    pub fn set_all_close(&mut self, close: bool) {
+        let height = if close {
+            TRACK_CLOSED_HEIGHT
+        } else {
+            DEFAULT_TRACK_HEIGHT
+        };
+        for track in self.tracks.values_mut() {
+            track.mutable.closed = close;
+            track.mutable.height = height;
         }
     }
 

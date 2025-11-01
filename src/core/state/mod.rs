@@ -5,17 +5,20 @@ mod tests;
 use crate::{
     core::{
         clip::ClipCore,
+        grid::GridService,
         message::{GuiToPlayerMsg, ProcessToGuiMsg},
         metrics::GlobalMetrics,
-        state::action::{
-            AddClipsAction, AddTrackAction, BatchAction, CutClipAction, DeleteClipsAction,
-            DeleteTrackAction, DuplicateClipAction, DuplicateTrackAction, MoveClipAction,
-            ProjectStateAction, ResizeClipAction, SetMutableTrackAction, SetVolumeAction,
+        state::{
+            action::{
+                AddClipsAction, AddTrackAction, BatchAction, CutClipAction, DeleteClipsAction,
+                DeleteTrackAction, DuplicateClipAction, DuplicateTrackAction, MoveClipAction,
+                ProjectStateAction, ResizeClipAction, SetMutableTrackAction, SetVolumeAction,
+            },
+            services::track::TrackService,
         },
-        state::services::track::TrackService,
         track::{MutableTrackCore, TrackCore, TrackReferenceCore},
     },
-    ui::{effect::UIEffect, effects::EffectId, workspace::PlaybackState},
+    ui::{effect::UIEffect, effects::EffectId},
 };
 use rtrb::{Consumer, Producer};
 use std::{mem::take, path::PathBuf};
@@ -23,6 +26,12 @@ use std::{mem::take, path::PathBuf};
 #[derive(Clone, Debug)]
 enum ProjectStatePendingAction {
     DeleteTrack { id: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlaybackState {
+    Paused,
+    Playing,
 }
 
 pub struct ToniqueProjectState {
@@ -44,8 +53,14 @@ pub struct ToniqueProjectState {
     redo_stack: Vec<Box<dyn ProjectStateAction>>,
     batching: bool,
     batch_buffer: Vec<Box<dyn ProjectStateAction>>,
+    // Grid
+    pub grid: GridService,
+    metronome: bool,
 
     pub resized_clip: Option<(String, f32, f32, f32)>,
+    // Panels
+    pub left_panel_open: bool,
+    pub bottom_panel_open: bool,
 }
 
 impl ToniqueProjectState {
@@ -66,6 +81,10 @@ impl ToniqueProjectState {
             batching: false,
             batch_buffer: Vec::new(),
             resized_clip: None,
+            grid: GridService::new(),
+            left_panel_open: true,
+            bottom_panel_open: false,
+            metronome: false,
         }
     }
     /// Update each frame the state
@@ -84,7 +103,7 @@ impl ToniqueProjectState {
     }
     // Playback position
     pub fn set_playback_position(&mut self, value: f32) {
-        self.playback_position = value;
+        self.playback_position = value.max(0.);
         let _ = self.tx.push(GuiToPlayerMsg::SeekTo(value));
     }
     pub fn playback_position(&self) -> f32 {
@@ -97,6 +116,7 @@ impl ToniqueProjectState {
     }
     pub fn play(&mut self) {
         self.playback_state = PlaybackState::Playing;
+        self.preview_playback_state = PlaybackState::Paused;
         let _ = self.tx.push(GuiToPlayerMsg::Play);
     }
     pub fn pause_preview(&mut self) {
@@ -109,7 +129,17 @@ impl ToniqueProjectState {
     }
     pub fn seek_preview(&mut self, pos: usize) {
         self.preview_position = pos;
+        self.preview_playback_state = PlaybackState::Playing;
         let _ = self.tx.push(GuiToPlayerMsg::SeekPreview(pos));
+    }
+    pub fn toggle_metronome(&mut self) {
+        self.metronome = !self.metronome;
+        let _ = self
+            .tx
+            .push(GuiToPlayerMsg::ToggleMetronome(self.metronome));
+    }
+    pub fn metronome(&self) -> bool {
+        self.metronome
     }
 
     pub fn playback_state(&self) -> PlaybackState {
@@ -136,10 +166,18 @@ impl ToniqueProjectState {
         let action = DuplicateTrackAction::new(id);
         self.apply_action(Box::new(action));
     }
+    /// Move track to position `new_index`
+    pub fn move_track(&mut self, id: &str, new_index: usize) {
+        self.track_service.move_track(id, new_index);
+    }
     /// Delete a track
     pub fn delete_track(&mut self, id: &String) {
         self.pending_actions
             .push(ProjectStatePendingAction::DeleteTrack { id: id.clone() });
+    }
+    /// Close or open all tracks
+    pub fn set_all_close(&mut self, close: bool) {
+        self.track_service.set_all_close(close);
     }
     // Clips
     /// Add clips and fix all overlaps on the track.
@@ -281,9 +319,11 @@ impl ToniqueProjectState {
     /// Apply changes saved in the batch buffer. New actions are no longer saved in the buffer.
     pub fn commit_batch(&mut self) {
         self.batching = false;
-        let batch = std::mem::take(&mut self.batch_buffer);
-        let action = BatchAction::new(batch);
-        self.apply_action(Box::new(action));
+        if self.batch_buffer.len() > 0 {
+            let batch = std::mem::take(&mut self.batch_buffer);
+            let action = BatchAction::new(batch);
+            self.apply_action(Box::new(action));
+        }
         self.batch_buffer.clear();
     }
     /// Undo last action. Does nothing if there is no action.
