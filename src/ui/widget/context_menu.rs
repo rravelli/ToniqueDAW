@@ -1,10 +1,11 @@
+use crate::ui::font::PHOSPHOR_REGULAR;
 use egui::{
-    Align2, Color32, FontId, Response, Sense, Stroke, Ui, Vec2, Widget,
+    Align2, Color32, FontId, Label, Response, RichText, Sense, Stroke, Ui, Vec2, Widget,
     containers::menu::{MenuState, SubMenu},
 };
 use egui_phosphor::fill::CARET_RIGHT;
 
-use crate::ui::font::PHOSPHOR_REGULAR;
+const FONT_SIZE: f32 = 9.0;
 
 pub struct ContextMenuButton {
     icon: String,
@@ -69,8 +70,8 @@ impl Widget for ContextMenuButton {
         }
 
         // Draw the icon + text manually inside that region
-        let icon_font = FontId::new(10.0, egui::FontFamily::Name(PHOSPHOR_REGULAR.into()));
-        let text_font = FontId::new(10.0, egui::FontFamily::Proportional);
+        let icon_font = FontId::new(FONT_SIZE, egui::FontFamily::Name(PHOSPHOR_REGULAR.into()));
+        let text_font = FontId::new(FONT_SIZE, egui::FontFamily::Proportional);
 
         let icon_x = rect.left() + 3.0;
         let text_x = rect.left() + 18.0;
@@ -137,5 +138,30 @@ impl Widget for ContextMenuSeparator {
         ui.add_space(2.0);
 
         response
+    }
+}
+
+pub struct ContextMenuLabel {
+    text: String,
+}
+
+impl ContextMenuLabel {
+    pub fn new(text: impl ToString) -> Self {
+        Self {
+            text: text.to_string(),
+        }
+    }
+}
+
+impl Widget for ContextMenuLabel {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let text_font = FontId::new(FONT_SIZE, egui::FontFamily::Proportional);
+        let res = ui.add(Label::new(
+            RichText::new(self.text)
+                .font(text_font)
+                .color(Color32::from_gray(210)),
+        ));
+        ui.add_space(3.0);
+        res
     }
 }

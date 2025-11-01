@@ -1,12 +1,12 @@
 use crate::{
-    core::{clip::ClipCore, state::ToniqueProjectState},
-    ui::{
-        grid::WorkspaceGrid, track::CLOSED_HEIGHT, waveform::UIWaveform,
-        widget::context_menu::ContextMenuButton,
+    core::{
+        clip::ClipCore, grid::GridService, state::ToniqueProjectState, track::TRACK_CLOSED_HEIGHT,
     },
+    ui::{waveform::UIWaveform, widget::context_menu::ContextMenuButton},
 };
 use egui::{
     Align2, Color32, CursorIcon, FontFamily, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2,
+    pos2, vec2,
 };
 use egui_phosphor::fill::TRASH;
 
@@ -32,7 +32,6 @@ impl UIClip {
         pos: Pos2,
         size: Vec2,
         viewport: Rect,
-        grid: &WorkspaceGrid,
         selected: bool,
         clip: &ClipCore,
         state: &mut ToniqueProjectState,
@@ -49,7 +48,7 @@ impl UIClip {
         if size.x > MIN_HANDLE_WIDTH {
             let left_resize = self.left_resize_handle(
                 ui,
-                grid,
+                &state.grid,
                 Rect::from_min_size(Pos2::new(pos.x - 2.0, pos.y), Vec2::new(4., size.y)),
                 state.bpm(),
                 viewport,
@@ -59,10 +58,10 @@ impl UIClip {
             drag_stopped = drag_stopped || left_resize.drag_stopped();
         }
 
-        if size.x > MIN_HANDLE_WIDTH && pos.x + size.x + 2.0 < viewport.right() {
+        if size.x > MIN_HANDLE_WIDTH {
             let right_resize = self.right_resize_handle(
                 ui,
-                grid,
+                &state.grid,
                 Rect::from_min_size(
                     Pos2::new(pos.x + size.x - 2.0, pos.y),
                     Vec2::new(4., size.y),
@@ -80,15 +79,23 @@ impl UIClip {
         } else {
             Stroke::new(BORDER_WIDTH, color)
         };
+        // Main rect
         painter.rect(
             Rect::from_min_size(pos, size),
             2.0,
-            color
-                .gamma_multiply_u8(230)
-                .blend(Color32::from_white_alpha(30)),
+            color.blend(Color32::from_white_alpha(20)),
             stroke,
             egui::StrokeKind::Inside,
         );
+        // Grid
+        if show_waveform {
+            let rect = Rect::from_min_size(
+                pos2(pos.x, pos.y + HEADER_HEIGHT - BORDER_WIDTH),
+                vec2(size.x, size.y - HEADER_HEIGHT),
+            );
+            state.grid.render_clip_grid(&painter, viewport, rect, color);
+        }
+        // Header area
         let hitbox = Rect::from_min_size(
             Pos2::new(pos.x + BORDER_WIDTH, pos.y + BORDER_WIDTH),
             Vec2::new(
@@ -96,18 +103,18 @@ impl UIClip {
                 if show_waveform {
                     HEADER_HEIGHT
                 } else {
-                    CLOSED_HEIGHT
+                    TRACK_CLOSED_HEIGHT
                 } - 2. * BORDER_WIDTH,
             ),
         )
         .intersect(viewport);
         painter.rect(hitbox, 2.0, color, Stroke::NONE, egui::StrokeKind::Inside);
+
         let response = ui.interact(
             hitbox,
             format!("{}{}", clip.id, clip.position).into(),
             Sense::all(),
         );
-
         painter.text(
             Pos2::new(pos.x + PADDING_TEXT, pos.y + 2.),
             Align2::LEFT_TOP,
@@ -120,7 +127,7 @@ impl UIClip {
             vec![hitbox.left_bottom(), hitbox.right_bottom()],
             Stroke::new(1.0, color.blend(Color32::from_black_alpha(50))),
         );
-
+        // Waveform
         if show_waveform && let Ok(data) = clip.audio.data.read() {
             let mut shapes = Vec::new();
             let waveform_rect = Rect::from_min_max(
@@ -143,10 +150,12 @@ impl UIClip {
                 start_ratio,
                 end_ratio,
                 clip.audio.num_samples.unwrap(),
+                clip.audio.channels >= 2,
+                Color32::BLACK,
             );
             painter.add(shapes);
         };
-
+        // Draw an overlay when audio not ready
         if let Ok(ready) = clip.audio.ready.read()
             && !*ready
         {
@@ -184,7 +193,7 @@ impl UIClip {
     fn left_resize_handle(
         &mut self,
         ui: &mut Ui,
-        grid: &WorkspaceGrid,
+        grid: &GridService,
         rect: Rect,
         bpm: f32,
         viewport: Rect,
@@ -196,7 +205,7 @@ impl UIClip {
             && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
         {
             clip.trim_start_at(
-                grid.snap_at_grid_with_default(grid.x_to_beats(mouse_pos.x, viewport)),
+                grid.snap_at_grid(grid.x_to_beats(mouse_pos.x, viewport)),
                 bpm,
             );
         }
@@ -213,7 +222,7 @@ impl UIClip {
     fn right_resize_handle(
         &mut self,
         ui: &mut Ui,
-        grid: &WorkspaceGrid,
+        grid: &GridService,
         rect: Rect,
         bpm: f32,
         viewport: Rect,
@@ -225,7 +234,7 @@ impl UIClip {
             && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
         {
             clip.trim_end_at(
-                grid.snap_at_grid_with_default(grid.x_to_beats(mouse_pos.x, viewport)),
+                grid.snap_at_grid(grid.x_to_beats(mouse_pos.x, viewport)),
                 bpm,
             );
         }

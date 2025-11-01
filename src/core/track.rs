@@ -12,11 +12,15 @@ use rand::Rng;
 use rtrb::Producer;
 use uuid::Uuid;
 
+#[derive(Debug, Clone)]
 pub enum TrackSoloState {
     Soloing,
     NotSoloing,
     Solo,
 }
+
+pub const DEFAULT_TRACK_HEIGHT: f32 = 60.;
+pub const TRACK_CLOSED_HEIGHT: f32 = 22.;
 /// A track containing multiple clips
 #[derive(Clone, Debug)]
 pub struct TrackCore {
@@ -345,6 +349,7 @@ impl TrackCore {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct TrackReferenceCore {
     pub id: String,
     pub clips: Vec<ClipCore>,
