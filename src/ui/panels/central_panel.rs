@@ -83,6 +83,18 @@ impl UICentralPanel {
                 ),
             ),
         );
+
+        self.draw_loop_markers(
+            ui,
+            state,
+            Rect::from_min_size(
+                available_rect.min,
+                vec2(
+                    available_rect.width() - self.tracks.width,
+                    available_rect.height(),
+                ),
+            ),
+        );
     }
 
     /// Draw horizontal and vertical scrollbars.
@@ -149,6 +161,19 @@ impl UICentralPanel {
                 offset.y = (offset.y + drag_y * ratio).clamp(0., max_scroll);
             }
         }
+    }
+
+    fn draw_loop_markers(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {
+        let start_x = state.grid.beats_to_x(state.loop_state.start, rect);
+        ui.painter().line_segment(
+            [pos2(start_x, rect.top()), pos2(start_x, rect.bottom())],
+            Stroke::new(4., Color32::from_white_alpha(150)),
+        );
+        let end_x = state.grid.beats_to_x(state.loop_state.end, rect);
+        ui.painter().line_segment(
+            [pos2(end_x, rect.top()), pos2(end_x, rect.bottom())],
+            Stroke::new(4., Color32::from_white_alpha(150)),
+        );
     }
 
     fn draw_playhead_handle(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {

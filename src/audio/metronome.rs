@@ -26,10 +26,10 @@ impl MetronomeBackend {
         bpm: f32,
     ) {
         let samples_per_beat = (sample_rate as f32 * 60.0 / bpm) as usize;
-        let beats_per_bar = 4; // You could make this configurable
+        let beats_per_bar = 4;
 
         for i in 0..num_frames {
-            let absolute_sample = playhead + i - num_frames;
+            let absolute_sample = playhead + i;
 
             // Determine current beat
             let beat_index = absolute_sample / samples_per_beat;

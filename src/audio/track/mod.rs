@@ -9,19 +9,27 @@ use crate::{
     },
     core::metrics::AudioMetrics,
 };
+
 use fundsp::{
     MAX_BUFFER_SIZE,
     hacker::{AudioUnit, BufferArray, Fade, NetBackend, pass},
     hacker32::U2,
     net::{Net, NodeId},
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 trait Processor {
-    fn process(&mut self, pos: usize, num_frames: usize, sample_rate: usize, mix: &mut Vec<f32>);
+    fn process(
+        &mut self,
+        pos: usize,
+        num_frames: usize,
+        sample_rate: usize,
+        mix: &mut Vec<f32>,
+        bpm: f32,
+    );
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum TrackKind {
     Audio(AudioTrackData),
     Midi(MidiTrackData),
@@ -73,7 +81,23 @@ impl TrackBackend {
         }
     }
 
-    pub fn process(&mut self, pos: usize, num_frames: usize, sample_rate: usize) {
+    pub fn new_audio_track(id: &str) -> Self {
+        Self::new(id.to_string(), 1., TrackKind::Audio(AudioTrackData::new()))
+    }
+
+    pub fn new_bus(id: &str) -> Self {
+        Self::new(id.to_string(), 1., TrackKind::Bus(BusTrackData::new()))
+    }
+
+    pub fn process(
+        &mut self,
+        pos: usize,
+        num_frames: usize,
+        sample_rate: usize,
+        bpm: f32,
+        children: Vec<TrackBackend>,
+        solo_tracks: &Vec<String>,
+    ) {
         // Reset buffers
         self.mix.fill(0.);
         self.mix.resize(num_frames * 2, 0.);
@@ -82,11 +106,11 @@ impl TrackBackend {
         // Render all clips into self.mix
         match &mut self.kind {
             TrackKind::Audio(audio_track_data) => {
-                audio_track_data.process(pos, num_frames, sample_rate, &mut self.mix)
+                audio_track_data.process(pos, num_frames, sample_rate, &mut self.mix, bpm)
             }
             TrackKind::Midi(_) => todo!(),
             TrackKind::Bus(bus_track_data) => {
-                bus_track_data.process(pos, num_frames, sample_rate, &mut self.mix)
+                bus_track_data.process(&mut self.mix, children, solo_tracks)
             }
         }
 
@@ -190,6 +214,18 @@ impl TrackBackend {
         }
     }
 
+    pub fn collect_children(&self, tracks: &HashMap<String, TrackBackend>) -> Vec<TrackBackend> {
+        if let TrackKind::Bus(data) = &self.kind {
+            data.children
+                .iter()
+                .filter_map(|cid| tracks.get(cid))
+                .map(|t| t.clone())
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub fn duplicate(&self, new_id: &String, clip_map: HashMap<String, String>) -> Self {
         let mut clone = self.clone();
         clone.id = new_id.clone();
@@ -206,5 +242,14 @@ impl TrackBackend {
             TrackKind::Bus(_) => {}
         }
         clone
+    }
+}
+
+impl Debug for TrackBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrackBackend")
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .finish()
     }
 }

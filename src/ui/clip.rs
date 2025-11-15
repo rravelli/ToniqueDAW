@@ -132,7 +132,10 @@ impl UIClip {
             let mut shapes = Vec::new();
             let waveform_rect = Rect::from_min_max(
                 Pos2::new(pos.x.max(viewport.left()), pos.y + HEADER_HEIGHT),
-                Pos2::new((pos.x + size.x).min(viewport.right()), pos.y + size.y),
+                Pos2::new(
+                    (pos.x + size.x).min(viewport.right()),
+                    pos.y + size.y - BORDER_WIDTH,
+                ),
             );
 
             let start_ratio = (waveform_rect.left() - pos.x) / size.x

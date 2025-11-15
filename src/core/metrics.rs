@@ -1,5 +1,5 @@
 use rustfft::{FftPlanner, num_complex::Complex};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 #[derive(Clone)]
 pub struct AudioMetrics {
@@ -9,6 +9,15 @@ pub struct AudioMetrics {
     /// Smoothing factor
     alpha: f32,
     pub samples: [Vec<f32>; 2],
+}
+
+impl Debug for AudioMetrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AudioMetrics")
+            .field("peak", &self.get_peak())
+            .field("rms", &self.get_rms())
+            .finish()
+    }
 }
 
 impl AudioMetrics {
@@ -23,9 +32,7 @@ impl AudioMetrics {
     }
 
     pub fn reset(&mut self) {
-        if !self.samples[0].is_empty() {
-            self.prev_rms = self.get_rms();
-        }
+        self.prev_rms = self.get_rms();
         self.peak = [0., 0.];
         self.rms = [0., 0.];
         self.samples[0].clear();
@@ -68,6 +75,9 @@ impl AudioMetrics {
 
     fn compute_rms(&self) -> [f32; 2] {
         let num_sample = self.samples[0].len();
+        if num_sample == 0 {
+            return [0., 0.];
+        }
         [
             (self.rms[0] / num_sample as f32).sqrt(),
             (self.rms[1] / num_sample as f32).sqrt(),
@@ -91,19 +101,24 @@ impl AudioMetrics {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GlobalMetrics {
-    pub master: AudioMetrics,
     pub tracks: HashMap<String, AudioMetrics>,
-    pub latency: f32,
+    pub processing_ratio: f32,
 }
 
 impl GlobalMetrics {
     pub fn new() -> Self {
         Self {
-            master: AudioMetrics::new(),
             tracks: HashMap::new(),
-            latency: 0.,
+            processing_ratio: 0.,
         }
+    }
+
+    pub fn reset(&mut self) {
+        for m in self.tracks.values_mut() {
+            m.reset();
+        }
+        self.processing_ratio = 0.;
     }
 }

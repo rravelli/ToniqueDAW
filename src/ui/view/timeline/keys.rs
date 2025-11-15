@@ -1,4 +1,4 @@
-use egui::{Key, Ui};
+use egui::{Key, Ui, ViewportCommand};
 
 use crate::{
     core::state::{PlaybackState, ToniqueProjectState},
@@ -62,6 +62,12 @@ impl UITimeline {
         } else if ui.input(|i| i.modifiers.ctrl && i.key_pressed(Key::Y)) {
             // Redo
             state.redo();
+        }
+
+        if ui.input(|r| r.key_pressed(Key::F11)) {
+            ui.ctx().send_viewport_cmd(ViewportCommand::Fullscreen(
+                !ui.input(|i| i.viewport().fullscreen).unwrap_or_default(),
+            ));
         }
     }
 }

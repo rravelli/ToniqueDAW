@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::audio::{clip::ClipBackend, track::Processor};
 
 #[derive(Clone)]
@@ -11,11 +13,25 @@ impl AudioTrackData {
     }
 }
 
+impl Debug for AudioTrackData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AudioTrackData").finish()
+    }
+}
+
 impl Processor for AudioTrackData {
-    fn process(&mut self, pos: usize, num_frames: usize, sample_rate: usize, mix: &mut Vec<f32>) {
+    fn process(
+        &mut self,
+        pos: usize,
+        num_frames: usize,
+        sample_rate: usize,
+        mix: &mut Vec<f32>,
+        bpm: f32,
+    ) {
         for clip in self.clips.iter_mut() {
-            let clip_start = clip.start_frame;
-            let clip_end = clip.end(sample_rate);
+            let clip_start = clip.start(sample_rate, bpm);
+            let clip_end = clip.end(sample_rate, bpm);
+
             // not in range
             if pos > clip_end || clip_start > pos + num_frames {
                 continue;
@@ -27,7 +43,7 @@ impl Processor for AudioTrackData {
                 continue;
             };
 
-            clip.render_block(mix, pos, num_frames, sample_rate);
+            clip.render_block(mix, pos, num_frames, sample_rate, bpm);
         }
     }
 }

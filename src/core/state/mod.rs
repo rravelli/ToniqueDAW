@@ -5,8 +5,9 @@ mod tests;
 use crate::{
     core::{
         clip::ClipCore,
+        export::ExportStatus,
         grid::GridService,
-        message::{GuiToPlayerMsg, ProcessToGuiMsg},
+        message::{AudioToGuiRx, GuiToAudioTx, GuiToPlayerMsg, ProcessToGuiMsg},
         metrics::GlobalMetrics,
         state::{
             action::{
@@ -20,7 +21,7 @@ use crate::{
     },
     ui::{effect::UIEffect, effects::EffectId},
 };
-use rtrb::{Consumer, Producer};
+
 use std::{mem::take, path::PathBuf};
 
 #[derive(Clone, Debug)]
@@ -34,20 +35,28 @@ pub enum PlaybackState {
     Playing,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoopState {
+    pub enabled: bool,
+    pub start: f32,
+    pub end: f32,
+}
+
 pub struct ToniqueProjectState {
     bpm: f32,
     playback_position: f32,
     playback_state: PlaybackState,
     preview_playback_state: PlaybackState,
     preview_position: usize,
+    export_status: ExportStatus,
     pub metrics: GlobalMetrics,
     // Services
     track_service: TrackService,
     // Pending
     pending_actions: Vec<ProjectStatePendingAction>,
 
-    tx: Producer<GuiToPlayerMsg>,
-    rx: Consumer<ProcessToGuiMsg>,
+    tx: GuiToAudioTx,
+    rx: AudioToGuiRx,
     // History management
     undo_stack: Vec<Box<dyn ProjectStateAction>>,
     redo_stack: Vec<Box<dyn ProjectStateAction>>,
@@ -56,15 +65,18 @@ pub struct ToniqueProjectState {
     // Grid
     pub grid: GridService,
     metronome: bool,
-
+    pub loop_state: LoopState,
     pub resized_clip: Option<(String, f32, f32, f32)>,
     // Panels
     pub left_panel_open: bool,
     pub bottom_panel_open: bool,
+    pub show_export: bool,
+
+    ouptput_device: Option<String>,
 }
 
 impl ToniqueProjectState {
-    pub fn new(tx: Producer<GuiToPlayerMsg>, rx: Consumer<ProcessToGuiMsg>) -> Self {
+    pub fn new(tx: GuiToAudioTx, rx: AudioToGuiRx) -> Self {
         Self {
             bpm: 120.,
             playback_position: 0.,
@@ -84,17 +96,28 @@ impl ToniqueProjectState {
             grid: GridService::new(),
             left_panel_open: true,
             bottom_panel_open: false,
+            show_export: false,
+            loop_state: LoopState {
+                enabled: false,
+                start: 0.,
+                end: 16.,
+            },
             metronome: false,
+            export_status: ExportStatus::DONE,
+            ouptput_device: None,
         }
     }
     /// Update each frame the state
-    pub fn update(&mut self) {
+    pub fn update(&mut self, delta: f32) {
         self.handle_pending_actions();
         self.handle_messages();
+        if self.playback_state == PlaybackState::Playing {
+            self.playback_position += delta * self.bpm / 60.;
+        }
     }
     // Bpm
     pub fn set_bpm(&mut self, value: f32) {
-        self.bpm = value;
+        self.bpm = value.clamp(10., 999.9);
         let _ = self.tx.push(GuiToPlayerMsg::UpdateBPM(value));
     }
 
@@ -355,9 +378,22 @@ impl ToniqueProjectState {
         !self.redo_stack.is_empty()
     }
 
+    pub fn output_device(&self) -> Option<String> {
+        return self.ouptput_device.clone();
+    }
+    // Export
+    pub fn export_status(&self) -> &ExportStatus {
+        &self.export_status
+    }
+    pub fn export(&mut self, path: PathBuf) {
+        if self.tx.push(GuiToPlayerMsg::Export(path)).is_ok() {
+            self.export_status = ExportStatus::PROCESSING(0.);
+        };
+    }
+
     // Handle messages received from the audio thread
     fn handle_messages(&mut self) {
-        while let Ok(msg) = self.rx.pop() {
+        while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 ProcessToGuiMsg::PlaybackPos(pos) => {
                     self.playback_position = pos;
@@ -365,6 +401,8 @@ impl ToniqueProjectState {
                 }
                 ProcessToGuiMsg::Metrics(metrics) => self.metrics = metrics,
                 ProcessToGuiMsg::PreviewPos(pos) => self.preview_position = pos,
+                ProcessToGuiMsg::ExportUpdate(status) => self.export_status = status,
+                ProcessToGuiMsg::DeviceChanged(name) => self.ouptput_device = name,
             }
         }
     }

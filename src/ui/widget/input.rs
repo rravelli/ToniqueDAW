@@ -164,16 +164,16 @@ impl NumberInput {
         let res = ui.allocate_rect(rect, Sense::click());
         let mut bg = Color32::from_gray(30);
         if res.hovered() {
-            bg = bg.gamma_multiply(0.7);
+            bg = bg.blend(Color32::from_white_alpha(50));
         }
 
-        painter.rect_filled(rect, 1.0, bg);
+        // painter.rect_filled(rect, 1.0, bg);
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
             icon,
             FontId::new(8., egui::FontFamily::Proportional),
-            Color32::WHITE,
+            Color32::from_gray(30),
         );
 
         res

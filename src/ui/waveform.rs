@@ -57,11 +57,11 @@ impl UIWaveform {
             let mut max_right: f32 = 0.;
             let mut i = start;
             while i < end.max(start + 1).min(data_len) {
-                let sample = data.0[i];
+                let sample = data.0[i].clamp(-1., 1.);
                 min_left = min_left.min(sample);
                 max_left = max_left.max(sample);
                 if is_stereo && data.1.len() > i {
-                    let sample = data.1[i];
+                    let sample = data.1[i].clamp(-1.0, 1.0);
                     min_right = min_right.min(sample);
                     max_right = max_right.max(sample);
                 }

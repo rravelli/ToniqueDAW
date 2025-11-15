@@ -153,7 +153,9 @@ impl UIItems {
         new_items: &mut Vec<FileNode>,
         state: &mut ToniqueProjectState,
     ) {
-        let file = if let Ok(files) = self.files.lock() {
+        let file = if let Ok(files) = self.files.lock()
+            && index < files.items.len()
+        {
             files.items[index].clone()
         } else {
             return;

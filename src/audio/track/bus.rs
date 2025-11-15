@@ -1,30 +1,29 @@
-use std::collections::HashMap;
+use crate::audio::track::TrackBackend;
 
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
-use crate::audio::track::{Processor, TrackBackend};
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BusTrackData {
-    pub children: HashMap<String, TrackBackend>,
+    pub children: Vec<String>,
 }
 impl BusTrackData {
     pub fn new() -> Self {
         Self {
-            children: HashMap::new(),
+            children: Vec::new(),
         }
     }
 }
 
-impl Processor for BusTrackData {
-    fn process(&mut self, pos: usize, num_frames: usize, sample_rate: usize, mix: &mut Vec<f32>) {
-        self.children.par_iter_mut().for_each(|(_, track)| {
-            track.process(pos, num_frames, sample_rate);
-        });
-
-        for track in self.children.values() {
-            for i in 0..mix.len() {
-                mix[i] += track.mix[i];
+impl BusTrackData {
+    pub fn process(
+        &mut self,
+        mix: &mut Vec<f32>,
+        children: Vec<TrackBackend>,
+        solo_tracks: &Vec<String>,
+    ) {
+        for track in children {
+            if !track.disabled(solo_tracks) {
+                for i in 0..mix.len() {
+                    mix[i] += track.mix[i];
+                }
             }
         }
     }

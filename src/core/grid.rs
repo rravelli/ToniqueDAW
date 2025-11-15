@@ -72,7 +72,7 @@ impl GridService {
     }
     /// Actual x position to beats position
     pub fn x_to_beats(&self, x: f32, viewport: Rect) -> f32 {
-        (x + self.offset.x - viewport.left()) / self.pixels_per_beat
+        ((x + self.offset.x - viewport.left()) / self.pixels_per_beat).max(0.)
     }
 
     pub fn zoom_around(&mut self, delta: f32, cursor_x: f32, viewport: Rect) {

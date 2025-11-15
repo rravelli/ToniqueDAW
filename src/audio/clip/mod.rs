@@ -3,13 +3,13 @@ use crate::{analysis::AudioInfo, cache::AUDIO_ANALYSIS_CACHE, core::clip::ClipCo
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType};
 use std::path::PathBuf;
 
-const RESAMPLER_CHUNK_SIZE: usize = 1024;
+const RESAMPLER_CHUNK_SIZE: usize = 2048;
 
 /// Clip struct for the audio thread.
 pub struct ClipBackend {
     pub id: String,
     pub audio: AudioInfo,
-    pub start_frame: usize,
+    pub pos: f32,
     pub trim_start: f32,
     pub trim_end: f32,
 
@@ -27,13 +27,7 @@ pub struct ClipBackend {
 }
 
 impl ClipBackend {
-    pub fn new(
-        id: String,
-        path: PathBuf,
-        start_frame: usize,
-        trim_start: f32,
-        trim_end: f32,
-    ) -> Self {
+    pub fn new(id: String, path: PathBuf, pos: f32, trim_start: f32, trim_end: f32) -> Self {
         let audio = AUDIO_ANALYSIS_CACHE.get_or_analyze(path.clone()).unwrap();
         let input_buffer = vec![Vec::new(), Vec::new()];
         let output_buffer = [Vec::new(), Vec::new()];
@@ -56,7 +50,6 @@ impl ClipBackend {
         Self {
             id,
             audio,
-            start_frame,
             trim_start: trim_start,
             trim_end: trim_end,
             input_buffer,
@@ -65,6 +58,7 @@ impl ClipBackend {
             timeline_playhead: 0,
             resampler,
             resampler_output_buffer: output_buffer,
+            pos,
         }
     }
 
@@ -191,11 +185,12 @@ impl ClipBackend {
         playhead: usize,
         num_frames: usize,
         sample_rate: usize,
+        bpm: f32,
     ) {
         // global start position
-        let clip_start = self.start_frame;
+        let clip_start = self.start(sample_rate, bpm);
         // global end position
-        let clip_end = self.end(sample_rate);
+        let clip_end = self.end(sample_rate, bpm);
 
         // start position of the clip in [pos, pos + num_frames]
         let start = clip_start.max(playhead);
@@ -266,17 +261,21 @@ impl ClipBackend {
         (self.trim_end * self.audio.num_samples.unwrap() as f32).round() as usize
     }
 
-    pub fn end(&self, sample_rate: usize) -> usize {
-        self.start_frame
+    pub fn end(&self, sample_rate: usize, bpm: f32) -> usize {
+        self.start(sample_rate, bpm)
             + (self.num_frames() as f32 * sample_rate as f32 / self.audio.sample_rate as f32)
                 .floor() as usize
     }
 
-    pub fn from_clipcore(clip: &ClipCore, bpm: f32, sample_rate: usize) -> Self {
+    pub fn start(&self, sample_rate: usize, bpm: f32) -> usize {
+        (self.pos / bpm * sample_rate as f32 * 60.).floor() as usize
+    }
+
+    pub fn from_clipcore(clip: &ClipCore) -> Self {
         Self::new(
             clip.id.clone(),
             clip.audio.path.clone(),
-            (clip.position / bpm * 60. * sample_rate as f32).floor() as usize,
+            clip.position,
             clip.trim_start,
             clip.trim_end,
         )
@@ -288,7 +287,7 @@ impl Clone for ClipBackend {
         Self::new(
             self.id.clone(),
             self.audio.path.clone(),
-            self.start_frame,
+            self.pos,
             self.trim_start,
             self.trim_end,
         )

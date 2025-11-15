@@ -1,5 +1,5 @@
 use crate::{
-    core::{state::ToniqueProjectState, track::TrackReferenceCore},
+    core::{metrics::AudioMetrics, state::ToniqueProjectState, track::TrackReferenceCore},
     ui::panels::left_panel::DragPayload,
     utils::parse_name,
 };
@@ -41,7 +41,13 @@ impl UIBottomPanel {
 
     pub fn ui(&mut self, ui: &mut Ui, track: TrackReferenceCore, state: &mut ToniqueProjectState) {
         // TODO Not using unwrap
-        let mut metrics = state.metrics.tracks.get_mut(&track.id).unwrap().clone();
+        let mut metrics = state
+            .metrics
+            .tracks
+            .get(&track.id)
+            .unwrap_or(&AudioMetrics::new())
+            .clone();
+
         let mut insert_index = None;
         let mut drag_payload = None;
 

@@ -1,10 +1,13 @@
-use crate::core::{clip::ClipCore, metrics::GlobalMetrics};
+use crate::core::{clip::ClipCore, export::ExportStatus, metrics::GlobalMetrics, state::LoopState};
+use crossbeam::channel::{Receiver, Sender};
 use fundsp::hacker::AudioUnit;
 use rtrb::{Consumer, Producer};
 use std::{collections::HashMap, fmt::Debug, path::PathBuf};
 
 pub type GuiToAudioTx = Producer<GuiToPlayerMsg>;
-pub type AudioToGuiRx = Consumer<ProcessToGuiMsg>;
+pub type AudioToGuiRx = Receiver<ProcessToGuiMsg>;
+pub type GuiToAudioRx = Consumer<GuiToPlayerMsg>;
+pub type AudioToGuiTx = Sender<ProcessToGuiMsg>;
 
 pub enum GuiToPlayerMsg {
     // Playback control messages
@@ -48,12 +51,18 @@ pub enum GuiToPlayerMsg {
     },
     // Metronome
     ToggleMetronome(bool),
+    // Export
+    Export(PathBuf),
+    // Loop
+    UpdateLoop(LoopState),
 }
 
 pub enum ProcessToGuiMsg {
     PlaybackPos(f32),
     PreviewPos(usize),
     Metrics(GlobalMetrics),
+    ExportUpdate(ExportStatus),
+    DeviceChanged(Option<String>),
 }
 
 impl Debug for GuiToPlayerMsg {
@@ -132,6 +141,8 @@ impl Debug for GuiToPlayerMsg {
                 .field("clip_map", clip_map)
                 .finish(),
             Self::ToggleMetronome(val) => f.debug_tuple("ToggleMetronome").field(val).finish(),
+            Self::Export(arg0) => f.debug_tuple("Export").field(arg0).finish(),
+            Self::UpdateLoop(arg0) => f.debug_tuple("UpdateLoop").field(arg0).finish(),
         }
     }
 }

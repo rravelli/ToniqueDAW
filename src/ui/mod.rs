@@ -2,6 +2,7 @@ use crate::{
     core::message::{AudioToGuiRx, GuiToAudioTx},
     ui::{app::ToniqueApp, font::get_fonts, theme::get_app_style, window::get_native_options},
 };
+
 use egui::Theme;
 pub mod app;
 mod buttons;
