@@ -4,12 +4,10 @@ use cpal::{
 };
 use egui::{
     Color32, Context, FontFamily, FontId, Frame, Layout, Margin, Pos2, Rangef, Response, Sense,
-    Stroke, Ui, Vec2, Widget, containers::menu::MenuButton,
+    Stroke, Ui, Vec2,
 };
 use egui_phosphor::{
-    fill::{
-        ARROW_COUNTER_CLOCKWISE, ARROWS_COUNTER_CLOCKWISE, EXPORT, FLOPPY_DISK, SIDEBAR_SIMPLE,
-    },
+    fill::{ARROWS_COUNTER_CLOCKWISE, SIDEBAR_SIMPLE},
     regular::RECORD,
 };
 
@@ -18,11 +16,7 @@ use crate::{
     ui::{
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::PRIMARY_COLOR,
-        widget::{
-            context_menu::{ContextMenuButton, ContextMenuSeparator},
-            input::NumberInput,
-            square_button::SquareButton,
-        },
+        widget::{input::NumberInput, square_button::SquareButton},
     },
 };
 const BUTTON_SIZE: f32 = 22.;
@@ -61,16 +55,6 @@ impl UITopBar {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
             self.sidebar_ui(ui, state);
-
-            MenuButton::new("File").ui(ui, |ui| {
-                ContextMenuButton::new("", "New").submenu(ui, |ui| {});
-                ContextMenuButton::new(FLOPPY_DISK, "Save").ui(ui);
-                ContextMenuSeparator::new().ui(ui);
-                if ContextMenuButton::new(EXPORT, "Export").ui(ui).clicked() {
-                    state.show_export = true;
-                }
-            });
-
             self.metronome_ui(ui, state);
             self.bpm_input.value = state.bpm();
             self.bpm_input.ui(ui);
@@ -94,7 +78,6 @@ impl UITopBar {
                 if self.undo_ui(ui, state).clicked() {
                     state.undo();
                 };
-                self.output_ui(ui, state);
                 self.usage_ui(ui, state);
                 self.fps_ui(ui);
                 self.waveform_ui(ui, state);
@@ -151,7 +134,7 @@ impl UITopBar {
                         14.,
                         egui::FontFamily::Name(PHOSPHOR_FILL.into()),
                     ))
-                    .fill(if state.loop_state.enabled {
+                    .fill(if state.loop_state().enabled {
                         PRIMARY_COLOR
                     } else {
                         PRIMARY_BUTTON_COLOR
@@ -161,7 +144,7 @@ impl UITopBar {
             )
             .clicked()
         {
-            state.loop_state.enabled = !state.loop_state.enabled
+            state.toggle_loop();
         }
     }
 
@@ -294,39 +277,6 @@ impl UITopBar {
             .color(Color32::from_gray(30))
             .tooltip("FPS"),
         )
-    }
-
-    fn output_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
-        let res = ui.add(
-            SquareButton::new(state.output_device().unwrap_or("OFF".into()))
-                .square(BUTTON_SIZE)
-                .font(FontId::new(10., egui::FontFamily::Proportional))
-                .fill(PRIMARY_BUTTON_COLOR)
-                .color(Color32::from_gray(30))
-                .tooltip("Output device"),
-        );
-
-        if res.clicked() {
-            let host = default_host();
-
-            println!("{:?}", available_hosts());
-            println!(
-                "{:?}",
-                host.output_devices()
-                    .unwrap()
-                    .map(|d| d.name())
-                    .collect::<Vec<_>>()
-            );
-            println!(
-                "{:?}",
-                host.input_devices()
-                    .unwrap()
-                    .map(|d| d.name())
-                    .collect::<Vec<_>>()
-            );
-        }
-
-        res
     }
 
     fn undo_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {

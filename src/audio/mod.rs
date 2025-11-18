@@ -11,20 +11,19 @@ use crate::{
     },
     core::{
         message::{AudioToGuiTx, GuiToAudioRx, GuiToPlayerMsg, ProcessToGuiMsg},
-        metrics::{AudioMetrics, GlobalMetrics},
+        metrics::GlobalMetrics,
         state::{LoopState, PlaybackState},
     },
 };
 use cpal::{
-    Device, Stream, available_hosts,
+    Device, Stream,
     traits::{DeviceTrait, HostTrait},
 };
-use crossbeam::channel::{Sender, bounded, unbounded};
+use crossbeam::channel::Sender;
 use rtrb::Consumer;
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
-    sync::atomic::AtomicU32,
     thread::spawn,
     time::Instant,
 };
@@ -42,7 +41,7 @@ mod preview;
 mod process;
 mod track;
 
-pub const CHUNK_SIZE: usize = 1024;
+pub const CHUNK_SIZE: usize = 2048;
 
 struct DeviceStream {
     stream: cpal::Stream,
@@ -149,7 +148,27 @@ impl AudioManager {
                                     self.tx.send(ProcessToGuiMsg::PreviewPos(stream.playhead()));
                             }
                             if self.playback_state == PlaybackState::Playing {
-                                output.playhead += frames.len() / 2;
+                                let loop_end_samples = (self.loop_state.end * 60. / self.engine.bpm
+                                    * self.engine.sample_rate as f32)
+                                    .floor()
+                                    as usize;
+                                if self.loop_state.enabled
+                                    && output.playhead <= loop_end_samples
+                                    && output.playhead + frames.len() / 2 >= loop_end_samples
+                                {
+                                    output.playhead = (self.loop_state.start * 60.
+                                        / self.engine.bpm
+                                        * self.engine.sample_rate as f32)
+                                        .floor()
+                                        as usize
+                                        + (output.playhead + frames.len() / 2 - loop_end_samples);
+                                } else {
+                                    output.playhead += frames.len() / 2;
+                                }
+                                let _ = self.tx.send(ProcessToGuiMsg::PlaybackPos(
+                                    output.playhead as f32 * self.engine.bpm
+                                        / (self.engine.sample_rate as f32 * 60.),
+                                ));
                             } else {
                                 self.metrics.reset();
                             }
@@ -180,7 +199,7 @@ impl AudioManager {
             self.process_preview();
         }
         if self.playback_state == PlaybackState::Playing {
-            self.process_master();
+            self.process_tracks();
         }
         // Update
         self.metrics.processing_ratio = time_start.elapsed().as_secs_f32()
@@ -189,12 +208,50 @@ impl AudioManager {
         self.acc.extend(self.buffer.clone());
     }
 
-    fn process_master(&mut self) {
-        self.engine
-            .process(self.playhead, CHUNK_SIZE, &mut self.metrics);
+    fn process_tracks(&mut self) {
+        let mut looping = false;
+        let loop_start_samples = (self.loop_state.start * 60. / self.engine.bpm
+            * self.engine.sample_rate as f32)
+            .floor() as usize;
+        let loop_end_samples = (self.loop_state.end * 60. / self.engine.bpm
+            * self.engine.sample_rate as f32)
+            .floor() as usize;
 
-        if let Some(track) = self.engine.tracks.get("master") {
-            self.buffer.copy_from_slice(track.mix.as_slice());
+        if self.loop_state.enabled {
+            if self.playhead <= loop_end_samples && self.playhead + CHUNK_SIZE >= loop_end_samples {
+                looping = true;
+                let render_size = (loop_end_samples - self.playhead).min(CHUNK_SIZE);
+                self.engine
+                    .process(self.playhead, render_size, &mut self.metrics);
+
+                if let Some(track) = self.engine.tracks.get("master") {
+                    self.buffer[..2 * render_size].copy_from_slice(&track.mix);
+                }
+
+                self.engine.process(
+                    loop_start_samples,
+                    CHUNK_SIZE - render_size,
+                    &mut self.metrics,
+                );
+                if let Some(track) = self.engine.tracks.get("master") {
+                    println!(
+                        "render_size: {}, mix size: {}, buffer size: {}",
+                        render_size,
+                        track.mix.len(),
+                        self.buffer[render_size..].len()
+                    );
+                    self.buffer[render_size * 2..].copy_from_slice(&track.mix.as_slice());
+                }
+            }
+        }
+
+        if !looping {
+            self.engine
+                .process(self.playhead, CHUNK_SIZE, &mut self.metrics);
+
+            if let Some(track) = self.engine.tracks.get("master") {
+                self.buffer.copy_from_slice(track.mix.as_slice());
+            }
         }
 
         if self.metronome.enabled {
@@ -207,7 +264,11 @@ impl AudioManager {
             );
         }
 
-        self.playhead += CHUNK_SIZE;
+        if looping {
+            self.playhead = loop_start_samples + CHUNK_SIZE - (loop_end_samples - self.playhead);
+        } else {
+            self.playhead += CHUNK_SIZE;
+        }
     }
 
     fn process_preview(&mut self) {
@@ -286,13 +347,7 @@ impl AudioManager {
                 }
                 GuiToPlayerMsg::AddTrack(id) => {
                     let track = TrackBackend::new_audio_track(&id);
-                    // Insert in parent children
-                    if let Some(track) = self.engine.tracks.get_mut("master")
-                        && let TrackKind::Bus(data) = &mut track.kind
-                    {
-                        data.children.push(id.clone());
-                    }
-                    self.engine.tracks.insert(id, track);
+                    self.engine.add_track(track, None);
                 }
                 GuiToPlayerMsg::AddClip(
                     track_id,
@@ -378,14 +433,7 @@ impl AudioManager {
                     self.engine.solo_tracks = tracks;
                 }
                 GuiToPlayerMsg::RemoveTrack(id) => {
-                    self.engine.tracks.remove(&id);
-                    // Remove from parent children
-                    if let Some(track) = self.engine.tracks.get_mut("master")
-                        && let TrackKind::Bus(data) = &mut track.kind
-                    {
-                        data.children.retain(|cid| *cid != id);
-                    }
-                    self.engine.solo_tracks.retain(|solo| *solo != *id);
+                    self.engine.remove_track(&id);
                 }
                 GuiToPlayerMsg::PlayPreview(file) => {
                     if self.playback_state == PlaybackState::Paused {
@@ -436,16 +484,10 @@ impl AudioManager {
                     clip_map,
                 } => {
                     let Some(track) = self.engine.tracks.get(&id) else {
-                        return Ok(());
+                        continue;
                     };
                     let new_track = track.duplicate(&new_id, clip_map);
-                    // Insert in parent children
-                    if let Some(track) = self.engine.tracks.get_mut("master")
-                        && let TrackKind::Bus(data) = &mut track.kind
-                    {
-                        data.children.push(new_id.clone());
-                    }
-                    self.engine.tracks.insert(new_id, new_track);
+                    self.engine.add_track(new_track, None);
                 }
                 GuiToPlayerMsg::ToggleMetronome(value) => {
                     self.metronome.enabled = value;

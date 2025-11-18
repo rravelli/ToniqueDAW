@@ -1,4 +1,4 @@
-use egui::{FontDefinitions, FontFamily};
+use egui::{FontDefinitions, FontFamily, epaint::text::FontData};
 
 pub const PHOSPHOR_REGULAR: &str = "phosphor_regular";
 pub const PHOSPHOR_FILL: &str = "phosphor_fill";
@@ -8,11 +8,11 @@ pub fn get_fonts() -> FontDefinitions {
 
     fonts.font_data.insert(
         PHOSPHOR_REGULAR.into(),
-        egui_phosphor::Variant::Regular.font_data().into(),
+        FontData::from_static(egui_phosphor::Variant::Regular.font_bytes()).into(),
     );
     fonts.font_data.insert(
         PHOSPHOR_FILL.into(),
-        egui_phosphor::Variant::Fill.font_data().into(),
+        FontData::from_static(egui_phosphor::Variant::Fill.font_bytes()).into(),
     );
     fonts.families.insert(
         FontFamily::Name(PHOSPHOR_FILL.into()),

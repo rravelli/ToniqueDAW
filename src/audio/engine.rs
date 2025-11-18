@@ -1,9 +1,14 @@
 use crate::{
-    audio::{process::build_layers, track::TrackBackend},
+    audio::{
+        process::build_layers,
+        track::{TrackBackend, TrackKind},
+    },
     core::{metrics::GlobalMetrics, state::LoopState},
 };
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::collections::HashMap;
+
+pub const MASTER_TRACK_ID: &str = "master";
 
 #[derive(Clone)]
 pub struct Engine {
@@ -11,33 +16,30 @@ pub struct Engine {
     pub bpm: f32,
     pub tracks: HashMap<String, TrackBackend>,
     pub solo_tracks: Vec<String>,
-    pub loop_state: LoopState,
+    _tree_layers: Vec<Vec<String>>,
 }
 
 impl Engine {
     pub fn new(sample_rate: usize, bpm: f32) -> Self {
         let mut tracks = HashMap::new();
-        tracks.insert("master".to_string(), TrackBackend::new_bus("master"));
+        tracks.insert(
+            MASTER_TRACK_ID.to_string(),
+            TrackBackend::new_bus(MASTER_TRACK_ID),
+        );
 
         Self {
             sample_rate,
             bpm,
             tracks,
             solo_tracks: Vec::new(),
-            loop_state: LoopState {
-                enabled: false,
-                start: 0.,
-                end: 40.,
-            },
+            _tree_layers: vec![vec![MASTER_TRACK_ID.to_string()]],
         }
     }
 
     pub fn process(&mut self, pos: usize, num_frames: usize, metrics: &mut GlobalMetrics) {
-        let layers = build_layers("master", &self.tracks);
-
-        for layer in layers {
+        for layer in self._tree_layers.as_slice() {
             let mut child_map = HashMap::new();
-            for id in &layer {
+            for id in layer {
                 if let Some(track) = self.tracks.get(id) {
                     child_map.insert(id.clone(), track.collect_children(&self.tracks));
                 }
@@ -63,25 +65,38 @@ impl Engine {
             });
         }
 
-        // Collect tracks
-        // let tracks: Vec<_> = self.tracks.values_mut().collect();
-
-        // // Process all tracks in parallel
-        // tracks.into_par_iter().for_each(|track| {
-        //     let mut track_metrics = AudioMetrics::new();
-
-        //     track.process(pos, num_frames, self.sample_rate, self.bpm);
-
-        //     for i in 0..track.mix.len() {
-        //         track_metrics.add_sample(track.mix[i], (i % 2 == 0).into());
-        //     }
-        // });
-
         // Add processed tracks to global mix
         for track in self.tracks.values() {
             metrics
                 .tracks
                 .insert(track.id.clone(), track.metrics.clone());
         }
+    }
+
+    pub fn add_track(&mut self, track: TrackBackend, parent: Option<&str>) {
+        let parent_id = parent.unwrap_or(MASTER_TRACK_ID);
+        if let Some(parent_track) = self.tracks.get_mut(parent_id)
+            && let TrackKind::Bus(data) = &mut parent_track.kind
+        {
+            data.children.push(track.id.clone());
+        } else {
+            return;
+        }
+        self.tracks.insert(track.id.clone(), track);
+        // Recompute tree
+        self._tree_layers = build_layers(MASTER_TRACK_ID, &self.tracks);
+    }
+
+    pub fn remove_track(&mut self, id: &str) {
+        self.tracks.remove(id);
+        // Remove from parent children
+        if let Some(track) = self.tracks.get_mut(MASTER_TRACK_ID)
+            && let TrackKind::Bus(data) = &mut track.kind
+        {
+            data.children.retain(|cid| *cid != id);
+        }
+        self.solo_tracks.retain(|solo| *solo != *id);
+        // Recompute tree
+        self._tree_layers = build_layers(MASTER_TRACK_ID, &self.tracks);
     }
 }

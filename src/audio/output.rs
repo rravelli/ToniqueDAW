@@ -1,4 +1,6 @@
 use std::collections::VecDeque;
+use std::thread::sleep;
+use std::time::Duration;
 
 use crate::audio::player::PlayerBackend;
 use crate::core::message::{AudioToGuiTx, GuiToAudioRx};
@@ -63,12 +65,15 @@ pub fn spawn_output_thread(
             &config,
             move |data: &mut [f32], _| {
                 data.fill(0.);
-                let _ = tx.push(data.len());
+                let len = data.len();
+                let _ = tx.push(len);
+                sleep(Duration::from_millis(4));
                 while let Ok(msg) = rx.pop() {
                     match msg {
                         OutputStreamMessage::AddChunk(items) => {
                             if !items.is_empty() {
-                                data[..items.len()].copy_from_slice(&items);
+                                let size = items.len().min(len);
+                                data[..size].copy_from_slice(&items[..size]);
                             }
                         }
                     }

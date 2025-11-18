@@ -3,7 +3,7 @@ use crate::{
     ui::{app::ToniqueApp, font::get_fonts, theme::get_app_style, window::get_native_options},
 };
 
-use egui::Theme;
+use eframe::egui::ThemePreference;
 pub mod app;
 mod buttons;
 mod clip;
@@ -24,9 +24,10 @@ pub fn spawn_ui_thread(tx: GuiToAudioTx, rx: AudioToGuiRx) -> Result<(), eframe:
         "Tonique",
         get_native_options(),
         Box::new(|cc| {
+            egui_extras::install_image_loaders(&cc.egui_ctx);
             cc.egui_ctx.set_fonts(get_fonts());
             cc.egui_ctx.set_style(get_app_style());
-            cc.egui_ctx.set_theme(Theme::Dark);
+            cc.egui_ctx.set_theme(ThemePreference::Dark);
             Ok(Box::new(ToniqueApp::new(tx, rx, cc)))
         }),
     )

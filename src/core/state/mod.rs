@@ -1,7 +1,9 @@
 mod action;
+mod looping;
 mod services;
 #[cfg(test)]
 mod tests;
+mod transport;
 use crate::{
     core::{
         clip::ClipCore,
@@ -65,7 +67,7 @@ pub struct ToniqueProjectState {
     // Grid
     pub grid: GridService,
     metronome: bool,
-    pub loop_state: LoopState,
+    loop_state: LoopState,
     pub resized_clip: Option<(String, f32, f32, f32)>,
     // Panels
     pub left_panel_open: bool,
@@ -114,65 +116,6 @@ impl ToniqueProjectState {
         if self.playback_state == PlaybackState::Playing {
             self.playback_position += delta * self.bpm / 60.;
         }
-    }
-    // Bpm
-    pub fn set_bpm(&mut self, value: f32) {
-        self.bpm = value.clamp(10., 999.9);
-        let _ = self.tx.push(GuiToPlayerMsg::UpdateBPM(value));
-    }
-
-    pub fn bpm(&self) -> f32 {
-        self.bpm
-    }
-    // Playback position
-    pub fn set_playback_position(&mut self, value: f32) {
-        self.playback_position = value.max(0.);
-        let _ = self.tx.push(GuiToPlayerMsg::SeekTo(value));
-    }
-    pub fn playback_position(&self) -> f32 {
-        self.playback_position
-    }
-    // Transport state
-    pub fn pause(&mut self) {
-        self.playback_state = PlaybackState::Paused;
-        let _ = self.tx.push(GuiToPlayerMsg::Pause);
-    }
-    pub fn play(&mut self) {
-        self.playback_state = PlaybackState::Playing;
-        self.preview_playback_state = PlaybackState::Paused;
-        let _ = self.tx.push(GuiToPlayerMsg::Play);
-    }
-    pub fn pause_preview(&mut self) {
-        self.preview_playback_state = PlaybackState::Paused;
-        let _ = self.tx.push(GuiToPlayerMsg::PausePreview());
-    }
-    pub fn play_preview(&mut self, path: PathBuf) {
-        self.preview_playback_state = PlaybackState::Playing;
-        let _ = self.tx.push(GuiToPlayerMsg::PlayPreview(path));
-    }
-    pub fn seek_preview(&mut self, pos: usize) {
-        self.preview_position = pos;
-        self.preview_playback_state = PlaybackState::Playing;
-        let _ = self.tx.push(GuiToPlayerMsg::SeekPreview(pos));
-    }
-    pub fn toggle_metronome(&mut self) {
-        self.metronome = !self.metronome;
-        let _ = self
-            .tx
-            .push(GuiToPlayerMsg::ToggleMetronome(self.metronome));
-    }
-    pub fn metronome(&self) -> bool {
-        self.metronome
-    }
-
-    pub fn playback_state(&self) -> PlaybackState {
-        self.playback_state
-    }
-    pub fn preview_playback_state(&self) -> PlaybackState {
-        self.preview_playback_state
-    }
-    pub fn preview_position(&self) -> usize {
-        self.preview_position
     }
     // Tracks
     /// Add track at the last position. Shortcut for `add_track_at``

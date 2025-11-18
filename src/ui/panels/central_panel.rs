@@ -1,6 +1,13 @@
 use crate::{
     core::state::ToniqueProjectState,
-    ui::view::{navigation_bar::UINavigationBar, timeline::UITimeline, tracks::UITracks},
+    ui::{
+        theme::PRIMARY_COLOR,
+        view::{
+            navigation_bar::{NAVIGATION_BAR_HEIGHT, UINavigationBar},
+            timeline::UITimeline,
+            tracks::UITracks,
+        },
+    },
 };
 use egui::{Color32, Context, Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
@@ -71,30 +78,17 @@ impl UICentralPanel {
                 state.grid.offset.y = state.grid.offset.y.clamp(0., max_y);
             }
         }
+        let rect = Rect::from_min_size(
+            available_rect.min,
+            vec2(
+                available_rect.width() - self.tracks.width,
+                available_rect.height(),
+            ),
+        );
         self.draw_scrollbars(ui, viewport, content_size, &mut state.grid.offset);
-        self.draw_playhead_handle(
-            ui,
-            state,
-            Rect::from_min_size(
-                available_rect.min,
-                vec2(
-                    available_rect.width() - self.tracks.width,
-                    available_rect.height(),
-                ),
-            ),
-        );
-
-        self.draw_loop_markers(
-            ui,
-            state,
-            Rect::from_min_size(
-                available_rect.min,
-                vec2(
-                    available_rect.width() - self.tracks.width,
-                    available_rect.height(),
-                ),
-            ),
-        );
+        ui.set_clip_rect(rect);
+        self.draw_loop_markers(ui, state, rect);
+        self.draw_playhead_handle(ui, state, rect);
     }
 
     /// Draw horizontal and vertical scrollbars.
@@ -164,20 +158,93 @@ impl UICentralPanel {
     }
 
     fn draw_loop_markers(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {
-        let start_x = state.grid.beats_to_x(state.loop_state.start, rect);
+        let start_x = state.grid.beats_to_x(state.loop_state().start, rect);
+        let end_x = state.grid.beats_to_x(state.loop_state().end, rect);
+        let triangle_height = 8.;
+        let color = PRIMARY_COLOR;
+
+        if state.loop_state().enabled {
+            ui.painter().rect_filled(
+                Rect::from_min_max(pos2(start_x, rect.top()), pos2(end_x, rect.top() + 12.)),
+                2.0,
+                PRIMARY_COLOR.gamma_multiply(0.4),
+            );
+        }
+
         ui.painter().line_segment(
             [pos2(start_x, rect.top()), pos2(start_x, rect.bottom())],
-            Stroke::new(4., Color32::from_white_alpha(150)),
+            Stroke::new(2., color),
         );
-        let end_x = state.grid.beats_to_x(state.loop_state.end, rect);
+
+        let points = [
+            pos2(start_x, rect.top() + triangle_height), // top (point)
+            pos2(start_x + triangle_height, rect.top()),
+            pos2(start_x, rect.top()),
+        ];
+
+        ui.painter().add(egui::Shape::convex_polygon(
+            points.to_vec(),
+            color,
+            Stroke::new(0., Color32::from_black_alpha(120)),
+        ));
+
+        let points = [
+            pos2(end_x, rect.top() + triangle_height), // top (point)
+            pos2(end_x - triangle_height, rect.top()),
+            pos2(end_x, rect.top()),
+        ];
+
+        ui.painter().add(egui::Shape::convex_polygon(
+            points.to_vec(),
+            color,
+            Stroke::new(0., Color32::from_black_alpha(120)),
+        ));
         ui.painter().line_segment(
             [pos2(end_x, rect.top()), pos2(end_x, rect.bottom())],
-            Stroke::new(4., Color32::from_white_alpha(150)),
+            Stroke::new(2., color),
         );
+
+        let handle_rect = Rect::from_min_max(
+            pos2(start_x - 1., rect.top()),
+            pos2(
+                start_x + triangle_height,
+                rect.top() + NAVIGATION_BAR_HEIGHT,
+            ),
+        );
+
+        let start_handle_response = ui.interact(
+            handle_rect,
+            ui.id().with("loop-start-handle"),
+            Sense::click_and_drag(),
+        );
+
+        if start_handle_response.dragged()
+            && let Some(pos) = start_handle_response.interact_pointer_pos()
+        {
+            let snapped_position = state.grid.snap_at_grid(state.grid.x_to_beats(pos.x, rect));
+            state.set_loop_start(snapped_position);
+        }
+
+        let handle_rect = Rect::from_min_max(
+            pos2(end_x - triangle_height / 2., rect.top()),
+            pos2(end_x + 1., rect.top() + NAVIGATION_BAR_HEIGHT),
+        );
+
+        let handle_response = ui.interact(
+            handle_rect,
+            ui.id().with("loop-end-handle"),
+            Sense::click_and_drag(),
+        );
+
+        if handle_response.dragged()
+            && let Some(pos) = handle_response.interact_pointer_pos()
+        {
+            let snapped_position = state.grid.snap_at_grid(state.grid.x_to_beats(pos.x, rect));
+            state.set_loop_end(snapped_position);
+        }
     }
 
     fn draw_playhead_handle(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {
-        ui.set_clip_rect(rect);
         let painter = ui.painter();
         let playhead_x = state.grid.beats_to_x(state.playback_position(), rect);
         let line_stroke = Stroke::new(2.0, PLAYHEAD_COLOR.gamma_multiply_u8(160));
