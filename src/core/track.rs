@@ -28,8 +28,7 @@ pub struct TrackCore {
     pub clips: Vec<ClipCore>,
     pub muted: bool,
     pub volume: f32,
-    pub arm: bool,
-    /// TODO Should not mix ui in the state
+    /// TODO Refactor effects
     effects: Vec<UIEffect>,
     pub mutable: MutableTrackCore,
     pub old_mutable: MutableTrackCore,
@@ -42,7 +41,6 @@ impl TrackCore {
             clips: vec![],
             muted: false,
             volume: 1.,
-            arm: false,
             mutable: MutableTrackCore::new(),
             old_mutable: MutableTrackCore::new(),
             effects: vec![],
@@ -62,7 +60,7 @@ impl TrackCore {
         solo: TrackSoloState,
     ) -> TrackReferenceCore {
         TrackReferenceCore {
-            arm: self.arm,
+            arm: false,
             clips: self.clips.clone(),
             closed: self.mutable.closed,
             color: self.mutable.color,

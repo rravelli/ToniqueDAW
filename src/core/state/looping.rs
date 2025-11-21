@@ -1,9 +1,23 @@
-use crate::core::{
-    message::GuiToPlayerMsg,
-    state::{LoopState, ToniqueProjectState},
-};
+use crate::core::{message::GuiToPlayerMsg, state::ToniqueProjectState};
 
-const MIN_LOOP_SIZE: f32 = 4.;
+pub const MIN_LOOP_SIZE: f32 = 4.;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoopState {
+    pub enabled: bool,
+    pub start: f32,
+    pub end: f32,
+}
+
+impl LoopState {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            start: 0.,
+            end: 16.,
+        }
+    }
+}
 
 impl ToniqueProjectState {
     /// Get the current loop state

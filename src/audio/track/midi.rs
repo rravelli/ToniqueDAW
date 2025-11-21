@@ -1,9 +1,6 @@
-use crate::audio::{
-    clip::midi::MidiClip,
-    track::{Processor, TrackBackend},
-};
+use crate::audio::{clip::midi::MidiClip, track::Processor};
 use fundsp::hacker::AudioUnit;
-use std::{collections::HashMap, fmt::Debug};
+use std::fmt::Debug;
 
 #[derive(Clone)]
 pub struct MidiTrackData {

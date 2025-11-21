@@ -10,27 +10,6 @@ use std::time::Duration;
 
 use crate::waveform::load_audio;
 
-#[derive(Debug)]
-pub enum AudioInfoError {
-    Io(std::io::Error),
-    Symphonia(symphonia::core::errors::Error),
-    MissingSampleRate,
-    MissingChannels,
-    NoDefaultTrack,
-}
-
-impl From<std::io::Error> for AudioInfoError {
-    fn from(e: std::io::Error) -> Self {
-        AudioInfoError::Io(e)
-    }
-}
-
-impl From<symphonia::core::errors::Error> for AudioInfoError {
-    fn from(e: symphonia::core::errors::Error) -> Self {
-        AudioInfoError::Symphonia(e)
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct AudioInfo {
     pub name: String,
@@ -44,7 +23,7 @@ pub struct AudioInfo {
     pub path: PathBuf,
 }
 
-pub fn get_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoError> {
+pub fn get_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, String> {
     let name = path
         .as_ref()
         .file_name()
@@ -52,29 +31,25 @@ pub fn get_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoErr
         .to_string_lossy()
         .to_string();
 
-    let file = File::open(&path)?;
+    let file = File::open(&path).map_err(|e| e.to_string())?;
 
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
     let hint = Hint::new();
-    let probed =
-        get_probe().format(&hint, mss, &Default::default(), &MetadataOptions::default())?;
+    let probed = get_probe()
+        .format(&hint, mss, &Default::default(), &MetadataOptions::default())
+        .map_err(|e| e.to_string())?;
     let format = probed.format;
 
     let track = format
         .default_track()
-        .ok_or(AudioInfoError::NoDefaultTrack)?;
+        .ok_or("No default track".to_string())?;
 
     let codec_params = &track.codec_params;
 
-    let sample_rate = codec_params
-        .sample_rate
-        .ok_or(AudioInfoError::MissingSampleRate)?;
+    let sample_rate = codec_params.sample_rate.ok_or("Missing sample rate")?;
 
-    let channels = codec_params
-        .channels
-        .ok_or(AudioInfoError::MissingChannels)?
-        .count() as u16;
+    let channels = codec_params.channels.ok_or("Missing channels")?.count() as u16;
 
     let duration = codec_params
         .n_frames

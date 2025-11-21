@@ -3,6 +3,7 @@ use cpal::{
     BufferSize, Stream,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
+use rtrb::{Consumer, Producer};
 
 pub fn spawn_input_thread() -> Stream {
     let host = cpal::default_host();
@@ -36,4 +37,12 @@ pub fn spawn_input_thread() -> Stream {
     let _ = stream.play().unwrap();
 
     stream
+}
+
+pub struct InputStream {
+    pub name: String,
+    pub _stream: cpal::Stream,
+    pub tx: Producer<Vec<f32>>,
+    pub rx: Consumer<usize>,
+    pub playhead: usize,
 }

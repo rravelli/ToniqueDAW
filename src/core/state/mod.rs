@@ -1,4 +1,7 @@
 mod action;
+mod clip;
+mod export;
+mod history;
 mod looping;
 mod services;
 #[cfg(test)]
@@ -6,16 +9,14 @@ mod tests;
 mod transport;
 use crate::{
     core::{
-        clip::ClipCore,
         export::ExportStatus,
         grid::GridService,
-        message::{AudioToGuiRx, GuiToAudioTx, GuiToPlayerMsg, ProcessToGuiMsg},
+        message::{AudioToGuiRx, GuiToAudioTx, ProcessToGuiMsg},
         metrics::GlobalMetrics,
         state::{
             action::{
-                AddClipsAction, AddTrackAction, BatchAction, CutClipAction, DeleteClipsAction,
-                DeleteTrackAction, DuplicateClipAction, DuplicateTrackAction, MoveClipAction,
-                ProjectStateAction, ResizeClipAction, SetMutableTrackAction, SetVolumeAction,
+                AddTrackAction, DeleteTrackAction, DuplicateTrackAction, ProjectStateAction,
+                SetMutableTrackAction, SetVolumeAction,
             },
             services::track::TrackService,
         },
@@ -23,8 +24,8 @@ use crate::{
     },
     ui::{effect::UIEffect, effects::EffectId},
 };
-
-use std::{mem::take, path::PathBuf};
+pub use looping::LoopState;
+use std::mem::take;
 
 #[derive(Clone, Debug)]
 enum ProjectStatePendingAction {
@@ -35,13 +36,6 @@ enum ProjectStatePendingAction {
 pub enum PlaybackState {
     Paused,
     Playing,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LoopState {
-    pub enabled: bool,
-    pub start: f32,
-    pub end: f32,
 }
 
 pub struct ToniqueProjectState {
@@ -99,11 +93,7 @@ impl ToniqueProjectState {
             left_panel_open: true,
             bottom_panel_open: false,
             show_export: false,
-            loop_state: LoopState {
-                enabled: false,
-                start: 0.,
-                end: 16.,
-            },
+            loop_state: LoopState::new(),
             metronome: false,
             export_status: ExportStatus::DONE,
             ouptput_device: None,
@@ -144,45 +134,6 @@ impl ToniqueProjectState {
     /// Close or open all tracks
     pub fn set_all_close(&mut self, close: bool) {
         self.track_service.set_all_close(close);
-    }
-    // Clips
-    /// Add clips and fix all overlaps on the track.
-    pub fn add_clips(&mut self, track_id: &String, clips: Vec<ClipCore>) {
-        let action = AddClipsAction::new(clips, track_id);
-        self.apply_action(Box::new(action));
-    }
-    /// Move clip to a new position and a new track fixing all overlaps on this track.
-    pub fn move_clip(&mut self, id: &String, to_track: &String, to_pos: f32, ignore: &Vec<String>) {
-        let action = MoveClipAction::new(id, to_track, to_pos, ignore);
-        self.apply_action(Box::new(action));
-    }
-    /// Delete clips for their ids
-    pub fn delete_clips(&mut self, ids: &Vec<String>) {
-        let action = DeleteClipsAction::new(ids);
-        self.apply_action(Box::new(action));
-    }
-    /// Cut clip located at position on given track. Does nothing it there is no clip.
-    pub fn cut_clip_at(&mut self, track_id: &String, position: f32) {
-        let action = CutClipAction::new(track_id, position);
-        self.apply_action(Box::new(action));
-    }
-    /// Duplicate clips fixing all overlaps on the tracks.
-    pub fn duplicate_clips(&mut self, ids: &Vec<String>, bounds: Option<(f32, f32)>) {
-        let action = DuplicateClipAction::new(ids, bounds);
-        self.apply_action(Box::new(action));
-    }
-    /// Resize clip without computing overlap checks.
-    /// Use `commit_resize_clip` to apply overlap checks and add to undo stack.
-    pub fn resize_clip(&mut self, id: &str, start: f32, end: f32, pos: f32) {
-        // self.track_service
-        //     .resize_clip_skip_overlap_check(id, start, end, pos, &mut self.tx);
-        self.resized_clip = Some((id.to_string(), start, end, pos));
-    }
-    /// Resize clip and perform overlap checks
-    pub fn commit_resize_clip(&mut self, id: &str, start: f32, end: f32, pos: f32) {
-        self.resized_clip = None;
-        let action = ResizeClipAction::new(id, start, end, pos);
-        self.apply_action(Box::new(action));
     }
     /// Add a effect to the track
     /// TODO: Action
@@ -262,8 +213,6 @@ impl ToniqueProjectState {
     pub fn track_from_index(&self, index: usize) -> Option<TrackReferenceCore> {
         self.track_service.from_index(index)
     }
-
-    // History management
     /// Apply a `ProjectStateAction` and adds it to the stack
     fn apply_action(&mut self, mut action: Box<dyn ProjectStateAction>) {
         if self.batching {
@@ -276,62 +225,6 @@ impl ToniqueProjectState {
         action.apply(self);
         self.undo_stack.push(action);
         self.redo_stack.clear();
-    }
-    /// Create a batch of actions. All actions made from this point are not applied but saved to a buffer.
-    /// Use `commit_batch` to apply them.
-    pub fn begin_batch(&mut self) {
-        self.batching = true;
-    }
-    /// Apply changes saved in the batch buffer. New actions are no longer saved in the buffer.
-    pub fn commit_batch(&mut self) {
-        self.batching = false;
-        if self.batch_buffer.len() > 0 {
-            let batch = std::mem::take(&mut self.batch_buffer);
-            let action = BatchAction::new(batch);
-            self.apply_action(Box::new(action));
-        }
-        self.batch_buffer.clear();
-    }
-    /// Undo last action. Does nothing if there is no action.
-    pub fn undo(&mut self) {
-        if let Some(mut action) = self.undo_stack.pop() {
-            if cfg!(debug_assertions) {
-                println!("Undoing {}", action.name());
-            }
-            action.undo(self);
-            self.redo_stack.push(action);
-        }
-    }
-    /// Redo last action. Does nothing if there is no action.
-    pub fn redo(&mut self) {
-        if let Some(mut action) = self.redo_stack.pop() {
-            if cfg!(debug_assertions) {
-                println!("Redoing {}", action.name());
-            }
-            action.apply(self);
-            self.undo_stack.push(action);
-        }
-    }
-    /// Whether there is still actions to undo
-    pub fn can_undo(&self) -> bool {
-        !self.undo_stack.is_empty()
-    }
-    /// Whether there is still actions to redo
-    pub fn can_redo(&self) -> bool {
-        !self.redo_stack.is_empty()
-    }
-
-    pub fn output_device(&self) -> Option<String> {
-        return self.ouptput_device.clone();
-    }
-    // Export
-    pub fn export_status(&self) -> &ExportStatus {
-        &self.export_status
-    }
-    pub fn export(&mut self, path: PathBuf) {
-        if self.tx.push(GuiToPlayerMsg::Export(path)).is_ok() {
-            self.export_status = ExportStatus::PROCESSING(0.);
-        };
     }
 
     // Handle messages received from the audio thread

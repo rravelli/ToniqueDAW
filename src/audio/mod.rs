@@ -1,11 +1,11 @@
 use crate::{
     audio::{
         clip::ClipBackend,
-        engine::Engine,
+        engine::{Engine, MASTER_TRACK_ID},
         export::export_audio,
-        input::spawn_input_thread,
+        input::InputStream,
         metronome::MetronomeBackend,
-        output::{OutputStream, OutputStreamMessage, spawn_output_stream, spawn_output_thread},
+        output::{OutputStream, OutputStreamMessage, spawn_output_thread},
         preview::PreviewBackend,
         track::{TrackBackend, TrackKind},
     },
@@ -16,11 +16,9 @@ use crate::{
     },
 };
 use cpal::{
-    Device, Stream,
+    Device,
     traits::{DeviceTrait, HostTrait},
 };
-use crossbeam::channel::Sender;
-use rtrb::Consumer;
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
@@ -34,38 +32,15 @@ mod export;
 mod input;
 mod instrument;
 mod metronome;
-pub mod midi;
+mod midi;
 mod output;
-pub mod player;
 mod preview;
-mod process;
 mod track;
 
 pub const CHUNK_SIZE: usize = 2048;
 
-struct DeviceStream {
-    stream: cpal::Stream,
-    subscribers: Vec<Sender<Vec<f32>>>,
-}
-
-pub fn spawn_audio_thread(
-    to_gui_tx: AudioToGuiTx,
-    from_gui_rx: GuiToAudioRx,
-    midi_rx: Consumer<Vec<u8>>,
-) -> (Stream, Stream) {
-    // Record sound from devices
-    let input_stream = spawn_input_thread();
-    // Play sound to device
-    let output_stream = spawn_output_stream(to_gui_tx, from_gui_rx, midi_rx);
-
-    (input_stream, output_stream)
-}
-
-pub fn spawn_audio_manager(
-    to_gui_tx: AudioToGuiTx,
-    from_gui_rx: GuiToAudioRx,
-    midi_rx: Consumer<Vec<u8>>,
-) {
+/// Spawn the audio manager thread that handles all audio backend
+pub fn spawn_audio_manager(to_gui_tx: AudioToGuiTx, from_gui_rx: GuiToAudioRx) {
     spawn(|| {
         let mut manager = AudioManager::new(from_gui_rx, to_gui_tx);
         manager.run_loop();
@@ -73,10 +48,10 @@ pub fn spawn_audio_manager(
 }
 
 struct AudioManager {
-    rx: GuiToAudioRx,
-    tx: AudioToGuiTx,
+    gui_rx: GuiToAudioRx,
+    gui_tx: AudioToGuiTx,
     host: cpal::Host,
-    input_streams: HashMap<String, DeviceStream>,
+    _input_streams: HashMap<String, InputStream>,
     output_stream: Option<OutputStream>,
     engine: Engine,
     buffer: Vec<f32>,
@@ -91,12 +66,12 @@ struct AudioManager {
 }
 
 impl AudioManager {
-    fn new(rx: GuiToAudioRx, tx: AudioToGuiTx) -> Self {
+    fn new(gui_rx: GuiToAudioRx, gui_tx: AudioToGuiTx) -> Self {
         let mut manager = Self {
-            rx,
-            tx,
+            gui_rx,
+            gui_tx,
             host: cpal::default_host(),
-            input_streams: HashMap::new(),
+            _input_streams: HashMap::new(),
             output_stream: None,
             engine: Engine::new(44100, 120.),
             buffer: vec![0.; 2 * CHUNK_SIZE],
@@ -106,11 +81,7 @@ impl AudioManager {
             preview_state: PlaybackState::Paused,
             preview: PreviewBackend::new(),
             metrics: GlobalMetrics::new(),
-            loop_state: LoopState {
-                enabled: false,
-                end: 0.,
-                start: 0.,
-            },
+            loop_state: LoopState::new(),
             metronome: MetronomeBackend::new(),
         };
 
@@ -144,8 +115,9 @@ impl AudioManager {
                             if self.preview_state == PlaybackState::Playing
                                 && let Some(stream) = &self.preview.stream
                             {
-                                let _ =
-                                    self.tx.send(ProcessToGuiMsg::PreviewPos(stream.playhead()));
+                                let _ = self
+                                    .gui_tx
+                                    .send(ProcessToGuiMsg::PreviewPos(stream.playhead()));
                             }
                             if self.playback_state == PlaybackState::Playing {
                                 let loop_end_samples = (self.loop_state.end * 60. / self.engine.bpm
@@ -165,7 +137,7 @@ impl AudioManager {
                                 } else {
                                     output.playhead += frames.len() / 2;
                                 }
-                                let _ = self.tx.send(ProcessToGuiMsg::PlaybackPos(
+                                let _ = self.gui_tx.send(ProcessToGuiMsg::PlaybackPos(
                                     output.playhead as f32 * self.engine.bpm
                                         / (self.engine.sample_rate as f32 * 60.),
                                 ));
@@ -173,7 +145,9 @@ impl AudioManager {
                                 self.metrics.reset();
                             }
 
-                            let _ = self.tx.send(ProcessToGuiMsg::Metrics(self.metrics.clone()));
+                            let _ = self
+                                .gui_tx
+                                .send(ProcessToGuiMsg::Metrics(self.metrics.clone()));
                         }
                         Err(_) => todo!(),
                     }
@@ -224,7 +198,7 @@ impl AudioManager {
                 self.engine
                     .process(self.playhead, render_size, &mut self.metrics);
 
-                if let Some(track) = self.engine.tracks.get("master") {
+                if let Some(track) = self.engine.tracks.get(MASTER_TRACK_ID) {
                     self.buffer[..2 * render_size].copy_from_slice(&track.mix);
                 }
 
@@ -233,13 +207,7 @@ impl AudioManager {
                     CHUNK_SIZE - render_size,
                     &mut self.metrics,
                 );
-                if let Some(track) = self.engine.tracks.get("master") {
-                    println!(
-                        "render_size: {}, mix size: {}, buffer size: {}",
-                        render_size,
-                        track.mix.len(),
-                        self.buffer[render_size..].len()
-                    );
+                if let Some(track) = self.engine.tracks.get(MASTER_TRACK_ID) {
                     self.buffer[render_size * 2..].copy_from_slice(&track.mix.as_slice());
                 }
             }
@@ -306,7 +274,7 @@ impl AudioManager {
             playhead: 0,
         });
 
-        let _ = self.tx.send(ProcessToGuiMsg::DeviceChanged(
+        let _ = self.gui_tx.send(ProcessToGuiMsg::DeviceChanged(
             device.name().map_or(None, |f| Some(f)),
         ));
 
@@ -316,12 +284,12 @@ impl AudioManager {
     fn export(&self, path: PathBuf) {
         let engine = self.engine.clone();
         let total_frames = engine.sample_rate * 60;
-        let sender_clone = self.tx.clone();
+        let sender_clone = self.gui_tx.clone();
         spawn(move || export_audio(engine, total_frames, path, sender_clone));
     }
 
     fn handle_messages(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        while let Ok(msg) = self.rx.pop() {
+        while let Ok(msg) = self.gui_rx.pop() {
             if cfg!(debug_assertions) {
                 println!("\x1b[1m\x1b[34mOutput Thread: {:?}\x1b[0m", msg);
             }

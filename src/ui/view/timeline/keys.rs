@@ -69,5 +69,8 @@ impl UITimeline {
                 !ui.input(|i| i.viewport().fullscreen).unwrap_or_default(),
             ));
         }
+        if ui.input(|i| i.modifiers.ctrl && i.key_pressed(Key::L)) {
+            state.toggle_loop();
+        }
     }
 }

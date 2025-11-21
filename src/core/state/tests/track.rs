@@ -1,12 +1,4 @@
-use crossbeam::channel::unbounded;
-
-use crate::core::{state::ToniqueProjectState, track::TrackCore};
-
-fn setup_state() -> ToniqueProjectState {
-    let (tx, _) = rtrb::RingBuffer::new(128);
-    let (_, rx) = unbounded();
-    ToniqueProjectState::new(tx, rx)
-}
+use crate::core::{state::tests::setup_state, track::TrackCore};
 
 #[test]
 fn test_add_track() {
@@ -57,6 +49,6 @@ fn test_delete_track() {
     state.delete_track(&track2.id);
     state.update(0.2);
     assert_eq!(state.track_len(), 0);
-    // deleting a non existant track should no raise errors
+    // deleting a non existant track should not raise errors
     state.delete_track(&"invalid_id".to_string());
 }
