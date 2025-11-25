@@ -34,3 +34,4 @@ hound = "3.5.1"
 crossbeam = "0.8.4"
 egui_extras = { version = "*", features = ["image"] }
 image = { version = "0.25", features = ["jpeg", "png"] }
+colored = "3.0.0"

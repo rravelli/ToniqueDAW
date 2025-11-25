@@ -19,6 +19,18 @@ impl UITimeline {
                 state.play();
             }
         }
+        if ui.input(|i| i.modifiers.ctrl && i.key_pressed(Key::L)) {
+            if let Some(bounds) = self.selected_clips.bounds {
+                state.set_loop_start(bounds.start_pos);
+                state.set_loop_end(bounds.end_pos);
+                self.selected_clips.reset();
+                if !state.loop_state().enabled {
+                    state.toggle_loop();
+                }
+            } else {
+                state.toggle_loop();
+            }
+        }
 
         if ui.input(|i| i.key_pressed(Key::D) && i.modifiers.ctrl) {
             // Duplicate clips
@@ -68,9 +80,6 @@ impl UITimeline {
             ui.ctx().send_viewport_cmd(ViewportCommand::Fullscreen(
                 !ui.input(|i| i.viewport().fullscreen).unwrap_or_default(),
             ));
-        }
-        if ui.input(|i| i.modifiers.ctrl && i.key_pressed(Key::L)) {
-            state.toggle_loop();
         }
     }
 }

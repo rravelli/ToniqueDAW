@@ -173,7 +173,7 @@ impl UICentralPanel {
 
         ui.painter().line_segment(
             [pos2(start_x, rect.top()), pos2(start_x, rect.bottom())],
-            Stroke::new(2., color),
+            Stroke::new(1., color),
         );
 
         let points = [
@@ -201,7 +201,7 @@ impl UICentralPanel {
         ));
         ui.painter().line_segment(
             [pos2(end_x, rect.top()), pos2(end_x, rect.bottom())],
-            Stroke::new(2., color),
+            Stroke::new(1., color),
         );
 
         let handle_rect = Rect::from_min_max(
@@ -218,9 +218,14 @@ impl UICentralPanel {
             Sense::click_and_drag(),
         );
 
+        if start_handle_response.hovered() {
+            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Grab);
+        }
+
         if start_handle_response.dragged()
             && let Some(pos) = start_handle_response.interact_pointer_pos()
         {
+            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Grabbing);
             let snapped_position = state.grid.snap_at_grid(state.grid.x_to_beats(pos.x, rect));
             state.set_loop_start(snapped_position);
         }
@@ -230,15 +235,20 @@ impl UICentralPanel {
             pos2(end_x + 1., rect.top() + NAVIGATION_BAR_HEIGHT),
         );
 
-        let handle_response = ui.interact(
+        let end_handle_response = ui.interact(
             handle_rect,
             ui.id().with("loop-end-handle"),
             Sense::click_and_drag(),
         );
 
-        if handle_response.dragged()
-            && let Some(pos) = handle_response.interact_pointer_pos()
+        if end_handle_response.hovered() {
+            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Grab);
+        }
+
+        if end_handle_response.dragged()
+            && let Some(pos) = end_handle_response.interact_pointer_pos()
         {
+            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Grabbing);
             let snapped_position = state.grid.snap_at_grid(state.grid.x_to_beats(pos.x, rect));
             state.set_loop_end(snapped_position);
         }

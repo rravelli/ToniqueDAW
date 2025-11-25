@@ -15,6 +15,7 @@ use crate::{
         state::{LoopState, PlaybackState},
     },
 };
+use colored::Colorize;
 use cpal::{
     Device,
     traits::{DeviceTrait, HostTrait},
@@ -38,6 +39,7 @@ mod preview;
 mod track;
 
 pub const CHUNK_SIZE: usize = 2048;
+pub const MAX_SIZE: usize = 3 * CHUNK_SIZE;
 
 /// Spawn the audio manager thread that handles all audio backend
 pub fn spawn_audio_manager(to_gui_tx: AudioToGuiTx, from_gui_rx: GuiToAudioRx) {
@@ -75,7 +77,7 @@ impl AudioManager {
             output_stream: None,
             engine: Engine::new(44100, 120.),
             buffer: vec![0.; 2 * CHUNK_SIZE],
-            acc: VecDeque::new(),
+            acc: VecDeque::with_capacity(MAX_SIZE),
             playhead: 0,
             playback_state: PlaybackState::Paused,
             preview_state: PlaybackState::Paused,
@@ -94,70 +96,76 @@ impl AudioManager {
 
     pub fn run_loop(&mut self) {
         loop {
-            let can_process = self.output_stream.is_some() && self.acc.len() < 7 * CHUNK_SIZE;
+            let can_process = self.output_stream.is_some() && self.acc.len() < 2 * MAX_SIZE;
 
             if can_process {
                 self.process();
             }
 
-            if let Some(output) = &mut self.output_stream {
-                while let Ok(requested_frames) = output.rx.pop() {
-                    // Get first frames in acc
-                    let frames: Vec<f32> = (0..requested_frames)
-                        .filter_map(|_| self.acc.pop_front())
-                        .collect();
+            self.handle_ouptput_messages();
 
-                    match output
-                        .tx
-                        .push(OutputStreamMessage::AddChunk(frames.clone()))
-                    {
-                        Ok(_) => {
-                            if self.preview_state == PlaybackState::Playing
-                                && let Some(stream) = &self.preview.stream
-                            {
-                                let _ = self
-                                    .gui_tx
-                                    .send(ProcessToGuiMsg::PreviewPos(stream.playhead()));
-                            }
-                            if self.playback_state == PlaybackState::Playing {
-                                let loop_end_samples = (self.loop_state.end * 60. / self.engine.bpm
-                                    * self.engine.sample_rate as f32)
-                                    .floor()
-                                    as usize;
-                                if self.loop_state.enabled
-                                    && output.playhead <= loop_end_samples
-                                    && output.playhead + frames.len() / 2 >= loop_end_samples
-                                {
-                                    output.playhead = (self.loop_state.start * 60.
-                                        / self.engine.bpm
-                                        * self.engine.sample_rate as f32)
-                                        .floor()
-                                        as usize
-                                        + (output.playhead + frames.len() / 2 - loop_end_samples);
-                                } else {
-                                    output.playhead += frames.len() / 2;
-                                }
-                                let _ = self.gui_tx.send(ProcessToGuiMsg::PlaybackPos(
-                                    output.playhead as f32 * self.engine.bpm
-                                        / (self.engine.sample_rate as f32 * 60.),
-                                ));
-                            } else {
-                                self.metrics.reset();
-                            }
-
-                            let _ = self
-                                .gui_tx
-                                .send(ProcessToGuiMsg::Metrics(self.metrics.clone()));
-                        }
-                        Err(_) => todo!(),
-                    }
-                }
-            }
-
-            let _ = self.handle_messages();
+            let _ = self.handle_gui_messages();
         }
     }
+    fn handle_ouptput_messages(&mut self) {
+        if let Some(output) = &mut self.output_stream {
+            while let Ok(requested_frames) = output.rx.pop() {
+                // Get first frames in acc
+                let mut frames: Vec<f32> = Vec::with_capacity(requested_frames);
+                for _ in 0..requested_frames {
+                    if let Some(s) = self.acc.pop_front() {
+                        frames.push(s);
+                    } else {
+                        frames.push(0.0);
+                    }
+                }
 
+                match output
+                    .tx
+                    .push(OutputStreamMessage::AddChunk(frames.clone()))
+                {
+                    Ok(_) => {
+                        if self.preview_state == PlaybackState::Playing
+                            && let Some(stream) = &self.preview.stream
+                        {
+                            let _ = self
+                                .gui_tx
+                                .send(ProcessToGuiMsg::PreviewPos(stream.playhead()));
+                        }
+                        if self.playback_state == PlaybackState::Playing {
+                            let loop_end_samples = (self.loop_state.end * 60. / self.engine.bpm
+                                * self.engine.sample_rate as f32)
+                                .floor()
+                                as usize;
+                            if self.loop_state.enabled
+                                && output.playhead <= loop_end_samples
+                                && output.playhead + frames.len() / 2 >= loop_end_samples
+                            {
+                                output.playhead = (self.loop_state.start * 60. / self.engine.bpm
+                                    * self.engine.sample_rate as f32)
+                                    .floor()
+                                    as usize
+                                    + (output.playhead + frames.len() / 2 - loop_end_samples);
+                            } else {
+                                output.playhead += frames.len() / 2;
+                            }
+                            let _ = self.gui_tx.send(ProcessToGuiMsg::PlaybackPos(
+                                output.playhead as f32 * self.engine.bpm
+                                    / (self.engine.sample_rate as f32 * 60.),
+                            ));
+                        } else {
+                            self.metrics.reset();
+                        }
+
+                        let _ = self
+                            .gui_tx
+                            .send(ProcessToGuiMsg::Metrics(self.metrics.clone()));
+                    }
+                    Err(e) => eprintln!("Warning: failed to push to output stream: {:?}", e),
+                }
+            }
+        }
+    }
     pub fn process(&mut self) {
         if self.preview_state == PlaybackState::Paused
             && self.playback_state == PlaybackState::Paused
@@ -217,7 +225,7 @@ impl AudioManager {
             self.engine
                 .process(self.playhead, CHUNK_SIZE, &mut self.metrics);
 
-            if let Some(track) = self.engine.tracks.get("master") {
+            if let Some(track) = self.engine.tracks.get(MASTER_TRACK_ID) {
                 self.buffer.copy_from_slice(track.mix.as_slice());
             }
         }
@@ -250,10 +258,12 @@ impl AudioManager {
     }
 
     fn start_output(self: &mut AudioManager, device: &Device) -> Result<(), String> {
+        let device_name = device.name().map_err(|err| err.to_string())?;
+
         if self
             .output_stream
             .as_ref()
-            .is_some_and(|s| s.name == device.name().unwrap())
+            .is_some_and(|s| s.name == device_name)
         {
             return Ok(());
         }
@@ -267,7 +277,7 @@ impl AudioManager {
         let stream = spawn_output_thread(device.clone(), rx, tx2)?;
 
         self.output_stream = Some(OutputStream {
-            name: device.name().unwrap().to_string(),
+            name: device_name,
             _stream: stream,
             tx,
             rx: rx2,
@@ -288,10 +298,10 @@ impl AudioManager {
         spawn(move || export_audio(engine, total_frames, path, sender_clone));
     }
 
-    fn handle_messages(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    fn handle_gui_messages(&mut self) {
         while let Ok(msg) = self.gui_rx.pop() {
             if cfg!(debug_assertions) {
-                println!("\x1b[1m\x1b[34mOutput Thread: {:?}\x1b[0m", msg);
+                println!("{}", format!("Output Thread: {:?}", msg).blue());
             }
             match msg {
                 GuiToPlayerMsg::Play => {
@@ -468,6 +478,5 @@ impl AudioManager {
                 }
             }
         }
-        Ok(())
     }
 }
