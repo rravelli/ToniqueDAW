@@ -212,7 +212,7 @@ impl ProjectStateAction for AddClipsAction {
     fn apply(&mut self, state: &mut ToniqueProjectState) {
         if let Some(track) = state.track_service.get(&self.track_id) {
             (self.added_clips, self.deleted_clips) =
-                track.add_clips(&self.clips, state.bpm, &mut state.tx);
+                track.add_clips(&self.clips, state.transport.bpm, &mut state.tx);
         }
     }
     fn undo(&mut self, state: &mut ToniqueProjectState) {
@@ -299,7 +299,7 @@ impl ProjectStateAction for MoveClipAction {
             &self.id,
             &self.to_track,
             self.to_pos,
-            state.bpm,
+            state.transport.bpm,
             &self.ignore,
             &mut state.tx,
         );
@@ -351,7 +351,7 @@ impl CutClipAction {
 impl ProjectStateAction for CutClipAction {
     fn apply(&mut self, state: &mut ToniqueProjectState) {
         if let Some(track) = state.track_service.get(&self.track) {
-            self.previous = track.cut_clip_at(self.at, state.bpm, &mut state.tx);
+            self.previous = track.cut_clip_at(self.at, state.transport.bpm, &mut state.tx);
         }
     }
     fn undo(&mut self, state: &mut ToniqueProjectState) {
@@ -419,7 +419,7 @@ impl ProjectStateAction for DuplicateClipAction {
             (self.added_clips, self.deleted_clips) = state.track_service.duplicate_clips(
                 &self.ids,
                 self.bounds,
-                state.bpm,
+                state.transport.bpm,
                 &mut state.tx,
             );
         }
@@ -477,7 +477,7 @@ impl ProjectStateAction for ResizeClipAction {
             self.start,
             self.end,
             self.pos,
-            state.bpm,
+            state.transport.bpm,
             &mut state.tx,
         );
     }

@@ -47,7 +47,7 @@ impl eframe::App for ToniqueApp {
         self.left_panel.show(ctx, &mut self.state);
         self.central_panel.show(ctx, &mut self.state);
 
-        if self.state.show_export {
+        if self.state.editor.show_export {
             self.export_window.show(ctx, &mut self.state);
         }
     }

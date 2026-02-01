@@ -30,7 +30,7 @@ impl UIBottomPanel {
             .height_range(Rangef::new(50. + BOTTOM_BAR_HEIGHT, 400.))
             .resizable(true)
             .frame(Frame::new().inner_margin(Margin::ZERO))
-            .show_animated(ctx, state.bottom_panel_open, |ui| {
+            .show_animated(ctx, state.editor.bottom_panel_open, |ui| {
                 ui.set_height(ui.available_height());
 
                 if let Some(selected) = state.selected_track() {

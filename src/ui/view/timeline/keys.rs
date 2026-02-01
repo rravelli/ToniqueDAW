@@ -67,7 +67,7 @@ impl UITimeline {
             }
         } else if ui.input(|i| i.key_pressed(Key::J) && i.modifiers.ctrl) {
             // Close bottom panel
-            state.bottom_panel_open = !state.bottom_panel_open;
+            state.editor.bottom_panel_open = !state.editor.bottom_panel_open;
         } else if ui.input(|i| i.modifiers.ctrl && i.key_pressed(Key::Z)) {
             // Undo
             state.undo();

@@ -59,7 +59,7 @@ impl UILeftPanel {
                     .corner_radius(4.0),
             )
             .default_width(220.)
-            .show_animated(ctx, state.left_panel_open, |ui| {
+            .show_animated(ctx, state.editor.left_panel_open, |ui| {
                 self.ui(ui, state);
             });
     }

@@ -1,9 +1,11 @@
 mod action;
 mod clip;
+mod editor;
 mod export;
 mod history;
 mod looping;
 mod services;
+mod session;
 #[cfg(test)]
 mod tests;
 mod transport;
@@ -18,12 +20,16 @@ use crate::{
                 AddTrackAction, DeleteTrackAction, DuplicateTrackAction, ProjectStateAction,
                 SetMutableTrackAction, SetVolumeAction,
             },
+            editor::EditorState,
+            history::HistoryState,
             services::track::TrackService,
+            transport::TransportState,
         },
         track::{MutableTrackCore, TrackCore, TrackReferenceCore},
     },
     ui::{effect::UIEffect, effects::EffectId},
 };
+
 pub use looping::LoopState;
 use std::mem::take;
 
@@ -39,11 +45,6 @@ pub enum PlaybackState {
 }
 
 pub struct ToniqueProjectState {
-    bpm: f32,
-    playback_position: f32,
-    playback_state: PlaybackState,
-    preview_playback_state: PlaybackState,
-    preview_position: usize,
     export_status: ExportStatus,
     pub metrics: GlobalMetrics,
     // Services
@@ -53,59 +54,40 @@ pub struct ToniqueProjectState {
 
     tx: GuiToAudioTx,
     rx: AudioToGuiRx,
-    // History management
-    undo_stack: Vec<Box<dyn ProjectStateAction>>,
-    redo_stack: Vec<Box<dyn ProjectStateAction>>,
-    batching: bool,
-    batch_buffer: Vec<Box<dyn ProjectStateAction>>,
     // Grid
     pub grid: GridService,
-    metronome: bool,
     loop_state: LoopState,
-    pub resized_clip: Option<(String, f32, f32, f32)>,
-    // Panels
-    pub left_panel_open: bool,
-    pub bottom_panel_open: bool,
-    pub show_export: bool,
 
     ouptput_device: Option<String>,
+    transport: TransportState,
+    /// Ui related state
+    pub editor: EditorState,
+    /// history (undo, redo) state
+    history: HistoryState,
 }
 
 impl ToniqueProjectState {
     pub fn new(tx: GuiToAudioTx, rx: AudioToGuiRx) -> Self {
         Self {
-            bpm: 120.,
-            playback_position: 0.,
-            playback_state: PlaybackState::Paused,
-            preview_playback_state: PlaybackState::Paused,
-            preview_position: 0,
             metrics: GlobalMetrics::new(),
             track_service: TrackService::new(),
             pending_actions: Vec::new(),
             tx,
             rx,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
-            batching: false,
-            batch_buffer: Vec::new(),
-            resized_clip: None,
-            grid: GridService::new(),
-            left_panel_open: true,
-            bottom_panel_open: false,
-            show_export: false,
             loop_state: LoopState::new(),
-            metronome: false,
             export_status: ExportStatus::DONE,
             ouptput_device: None,
+            transport: TransportState::new(),
+            editor: EditorState::new(),
+            history: HistoryState::new(),
+            grid: GridService::new(),
         }
     }
     /// Update each frame the state
     pub fn update(&mut self, delta: f32) {
         self.handle_pending_actions();
         self.handle_messages();
-        if self.playback_state == PlaybackState::Playing {
-            self.playback_position += delta * self.bpm / 60.;
-        }
+        self.transport.update(delta);
     }
     // Tracks
     /// Add track at the last position. Shortcut for `add_track_at``
@@ -215,16 +197,16 @@ impl ToniqueProjectState {
     }
     /// Apply a `ProjectStateAction` and adds it to the stack
     fn apply_action(&mut self, mut action: Box<dyn ProjectStateAction>) {
-        if self.batching {
-            self.batch_buffer.push(action);
+        if self.history.batching {
+            self.history.batch_buffer.push(action);
             return;
         }
         if cfg!(debug_assertions) {
             println!("Applying {}", action.name());
         }
         action.apply(self);
-        self.undo_stack.push(action);
-        self.redo_stack.clear();
+        self.history.undo_stack.push(action);
+        self.history.redo_stack.clear();
     }
 
     // Handle messages received from the audio thread
@@ -232,11 +214,11 @@ impl ToniqueProjectState {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 ProcessToGuiMsg::PlaybackPos(pos) => {
-                    self.playback_position = pos;
-                    self.playback_state = PlaybackState::Playing;
+                    self.transport.playback_position = pos;
+                    self.transport.playback_state = PlaybackState::Playing;
                 }
                 ProcessToGuiMsg::Metrics(metrics) => self.metrics = metrics,
-                ProcessToGuiMsg::PreviewPos(pos) => self.preview_position = pos,
+                ProcessToGuiMsg::PreviewPos(pos) => self.transport.preview_position = pos,
                 ProcessToGuiMsg::ExportUpdate(status) => self.export_status = status,
                 ProcessToGuiMsg::DeviceChanged(name) => self.ouptput_device = name,
             }

@@ -54,7 +54,7 @@ impl UIMenuBar {
             ui.add(ContextMenuButton::new(FLOPPY_DISK, "Save"));
             ui.add(ContextMenuSeparator::new());
             if ui.add(ContextMenuButton::new(EXPORT, "Export")).clicked() {
-                state.show_export = true;
+                state.editor.show_export = true;
             }
         });
     }

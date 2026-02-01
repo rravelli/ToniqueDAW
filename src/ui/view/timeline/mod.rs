@@ -148,7 +148,7 @@ impl UITimeline {
             }
 
             for mut clip in track.clips.clone() {
-                if let Some((id, start, end, pos)) = &state.resized_clip
+                if let Some((id, start, end, pos)) = &state.editor.resized_clip
                     && clip.id == *id
                 {
                     clip.trim_start = *start;
@@ -205,7 +205,7 @@ impl UITimeline {
         {
             state.add_effect(&track.id, id, 0);
             state.select_track(&track.id);
-            state.bottom_panel_open = true;
+            state.editor.bottom_panel_open = true;
             DragAndDrop::take_payload::<DragPayload>(ui.ctx());
         }
     }

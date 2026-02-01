@@ -110,9 +110,9 @@ impl UITracks {
                 // Open bottom panel
                 if response.double_clicked() {
                     if track.selected {
-                        state.bottom_panel_open = !state.bottom_panel_open;
+                        state.editor.bottom_panel_open = !state.editor.bottom_panel_open;
                     } else {
-                        state.bottom_panel_open = true;
+                        state.editor.bottom_panel_open = true;
                     }
                 }
                 // Insert effects

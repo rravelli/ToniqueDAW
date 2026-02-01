@@ -34,9 +34,9 @@ impl ExporWindow {
                 .with_resizable(false)
                 .with_close_button(false)
                 .with_window_type(egui::X11WindowType::Utility),
-            |ctx, viewport_class| {
+            |ctx, _| {
                 if ctx.input(|r| r.viewport().close_requested()) {
-                    state.show_export = false;
+                    state.editor.show_export = false;
                 }
                 CentralPanel::default().show(ctx, |ui| {
                     self.ui(ui, state);

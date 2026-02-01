@@ -1,7 +1,3 @@
-use cpal::{
-    available_hosts, default_host, host_from_id,
-    traits::{DeviceTrait, HostTrait},
-};
 use egui::{
     Color32, Context, FontFamily, FontId, Frame, Layout, Margin, Pos2, Rangef, Response, Sense,
     Stroke, Ui, Vec2,
@@ -154,13 +150,13 @@ impl UITopBar {
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
                     15.,
-                    if state.left_panel_open {
+                    if state.editor.left_panel_open {
                         egui::FontFamily::Name(PHOSPHOR_FILL.into())
                     } else {
                         egui::FontFamily::Name(PHOSPHOR_REGULAR.into())
                     },
                 ))
-                .color(if state.left_panel_open {
+                .color(if state.editor.left_panel_open {
                     PRIMARY_COLOR
                 } else {
                     Color32::from_gray(180)
@@ -168,7 +164,7 @@ impl UITopBar {
         );
 
         if res.clicked() {
-            state.left_panel_open = !state.left_panel_open;
+            state.editor.left_panel_open = !state.editor.left_panel_open;
         };
 
         res

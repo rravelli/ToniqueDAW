@@ -40,11 +40,11 @@ impl ToniqueProjectState {
     pub fn resize_clip(&mut self, id: &str, start: f32, end: f32, pos: f32) {
         // self.track_service
         //     .resize_clip_skip_overlap_check(id, start, end, pos, &mut self.tx);
-        self.resized_clip = Some((id.to_string(), start, end, pos));
+        self.editor.resized_clip = Some((id.to_string(), start, end, pos));
     }
     /// Resize clip and perform overlap checks
     pub fn commit_resize_clip(&mut self, id: &str, start: f32, end: f32, pos: f32) {
-        self.resized_clip = None;
+        self.editor.resized_clip = None;
         let action = ResizeClipAction::new(id, start, end, pos);
         self.apply_action(Box::new(action));
     }
