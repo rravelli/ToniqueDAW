@@ -1,8 +1,11 @@
 use super::builder::{automation_curve, automation_identity, build_graph};
 use super::commands::EditCommand;
-use super::{Edit, EditError, Effects, UndoManager};
+use std::sync::Arc;
+
+use super::{Edit, EditError, Effects, SourceId, UndoManager};
 use crate::engine::{Command, Engine, EngineError};
 use crate::graph::{CompileStats, NodeMessage};
+use crate::sample::SampleBuffer;
 use crate::time::BeatPos;
 
 impl From<EngineError> for EditError {
@@ -46,6 +49,13 @@ impl EditSession {
     /// edit here directly are not undoable and don't reach the engine.
     pub fn create<R>(&mut self, f: impl FnOnce(&mut Edit) -> R) -> R {
         f(&mut self.edit)
+    }
+
+    /// Provide audio for clips that reference `id` (see [`Edit::new_source`])
+    /// and rebuild. Not part of the undo history.
+    pub fn set_source(&mut self, id: SourceId, data: Arc<SampleBuffer>) -> Result<(), EditError> {
+        self.edit.set_source(id, data);
+        self.rebuild().map(|_| ())
     }
 
     pub fn undo_manager(&self) -> &UndoManager {

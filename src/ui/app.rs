@@ -1,13 +1,12 @@
 use crate::{
-    core::{
-        message::{AudioToGuiRx, GuiToAudioTx},
-        state::{PlaybackState, ToniqueProjectState},
-    },
+    audio::host::PreviewLink,
+    core::state::{PlaybackState, ToniqueProjectState},
     ui::panels::{
         bottom_panel::UIBottomPanel, central_panel::UICentralPanel, left_panel::UILeftPanel,
         top_bar::UITopBar,
     },
 };
+use tonique_engine::engine::Engine;
 
 pub struct ToniqueApp {
     state: ToniqueProjectState,
@@ -18,9 +17,9 @@ pub struct ToniqueApp {
 }
 
 impl ToniqueApp {
-    pub fn new(tx: GuiToAudioTx, rx: AudioToGuiRx, _cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(engine: Engine, preview: PreviewLink, _cc: &eframe::CreationContext<'_>) -> Self {
         Self {
-            state: ToniqueProjectState::new(tx, rx),
+            state: ToniqueProjectState::new(engine, Some(preview)),
             top_bar: UITopBar::new(),
             bottom_panel: UIBottomPanel::new(),
             left_panel: UILeftPanel::new(),

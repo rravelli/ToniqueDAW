@@ -11,6 +11,7 @@ members = ["crates/tonique-engine"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+tonique-engine = { path = "crates/tonique-engine" }
 eframe = "0.36"
 rtrb = "0.3"
 cpal = "0.18"
@@ -28,12 +29,19 @@ rubato = "0.16.2"
 directories = "6.0.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.141"
-fundsp = "0.20.0"
 rustfft = "6.4.0"
-rayon = "1.11.0"
 midir = "0.11"
 midly = "0.5.3"
 
 # Profiles only take effect at the workspace root.
 [profile.test]
 opt-level = 1
+
+# Decoding and DSP are unusably slow unoptimised (a song takes tens of
+# seconds to decode). Optimise dependencies and the engine in dev builds;
+# they rarely change, so incremental rebuilds stay fast.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.tonique-engine]
+opt-level = 3

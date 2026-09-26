@@ -25,35 +25,98 @@ pub fn resample_offline(input: &[f32], from_rate: f64, to_rate: f64) -> Vec<f32>
     if from_rate == to_rate || input.is_empty() {
         return input.to_vec();
     }
-    let ratio = to_rate / from_rate;
-    let out_len = (input.len() as f64 * ratio).round() as usize;
-    // Cutoff relative to the input Nyquist; below 1 when downsampling.
-    let cutoff = ratio.min(1.0) * 0.95;
-    let half_width = SINC_ZERO_CROSSINGS / cutoff;
-    let reach = half_width.ceil() as isize;
-    let mut out = Vec::with_capacity(out_len);
-    for n in 0..out_len {
-        let t = n as f64 / ratio;
-        let centre = t.floor() as isize;
-        let (mut acc, mut wsum) = (0.0f64, 0.0f64);
-        for k in (centre - reach + 1)..=(centre + reach) {
-            let x = t - k as f64;
-            if x.abs() >= half_width {
-                continue;
-            }
-            let arg = PI * x * cutoff;
-            let sinc = if arg.abs() < 1e-12 { 1.0 } else { arg.sin() / arg };
-            let u = x / half_width;
-            let window = 0.42 + 0.5 * (PI * u).cos() + 0.08 * (2.0 * PI * u).cos();
-            let w = sinc * window;
-            wsum += w;
+    let kernel = Kernel::new(to_rate / from_rate);
+    let out_len = (input.len() as f64 * kernel.ratio).round() as usize;
+    match polyphase_steps(from_rate, to_rate) {
+        // Output sample n sits at input position n * step / phases, so its
+        // weights repeat every `phases` samples: compute them once.
+        Some((step, phases)) => {
+            let table: Vec<Vec<f64>> = (0..phases).map(|p| kernel.weights(p as f64 / phases as f64)).collect();
+            (0..out_len)
+                .map(|n| {
+                    let pos = n as u64 * step;
+                    kernel.apply(input, (pos / phases) as isize, &table[(pos % phases) as usize])
+                })
+                .collect()
+        }
+        None => (0..out_len)
+            .map(|n| {
+                let t = n as f64 / kernel.ratio;
+                kernel.apply(input, t.floor() as isize, &kernel.weights(t.fract()))
+            })
+            .collect(),
+    }
+}
+
+/// Limit on the weight table: one row of ~50 taps per phase.
+const MAX_PHASES: u64 = 4096;
+
+/// For integer rates, (input step, phases) such that output sample `n` is at
+/// input position `n * step / phases`, e.g. 44100 -> 48000 gives (147, 160).
+fn polyphase_steps(from_rate: f64, to_rate: f64) -> Option<(u64, u64)> {
+    if from_rate.fract() != 0.0 || to_rate.fract() != 0.0 || from_rate < 1.0 || to_rate < 1.0 {
+        return None;
+    }
+    let (from, to) = (from_rate as u64, to_rate as u64);
+    let gcd = {
+        let (mut a, mut b) = (from, to);
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        a
+    };
+    let phases = to / gcd;
+    (phases <= MAX_PHASES).then_some((from / gcd, phases))
+}
+
+struct Kernel {
+    ratio: f64,
+    cutoff: f64,
+    half_width: f64,
+    reach: isize,
+}
+
+impl Kernel {
+    fn new(ratio: f64) -> Self {
+        // Cutoff relative to the input Nyquist; below 1 when downsampling.
+        let cutoff = ratio.min(1.0) * 0.95;
+        let half_width = SINC_ZERO_CROSSINGS / cutoff;
+        Self { ratio, cutoff, half_width, reach: half_width.ceil() as isize }
+    }
+
+    /// Normalised weights of the input samples around a point `frac` past
+    /// input sample `centre`, for `k` in `centre - reach + 1 ..= centre + reach`.
+    fn weights(&self, frac: f64) -> Vec<f64> {
+        let mut w: Vec<f64> = (0..2 * self.reach)
+            .map(|i| {
+                let x = frac + (self.reach - 1 - i) as f64;
+                if x.abs() >= self.half_width {
+                    return 0.0;
+                }
+                let arg = PI * x * self.cutoff;
+                let sinc = if arg.abs() < 1e-12 { 1.0 } else { arg.sin() / arg };
+                let u = x / self.half_width;
+                sinc * (0.42 + 0.5 * (PI * u).cos() + 0.08 * (2.0 * PI * u).cos())
+            })
+            .collect();
+        let sum: f64 = w.iter().sum();
+        if sum > 0.0 {
+            w.iter_mut().for_each(|x| *x /= sum);
+        }
+        w
+    }
+
+    fn apply(&self, input: &[f32], centre: isize, weights: &[f64]) -> f32 {
+        let first = centre - self.reach + 1;
+        let mut acc = 0.0;
+        for (i, w) in weights.iter().enumerate() {
+            let k = first + i as isize;
             if k >= 0 && (k as usize) < input.len() {
                 acc += input[k as usize] as f64 * w;
             }
         }
-        out.push(if wsum > 0.0 { (acc / wsum) as f32 } else { 0.0 });
+        acc as f32
     }
-    out
 }
 
 /// Streaming, RT-safe resampler. `ratio` is input samples consumed per
@@ -285,6 +348,22 @@ mod tests {
 
     fn sine(freq: f64, rate: f64, len: usize) -> Vec<f32> {
         (0..len).map(|i| (2.0 * PI * freq * i as f64 / rate).sin() as f32).collect()
+    }
+
+    #[test]
+    fn precomputed_weights_match_direct_computation() {
+        assert_eq!(polyphase_steps(44100.0, 48000.0), Some((147, 160)));
+        assert_eq!(polyphase_steps(48000.0, 22050.0), Some((320, 147)));
+        assert_eq!(polyphase_steps(44100.5, 48000.0), None);
+
+        let input = sine(1000.0, 44100.0, 4410);
+        let out = resample_offline(&input, 44100.0, 48000.0);
+        let kernel = Kernel::new(48000.0 / 44100.0);
+        for n in [0, 1, 159, 160, 2345, out.len() - 1] {
+            let t = n as f64 * 44100.0 / 48000.0;
+            let direct = kernel.apply(&input, t.floor() as isize, &kernel.weights(t.fract()));
+            assert!((out[n] - direct).abs() < 1e-6, "sample {n}: {} vs {direct}", out[n]);
+        }
     }
 
     #[test]

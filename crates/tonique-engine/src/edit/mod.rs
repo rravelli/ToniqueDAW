@@ -8,12 +8,14 @@ pub mod commands;
 mod session;
 mod undo;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub use session::EditSession;
 pub use undo::{Effects, UndoManager};
 
 use crate::automation::BeatPoint;
+use crate::meter::ChannelMeter;
 use crate::nodes::{Envelope, FilterMode};
 use crate::param::{AtomicParam, ParamId};
 use crate::sample::SampleBuffer;
@@ -27,6 +29,9 @@ pub struct BusId(pub u64);
 pub struct ClipId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PluginId(pub u64);
+/// Audio data referenced by clips. See [`Edit::set_source`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SourceId(pub u64);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditError {
@@ -73,6 +78,13 @@ impl Parameter {
         self.value.get()
     }
 
+    fn duplicate(&self, edit: &mut Edit) -> Self {
+        let mut p = Self::new(ParamId(edit.next_id()), self.name, self.min, self.max, self.default);
+        p.value.set(self.get(), 0.0);
+        p.automation = self.automation.clone();
+        p
+    }
+
     /// Set (clamped) with a short ramp. Not undoable; see `commands::SetParam`.
     pub fn set(&self, v: f32) {
         self.value.set(v.clamp(self.min, self.max), PARAM_RAMP_MS);
@@ -112,6 +124,11 @@ impl Plugin {
     pub fn param(&self, name: &str) -> Option<&Parameter> {
         self.params.iter().find(|p| p.name == name)
     }
+
+    fn duplicate(&self, edit: &mut Edit) -> Self {
+        let params = self.params.iter().map(|p| p.duplicate(edit)).collect();
+        Self { id: PluginId(edit.next_id()), kind: self.kind, params, bypassed: self.bypassed }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -125,7 +142,8 @@ pub struct Note {
 
 #[derive(Clone, Debug)]
 pub enum ClipContent {
-    Audio { source: Arc<SampleBuffer>, source_offset_s: f64, gain: f32 },
+    /// Plays silence until the source's data is set.
+    Audio { source: SourceId, source_offset_s: f64, gain: f32 },
     Midi { notes: Vec<Note>, channel: u8 },
 }
 
@@ -145,7 +163,7 @@ impl Clip {
         Self { id: ClipId(edit.next_id()), start, length, fade_in_s: 0.0, fade_out_s: 0.0, content: ClipContent::Midi { notes, channel: 0 } }
     }
 
-    pub fn audio(edit: &mut Edit, start: BeatPos, length: f64, source: Arc<SampleBuffer>) -> Self {
+    pub fn audio(edit: &mut Edit, start: BeatPos, length: f64, source: SourceId) -> Self {
         Self {
             id: ClipId(edit.next_id()),
             start,
@@ -191,6 +209,8 @@ pub struct Channel {
     pub muted: bool,
     /// Effective mute/solo gain, ramped; derived from mute/solo state.
     mute_gain: Arc<AtomicParam>,
+    /// Post-fader levels, written by the audio thread.
+    meter: Arc<ChannelMeter>,
 }
 
 impl Channel {
@@ -201,7 +221,23 @@ impl Channel {
             pan: Parameter::new(ParamId(edit.next_id()), "pan", -1.0, 1.0, 0.0),
             muted: false,
             mute_gain: Arc::new(AtomicParam::new(1.0)),
+            meter: Arc::default(),
         }
+    }
+
+    /// Copy with fresh IDs and its own parameter values and meter, so the
+    /// copy can be changed independently of the original.
+    fn duplicate(&self, edit: &mut Edit) -> Self {
+        let mut c = Self::new(edit);
+        c.volume = self.volume.duplicate(edit);
+        c.pan = self.pan.duplicate(edit);
+        c.muted = self.muted;
+        c.plugins = self.plugins.iter().map(|p| p.duplicate(edit)).collect();
+        c
+    }
+
+    pub fn meter(&self) -> &ChannelMeter {
+        &self.meter
     }
 
     pub fn plugin(&self, id: PluginId) -> Option<&Plugin> {
@@ -244,6 +280,21 @@ impl Track {
     pub fn clip(&self, id: ClipId) -> Option<&Clip> {
         self.clips.iter().find(|c| c.id == id)
     }
+
+    /// Deep copy with fresh IDs throughout (track, clips, plugins, params).
+    /// Sends are not copied.
+    pub fn duplicate(&self, edit: &mut Edit) -> Self {
+        let clips = self.clips.iter().map(|c| Clip { id: ClipId(edit.next_id()), ..c.clone() }).collect();
+        Self {
+            id: TrackId(edit.next_id()),
+            name: self.name.clone(),
+            clips,
+            channel: self.channel.duplicate(edit),
+            soloed: false,
+            output: self.output,
+            sends: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -275,12 +326,23 @@ pub struct Edit {
     pub tracks: Vec<Track>,
     pub buses: Vec<Bus>,
     pub master: Channel,
+    /// Metronome level (0 = off). Not part of the undo history.
+    pub metronome: Arc<AtomicParam>,
+    sources: HashMap<SourceId, Arc<SampleBuffer>>,
     next_id: u64,
 }
 
 impl Edit {
     pub fn new(bpm: f64) -> Self {
-        let mut e = Self { tempo: TempoMap::new(bpm), tracks: Vec::new(), buses: Vec::new(), master: Channel::placeholder(), next_id: 1 };
+        let mut e = Self {
+            tempo: TempoMap::new(bpm),
+            tracks: Vec::new(),
+            buses: Vec::new(),
+            master: Channel::placeholder(),
+            metronome: Arc::new(AtomicParam::new(0.0)),
+            sources: HashMap::new(),
+            next_id: 1,
+        };
         e.master = Channel::new(&mut e);
         e
     }
@@ -289,6 +351,30 @@ impl Edit {
     pub fn next_id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
+    }
+
+    /// Reserve an ID for audio that isn't loaded yet; clips can use it
+    /// right away and stay silent until [`Edit::set_source`].
+    pub fn new_source(&mut self) -> SourceId {
+        SourceId(self.next_id())
+    }
+
+    /// Register loaded audio and return its ID.
+    pub fn add_source(&mut self, data: Arc<SampleBuffer>) -> SourceId {
+        let id = self.new_source();
+        self.sources.insert(id, data);
+        id
+    }
+
+    /// Provide (or replace) a source's data. Takes effect on the next graph
+    /// rebuild; [`EditSession::set_source`] does both. Data must be at the
+    /// engine sample rate (see [`SampleBuffer::resampled`]).
+    pub fn set_source(&mut self, id: SourceId, data: Arc<SampleBuffer>) {
+        self.sources.insert(id, data);
+    }
+
+    pub fn source(&self, id: SourceId) -> Option<&Arc<SampleBuffer>> {
+        self.sources.get(&id)
     }
 
     pub fn track(&self, id: TrackId) -> Result<&Track, EditError> {
@@ -363,6 +449,6 @@ impl Edit {
 impl Channel {
     fn placeholder() -> Self {
         let p = Parameter::new(ParamId(0), "", 0.0, 0.0, 0.0);
-        Self { plugins: Vec::new(), volume: p.clone(), pan: p, muted: false, mute_gain: Arc::new(AtomicParam::new(1.0)) }
+        Self { plugins: Vec::new(), volume: p.clone(), pan: p, muted: false, mute_gain: Arc::new(AtomicParam::new(1.0)), meter: Arc::default() }
     }
 }

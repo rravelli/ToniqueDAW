@@ -15,6 +15,7 @@ pub mod automation;
 pub mod edit;
 pub mod engine;
 pub mod graph;
+pub mod meter;
 pub mod midi;
 pub mod nodes;
 pub mod param;

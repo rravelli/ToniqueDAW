@@ -3,12 +3,11 @@ use crate::{
     ui::{buttons::paint_circle_button, effect::UIEffectContent},
 };
 use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
-use fundsp::{
-    hacker::{AudioUnit, shared},
-    hacker32::{lowpass, pass, var},
-    shared::Shared,
-};
 use std::f32::consts::PI;
+use tonique_engine::{
+    edit::{Parameter, Plugin, PluginKind},
+    nodes::FilterMode,
+};
 
 const BOTTOM_HEIGHT: f32 = 50.;
 
@@ -18,8 +17,8 @@ pub struct EqualizerEffect {
     q: f32,
     cutoff: f32,
 
-    cutoff_shared: Shared,
-    q_shared: Shared,
+    cutoff_param: Option<Parameter>,
+    q_param: Option<Parameter>,
 
     min_freq: f32,
     max_freq: f32,
@@ -31,8 +30,8 @@ impl EqualizerEffect {
             id: uuid::Uuid::new_v4().into(),
             cutoff: 1300.,
             q: 0.5,
-            cutoff_shared: shared(1300.),
-            q_shared: shared(0.5),
+            cutoff_param: None,
+            q_param: None,
 
             min_freq: 50.,
             max_freq: 20_000.,
@@ -203,8 +202,11 @@ impl UIEffectContent for EqualizerEffect {
         );
 
         if q_res.dragged() || freq_res.dragged() {
-            self.q_shared.set_value(self.q);
-            self.cutoff_shared.set_value(self.cutoff);
+            for (param, value) in [(&self.q_param, self.q), (&self.cutoff_param, self.cutoff)] {
+                if let Some(p) = param {
+                    p.set(value);
+                }
+            }
         }
 
         painter.add(shapes);
@@ -214,9 +216,19 @@ impl UIEffectContent for EqualizerEffect {
         300.
     }
 
-    fn get_unit(&self) -> Box<dyn AudioUnit> {
-        let filter = (pass() | var(&self.cutoff_shared) | var(&self.q_shared)) >> lowpass();
-        Box::new(filter.clone() | filter.clone())
+    fn plugin_kind(&self) -> PluginKind {
+        PluginKind::Filter(FilterMode::LowPass)
+    }
+
+    fn bind(&mut self, plugin: &Plugin) {
+        self.cutoff_param = plugin.param("cutoff").cloned();
+        self.q_param = plugin.param("q").cloned();
+        // New plugins start at the engine's defaults: apply the editor's values.
+        for (param, value) in [(&self.q_param, self.q), (&self.cutoff_param, self.cutoff)] {
+            if let Some(p) = param {
+                p.set(value);
+            }
+        }
     }
 
     fn id(&self) -> String {

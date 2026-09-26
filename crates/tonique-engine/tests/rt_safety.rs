@@ -31,7 +31,8 @@ fn busy_edit() -> Edit {
             let clip = Clip::midi(&mut edit, BeatPos(0.0), 4.0, notes);
             t.clips.push(clip);
         } else {
-            let clip = Clip::audio(&mut edit, BeatPos(i as f64 * 0.1), 4.0, sample.clone());
+            let source = edit.add_source(sample.clone());
+            let clip = Clip::audio(&mut edit, BeatPos(i as f64 * 0.1), 4.0, source);
             t.clips.push(clip);
             let lat = Plugin::new(&mut edit, PluginKind::Latency { samples: 64 * i as usize });
             t.channel.plugins.push(lat);
@@ -47,6 +48,7 @@ fn busy_edit() -> Edit {
         ];
         edit.tracks.push(t);
     }
+    edit.metronome.set(0.5, 0.0);
     let mut bus = bus;
     let echo = Plugin::new(&mut edit, PluginKind::Echo { time_s: 0.3 });
     bus.channel.plugins.push(echo);
@@ -89,6 +91,12 @@ fn rt_path_never_allocates() {
             }
             43 => {
                 s.undo().unwrap();
+            }
+            47 => s.perform(ResizeClip::new(tid, cid, BeatPos(0.25), 3.0, 0.01)).unwrap(),
+            49 => {
+                // UI-side meter reads while the audio thread writes.
+                s.edit().master.meter().take_levels();
+                s.edit().master.meter().read_scope(0, &mut [0.0; 256]);
             }
             _ => {}
         }

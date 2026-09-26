@@ -112,7 +112,7 @@ impl UIClip {
 
         let response = ui.interact(
             hitbox,
-            format!("{}{}", clip.id, clip.position).into(),
+            format!("{:?}{}", clip.id, clip.position).into(),
             Sense::all(),
         );
         painter.text(
