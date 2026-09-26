@@ -283,5 +283,30 @@ fn clips_play_through_the_engine_once_loaded() {
     state.update();
     let [left, _] = state.metrics.tracks[&track].get_peak();
     assert!(left > 0.4, "track meter shows {left}");
-    assert!(state.playback_position() > 0.);
+    assert!(state.playhead() > 0.);
+}
+
+#[test]
+fn edit_cursor_moves_the_playhead_only_when_stopped() {
+    let mut state = setup_state();
+    state.set_edit_cursor(4.);
+    assert_eq!((state.edit_cursor(), state.playhead()), (4., 4.));
+
+    state.play();
+    state.set_edit_cursor(8.);
+    assert_eq!((state.edit_cursor(), state.playhead()), (8., 4.));
+
+    // Stopping returns to the edit cursor.
+    state.stop();
+    assert_eq!(state.playhead(), 8.);
+}
+
+#[test]
+fn seeking_moves_both_cursors() {
+    let mut state = setup_state();
+    state.play();
+    state.seek(2.);
+    assert_eq!((state.edit_cursor(), state.playhead()), (2., 2.));
+    state.seek(-1.);
+    assert_eq!((state.edit_cursor(), state.playhead()), (0., 0.));
 }

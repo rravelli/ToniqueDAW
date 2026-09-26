@@ -14,7 +14,7 @@ impl UITimeline {
 
         if ui.input(|i| i.focused && i.key_pressed(egui::Key::Space)) {
             if state.playback_state() == PlaybackState::Playing {
-                state.pause();
+                state.stop();
             } else {
                 state.play();
             }
@@ -65,7 +65,7 @@ impl UITimeline {
         } else if ui.input(|i| i.key_pressed(Key::K) && i.modifiers.ctrl) {
             // Cut clips
             for id in state.selected_tracks().clone() {
-                state.cut_clip_at(&id, state.playback_position());
+                state.cut_clip_at(&id, state.edit_cursor());
             }
         } else if ui.input(|i| i.key_pressed(Key::J) && i.modifiers.ctrl) {
             // Close bottom panel

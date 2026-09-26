@@ -34,11 +34,11 @@ impl UINavigationBar {
             state
                 .grid
                 .render_labels(&painter, nav_bar_rect, state.bpm());
-            // Move to cursor on click
-            if nav_bar_response.clicked()
+            // Seek on click, scrub on drag
+            if (nav_bar_response.clicked() || nav_bar_response.dragged())
                 && let Some(mouse_pos) = nav_bar_response.interact_pointer_pos()
             {
-                state.set_playback_position(state.grid.x_to_beats(mouse_pos.x, nav_bar_rect));
+                state.seek(state.grid.x_to_beats(mouse_pos.x, nav_bar_rect));
             }
             // Zoom
             if ui.input(|i| i.smooth_scroll_delta.y != 0.0)

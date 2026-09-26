@@ -1,13 +1,18 @@
 use crate::{
     core::state::{CentralView, ToniqueProjectState},
-    ui::view::{
-        graph::UIGraphView, navigation_bar::UINavigationBar, timeline::UITimeline, tracks::UITracks,
+    ui::{
+        theme::PRIMARY_COLOR,
+        view::{
+            graph::UIGraphView, navigation_bar::UINavigationBar, timeline::UITimeline,
+            tracks::UITracks,
+        },
     },
 };
 use egui::{Color32, Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
 pub const SCROLLBAR_WIDTH: f32 = 5.;
 pub const PLAYHEAD_COLOR: Color32 = Color32::WHITE;
+pub const EDIT_CURSOR_COLOR: Color32 = PRIMARY_COLOR;
 
 pub struct UICentralPanel {
     timeline: UITimeline,
@@ -65,7 +70,7 @@ impl UICentralPanel {
         let content_size = ui.min_size();
 
         if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
-            && ui.input(|i| i.smooth_scroll_delta != Vec2::ZERO && !i.modifiers.alt)
+            && ui.input(|i| i.smooth_scroll_delta != Vec2::ZERO && !i.modifiers.ctrl)
         {
             let delta = ui.input(|i| i.smooth_scroll_delta);
             if timeline_viewport.contains(mouse_pos) {
@@ -80,7 +85,7 @@ impl UICentralPanel {
             }
         }
         self.draw_scrollbars(ui, viewport, content_size, &mut state.grid.offset);
-        self.draw_playhead_handle(
+        self.draw_cursors(
             ui,
             state,
             Rect::from_min_size(
@@ -159,10 +164,19 @@ impl UICentralPanel {
         }
     }
 
-    fn draw_playhead_handle(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {
+    /// Edit cursor (only while it differs from the playhead) and playhead
+    /// with its draggable handle.
+    fn draw_cursors(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {
         ui.set_clip_rect(rect);
         let painter = ui.painter();
-        let playhead_x = state.grid.beats_to_x(state.playback_position(), rect);
+        if state.edit_cursor() != state.playhead() {
+            let x = state.grid.beats_to_x(state.edit_cursor(), rect);
+            painter.line_segment(
+                [pos2(x, rect.top()), pos2(x, rect.bottom())],
+                Stroke::new(1.0, EDIT_CURSOR_COLOR.gamma_multiply_u8(200)),
+            );
+        }
+        let playhead_x = state.grid.beats_to_x(state.playhead(), rect);
         let line_stroke = Stroke::new(2.0, PLAYHEAD_COLOR.gamma_multiply_u8(160));
 
         // Draw vertical playhead line
@@ -218,11 +232,10 @@ impl UICentralPanel {
         ));
 
         // Dragging logic
-        if handle_response.dragged() {
-            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                let new_beat = state.grid.x_to_beats(mouse_pos.x, rect);
-                state.set_playback_position(new_beat);
-            }
+        if handle_response.dragged()
+            && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
+        {
+            state.seek(state.grid.x_to_beats(mouse_pos.x, rect));
         }
     }
 }

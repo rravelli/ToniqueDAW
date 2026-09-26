@@ -55,7 +55,7 @@ impl UITopBar {
             self.metronome_ui(ui, state);
             if self.play_button_ui(ui, state.playback_state()).clicked() {
                 if state.playback_state() == PlaybackState::Playing {
-                    state.pause();
+                    state.stop();
                 } else {
                     state.play();
                 }
@@ -84,12 +84,12 @@ impl UITopBar {
     fn play_button_ui(&mut self, ui: &mut Ui, playback_state: PlaybackState) -> Response {
         ui.add(
             SquareButton::new(if playback_state == PlaybackState::Playing {
-                egui_phosphor::fill::PAUSE
+                egui_phosphor::fill::STOP
             } else {
                 egui_phosphor::fill::PLAY
             })
             .tooltip(if playback_state == PlaybackState::Playing {
-                "Pause"
+                "Stop"
             } else {
                 "Play"
             })
@@ -185,7 +185,7 @@ impl UITopBar {
     fn metronome_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
         let click = state.metronome()
             && matches!(state.playback_state(), PlaybackState::Playing)
-            && state.playback_position() % 1.0 < 0.5;
+            && state.playhead() % 1.0 < 0.5;
         let res = ui.add(
             SquareButton::new(egui_phosphor::fill::METRONOME)
                 .square(BUTTON_SIZE)

@@ -3,14 +3,15 @@ use crate::{
     core::state::ToniqueProjectState,
     ui::{
         effects::EffectId,
-        font::PHOSPHOR_REGULAR,
         theme::PRIMARY_COLOR,
         view::filebrowser::FileBrowser,
-        widget::{item_button::ItemButton, square_button::SquareButton},
+        widget::{item_button::ItemButton, search_bar::SearchBar, square_button::SquareButton},
     },
 };
-use egui::{Color32, FontId, Frame, Margin, RichText, Stroke, TextEdit, Ui, vec2};
-use std::time::{Duration, Instant};
+use egui::{Color32, Frame, Margin, Ui, vec2};
+
+/// Space around and between the tab bar and the search bar.
+const HEADER_SPACING: f32 = 4.;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum LeftPanelTabs {
@@ -27,9 +28,7 @@ pub enum DragPayload {
 pub struct UILeftPanel {
     pub file_browser: FileBrowser,
     tab: LeftPanelTabs,
-    search: String,
-    last_search: String,
-    last_search_time: Option<Instant>,
+    search: SearchBar,
 }
 
 impl UILeftPanel {
@@ -37,9 +36,7 @@ impl UILeftPanel {
         Self {
             file_browser: FileBrowser::new(),
             tab: LeftPanelTabs::Files,
-            search: "".into(),
-            last_search: "".into(),
-            last_search_time: None,
+            search: SearchBar::new("Search"),
         }
     }
 
@@ -69,9 +66,15 @@ impl UILeftPanel {
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
         ui.vertical(|ui| {
             ui.set_width(ui.available_width());
-            self.tab_bar(ui);
-            self.search_bar(ui);
-            ui.add_space(4.0);
+            Frame::new()
+                .inner_margin(Margin::symmetric(2, HEADER_SPACING as i8))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = HEADER_SPACING;
+                    self.tab_bar(ui);
+                    if let Some(query) = self.search.ui(ui) {
+                        self.file_browser.trigger_search(query);
+                    }
+                });
 
             match self.tab {
                 LeftPanelTabs::Files => {
@@ -90,13 +93,11 @@ impl UILeftPanel {
     }
 
     fn tab_bar(&mut self, ui: &mut Ui) {
-        Frame::new().inner_margin(Margin::same(2)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.style_mut().spacing.item_spacing.x = 2.0;
-                let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-                self.tab_bar_button(ui, LeftPanelTabs::Files, "Files", width);
-                self.tab_bar_button(ui, LeftPanelTabs::Effects, "Effects", width);
-            });
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+            self.tab_bar_button(ui, LeftPanelTabs::Files, "Files", width);
+            self.tab_bar_button(ui, LeftPanelTabs::Effects, "Effects", width);
         });
     }
 
@@ -111,58 +112,6 @@ impl UILeftPanel {
 
         if res.clicked() {
             self.tab = value;
-        }
-    }
-
-    fn search_bar(&mut self, ui: &mut Ui) {
-        Frame::new()
-            .stroke(Stroke::new(2.0, Color32::from_gray(100)))
-            .corner_radius(2.0)
-            .inner_margin(Margin::symmetric(2, 1))
-            .fill(Color32::from_gray(180))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(egui_phosphor::regular::MAGNIFYING_GLASS)
-                            .color(Color32::from_gray(30))
-                            .family(egui::FontFamily::Name(PHOSPHOR_REGULAR.into())),
-                    );
-                    TextEdit::singleline(&mut self.search)
-                        .background_color(Color32::TRANSPARENT)
-                        .frame(Frame::new().inner_margin(Margin::symmetric(4, 2)))
-                        .desired_width(ui.available_width() - 20.)
-                        .font(FontId::new(10., egui::FontFamily::Proportional))
-                        .text_color(Color32::from_gray(30))
-                        .show(ui)
-                        .response;
-
-                    if !self.search.is_empty() {
-                        let x_response = ui.add(
-                            SquareButton::ghost(egui_phosphor::regular::X)
-                                .border_radius(5.0)
-                                .square(10.)
-                                .color(Color32::from_gray(30))
-                                .font(FontId::new(
-                                    10.,
-                                    egui::FontFamily::Name(PHOSPHOR_REGULAR.into()),
-                                )),
-                        );
-                        if x_response.clicked() {
-                            self.search = "".into();
-                        }
-                        x_response.on_hover_cursor(egui::CursorIcon::PointingHand);
-                    }
-                })
-            });
-        if self.search != self.last_search {
-            self.last_search = self.search.clone();
-            self.last_search_time = Some(Instant::now());
-        } else if let Some(last_time) = self.last_search_time
-            && last_time.elapsed() >= Duration::from_millis(300)
-        {
-            self.file_browser.trigger_search(&self.search);
-            self.last_search_time = None;
         }
     }
 }

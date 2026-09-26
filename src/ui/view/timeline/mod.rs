@@ -12,7 +12,7 @@ use crate::{
         theme::PRIMARY_COLOR,
         track::HANDLE_HEIGHT,
         utils::find_track_at,
-        view::timeline::{
+        views::timeline::{
             drag::DragState,
             selection::{ClipSelection, Multiselect},
         },
@@ -92,7 +92,8 @@ impl UITimeline {
         {
             self.selected_clips.reset();
             state.pause_preview();
-            state.set_playback_position(state.grid.x_to_beats(mouse_pos.x, viewport));
+            let beats = state.grid.x_to_beats(mouse_pos.x, viewport);
+            state.set_edit_cursor(state.grid.snap_at_grid(beats));
         }
         if let Some(mouse_pos) = response.hover_pos()
             && ui.input(|i| i.smooth_scroll_delta.y != 0. && i.modifiers.alt)

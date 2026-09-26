@@ -71,7 +71,11 @@ pub struct ToniqueProjectState {
     session: EditSession,
     sources: SourceRegistry,
 
-    playback_position: f32,
+    /// Where the transport is, in beats (follows the engine while playing).
+    playhead: f32,
+    /// Where the user last clicked in the arrangement, in beats. Playback
+    /// starts and returns here, and edits (cuts) happen here.
+    edit_cursor: f32,
     playback_state: PlaybackState,
     preview_playback_state: PlaybackState,
     preview_position: usize,
@@ -110,7 +114,8 @@ impl ToniqueProjectState {
         Self {
             session,
             sources: SourceRegistry::new(sample_rate),
-            playback_position: 0.,
+            playhead: 0.,
+            edit_cursor: 0.,
             playback_state: PlaybackState::Paused,
             preview_playback_state: PlaybackState::Paused,
             preview_position: 0,
@@ -139,7 +144,7 @@ impl ToniqueProjectState {
             report(result);
         }
         if self.playback_state == PlaybackState::Playing {
-            self.playback_position = self.session.position().0 as f32;
+            self.playhead = self.session.position().0 as f32;
         }
         let engine = self.session.engine();
         if let Some(pos) = engine.preview_position() {
@@ -223,20 +228,38 @@ impl ToniqueProjectState {
     pub fn bpm(&self) -> f32 {
         self.edit().tempo.bpm_at(BeatPos(0.)) as f32
     }
-    // Playback position
-    pub fn set_playback_position(&mut self, value: f32) {
-        self.playback_position = value.max(0.);
-        let result = self.session.seek(BeatPos(self.playback_position as f64));
+    // Playhead and edit cursor
+    /// Move the playhead and the edit cursor there (ruler, playhead handle).
+    pub fn seek(&mut self, beats: f32) {
+        self.edit_cursor = beats.max(0.);
+        self.seek_playhead(self.edit_cursor);
+    }
+    /// Place the edit cursor (a click in the arrangement). Doesn't interrupt
+    /// playback; when stopped, the playhead follows so play starts there.
+    pub fn set_edit_cursor(&mut self, beats: f32) {
+        self.edit_cursor = beats.max(0.);
+        if self.playback_state != PlaybackState::Playing {
+            self.seek_playhead(self.edit_cursor);
+        }
+    }
+    fn seek_playhead(&mut self, beats: f32) {
+        self.playhead = beats;
+        let result = self.session.seek(BeatPos(beats as f64));
         report(result);
     }
-    pub fn playback_position(&self) -> f32 {
-        self.playback_position
+    pub fn playhead(&self) -> f32 {
+        self.playhead
+    }
+    pub fn edit_cursor(&self) -> f32 {
+        self.edit_cursor
     }
     // Transport state
-    pub fn pause(&mut self) {
+    /// Stop playback and return the playhead to the edit cursor.
+    pub fn stop(&mut self) {
         self.playback_state = PlaybackState::Paused;
         let result = self.session.stop();
         report(result);
+        self.seek_playhead(self.edit_cursor);
     }
     pub fn play(&mut self) {
         self.playback_state = PlaybackState::Playing;
