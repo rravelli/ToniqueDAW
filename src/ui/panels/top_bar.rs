@@ -61,6 +61,7 @@ impl UITopBar {
                 }
             };
             self.record_button_ui(ui);
+            self.loop_ui(ui, state);
             self.bpm_input.value = state.bpm();
             self.bpm_input.ui(ui);
             if self.bpm_input.value != state.bpm() {
@@ -180,6 +181,35 @@ impl UITopBar {
         };
 
         res
+    }
+
+    fn loop_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+        let looping = state.looping();
+        let res = ui.add(
+            SquareButton::new(egui_phosphor::fill::REPEAT)
+                .square(BUTTON_SIZE)
+                .font(FontId::new(
+                    14.,
+                    FontFamily::Name(
+                        if looping {
+                            PHOSPHOR_FILL
+                        } else {
+                            PHOSPHOR_REGULAR
+                        }
+                        .into(),
+                    ),
+                ))
+                .fill(if looping {
+                    PRIMARY_COLOR
+                } else {
+                    PRIMARY_BUTTON_COLOR
+                })
+                .color(Color32::from_gray(30))
+                .tooltip("Loop (Ctrl+L)"),
+        );
+        if res.clicked() {
+            state.set_looping(!looping);
+        }
     }
 
     fn metronome_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {

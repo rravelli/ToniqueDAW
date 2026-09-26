@@ -59,6 +59,18 @@ impl GridService {
             offset: Vec2::ZERO,
         }
     }
+    pub fn beats_per_bar(&self) -> usize {
+        self.beats_per_bar
+    }
+    /// Spacing between grid lines, in beats.
+    pub fn step_beats(&self) -> f32 {
+        1.0 / self.resolution.divisions_per_beat(self.beats_per_bar)
+    }
+    /// The nearest grid line, however far.
+    pub fn snap_to_step(&self, beats: f32) -> f32 {
+        let step = self.step_beats();
+        (beats / step).round() * step
+    }
     pub fn pixels_per_beat(&self) -> f32 {
         self.pixels_per_beat
     }
@@ -105,11 +117,8 @@ impl GridService {
     }
 
     pub fn snap_at_grid_with_threshold(&self, beats: f32, threshold: f32) -> Option<f32> {
-        let divisions = self.resolution.divisions_per_beat(self.beats_per_bar);
-        let step = 1.0 / divisions; // spacing between grid lines (in beats)
-
-        let nearest_position = (beats / step).round() * step;
-
+        let step = self.step_beats();
+        let nearest_position = self.snap_to_step(beats);
         if (beats - nearest_position).abs() < step * threshold {
             Some(nearest_position)
         } else {

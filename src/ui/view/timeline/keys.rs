@@ -67,6 +67,14 @@ impl UITimeline {
             for id in state.selected_tracks().clone() {
                 state.cut_clip_at(&id, state.edit_cursor());
             }
+        } else if ui.input(|i| i.key_pressed(Key::L) && i.modifiers.ctrl) {
+            // Loop the selected clips, or toggle looping
+            if let Some(bounds) = self.selected_clips.bounds {
+                state.set_loop_range(bounds.start_pos, bounds.end_pos);
+                state.set_looping(true);
+            } else {
+                state.set_looping(!state.looping());
+            }
         } else if ui.input(|i| i.key_pressed(Key::J) && i.modifiers.ctrl) {
             // Close bottom panel
             state.bottom_panel_open = !state.bottom_panel_open;

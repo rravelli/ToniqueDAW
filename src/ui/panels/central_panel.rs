@@ -164,11 +164,23 @@ impl UICentralPanel {
         }
     }
 
-    /// Edit cursor (only while it differs from the playhead) and playhead
+    /// Loop bounds (while looping), edit cursor (only while it differs from
+    /// the playhead) and playhead
     /// with its draggable handle.
     fn draw_cursors(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {
         ui.set_clip_rect(rect);
         let painter = ui.painter();
+        if state.looping() {
+            let (start, end) = state.loop_range();
+            for beats in [start, end] {
+                let x = state.grid.beats_to_x(beats, rect);
+                painter.vline(
+                    x,
+                    rect.y_range(),
+                    Stroke::new(1.0, EDIT_CURSOR_COLOR.gamma_multiply(0.35)),
+                );
+            }
+        }
         if state.edit_cursor() != state.playhead() {
             let x = state.grid.beats_to_x(state.edit_cursor(), rect);
             painter.line_segment(

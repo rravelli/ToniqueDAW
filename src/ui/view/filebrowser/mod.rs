@@ -4,7 +4,7 @@ use crate::{
     ui::{
         font::PHOSPHOR_FILL,
         theme::PRIMARY_COLOR,
-        views::filebrowser::{items::UIItems, preview::UIPreview},
+        view::filebrowser::{items::UIItems, preview::UIPreview},
         widget::{context_menu::ContextMenuButton, square_button::SquareButton},
     },
 };

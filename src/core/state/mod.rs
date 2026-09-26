@@ -43,6 +43,8 @@ use tonique_engine::{
 pub const MASTER_TRACK_ID: TrackId = TrackId(0);
 
 const DEFAULT_BPM: f64 = 120.;
+/// Length of the loop region in a new project.
+const DEFAULT_LOOP_BARS: f32 = 4.;
 const TRACK_NAME: &str = "# Audio Track";
 
 #[derive(Clone, Debug)]
@@ -97,6 +99,11 @@ pub struct ToniqueProjectState {
 
     pub grid: GridService,
     metronome: bool,
+    /// Loop region in beats; playback wraps over it while `looping`.
+    loop_range: (f32, f32),
+    looping: bool,
+    /// Tempo the engine's loop (in samples) was computed with.
+    loop_bpm: f32,
 
     pub resized_clip: Option<(ClipId, f32, f32, f32)>,
     // Panels
@@ -130,6 +137,12 @@ impl ToniqueProjectState {
             batching: false,
             resized_clip: None,
             grid: GridService::new(),
+            loop_range: (
+                0.,
+                DEFAULT_LOOP_BARS * GridService::new().beats_per_bar() as f32,
+            ),
+            looping: false,
+            loop_bpm: DEFAULT_BPM as f32,
             left_panel_open: true,
             bottom_panel_open: false,
             metronome: false,
@@ -142,6 +155,10 @@ impl ToniqueProjectState {
         for (id, data) in self.sources.poll_loaded() {
             let result = self.session.set_source(id, data);
             report(result);
+        }
+        // Tempo changes (edits, undo, redo) move the loop in samples.
+        if self.looping && self.bpm() != self.loop_bpm {
+            self.sync_loop();
         }
         if self.playback_state == PlaybackState::Playing {
             self.playhead = self.session.position().0 as f32;
@@ -291,6 +308,35 @@ impl ToniqueProjectState {
         self.preview_playback_state = PlaybackState::Playing;
         let result = self.session.engine_mut().preview_seek(pos);
         report(result.map_err(EditError::from));
+    }
+    // Loop
+    pub fn looping(&self) -> bool {
+        self.looping
+    }
+    pub fn set_looping(&mut self, looping: bool) {
+        self.looping = looping;
+        self.sync_loop();
+    }
+    pub fn loop_range(&self) -> (f32, f32) {
+        self.loop_range
+    }
+    /// Set the loop region (in any order). Empty regions are ignored.
+    pub fn set_loop_range(&mut self, a: f32, b: f32) {
+        let (start, end) = (a.min(b).max(0.), a.max(b).max(0.));
+        if end > start && (start, end) != self.loop_range {
+            self.loop_range = (start, end);
+            self.sync_loop();
+        }
+    }
+    /// Hand the loop to the engine. It counts in samples, so this must run
+    /// again whenever the tempo changes.
+    fn sync_loop(&mut self) {
+        self.loop_bpm = self.bpm();
+        let (start, end) = self.loop_range;
+        let range = self
+            .looping
+            .then_some((BeatPos(start as f64), BeatPos(end as f64)));
+        report(self.session.set_loop(range));
     }
     pub fn toggle_metronome(&mut self) {
         self.metronome = !self.metronome;

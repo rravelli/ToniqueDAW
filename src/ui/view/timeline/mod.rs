@@ -12,7 +12,7 @@ use crate::{
         theme::PRIMARY_COLOR,
         track::HANDLE_HEIGHT,
         utils::find_track_at,
-        views::timeline::{
+        view::timeline::{
             drag::DragState,
             selection::{ClipSelection, Multiselect},
         },

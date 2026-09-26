@@ -310,3 +310,42 @@ fn seeking_moves_both_cursors() {
     state.seek(-1.);
     assert_eq!((state.edit_cursor(), state.playhead()), (0., 0.));
 }
+
+#[test]
+fn loop_range_is_ordered_and_never_empty() {
+    let mut state = setup_state();
+    state.set_loop_range(8., 4.);
+    assert_eq!(state.loop_range(), (4., 8.));
+    state.set_loop_range(-2., 1.);
+    assert_eq!(state.loop_range(), (0., 1.));
+    state.set_loop_range(3., 3.);
+    assert_eq!(state.loop_range(), (0., 1.));
+}
+
+#[test]
+fn playback_wraps_inside_the_loop_after_a_tempo_change() {
+    use tonique_engine::engine::render_offline;
+
+    let (engine, mut processor) = Engine::new(EngineConfig {
+        sample_rate: 48000.,
+        housekeeping_thread: false,
+        ..Default::default()
+    });
+    let mut state = ToniqueProjectState::new(engine);
+    state.set_loop_range(0., 1.);
+    state.set_looping(true);
+    // The loop was sent in samples at 120 bpm: it must follow the new tempo.
+    state.set_bpm(60.);
+    state.play();
+
+    // Two seconds, with the loop being one second long at 60 bpm.
+    let mut furthest = 0.0f32;
+    for _ in 0..(2 * 48000 / 256) {
+        state.update();
+        render_offline(&mut processor, 256, 2);
+        state.update();
+        furthest = furthest.max(state.playhead());
+        assert!(state.playhead() < 1., "played past the loop: {}", state.playhead());
+    }
+    assert!(furthest > 0.9, "never reached the loop end ({furthest})");
+}
