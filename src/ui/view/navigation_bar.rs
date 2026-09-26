@@ -41,7 +41,7 @@ impl UINavigationBar {
                 state.set_playback_position(state.grid.x_to_beats(mouse_pos.x, nav_bar_rect));
             }
             // Zoom
-            if ui.input(|i| i.raw_scroll_delta.y != 0.0)
+            if ui.input(|i| i.smooth_scroll_delta.y != 0.0)
                 && let Some(mouse_pos) = nav_bar_response.hover_pos()
             {
                 let delta = ui.input(|i| i.smooth_scroll_delta.y);

@@ -9,7 +9,7 @@ use crate::{
         widget::{item_button::ItemButton, square_button::SquareButton},
     },
 };
-use egui::{Color32, Context, FontId, Frame, Margin, RichText, Stroke, TextEdit, Ui, vec2};
+use egui::{Color32, FontId, Frame, Margin, RichText, Stroke, TextEdit, Ui, vec2};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -43,10 +43,11 @@ impl UILeftPanel {
         }
     }
 
-    pub fn show(&mut self, ctx: &Context, state: &mut ToniqueProjectState) {
-        egui::SidePanel::left("left-pannel")
-            .min_width(100.)
-            .max_width(400.)
+    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+        let mut open = state.left_panel_open;
+        egui::Panel::left("left-pannel")
+            .min_size(100.)
+            .max_size(400.)
             .frame(
                 Frame::new()
                     .inner_margin(Margin {
@@ -55,13 +56,14 @@ impl UILeftPanel {
                         right: 2,
                         top: 0,
                     })
-                    .fill(ctx.style().visuals.panel_fill)
+                    .fill(ui.style().visuals.panel_fill)
                     .corner_radius(4.0),
             )
-            .default_width(220.)
-            .show_animated(ctx, state.left_panel_open, |ui| {
+            .default_size(220.)
+            .show_collapsible(ui, &mut open, |ui| {
                 self.ui(ui, state);
             });
+        state.left_panel_open = open;
     }
 
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
@@ -128,7 +130,7 @@ impl UILeftPanel {
                     );
                     TextEdit::singleline(&mut self.search)
                         .background_color(Color32::TRANSPARENT)
-                        .frame(false)
+                        .frame(Frame::new().inner_margin(Margin::symmetric(4, 2)))
                         .desired_width(ui.available_width() - 20.)
                         .font(FontId::new(10., egui::FontFamily::Proportional))
                         .text_color(Color32::from_gray(30))

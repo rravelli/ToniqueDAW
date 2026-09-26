@@ -2,7 +2,7 @@ use crate::{
     core::state::ToniqueProjectState,
     ui::view::{navigation_bar::UINavigationBar, timeline::UITimeline, tracks::UITracks},
 };
-use egui::{Color32, Context, Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{Color32, Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
 pub const SCROLLBAR_WIDTH: f32 = 5.;
 pub const PLAYHEAD_COLOR: Color32 = Color32::WHITE;
@@ -22,14 +22,14 @@ impl UICentralPanel {
         }
     }
 
-    pub fn show(&mut self, ctx: &Context, state: &mut ToniqueProjectState) {
+    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
         egui::CentralPanel::default()
             .frame(
-                Frame::central_panel(&ctx.style())
+                Frame::central_panel(ui.style())
                     .inner_margin(Margin::ZERO)
                     .fill(Color32::from_gray(55)),
             )
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 self.ui(ui, state);
             });
     }

@@ -4,8 +4,7 @@ use crate::{
     utils::parse_name,
 };
 use egui::{
-    Color32, Context, Frame, Key, Layout, Margin, Rangef, RichText, ScrollArea, Separator, Stroke,
-    Ui,
+    Color32, Frame, Key, Layout, Margin, Rangef, RichText, ScrollArea, Separator, Stroke, Ui,
 };
 
 pub const BOTTOM_BAR_HEIGHT: f32 = 20.;
@@ -25,18 +24,20 @@ impl UIBottomPanel {
         }
     }
 
-    pub fn show(&mut self, ctx: &Context, state: &mut ToniqueProjectState) {
-        egui::TopBottomPanel::bottom("bottom-panel")
-            .height_range(Rangef::new(50. + BOTTOM_BAR_HEIGHT, 400.))
+    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+        let mut open = state.bottom_panel_open;
+        egui::Panel::bottom("bottom-panel")
+            .size_range(Rangef::new(50. + BOTTOM_BAR_HEIGHT, 400.))
             .resizable(true)
             .frame(Frame::new().inner_margin(Margin::ZERO))
-            .show_animated(ctx, state.bottom_panel_open, |ui| {
+            .show_collapsible(ui, &mut open, |ui| {
                 ui.set_height(ui.available_height());
 
                 if let Some(selected) = state.selected_track() {
                     self.ui(ui, selected, state);
                 }
             });
+        state.bottom_panel_open = open;
     }
 
     pub fn ui(&mut self, ui: &mut Ui, track: TrackReferenceCore, state: &mut ToniqueProjectState) {

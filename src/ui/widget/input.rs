@@ -82,7 +82,7 @@ impl NumberInput {
                     &mut text
                 })
                 .desired_width(text_edit_rect.width())
-                .frame(false)
+                .frame(egui::Frame::NONE)
                 .font(self.font.clone())
                 .interactive(self.edit_mode)
                 .horizontal_align(egui::Align::Center)
