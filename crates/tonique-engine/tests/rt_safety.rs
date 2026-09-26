@@ -93,6 +93,10 @@ fn rt_path_never_allocates() {
                 s.undo().unwrap();
             }
             47 => s.perform(ResizeClip::new(tid, cid, BeatPos(0.25), 3.0, 0.01)).unwrap(),
+            // Preview: new streams arrive, old ones are retired.
+            3 => s.engine_mut().preview_play(Box::new(Noise(44100.0)), 0).unwrap(),
+            17 => s.engine_mut().preview_seek(1000).unwrap(),
+            33 if block % 100 == 33 => s.engine_mut().preview_stop().unwrap(),
             49 => {
                 // UI-side meter reads while the audio thread writes.
                 s.edit().master.meter().take_levels();
@@ -111,4 +115,21 @@ fn rt_path_never_allocates() {
     let v: Vec<u8> = rt::no_alloc(|| Vec::with_capacity(16));
     drop(v);
     assert_eq!(rt::alloc_violations(), 1);
+}
+
+/// Endless preview source at a different rate than the engine's.
+struct Noise(f64);
+
+impl tonique_engine::preview::PreviewSource for Noise {
+    fn sample_rate(&self) -> f64 {
+        self.0
+    }
+    fn seek(&mut self, _frame: usize) {}
+    fn read(&mut self, left: &mut [f32], right: &mut [f32]) -> usize {
+        for (i, (l, r)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
+            *l = (i as f32 * 0.37).sin() * 0.1;
+            *r = -*l;
+        }
+        left.len()
+    }
 }

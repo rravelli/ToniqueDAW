@@ -3,7 +3,7 @@ mod sources;
 #[cfg(test)]
 mod tests;
 use crate::{
-    audio::host::{PreviewCommand, PreviewLink},
+    audio::preview::FilePreview,
     core::{
         clip::ClipCore,
         grid::GridService,
@@ -61,7 +61,6 @@ pub enum PlaybackState {
 pub struct ToniqueProjectState {
     session: EditSession,
     sources: SourceRegistry,
-    preview: Option<PreviewLink>,
 
     playback_position: f32,
     playback_state: PlaybackState,
@@ -90,8 +89,7 @@ pub struct ToniqueProjectState {
 }
 
 impl ToniqueProjectState {
-    /// `preview` is `None` when there's no audio device (e.g. in tests).
-    pub fn new(engine: Engine, preview: Option<PreviewLink>) -> Self {
+    pub fn new(engine: Engine) -> Self {
         let sample_rate = engine.config().sample_rate;
         let session = EditSession::new(Edit::new(DEFAULT_BPM), engine)
             .expect("an empty edit always compiles");
@@ -100,7 +98,6 @@ impl ToniqueProjectState {
         Self {
             session,
             sources: SourceRegistry::new(sample_rate),
-            preview,
             playback_position: 0.,
             playback_state: PlaybackState::Paused,
             preview_playback_state: PlaybackState::Paused,
@@ -130,10 +127,13 @@ impl ToniqueProjectState {
         if self.playback_state == PlaybackState::Playing {
             self.playback_position = self.session.position().0 as f32;
         }
-        if let Some(preview) = &mut self.preview {
-            while let Ok(pos) = preview.position_rx.pop() {
-                self.preview_position = pos;
-            }
+        let engine = self.session.engine();
+        if let Some(pos) = engine.preview_position() {
+            self.preview_position = pos;
+        }
+        if !engine.is_previewing() {
+            // Played to the end
+            self.preview_playback_state = PlaybackState::Paused;
         }
         self.sync_effects();
         self.update_metrics();
@@ -230,24 +230,28 @@ impl ToniqueProjectState {
     }
     pub fn pause_preview(&mut self) {
         self.preview_playback_state = PlaybackState::Paused;
-        self.send_preview(PreviewCommand::Pause);
+        let result = self.session.engine_mut().preview_stop();
+        report(result.map_err(EditError::from));
     }
+    /// Play a file from the start. Ignored while the transport plays.
     pub fn play_preview(&mut self, path: PathBuf) {
         if self.playback_state == PlaybackState::Playing {
             return;
         }
+        let Some(source) = FilePreview::open(path) else {
+            return;
+        };
+        self.preview_position = 0;
         self.preview_playback_state = PlaybackState::Playing;
-        self.send_preview(PreviewCommand::Play(path));
+        let result = self.session.engine_mut().preview_play(Box::new(source), 0);
+        report(result.map_err(EditError::from));
     }
+    /// Continue the last previewed file from `pos` (in frames of the file).
     pub fn seek_preview(&mut self, pos: usize) {
         self.preview_position = pos;
         self.preview_playback_state = PlaybackState::Playing;
-        self.send_preview(PreviewCommand::Seek(pos));
-    }
-    fn send_preview(&mut self, cmd: PreviewCommand) {
-        if let Some(preview) = &mut self.preview {
-            let _ = preview.tx.push(cmd);
-        }
+        let result = self.session.engine_mut().preview_seek(pos);
+        report(result.map_err(EditError::from));
     }
     pub fn toggle_metronome(&mut self) {
         self.metronome = !self.metronome;

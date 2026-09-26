@@ -19,6 +19,7 @@ pub mod meter;
 pub mod midi;
 pub mod nodes;
 pub mod param;
+pub mod preview;
 pub mod resample;
 pub mod rt;
 pub mod sample;

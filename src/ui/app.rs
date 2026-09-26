@@ -1,5 +1,4 @@
 use crate::{
-    audio::host::PreviewLink,
     core::state::{PlaybackState, ToniqueProjectState},
     ui::panels::{
         bottom_panel::UIBottomPanel, central_panel::UICentralPanel, left_panel::UILeftPanel,
@@ -17,9 +16,9 @@ pub struct ToniqueApp {
 }
 
 impl ToniqueApp {
-    pub fn new(engine: Engine, preview: PreviewLink, _cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(engine: Engine, _cc: &eframe::CreationContext<'_>) -> Self {
         Self {
-            state: ToniqueProjectState::new(engine, Some(preview)),
+            state: ToniqueProjectState::new(engine),
             top_bar: UITopBar::new(),
             bottom_panel: UIBottomPanel::new(),
             left_panel: UILeftPanel::new(),

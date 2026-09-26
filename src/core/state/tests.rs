@@ -15,7 +15,7 @@ use tonique_engine::{
 
 fn setup_state() -> ToniqueProjectState {
     let (engine, _processor) = Engine::new(EngineConfig::default());
-    ToniqueProjectState::new(engine, None)
+    ToniqueProjectState::new(engine)
 }
 
 /// A decoded (silent) file of `seconds`. At 120 bpm that's `2 * seconds` beats.
@@ -253,11 +253,13 @@ fn clips_play_through_the_engine_once_loaded() {
         housekeeping_thread: false,
         ..Default::default()
     });
-    let mut state = ToniqueProjectState::new(engine, None);
+    let mut state = ToniqueProjectState::new(engine);
     let track = state.add_track();
     // One second of a loud square wave, decoded at another rate so it's resampled.
     let mut info = audio(1.);
-    let wave: Vec<f32> = (0..44100).map(|i| if i / 50 % 2 == 0 { 0.5 } else { -0.5 }).collect();
+    let wave: Vec<f32> = (0..44100)
+        .map(|i| if i / 50 % 2 == 0 { 0.5 } else { -0.5 })
+        .collect();
     info.data = Arc::new(RwLock::new((wave.clone(), wave)));
     info.sample_rate = 44100;
     let id = state.new_clip_id();

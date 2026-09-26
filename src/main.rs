@@ -18,8 +18,8 @@ fn main() {
     // Midi thread that collects midi inputs (not routed to the engine yet)
     let (midi_tx, _midi_rx) = RingBuffer::<Vec<u8>>::new(256);
     spawn_midi_thread(midi_tx);
-    // Audio output: the engine plus the file preview, on the default device
-    let (_audio, engine, preview) = start_audio().expect("failed to start audio output");
+    // Audio output: the engine on the default device
+    let (_stream, engine) = start_audio().expect("failed to start audio output");
     // Ui thread (main thread). Opens the app window
-    spawn_ui_thread(engine, preview).unwrap();
+    spawn_ui_thread(engine).unwrap();
 }

@@ -1,3 +1,3 @@
 pub mod host;
 pub mod midi;
-mod preview;
+pub mod preview;
