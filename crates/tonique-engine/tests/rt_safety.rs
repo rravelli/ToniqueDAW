@@ -66,6 +66,7 @@ fn rt_path_never_allocates() {
         ..Default::default()
     });
     let mut s = EditSession::new(busy_edit(), engine).unwrap();
+    s.engine_mut().set_graph_metering(true);
     let tracks: Vec<_> = s.edit().tracks.iter().map(|t| (t.id, t.channel.volume.id, t.clips[0].id)).collect();
     s.set_loop(Some((BeatPos(0.5), BeatPos(3.5)))).unwrap();
     s.play().unwrap();

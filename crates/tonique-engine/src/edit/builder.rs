@@ -15,7 +15,7 @@ use std::sync::Arc;
 use super::{Bus, BusId, Channel, ClipContent, Edit, Output, Parameter, PluginKind, Track};
 use crate::automation::AutomationCurve;
 use crate::graph::{GraphDescription, NodeId, NodeIdentity};
-use crate::nodes::{AudioClipNode, AutomationNode, ClipPlacement, DelayNode, EchoNode, FilterNode, MetronomeNode, MidiClipNode, SumNode, SynthNode, TimelineNote, VolumePanNode};
+use crate::nodes::{FilterMode, AudioClipNode, AutomationNode, ClipPlacement, DelayNode, EchoNode, FilterNode, MetronomeNode, MidiClipNode, SumNode, SynthNode, TimelineNote, VolumePanNode};
 use crate::param::ParamId;
 use crate::time::{BeatPos, SamplePos};
 
@@ -26,7 +26,7 @@ pub fn automation_identity(param: ParamId) -> NodeIdentity {
 }
 
 pub fn build_graph(edit: &Edit, sample_rate: f64) -> GraphDescription {
-    let mut b = Builder { edit, sr: sample_rate, d: GraphDescription::new() };
+    let mut b = Builder { edit, sr: sample_rate, d: GraphDescription::new(), owner: None };
     b.build()
 }
 
@@ -39,18 +39,28 @@ struct Builder<'a> {
     edit: &'a Edit,
     sr: f64,
     d: GraphDescription,
+    /// Track or bus whose nodes are being added (for inspection).
+    owner: Option<u64>,
 }
 
 impl Builder<'_> {
     fn build(&mut self) -> GraphDescription {
         let master_in = self.d.add(SumNode::new(2), &[]);
-        let bus_in: HashMap<BusId, NodeId> = self.edit.buses.iter().map(|b| (b.id, self.d.add(SumNode::new(2), &[]))).collect();
+        self.label(master_in, "master · Σ");
+        let mut bus_in: HashMap<BusId, NodeId> = HashMap::new();
+        for bus in &self.edit.buses {
+            self.owner = Some(bus.id.0);
+            let sum = self.d.add(SumNode::new(2), &[]);
+            self.label(sum, format!("{} · Σ", bus.name));
+            bus_in.insert(bus.id, sum);
+        }
         let route = |o: Output| match o {
             Output::Master => master_in,
             Output::Bus(id) => bus_in.get(&id).copied().unwrap_or(master_in),
         };
 
         for track in &self.edit.tracks {
+            self.owner = Some(track.id.0);
             let out = self.track(track);
             self.d.connect(out, route(track.output));
             for send in &track.sends {
@@ -58,22 +68,35 @@ impl Builder<'_> {
                     let id = NodeIdentity::of(&("send", track.id.0, send.level.id.0));
                     let node = VolumePanNode::new(send.level.value.clone(), send.pan.clone()).with_identity(id);
                     let s = self.d.add(node, &[out]);
-                    self.automate(&send.level, s);
+                    let bus_name = self.edit.bus(send.bus).map_or("bus", |b| b.name.as_str());
+                    self.label(s, format!("{} → {bus_name}", track.name));
+                    self.automate(&send.level, s, &track.name);
                     self.d.connect(s, target);
                 }
             }
         }
         for bus in &self.edit.buses {
+            self.owner = Some(bus.id.0);
             let out = self.bus(bus, bus_in[&bus.id]);
             self.d.connect(out, route(bus.output));
         }
-        let master = self.channel(&self.edit.master, master_in, NodeIdentity::of(&"master"));
+        self.owner = None;
+        let master = self.channel(&self.edit.master, master_in, NodeIdentity::of(&"master"), "master");
         // The click bypasses the master fader and meter.
         let click = MetronomeNode::new(self.edit.tempo.clone(), self.edit.metronome.clone()).with_identity(NodeIdentity::of(&"metronome"));
         let click = self.d.add(click, &[]);
+        self.label(click, "metronome");
         let out = self.d.add(SumNode::new(2), &[master, click]);
+        self.label(out, "output");
         self.d.set_output(out);
         std::mem::take(&mut self.d)
+    }
+
+    fn label(&mut self, node: NodeId, label: impl Into<String>) {
+        self.d.set_label(node, label);
+        if let Some(owner) = self.owner {
+            self.d.set_owner(node, owner);
+        }
     }
 
     fn samples(&self, beat: f64) -> SamplePos {
@@ -111,18 +134,20 @@ impl Builder<'_> {
                     self.d.add(node, &[])
                 }
             };
+            self.label(node, format!("{} · clip", track.name));
             sources.push(node);
         }
         let input = self.d.add(SumNode::new(2), &sources);
-        self.channel(&track.channel, input, NodeIdentity::of(&("track", track.id.0)))
+        self.label(input, format!("{} · clips Σ", track.name));
+        self.channel(&track.channel, input, NodeIdentity::of(&("track", track.id.0)), &track.name)
     }
 
     fn bus(&mut self, bus: &Bus, input: NodeId) -> NodeId {
-        self.channel(&bus.channel, input, NodeIdentity::of(&("bus", bus.id.0)))
+        self.channel(&bus.channel, input, NodeIdentity::of(&("bus", bus.id.0)), &bus.name)
     }
 
     /// Plugin chain + fader for a track, bus or the master.
-    fn channel(&mut self, ch: &Channel, input: NodeId, fader_identity: NodeIdentity) -> NodeId {
+    fn channel(&mut self, ch: &Channel, input: NodeId, fader_identity: NodeIdentity, name: &str) -> NodeId {
         let mut prev = input;
         for plugin in ch.plugins.iter().filter(|p| !p.bypassed) {
             let id = NodeIdentity::of(&("plugin", plugin.id.0));
@@ -133,8 +158,9 @@ impl Builder<'_> {
                 PluginKind::Echo { time_s } => self.d.add(EchoNode::new(time_s, param("feedback"), param("mix")).with_identity(id), &[prev]),
                 PluginKind::Latency { samples } => self.d.add(DelayNode::reporting(samples, 2), &[prev]),
             };
+            self.label(prev, format!("{name} · {}", plugin_label(plugin.kind)));
             for p in &plugin.params {
-                self.automate(p, prev);
+                self.automate(p, prev, name);
             }
         }
         let fader = VolumePanNode::new(ch.volume.value.clone(), ch.pan.value.clone())
@@ -142,19 +168,31 @@ impl Builder<'_> {
             .with_meter(ch.meter.clone())
             .with_identity(fader_identity);
         let fader = self.d.add(fader, &[prev]);
-        self.automate(&ch.volume, fader);
-        self.automate(&ch.pan, fader);
+        self.label(fader, format!("{name} · fader"));
+        self.automate(&ch.volume, fader, name);
+        self.automate(&ch.pan, fader, name);
         fader
     }
 
     /// Add an automation writer for `param` that runs before `owner`.
-    fn automate(&mut self, param: &Parameter, owner: NodeId) {
+    fn automate(&mut self, param: &Parameter, owner: NodeId, owner_name: &str) {
         if param.automation.is_empty() {
             return;
         }
         let curve = automation_curve(self.edit, param, self.sr);
         let node = AutomationNode::new(curve, param.value.clone(), automation_identity(param.id));
         let a = self.d.add(node, &[]);
+        self.label(a, format!("{owner_name} · {} automation", param.name));
         self.d.add_order_dependency(owner, a);
+    }
+}
+
+fn plugin_label(kind: PluginKind) -> &'static str {
+    match kind {
+        PluginKind::Synth(_) => "synth",
+        PluginKind::Filter(FilterMode::LowPass) => "low-pass",
+        PluginKind::Filter(FilterMode::HighPass) => "high-pass",
+        PluginKind::Echo { .. } => "echo",
+        PluginKind::Latency { .. } => "latency",
     }
 }

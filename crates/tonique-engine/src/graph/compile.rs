@@ -4,6 +4,7 @@ use std::fmt;
 use super::compiled::{CompiledGraph, CompiledNode};
 use super::desc::GraphDescription;
 use super::node::{Node, NodeIdentity, NodeProperties};
+use super::topology::{GraphTopology, TopologyNode};
 use crate::nodes::DelayNode;
 
 #[derive(Clone, Copy, Debug)]
@@ -51,6 +52,8 @@ struct WorkNode {
     node: Box<dyn Node>,
     props: NodeProperties,
     name: &'static str,
+    label: Option<String>,
+    owner: Option<u64>,
     inputs: Vec<usize>,
     after: Vec<usize>,
 }
@@ -73,6 +76,8 @@ pub fn compile(desc: GraphDescription, opts: &CompileOptions) -> Result<Compiled
             node: spec.node,
             props,
             name,
+            label: spec.label,
+            owner: spec.owner,
             inputs: spec.inputs.iter().map(|n| n.0).collect(),
             after: spec.after.iter().map(|n| n.0).collect(),
         }));
@@ -151,10 +156,12 @@ pub fn compile(desc: GraphDescription, opts: &CompileOptions) -> Result<Compiled
                 continue;
             }
             let d = *delay_cache.entry((p, diff)).or_insert_with(|| {
-                let src = &work[p].as_ref().unwrap().props;
+                let src = work[p].as_ref().unwrap();
+                let (owner, src) = (src.owner, &src.props);
                 let node = DelayNode::new(diff, src.channels, src.has_midi);
                 let props = node.properties();
-                work.push(Some(WorkNode { name: node.name(), node: Box::new(node), props, inputs: vec![p], after: vec![] }));
+                let label = Some(format!("latency comp. +{diff}"));
+                work.push(Some(WorkNode { name: node.name(), label, owner, node: Box::new(node), props, inputs: vec![p], after: vec![] }));
                 latency.push(max_in);
                 final_order.push(work.len() - 1);
                 delays_inserted += 1;
@@ -183,6 +190,7 @@ pub fn compile(desc: GraphDescription, opts: &CompileOptions) -> Result<Compiled
     }
     let output_idx = index_of[output];
     let output_latency = latency[output];
+    let total_latency: Vec<usize> = final_order.iter().map(|&i| latency[i]).collect();
 
     // Identities must be unique so state migration is unambiguous.
     let mut identity_index: Vec<(NodeIdentity, u32)> =
@@ -222,6 +230,26 @@ pub fn compile(desc: GraphDescription, opts: &CompileOptions) -> Result<Compiled
         output_latency,
     };
 
+    let topology = GraphTopology::new(
+        nodes
+            .iter()
+            .zip(total_latency)
+            .map(|(w, total_latency)| TopologyNode {
+                name: w.name,
+                label: w.label.clone(),
+                owner: w.owner,
+                channels: w.props.channels,
+                has_midi: w.props.has_midi,
+                latency_samples: w.props.latency_samples,
+                total_latency,
+                inputs: w.inputs.clone(),
+                after: w.after.clone(),
+            })
+            .collect(),
+        output_idx,
+        stats,
+    );
+
     // 8. Prepare (may allocate: we're still off the RT thread).
     let compiled_nodes = nodes
         .into_iter()
@@ -242,6 +270,7 @@ pub fn compile(desc: GraphDescription, opts: &CompileOptions) -> Result<Compiled
         output_idx,
         *opts,
         stats,
+        topology,
     ))
 }
 

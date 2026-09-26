@@ -2,10 +2,13 @@ use egui::{
     Color32, FontFamily, FontId, Frame, Layout, Margin, Pos2, Rangef, Response, Sense, Stroke, Ui,
     Vec2,
 };
-use egui_phosphor::{fill::SIDEBAR_SIMPLE, regular::RECORD};
+use egui_phosphor::{
+    fill::SIDEBAR_SIMPLE,
+    regular::{GRAPH, RECORD},
+};
 
 use crate::{
-    core::state::{MASTER_TRACK_ID, PlaybackState, ToniqueProjectState},
+    core::state::{CentralView, MASTER_TRACK_ID, PlaybackState, ToniqueProjectState},
     ui::{
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::PRIMARY_COLOR,
@@ -48,6 +51,7 @@ impl UITopBar {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
             self.sidebar_ui(ui, state);
+            self.graph_view_ui(ui, state);
             self.metronome_ui(ui, state);
             if self.play_button_ui(ui, state.playback_state()).clicked() {
                 if state.playback_state() == PlaybackState::Playing {
@@ -138,6 +142,41 @@ impl UITopBar {
 
         if res.clicked() {
             state.left_panel_open = !state.left_panel_open;
+        };
+
+        res
+    }
+
+    fn graph_view_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
+        let active = state.central_view == CentralView::Graph;
+        let res = ui.add(
+            SquareButton::ghost(GRAPH)
+                .square(BUTTON_SIZE)
+                .font(FontId::new(
+                    15.,
+                    egui::FontFamily::Name(
+                        if active {
+                            PHOSPHOR_FILL
+                        } else {
+                            PHOSPHOR_REGULAR
+                        }
+                        .into(),
+                    ),
+                ))
+                .color(if active {
+                    PRIMARY_COLOR
+                } else {
+                    Color32::from_gray(180)
+                })
+                .tooltip("Audio graph"),
+        );
+
+        if res.clicked() {
+            state.central_view = if active {
+                CentralView::Timeline
+            } else {
+                CentralView::Graph
+            };
         };
 
         res

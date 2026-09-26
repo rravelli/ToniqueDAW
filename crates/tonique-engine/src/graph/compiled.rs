@@ -3,7 +3,11 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use crossbeam_queue::ArrayQueue;
 
+use std::sync::Arc;
+use std::time::Instant;
+
 use super::compile::{CompileOptions, CompileStats};
+use super::topology::{GraphTopology, NodeMeters};
 use super::node::{BlockInfo, Node, NodeIdentity, NodeIo, NodeMessage, NodeProperties, ProcessContext, StateTransfer};
 use crate::audio::{AudioBlock, AudioBlockMut, AudioBuffer};
 use crate::midi::MidiEventList;
@@ -44,6 +48,8 @@ pub struct CompiledGraph {
     slot_of: Vec<Option<usize>>,
     opts: CompileOptions,
     stats: CompileStats,
+    topology: Arc<GraphTopology>,
+    meters: Arc<NodeMeters>,
 }
 
 // SAFETY: the raw pointers in `io` point into heap storage owned by this
@@ -69,6 +75,7 @@ impl CompiledGraph {
         output: usize,
         opts: CompileOptions,
         stats: CompileStats,
+        topology: GraphTopology,
     ) -> Self {
         let n = nodes.len();
         let mut slots: Vec<AudioBuffer> = (0..slot_count).map(|_| AudioBuffer::new(slot_channels, opts.max_block)).collect();
@@ -99,6 +106,8 @@ impl CompiledGraph {
             slot_of,
             opts,
             stats,
+            meters: topology.meters_arc(),
+            topology: Arc::new(topology),
             nodes,
         }
     }
@@ -113,6 +122,11 @@ impl CompiledGraph {
 
     pub fn stats(&self) -> CompileStats {
         self.stats
+    }
+
+    /// Structure and live meters of this graph, for inspection.
+    pub fn topology(&self) -> Arc<GraphTopology> {
+        self.topology.clone()
     }
 
     pub fn sample_rate(&self) -> f64 {
@@ -171,7 +185,13 @@ impl CompiledGraph {
         ctx.audio_out.clear();
         ctx.midi_out.clear();
         let node = unsafe { &mut *cn.node.get() };
-        node.process(&mut ctx);
+        if self.meters.is_enabled() {
+            let started = Instant::now();
+            node.process(&mut ctx);
+            self.meters.record(idx, ctx.audio_out.as_block().peak(), started.elapsed());
+        } else {
+            node.process(&mut ctx);
+        }
     }
 
     /// Run every node in schedule order on the calling thread.

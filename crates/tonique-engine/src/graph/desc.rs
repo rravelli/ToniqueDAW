@@ -11,6 +11,10 @@ pub(crate) struct NodeSpec {
     /// Ordering-only dependencies: run after these, but don't read them
     /// (e.g. an automation writer must run before the node it controls).
     pub after: Vec<NodeId>,
+    /// Human-readable purpose, for inspection (see [`super::GraphTopology`]).
+    pub label: Option<String>,
+    /// Caller-defined ID of what this node belongs to (e.g. a track).
+    pub owner: Option<u64>,
 }
 
 /// Off-thread, owned description of a processing graph.
@@ -30,8 +34,20 @@ impl GraphDescription {
     }
 
     pub fn add_boxed(&mut self, node: Box<dyn Node>, inputs: &[NodeId]) -> NodeId {
-        self.nodes.push(NodeSpec { node, inputs: inputs.to_vec(), after: Vec::new() });
+        self.nodes.push(NodeSpec { node, inputs: inputs.to_vec(), after: Vec::new(), label: None, owner: None });
         NodeId(self.nodes.len() - 1)
+    }
+
+    /// Describe what `node` is for, e.g. `"Drums · fader"`. Only used for
+    /// inspection; it doesn't affect processing.
+    pub fn set_label(&mut self, node: NodeId, label: impl Into<String>) {
+        self.nodes[node.0].label = Some(label.into());
+    }
+
+    /// Record what `node` belongs to, as an ID meaningful to the caller
+    /// (e.g. a track's). Only used for inspection.
+    pub fn set_owner(&mut self, node: NodeId, owner: u64) {
+        self.nodes[node.0].owner = Some(owner);
     }
 
     /// Add a signal connection `from -> to` (may create a cycle, which
