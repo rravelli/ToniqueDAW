@@ -311,21 +311,19 @@ impl UITimeline {
         state.begin_batch();
         if !dropped_files.is_empty() {
             for file in dropped_files {
-                if let Some(path) = file.path {
-                    if let Some(audio_info) = AUDIO_ANALYSIS_CACHE.get_or_analyze(path) {
-                        if let Some(mouse_pos) = ui.ctx().input(|i| i.pointer.hover_pos())
-                            && viewport.contains(mouse_pos)
-                        {
-                            // Convert x to beats and snap to grid
-                            let position = state.grid.x_to_beats(mouse_pos.x, viewport);
-                            let snapped_position = state.grid.snap_at_grid(position);
+                if let Some(audio_info) =
+                    AUDIO_ANALYSIS_CACHE.get_or_analyze(file.path().to_path_buf())
+                    && let Some(mouse_pos) = ui.ctx().input(|i| i.pointer.hover_pos())
+                    && viewport.contains(mouse_pos)
+                {
+                    // Convert x to beats and snap to grid
+                    let position = state.grid.x_to_beats(mouse_pos.x, viewport);
+                    let snapped_position = state.grid.snap_at_grid(position);
 
-                            let new_track = TrackCore::new();
-                            state.add_track(new_track.clone());
-                            let clip = ClipCore::new(audio_info, snapped_position);
-                            state.add_clips(&new_track.id, vec![clip]);
-                        }
-                    }
+                    let new_track = TrackCore::new();
+                    state.add_track(new_track.clone());
+                    let clip = ClipCore::new(audio_info, snapped_position);
+                    state.add_clips(&new_track.id, vec![clip]);
                 }
             }
         }

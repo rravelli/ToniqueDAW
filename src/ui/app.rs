@@ -30,7 +30,7 @@ impl ToniqueApp {
 }
 
 impl eframe::App for ToniqueApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Update state
         self.state.update();
         if self.state.playback_state() == PlaybackState::Playing
@@ -38,9 +38,12 @@ impl eframe::App for ToniqueApp {
         {
             ctx.request_repaint();
         }
-        self.top_bar.show(ctx, &mut self.state);
-        self.bottom_panel.show(ctx, &mut self.state);
-        self.left_panel.show(ctx, &mut self.state);
-        self.central_panel.show(ctx, &mut self.state);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.top_bar.show(ui, &mut self.state);
+        self.bottom_panel.show(ui, &mut self.state);
+        self.left_panel.show(ui, &mut self.state);
+        self.central_panel.show(ui, &mut self.state);
     }
 }

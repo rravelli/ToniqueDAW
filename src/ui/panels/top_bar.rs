@@ -1,6 +1,6 @@
 use egui::{
-    Color32, Context, FontFamily, FontId, Frame, Layout, Margin, Pos2, Rangef, Response, Sense,
-    Stroke, Ui, Vec2,
+    Color32, FontFamily, FontId, Frame, Layout, Margin, Pos2, Rangef, Response, Sense, Stroke, Ui,
+    Vec2,
 };
 use egui_phosphor::{fill::SIDEBAR_SIMPLE, regular::RECORD};
 
@@ -31,15 +31,15 @@ impl UITopBar {
         }
     }
 
-    pub fn show(&mut self, ctx: &Context, state: &mut ToniqueProjectState) {
-        egui::TopBottomPanel::top("top-bar")
+    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+        egui::Panel::top("top-bar")
             .resizable(false)
             .frame(
                 Frame::new()
                     .fill(Color32::from_gray(40))
                     .inner_margin(Margin::same(4)),
             )
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 self.ui(ui, state);
             });
     }

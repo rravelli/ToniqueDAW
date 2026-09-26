@@ -24,7 +24,7 @@ pub fn spawn_ui_thread(tx: GuiToAudioTx, rx: AudioToGuiRx) -> Result<(), eframe:
         get_native_options(),
         Box::new(|cc| {
             cc.egui_ctx.set_fonts(get_fonts());
-            cc.egui_ctx.set_style(get_app_style());
+            cc.egui_ctx.set_global_style(get_app_style());
             cc.egui_ctx.set_theme(Theme::Dark);
             Ok(Box::new(ToniqueApp::new(tx, rx, cc)))
         }),
