@@ -1,6 +1,8 @@
 use crate::{
-    core::state::ToniqueProjectState,
-    ui::view::{navigation_bar::UINavigationBar, timeline::UITimeline, tracks::UITracks},
+    core::state::{CentralView, ToniqueProjectState},
+    ui::view::{
+        graph::UIGraphView, navigation_bar::UINavigationBar, timeline::UITimeline, tracks::UITracks,
+    },
 };
 use egui::{Color32, Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
@@ -11,6 +13,7 @@ pub struct UICentralPanel {
     timeline: UITimeline,
     navigation_bar: UINavigationBar,
     tracks: UITracks,
+    graph: UIGraphView,
 }
 
 impl UICentralPanel {
@@ -19,6 +22,7 @@ impl UICentralPanel {
             timeline: UITimeline::new(),
             navigation_bar: UINavigationBar::new(),
             tracks: UITracks::new(),
+            graph: UIGraphView::new(),
         }
     }
 
@@ -35,6 +39,10 @@ impl UICentralPanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+        if state.central_view == CentralView::Graph {
+            self.graph.ui(ui, state);
+            return;
+        }
         let available_rect = ui.available_rect_before_wrap();
         // Draw navigation bar on top
         self.navigation_bar.ui(ui, state, self.tracks.width);

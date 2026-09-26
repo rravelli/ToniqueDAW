@@ -22,7 +22,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::graph::scheduler::WorkerPool;
-use crate::graph::{BlockInfo, CompileError, CompileOptions, CompileStats, CompiledGraph, GraphDescription, NodeIdentity, NodeMessage, compile};
+use crate::graph::{BlockInfo, CompileError, CompileOptions, CompileStats, CompiledGraph, GraphDescription, GraphTopology, NodeIdentity, NodeMessage, compile};
 use crate::preview::{PreviewControl, PreviewShared, PreviewSource, PreviewStream};
 use crate::rt;
 use crate::time::SamplePos;
@@ -144,6 +144,9 @@ pub struct Engine {
     garbage: Arc<Mutex<rtrb::Consumer<Garbage>>>,
     housekeeping: Option<(JoinHandle<()>, Arc<AtomicBool>)>,
     preview: PreviewControl,
+    /// Structure of the latest published graph.
+    topology: Option<Arc<GraphTopology>>,
+    graph_metering: bool,
 }
 
 /// RT-side processor. Move it into the audio callback; call
@@ -215,7 +218,8 @@ impl Engine {
             preview_generation: 0,
             preview_shared: preview.shared(),
         };
-        (Engine { config, commands: cmd_tx, graphs, shared, garbage, housekeeping, preview }, processor)
+        let engine = Engine { config, commands: cmd_tx, graphs, shared, garbage, housekeeping, preview, topology: None, graph_metering: false };
+        (engine, processor)
     }
 
     pub fn config(&self) -> &EngineConfig {
@@ -242,6 +246,9 @@ impl Engine {
         if graph.max_block() < self.config.max_block {
             return Err(EngineError::Incompatible("max block smaller than engine's"));
         }
+        let topology = graph.topology();
+        topology.meters().set_enabled(self.graph_metering);
+        self.topology = Some(topology);
         let mut outbox = lock(&self.graphs);
         outbox.flush();
         // Replacing a still-pending graph drops it here, on this thread.
@@ -301,6 +308,22 @@ impl Engine {
     /// Last callback's processing time as a fraction of its real-time budget.
     pub fn cpu_load(&self) -> f32 {
         self.shared.load_permille.load(Ordering::Relaxed) as f32 / 1000.0
+    }
+
+    /// Structure of the latest published graph (the one playing, or about
+    /// to within a block), with its live meters.
+    pub fn graph_topology(&self) -> Option<Arc<GraphTopology>> {
+        self.topology.clone()
+    }
+
+    /// Measure each node's output peak and processing time (see
+    /// [`GraphTopology::meters`]). Off by default: it costs a little time
+    /// per node on the audio thread.
+    pub fn set_graph_metering(&mut self, on: bool) {
+        self.graph_metering = on;
+        if let Some(t) = &self.topology {
+            t.meters().set_enabled(on);
+        }
     }
 
     /// Play `source` from source frame `from`, alongside (and independent

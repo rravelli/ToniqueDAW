@@ -427,3 +427,78 @@ fn metronome_clicks_on_beats_when_enabled() {
     s.stop().unwrap();
     assert_eq!(peak(&render_offline(&mut p, 4800, 2)), 0.0, "silent when stopped");
 }
+
+#[test]
+fn topology_shows_the_compiled_graph_with_labels() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000 * 8));
+    let mut drums = Track::new(&mut edit, "drums");
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 16.0, src);
+    drums.clips.push(clip);
+    let filter = Plugin::new(&mut edit, PluginKind::Filter(FilterMode::LowPass));
+    drums.channel.plugins.push(filter);
+    drums.channel.volume.automation = vec![BeatPoint { beat: BeatPos(0.0), value: 0.5, shape: CurveShape::Linear }];
+    let mut slow = Track::new(&mut edit, "slow");
+    let lat = Plugin::new(&mut edit, PluginKind::Latency { samples: 64 });
+    slow.channel.plugins.push(lat);
+    edit.tracks.extend([drums, slow]);
+    let (e, _p) = engine(0);
+    let s = EditSession::new(edit, e).unwrap();
+
+    let t = s.engine().graph_topology().expect("a graph was published");
+    assert_eq!(t.stats, s.last_compile_stats().unwrap());
+    assert_eq!(t.nodes.len(), t.stats.scheduled);
+    let find = |label: &str| t.nodes.iter().position(|n| n.label.as_deref() == Some(label)).unwrap_or_else(|| panic!("no node {label}"));
+    let (clip, sum, lp, fader) = (find("drums · clip"), find("drums · clips Σ"), find("drums · low-pass"), find("drums · fader"));
+    assert_eq!(t.nodes[clip].name, "AudioClipNode");
+    assert_eq!(t.nodes[sum].inputs, [clip]);
+    assert_eq!(t.nodes[lp].inputs, [sum]);
+    assert_eq!(t.nodes[fader].inputs, [lp]);
+    assert_eq!(t.nodes[fader].after, [find("drums · volume automation")], "automation runs first");
+    assert_eq!(t.nodes[find("slow · latency")].latency_samples, 64);
+    // The drums branch is delayed to line up with the slow track.
+    let comp = find("latency comp. +64");
+    assert_eq!(t.nodes[comp].inputs, [fader]);
+    assert_eq!(t.nodes[t.output].label.as_deref(), Some("output"));
+    // Nodes know their track; the compensation delay belongs to the delayed track.
+    let drums_id = s.edit().tracks[0].id.0;
+    for n in [clip, sum, lp, fader, comp, find("drums · volume automation")] {
+        assert_eq!(t.nodes[n].owner, Some(drums_id), "{:?}", t.nodes[n].label);
+    }
+    assert_eq!(t.nodes[t.output].owner, None);
+    assert_eq!(t.nodes[t.output].total_latency, 64);
+    // Schedule order: inputs always come first.
+    assert!(t.nodes.iter().enumerate().all(|(i, n)| n.inputs.iter().chain(&n.after).all(|&p| p < i)));
+}
+
+#[test]
+fn node_meters_measure_only_when_enabled() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000 * 8));
+    let mut t = Track::new(&mut edit, "audio");
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 16.0, src);
+    t.clips.push(clip);
+    edit.tracks.push(t);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    let topology = s.engine().graph_topology().unwrap();
+    let fader = topology.nodes.iter().position(|n| n.label.as_deref() == Some("audio · fader")).unwrap();
+
+    render_offline(&mut p, 4800, 2);
+    assert!(topology.meters().take().iter().all(|r| *r == Default::default()), "off by default");
+
+    s.engine_mut().set_graph_metering(true);
+    render_offline(&mut p, 4800, 2);
+    let readings = topology.meters().take();
+    assert!((readings[fader].peak - 0.5).abs() < 0.01, "fader peak {}", readings[fader].peak);
+    assert!(readings.iter().any(|r| !r.busy.is_zero()));
+    assert_eq!(topology.meters().take()[fader].peak, 0.0, "reset after reading");
+
+    // New graphs inherit the setting.
+    s.perform(MoveClip::new(s.edit().tracks[0].id, s.edit().tracks[0].clips[0].id, BeatPos(0.0))).unwrap();
+    render_offline(&mut p, 4800, 2);
+    let rebuilt = s.engine().graph_topology().unwrap();
+    assert!(!Arc::ptr_eq(&rebuilt, &topology));
+    assert!(rebuilt.meters().take().iter().any(|r| r.peak > 0.4));
+}

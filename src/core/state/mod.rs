@@ -6,6 +6,7 @@ use crate::{
     audio::preview::FilePreview,
     core::{
         clip::ClipCore,
+        graph_monitor::GraphMonitor,
         grid::GridService,
         metrics::{AudioMetrics, GlobalMetrics},
         state::{
@@ -49,6 +50,14 @@ enum ProjectStatePendingAction {
     DeleteTrack { id: TrackId },
 }
 
+/// What the central panel shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CentralView {
+    Timeline,
+    /// The engine's processing graph, live.
+    Graph,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlaybackState {
     Paused,
@@ -67,6 +76,9 @@ pub struct ToniqueProjectState {
     preview_playback_state: PlaybackState,
     preview_position: usize,
     pub metrics: GlobalMetrics,
+    /// Live graph data for the graph view (measured only while it's shown).
+    pub graph: GraphMonitor,
+    pub central_view: CentralView,
 
     /// UI-only track fields; kept for deleted tracks so undo restores them.
     views: HashMap<TrackId, MutableTrackCore>,
@@ -103,6 +115,8 @@ impl ToniqueProjectState {
             preview_playback_state: PlaybackState::Paused,
             preview_position: 0,
             metrics: GlobalMetrics::new(),
+            graph: GraphMonitor::new(),
+            central_view: CentralView::Timeline,
             views: HashMap::from([(MASTER_TRACK_ID, master)]),
             selected_tracks: Vec::new(),
             effects: HashMap::new(),
@@ -137,6 +151,8 @@ impl ToniqueProjectState {
         }
         self.sync_effects();
         self.update_metrics();
+        let show_graph = self.central_view == CentralView::Graph;
+        self.graph.update(self.session.engine_mut(), show_graph);
     }
 
     // Engine plumbing
