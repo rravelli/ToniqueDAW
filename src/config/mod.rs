@@ -1,3 +1,5 @@
+pub mod settings;
+
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::{

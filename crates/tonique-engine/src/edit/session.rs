@@ -44,6 +44,15 @@ impl EditSession {
         &mut self.engine
     }
 
+    /// Move the edit to a new engine (e.g. after changing the audio device
+    /// or engine settings) and return the old one. The undo history is kept;
+    /// the transport starts stopped at 0 on the new engine.
+    pub fn replace_engine(&mut self, engine: Engine) -> Result<Engine, EditError> {
+        let old = std::mem::replace(&mut self.engine, engine);
+        self.rebuild()?;
+        Ok(old)
+    }
+
     /// Construct new model objects (tracks, clips, plugins...), which draws
     /// fresh IDs from the edit. Add them with commands; changes made to the
     /// edit here directly are not undoable and don't reach the engine.

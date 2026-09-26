@@ -7,6 +7,8 @@ pub struct SquareButton {
     bg_color: Color32,
     border_radius: f32,
     hover_color: Option<Color32>,
+    /// Horizontal padding around the text when the width fits the text.
+    padding: Option<f32>,
     // Text
     text: String,
     text_color: Color32,
@@ -26,6 +28,7 @@ impl SquareButton {
             tooltip_text: "".to_string(),
             border_radius: 1.0,
             hover_color: None,
+            padding: None,
         }
     }
     pub fn ghost(text: impl ToString) -> Self {
@@ -38,6 +41,7 @@ impl SquareButton {
             text: text.to_string(),
             text_color: Color32::from_gray(180),
             tooltip_text: "".to_string(),
+            padding: None,
         }
     }
     pub fn fill(mut self, bg: Color32) -> Self {
@@ -76,15 +80,39 @@ impl SquareButton {
         self.hover_color = Some(color);
         self
     }
+    /// Size the width to the text plus `padding` on each side (the height
+    /// stays as set).
+    pub fn padding(mut self, padding: f32) -> Self {
+        self.padding = Some(padding);
+        self
+    }
 }
 
 impl Widget for SquareButton {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let (mut res, painter) = ui.allocate_painter(self.size, Sense::click());
+        // Disabled through `ui.add_enabled` or a disabled parent
+        let enabled = ui.is_enabled();
+        let mut size = self.size;
+        let galley = ui
+            .painter()
+            .layout_no_wrap(self.text, self.font, self.text_color);
+        if let Some(padding) = self.padding {
+            size.x = galley.size().x + 2. * padding;
+        }
+        let sense = if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        };
+        let (mut res, painter) = ui.allocate_painter(size, sense);
         let rect = res.rect;
         let mut curr_color = self.bg_color;
+        let mut text_color = self.text_color;
         let mut stroke = Stroke::NONE;
-        if res.hovered() {
+        if !enabled {
+            curr_color = curr_color.gamma_multiply(0.5);
+            text_color = text_color.gamma_multiply(0.5);
+        } else if res.hovered() {
             curr_color = self
                 .hover_color
                 .unwrap_or(self.bg_color.blend(Color32::from_white_alpha(40)));
@@ -101,15 +129,17 @@ impl Widget for SquareButton {
             egui::StrokeKind::Inside,
         );
 
-        painter.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            self.text,
-            self.font,
-            self.text_color,
+        painter.galley(
+            Align2::CENTER_CENTER
+                .align_size_within_rect(galley.size(), rect)
+                .min,
+            galley,
+            text_color,
         );
         // Update response
-        res = res.on_hover_cursor(CursorIcon::PointingHand);
+        if enabled {
+            res = res.on_hover_cursor(CursorIcon::PointingHand);
+        }
 
         if !self.tooltip_text.is_empty() {
             res = res.on_hover_text(

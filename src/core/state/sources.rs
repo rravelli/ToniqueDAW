@@ -49,14 +49,29 @@ impl SourceRegistry {
         let id = new_id();
         self.by_path.insert(audio.path.clone(), id);
         self.info.insert(id, audio.clone());
+        self.convert(id, audio.clone());
+        id
+    }
 
-        let (audio, rate, tx) = (audio.clone(), self.engine_rate, self.loaded_tx.clone());
+    /// The engine now runs at `rate`: convert every file again.
+    pub fn set_engine_rate(&mut self, rate: f64) {
+        if rate == self.engine_rate {
+            return;
+        }
+        self.engine_rate = rate;
+        for (id, audio) in &self.info {
+            self.convert(*id, audio.clone());
+        }
+    }
+
+    /// Convert `audio` to the engine rate in the background.
+    fn convert(&self, id: SourceId, audio: AudioInfo) {
+        let (rate, tx) = (self.engine_rate, self.loaded_tx.clone());
         std::thread::spawn(move || {
             if let Some(buffer) = convert_when_ready(&audio, rate) {
                 let _ = tx.send((id, buffer));
             }
         });
-        id
     }
 
     pub fn info(&self, id: SourceId) -> Option<&AudioInfo> {

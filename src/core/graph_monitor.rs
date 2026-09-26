@@ -30,6 +30,11 @@ impl GraphMonitor {
         }
     }
 
+    /// Forget everything, e.g. after the engine was replaced.
+    pub fn reset(&mut self) {
+        *self = Self::new();
+    }
+
     pub fn topology(&self) -> Option<&Arc<GraphTopology>> {
         self.topology.as_ref()
     }
