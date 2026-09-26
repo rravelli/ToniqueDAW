@@ -413,16 +413,19 @@ impl ToniqueProjectState {
         });
     }
     /// Duplicate clips fixing all overlaps on the tracks.
-    pub fn duplicate_clips(&mut self, ids: &[ClipId], bounds: Option<(f32, f32)>) {
+    pub fn duplicate_clips(&mut self, ids: &[ClipId], bounds: Option<(f32, f32)>) -> Vec<ClipId> {
+        let mut copy_ids = Vec::new();
         self.clip_ops("Duplicate clips", |s, ops| {
             let tracks: Vec<_> = s.edit().tracks.iter().map(|t| t.id).collect();
             for track in tracks {
                 let mut clips_on_track = s.track_clips(track, ops);
                 let mut new_id = || s.new_clip_id();
                 let copies = clips_on_track.duplicates(ids, bounds, &mut new_id);
+                copy_ids.extend(copies.iter().map(|clip| clip.id));
                 clips_on_track.add(copies, &mut new_id);
             }
         });
+        copy_ids
     }
     /// Resize clip without computing overlap checks.
     /// Use `commit_resize_clip` to apply overlap checks and add to undo stack.

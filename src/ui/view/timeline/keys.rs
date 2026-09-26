@@ -1,4 +1,4 @@
-use egui::{Key, Ui};
+use egui::{Event, Key, Ui};
 
 use crate::{
     core::state::{PlaybackState, ToniqueProjectState},
@@ -20,14 +20,28 @@ impl UITimeline {
             }
         }
 
-        if ui.input(|i| i.key_pressed(Key::D) && i.modifiers.ctrl) {
+        let duplicate_pressed = ui.input(|i| {
+            i.events.iter().any(|event| {
+                matches!(
+                    event,
+                    Event::Key {
+                        key: Key::D,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                        ..
+                    } if modifiers.ctrl
+                )
+            })
+        });
+
+        if duplicate_pressed {
             // Duplicate clips
-            if self.selected_clips.clip_ids.len() > 0 {
-                state.duplicate_clips(
+            if !self.selected_clips.clip_ids.is_empty() {
+                self.selected_clips.clip_ids = state.duplicate_clips(
                     &self.selected_clips.clip_ids,
                     self.selected_clips.bounds.map(|b| (b.start_pos, b.end_pos)),
                 );
-                self.selected_clips.clip_ids.clear();
                 if let Some(bounds) = &mut self.selected_clips.bounds {
                     let bound_size = bounds.end_pos - bounds.start_pos;
                     bounds.start_pos = bounds.end_pos;
