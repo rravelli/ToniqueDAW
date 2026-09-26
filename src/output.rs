@@ -25,11 +25,11 @@ pub fn spawn_cpal_stream(
         buffer_size: BufferSize::Default,
     };
 
-    let mut player = PlayerBackend::new(to_gui_tx, from_gui_rx, midi_rx, sample_rate.0 as usize);
+    let mut player = PlayerBackend::new(to_gui_tx, from_gui_rx, midi_rx, sample_rate as usize);
 
     let stream = device
         .build_output_stream(
-            &config,
+            config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| player.mix_audio(data),
             move |err| {
                 eprintln!("{}", err);

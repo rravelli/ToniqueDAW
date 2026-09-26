@@ -1,0 +1,23 @@
+[package]
+name = "tonique-engine"
+description = "A graph-based, real-time safe audio engine for DAWs"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+# Real audio device output through cpal.
+device = ["dep:cpal"]
+
+# Keep this crate free of UI dependencies: it must stay usable (and
+# publishable) on its own. UI code lives in the DAW crate at the repo root.
+[dependencies]
+crossbeam-queue = "0.3"
+hound = "3.5"
+libc = "0.2"
+rtrb = "0.4"
+cpal = { version = "0.18", optional = true }
+
+[[example]]
+name = "play"
+required-features = ["device"]
