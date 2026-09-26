@@ -3,7 +3,7 @@
 - Fix backend out of sync when changing BPM
 - <del>Fix artefacts in preview when resampling</del>
 - Fix bottom scrollbar behavior
-- Fix waveform jittering
+- <del>Fix waveform jittering</del>
 - Fix wrong curve for the equalizer effect
 
 # Refactor
@@ -15,7 +15,7 @@
 
 - Improve UI/UX!!
 - Improve player performances (optimize tracks)
-- Improve waveform performance and accuracy
+- <del>Improve waveform performance and accuracy</del>
 - Improve file picker performance
 - Improve player accuracy
 - <del>Handle multi-selecting correctly</del>

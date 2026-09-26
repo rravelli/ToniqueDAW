@@ -223,10 +223,15 @@ impl UITimeline {
             .grid
             .duration_to_width(clip.duration().unwrap(), state.bpm());
 
-        if x + width < viewport.left() || x > viewport.right() {
+        let top = y - offset.y;
+        if x + width < viewport.left()
+            || x > viewport.right()
+            || top + track.height < viewport.top()
+            || top > viewport.bottom()
+        {
             return false;
         }
-        let pos = pos2(x, y - offset.y);
+        let pos = pos2(x, top);
         let size = vec2(width, track.height);
         let color = if track.disabled() {
             Color32::from_gray(100)
