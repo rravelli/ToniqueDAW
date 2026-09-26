@@ -6,6 +6,7 @@ use crate::{
     },
 };
 use egui::{Color32, Pos2, Rect, Response, Stroke, StrokeKind, Ui};
+use tonique_engine::edit::ClipId;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SelectionBounds {
@@ -17,7 +18,7 @@ pub struct SelectionBounds {
 
 #[derive(Debug, Clone)]
 pub struct ClipSelection {
-    pub clip_ids: Vec<String>,
+    pub clip_ids: Vec<ClipId>,
     pub bounds: Option<SelectionBounds>,
 }
 

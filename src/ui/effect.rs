@@ -3,8 +3,8 @@ use egui::{
     Button, Color32, Frame, InnerResponse, Label, Margin, Rect, Response, RichText, Sense, Stroke,
     Ui, Vec2,
 };
-use fundsp::hacker::AudioUnit;
 use std::fmt::Debug;
+use tonique_engine::edit::{Plugin, PluginId, PluginKind, TrackId};
 
 pub trait UIEffectContent: UIEffectContentClone {
     // show ui and update effect
@@ -17,8 +17,10 @@ pub trait UIEffectContent: UIEffectContentClone {
     );
     // effect window width
     fn width(&self) -> f32;
-    // get audio processing unit
-    fn get_unit(&self) -> Box<dyn AudioUnit>;
+    // engine plugin that does the processing
+    fn plugin_kind(&self) -> PluginKind;
+    // take the plugin's parameters, so the editor controls them
+    fn bind(&mut self, plugin: &Plugin);
     // effect id
     fn id(&self) -> String;
 }
@@ -30,8 +32,11 @@ pub trait UIEffectContentClone {
 #[derive(Clone)]
 pub struct UIEffect {
     id: String,
-    pub track_id: String,
+    pub track_id: TrackId,
+    plugin_id: PluginId,
     pub enabled: bool,
+    /// Power button clicked since the last `take_toggled`.
+    toggled: bool,
     pub name: String,
     content: Box<dyn UIEffectContent>,
 }
@@ -56,6 +61,7 @@ impl Debug for UIEffect {
         f.debug_struct("UIEffect")
             .field("id", &self.id)
             .field("track_id", &self.track_id)
+            .field("plugin_id", &self.plugin_id)
             .field("enabled", &self.enabled)
             .field("name", &self.name)
             .field("content", &self.content.id())
@@ -64,14 +70,39 @@ impl Debug for UIEffect {
 }
 
 impl UIEffect {
-    pub fn new(content: Box<dyn UIEffectContent>, track_id: String) -> Self {
+    pub fn new(mut content: Box<dyn UIEffectContent>, track_id: TrackId, plugin: &Plugin) -> Self {
+        content.bind(plugin);
         Self {
             id: content.id(),
-            enabled: true,
+            plugin_id: plugin.id,
+            enabled: !plugin.bypassed,
+            toggled: false,
             name: "Audio effect".to_string(),
             content,
             track_id,
         }
+    }
+
+    /// Point this editor at another plugin (e.g. the copy on a duplicated track).
+    pub fn bind(&mut self, track_id: TrackId, plugin: &Plugin) {
+        self.content.bind(plugin);
+        self.track_id = track_id;
+        self.plugin_id = plugin.id;
+        self.id = format!("{}-{}", self.content.id(), plugin.id.0);
+    }
+
+    pub fn plugin_id(&self) -> PluginId {
+        self.plugin_id
+    }
+
+    /// Power button: the state turns this into a bypass change.
+    pub fn toggle(&mut self) {
+        self.enabled = !self.enabled;
+        self.toggled = true;
+    }
+
+    pub fn take_toggled(&mut self) -> bool {
+        std::mem::take(&mut self.toggled)
     }
 
     pub fn ui(
@@ -152,12 +183,7 @@ impl UIEffect {
                         )
                         .clicked()
                     {
-                        self.enabled = !self.enabled;
-                        // let _ = tx.push(GuiToPlayerMsg::SetNodeEnabled(
-                        //     self.track_id.clone(),
-                        //     self.content.id(),
-                        //     self.enabled,
-                        // ));
+                        self.toggle();
                     };
                     ui.add_space(4.0);
                     ui.add(
@@ -171,9 +197,5 @@ impl UIEffect {
                 });
             });
         response
-    }
-
-    pub fn id(&self) -> String {
-        self.id.clone()
     }
 }

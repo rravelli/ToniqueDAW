@@ -4,7 +4,7 @@ use crate::{
     core::{
         clip::ClipCore,
         state::ToniqueProjectState,
-        track::{DEFAULT_TRACK_HEIGHT, TrackCore, TrackReferenceCore},
+        track::{DEFAULT_TRACK_HEIGHT, TrackReferenceCore},
     },
     ui::{
         clip::UIClip,
@@ -19,6 +19,7 @@ use crate::{
     },
 };
 use egui::{Color32, DragAndDrop, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use tonique_engine::edit::ClipId;
 mod drag;
 mod keys;
 mod selection;
@@ -320,10 +321,9 @@ impl UITimeline {
                     let position = state.grid.x_to_beats(mouse_pos.x, viewport);
                     let snapped_position = state.grid.snap_at_grid(position);
 
-                    let new_track = TrackCore::new();
-                    state.add_track(new_track.clone());
-                    let clip = ClipCore::new(audio_info, snapped_position);
-                    state.add_clips(&new_track.id, vec![clip]);
+                    let track = state.add_track();
+                    let clip = ClipCore::new(state.new_clip_id(), audio_info, snapped_position);
+                    state.add_clips(&track, vec![clip]);
                 }
             }
         }
@@ -360,7 +360,8 @@ impl UITimeline {
 
             let pos = pos2(x, y - offset.y);
             let size = Vec2::new(width, height);
-            let clip = ClipCore::new(audio_info, snapped_position);
+            // Placeholder ID: the clip only gets a real one when dropped
+            let clip = ClipCore::new(ClipId(0), audio_info, snapped_position);
             // render clip
             UIClip::new().ui(
                 ui,
@@ -376,13 +377,11 @@ impl UITimeline {
 
             if is_released {
                 state.begin_batch();
-                let id = if let Some(t) = track {
-                    t.id
-                } else {
-                    let new_track = TrackCore::new();
-                    state.add_track(new_track.clone());
-                    new_track.id
+                let id = match track {
+                    Some(t) => t.id,
+                    None => state.add_track(),
                 };
+                let clip = clip.with_id(state.new_clip_id());
                 state.add_clips(&id, vec![clip]);
                 state.commit_batch();
             }

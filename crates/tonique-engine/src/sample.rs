@@ -55,7 +55,11 @@ impl SampleBuffer {
         if target_rate == self.sample_rate {
             return self.clone();
         }
-        let channels = self.channels.iter().map(|c| resample_offline(c, self.sample_rate, target_rate)).collect();
+        // Channels are independent: convert them in parallel.
+        let channels = std::thread::scope(|scope| {
+            let jobs: Vec<_> = self.channels.iter().map(|c| scope.spawn(move || resample_offline(c, self.sample_rate, target_rate))).collect();
+            jobs.into_iter().map(|j| j.join().expect("resampling thread panicked")).collect()
+        });
         Self::new(channels, target_rate)
     }
 

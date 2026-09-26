@@ -15,7 +15,7 @@ use std::sync::Arc;
 use super::{Bus, BusId, Channel, ClipContent, Edit, Output, Parameter, PluginKind, Track};
 use crate::automation::AutomationCurve;
 use crate::graph::{GraphDescription, NodeId, NodeIdentity};
-use crate::nodes::{AudioClipNode, AutomationNode, ClipPlacement, DelayNode, EchoNode, FilterNode, MidiClipNode, SumNode, SynthNode, TimelineNote, VolumePanNode};
+use crate::nodes::{AudioClipNode, AutomationNode, ClipPlacement, DelayNode, EchoNode, FilterNode, MetronomeNode, MidiClipNode, SumNode, SynthNode, TimelineNote, VolumePanNode};
 use crate::param::ParamId;
 use crate::time::{BeatPos, SamplePos};
 
@@ -67,7 +67,11 @@ impl Builder<'_> {
             let out = self.bus(bus, bus_in[&bus.id]);
             self.d.connect(out, route(bus.output));
         }
-        let out = self.channel(&self.edit.master, master_in, NodeIdentity::of(&"master"));
+        let master = self.channel(&self.edit.master, master_in, NodeIdentity::of(&"master"));
+        // The click bypasses the master fader and meter.
+        let click = MetronomeNode::new(self.edit.tempo.clone(), self.edit.metronome.clone()).with_identity(NodeIdentity::of(&"metronome"));
+        let click = self.d.add(click, &[]);
+        let out = self.d.add(SumNode::new(2), &[master, click]);
         self.d.set_output(out);
         std::mem::take(&mut self.d)
     }
@@ -83,6 +87,8 @@ impl Builder<'_> {
             let end = self.samples(clip.end().0);
             let node = match &clip.content {
                 ClipContent::Audio { source, source_offset_s, gain } => {
+                    // Not loaded yet: silent until the source is set.
+                    let Some(source) = self.edit.source(*source) else { continue };
                     let place = ClipPlacement {
                         start,
                         length: end - start,
@@ -131,7 +137,10 @@ impl Builder<'_> {
                 self.automate(p, prev);
             }
         }
-        let fader = VolumePanNode::new(ch.volume.value.clone(), ch.pan.value.clone()).with_gain(ch.mute_gain.clone()).with_identity(fader_identity);
+        let fader = VolumePanNode::new(ch.volume.value.clone(), ch.pan.value.clone())
+            .with_gain(ch.mute_gain.clone())
+            .with_meter(ch.meter.clone())
+            .with_identity(fader_identity);
         let fader = self.d.add(fader, &[prev]);
         self.automate(&ch.volume, fader);
         self.automate(&ch.pan, fader);

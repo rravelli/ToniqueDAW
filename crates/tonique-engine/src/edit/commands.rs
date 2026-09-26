@@ -2,7 +2,7 @@
 //! itself and reports its [`Effects`]: whether the graph must be rebuilt,
 //! or only an automation curve swapped, or nothing (atomic param changes).
 
-use super::{Bus, BusId, ChannelRef, Clip, ClipId, Edit, EditError, Effects, Output, Plugin, PluginId, Send, Track, TrackId};
+use super::{Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, Effects, Output, Plugin, PluginId, Send, Track, TrackId};
 use crate::automation::BeatPoint;
 use crate::param::ParamId;
 use crate::time::{BeatPos, TempoMap};
@@ -143,17 +143,31 @@ pub struct MoveClip {
     track: TrackId,
     id: ClipId,
     to: BeatPos,
+    to_track: TrackId,
 }
 
 impl MoveClip {
     pub fn new(track: TrackId, id: ClipId, to: BeatPos) -> Self {
-        Self { track, id, to }
+        Self { track, id, to, to_track: track }
+    }
+
+    /// Move the clip to `to` on another track.
+    pub fn to_track(track: TrackId, id: ClipId, to_track: TrackId, to: BeatPos) -> Self {
+        Self { track, id, to, to_track }
     }
 
     fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        edit.track(self.to_track)?;
         let t = edit.track_mut(self.track)?;
-        let c = t.clips.iter_mut().find(|c| c.id == self.id).ok_or(EditError::ClipNotFound(self.id))?;
-        std::mem::swap(&mut c.start, &mut self.to);
+        let i = t.clips.iter().position(|c| c.id == self.id).ok_or(EditError::ClipNotFound(self.id))?;
+        if self.to_track == self.track {
+            std::mem::swap(&mut t.clips[i].start, &mut self.to);
+        } else {
+            let mut clip = t.clips.remove(i);
+            std::mem::swap(&mut clip.start, &mut self.to);
+            edit.track_mut(self.to_track)?.clips.push(clip);
+            std::mem::swap(&mut self.track, &mut self.to_track);
+        }
         Ok(Effects::rebuild())
     }
 }
@@ -161,6 +175,110 @@ impl MoveClip {
 impl EditCommand for MoveClip {
     fn label(&self) -> &'static str {
         "Move clip"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+}
+
+/// Change a clip's region: where it starts, how long it is, and (for audio
+/// clips) where in the source it starts reading. Used for trimming.
+pub struct ResizeClip {
+    track: TrackId,
+    id: ClipId,
+    start: BeatPos,
+    length: f64,
+    source_offset_s: f64,
+}
+
+impl ResizeClip {
+    /// `source_offset_s` is ignored for MIDI clips.
+    pub fn new(track: TrackId, id: ClipId, start: BeatPos, length: f64, source_offset_s: f64) -> Self {
+        Self { track, id, start, length, source_offset_s }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        if self.length <= 0.0 {
+            return Err(EditError::Invalid("clip length must be positive"));
+        }
+        let t = edit.track_mut(self.track)?;
+        let c = t.clips.iter_mut().find(|c| c.id == self.id).ok_or(EditError::ClipNotFound(self.id))?;
+        std::mem::swap(&mut c.start, &mut self.start);
+        std::mem::swap(&mut c.length, &mut self.length);
+        if let ClipContent::Audio { source_offset_s, .. } = &mut c.content {
+            std::mem::swap(source_offset_s, &mut self.source_offset_s);
+        }
+        Ok(Effects::rebuild())
+    }
+}
+
+impl EditCommand for ResizeClip {
+    fn label(&self) -> &'static str {
+        "Resize clip"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+}
+
+/// Reorder a track. Moving tracks never changes the sound.
+pub struct MoveTrack {
+    id: TrackId,
+    index: usize,
+}
+
+impl MoveTrack {
+    pub fn new(id: TrackId, index: usize) -> Self {
+        Self { id, index }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        let from = edit.tracks.iter().position(|t| t.id == self.id).ok_or(EditError::TrackNotFound(self.id))?;
+        let t = edit.tracks.remove(from);
+        let to = self.index.min(edit.tracks.len());
+        edit.tracks.insert(to, t);
+        self.index = from;
+        Ok(Effects::none())
+    }
+}
+
+impl EditCommand for MoveTrack {
+    fn label(&self) -> &'static str {
+        "Move track"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+}
+
+pub struct RenameTrack {
+    id: TrackId,
+    name: String,
+}
+
+impl RenameTrack {
+    pub fn new(id: TrackId, name: impl Into<String>) -> Self {
+        Self { id, name: name.into() }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        std::mem::swap(&mut edit.track_mut(self.id)?.name, &mut self.name);
+        Ok(Effects::none())
+    }
+}
+
+impl EditCommand for RenameTrack {
+    fn label(&self) -> &'static str {
+        "Rename track"
     }
     fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         self.swap(edit)

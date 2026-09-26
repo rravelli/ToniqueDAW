@@ -1,162 +1,69 @@
-use std::path::PathBuf;
+use creek::{ReadDiskStream, ReadStreamOptions, SeekMode, SymphoniaDecoder, read::ReadError};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
+use tonique_engine::preview::PreviewSource;
 
-use creek::{ReadDiskStream, ReadStreamOptions, SymphoniaDecoder};
-use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType};
+/// Longest wait for the disk stream to buffer before giving up (silence).
+const BUFFER_TIMEOUT: Duration = Duration::from_secs(2);
 
-const RESAMPLER_CHUNK_SIZE: usize = 1024;
-
-pub struct PreviewBackend {
-    pub stream: Option<Box<ReadDiskStream<SymphoniaDecoder>>>,
-    file: Option<PathBuf>,
-    resampler: SincFixedIn<f32>,
-    buffer: Vec<Vec<f32>>,
+/// Streams an audio file from disk for the engine's preview player. Runs on
+/// the engine's preview thread, so waiting for the disk is fine here.
+pub struct FilePreview {
+    stream: Box<ReadDiskStream<SymphoniaDecoder>>,
+    sample_rate: f64,
 }
 
-impl PreviewBackend {
-    pub fn new() -> Self {
-        let buffer = vec![Vec::new(), Vec::new()];
-        Self {
-            stream: None,
-            file: None,
-            resampler: SincFixedIn::<f32>::new(
-                1.,
-                10.,
-                SincInterpolationParameters {
-                    sinc_len: 256,
-                    f_cutoff: 0.95,
-                    oversampling_factor: 8,
-                    interpolation: SincInterpolationType::Nearest,
-                    window: rubato::WindowFunction::Hann,
-                },
-                RESAMPLER_CHUNK_SIZE,
-                2,
-            )
-            .unwrap(),
-            buffer,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.buffer[0].clear();
-        self.buffer[1].clear();
-        self.resampler.reset();
-    }
-
-    pub fn seek(&mut self, pos: usize) {
-        if let Some(stream) = &mut self.stream {
-            let _ = stream.seek(pos, creek::SeekMode::Auto);
-            self.reset();
-        }
-    }
-
-    pub fn play(&mut self, file: PathBuf) {
-        self.reset();
-        if self.file.clone().is_some_and(|f| f == file) {
-            if let Some(stream) = &mut self.stream {
-                let _ = stream.seek(0, creek::SeekMode::Auto);
-            }
-            return;
-        }
-        let mut stream =
-            Box::new(ReadDiskStream::new(file, 0, ReadStreamOptions::default()).unwrap());
+impl FilePreview {
+    pub fn open(path: PathBuf) -> Option<Self> {
+        let mut stream = Box::new(ReadDiskStream::new(path, 0, ReadStreamOptions::default()).ok()?);
         let _ = stream.cache(0, 0);
-        let _ = stream.seek(0, creek::SeekMode::Auto);
-        self.stream = Some(stream);
+        let sample_rate = stream.info().sample_rate? as f64;
+        Some(Self {
+            stream,
+            sample_rate,
+        })
     }
 
-    fn resample(&mut self, num_frames: usize, sample_rate: usize) -> Option<[Vec<f32>; 2]> {
-        if let Some(stream) = &mut self.stream
-            && stream.playhead() < stream.info().num_frames
-            && stream.is_ready().unwrap()
-        {
-            let _ = self.resampler.set_resample_ratio(
-                sample_rate as f64 / stream.info().sample_rate.unwrap() as f64,
-                false,
-            );
-
-            let mut output = [vec![0.; num_frames], vec![0.; num_frames]];
-
-            let buffer_len = self.buffer[0].len();
-            let mut output_len = buffer_len;
-            if buffer_len > 0 {
-                // Copy proper range of the buffer
-                let max_range = buffer_len.min(num_frames);
-                output[0][..max_range]
-                    .copy_from_slice(&self.buffer[0][..max_range]);
-                output[1][..max_range]
-                    .copy_from_slice(&self.buffer[1][..max_range]);
-                // Remove copied samples from the buffer
-                self.buffer[0].drain(0..max_range);
-                self.buffer[1].drain(0..max_range);
+    fn wait_until_ready(&mut self) -> bool {
+        let started = Instant::now();
+        while !self.stream.is_ready().unwrap_or(false) {
+            if started.elapsed() > BUFFER_TIMEOUT {
+                return false;
             }
-
-            let input_frames = self.resampler.input_frames_next();
-
-            while stream.info().num_frames - stream.playhead() > 0 && output_len < num_frames {
-                let data = stream
-                    .read(input_frames.min(stream.info().num_frames - stream.playhead()))
-                    .unwrap();
-                let input = if data.num_channels() > 1 {
-                    &[data.read_channel(0), data.read_channel(1)]
-                } else {
-                    &[data.read_channel(0), data.read_channel(0)]
-                };
-
-                let res = if data.num_frames() == num_frames {
-                    self.resampler.process(input, None)
-                } else {
-                    self.resampler.process_partial(Some(input), None)
-                };
-
-                match res {
-                    Ok(mut resampled) => {
-                        if resampled[0].len() > num_frames - output_len {
-                            let remaining_frames = num_frames - output_len;
-                            output[0][output_len..]
-                                .copy_from_slice(&resampled[0][..remaining_frames]);
-                            output[1][output_len..]
-                                .copy_from_slice(&resampled[1][..remaining_frames]);
-
-                            self.buffer[0] = resampled[0][remaining_frames..].to_vec();
-                            self.buffer[1] = resampled[1][remaining_frames..].to_vec();
-                            break;
-                        } else {
-                            output[0][output_len..(output_len + resampled[0].len())]
-                                .copy_from_slice(&mut resampled[0]);
-                            output[1][output_len..(output_len + resampled[0].len())]
-                                .copy_from_slice(&mut resampled[1]);
-                        }
-                        output_len += resampled[0].len();
-                    }
-                    Err(err) => {
-                        println!("Error while resampling {}", err);
-                        break;
-                    }
-                }
-            }
-
-            return Some(output);
+            std::thread::sleep(Duration::from_millis(1));
         }
-        None
+        true
+    }
+}
+
+impl PreviewSource for FilePreview {
+    fn sample_rate(&self) -> f64 {
+        self.sample_rate
     }
 
-    /// Return the next chunk of samples of size *num_frames* for the preview
-    pub fn read(&mut self, num_frames: usize, sample_rate: usize) -> Option<[Vec<f32>; 2]> {
-        if let Some(stream) = &mut self.stream
-            && stream.playhead() < stream.info().num_frames
-            && stream.is_ready().unwrap()
-        {
-            let audio_sample_rate = stream.info().sample_rate.unwrap() as usize;
-            // Same sample rate
-            if audio_sample_rate == sample_rate {
-                let data = stream.read(num_frames).unwrap();
-                if data.num_channels() > 1 {
-                    return Some([data.read_channel(0).to_vec(), data.read_channel(1).to_vec()]);
-                } else {
-                    return Some([data.read_channel(0).to_vec(), data.read_channel(0).to_vec()]);
+    fn seek(&mut self, frame: usize) {
+        let _ = self.stream.seek(frame, SeekMode::Auto);
+    }
+
+    fn read(&mut self, left: &mut [f32], right: &mut [f32]) -> usize {
+        loop {
+            if !self.wait_until_ready() {
+                return 0;
+            }
+            match self.stream.read(left.len()) {
+                Ok(data) => {
+                    let n = data.num_frames();
+                    left[..n].copy_from_slice(data.read_channel(0));
+                    let r = if data.num_channels() > 1 { 1 } else { 0 };
+                    right[..n].copy_from_slice(data.read_channel(r));
+                    return n;
                 }
+                // The disk thread is busy: try again shortly.
+                Err(ReadError::IOServerChannelFull) => std::thread::sleep(Duration::from_millis(1)),
+                Err(_) => return 0,
             }
         }
-        return self.resample(num_frames, sample_rate);
     }
 }

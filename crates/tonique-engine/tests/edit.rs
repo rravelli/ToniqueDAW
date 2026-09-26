@@ -150,7 +150,8 @@ fn undo_redo_and_transactions() {
 fn mute_solo_and_params_do_not_rebuild() {
     let mut edit = Edit::new(120.0);
     let mut t = Track::new(&mut edit, "audio");
-    let clip = Clip::audio(&mut edit, BeatPos(0.0), 16.0, sine(48000 * 8));
+    let src = edit.add_source(sine(48000 * 8));
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 16.0, src);
     t.clips.push(clip);
     let (tid, vol) = (t.id, t.channel.volume.id);
     edit.tracks.push(t);
@@ -176,7 +177,8 @@ fn mute_solo_and_params_do_not_rebuild() {
 fn automation_curves_swap_without_rebuild() {
     let mut edit = Edit::new(120.0);
     let mut t = Track::new(&mut edit, "audio");
-    let clip = Clip::audio(&mut edit, BeatPos(0.0), 16.0, sine(48000 * 8));
+    let src = edit.add_source(sine(48000 * 8));
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 16.0, src);
     t.clips.push(clip);
     let vol = t.channel.volume.id;
     edit.tracks.push(t);
@@ -185,7 +187,7 @@ fn automation_curves_swap_without_rebuild() {
     let flat = |v: f32| vec![BeatPoint { beat: BeatPos(0.0), value: v, shape: CurveShape::Linear }];
 
     s.perform(SetAutomation::new(vol, flat(0.0))).unwrap(); // lane appears: rebuild
-    assert_eq!(s.last_compile_stats().unwrap().scheduled, 6);
+    assert_eq!(s.last_compile_stats().unwrap().scheduled, 8); // incl. metronome + output sum
     s.play().unwrap();
     render_offline(&mut p, 4800, 2);
     assert_eq!(peak(&render_offline(&mut p, 4800, 2)), 0.0);
@@ -200,10 +202,10 @@ fn automation_curves_swap_without_rebuild() {
 #[test]
 fn identical_clips_are_deduplicated_and_latency_is_compensated() {
     let mut edit = Edit::new(120.0);
-    let src = impulse();
+    let src = edit.add_source(impulse());
     for latency in [0, 100] {
         let mut t = Track::new(&mut edit, "t");
-        let mut clip = Clip::audio(&mut edit, BeatPos(0.0), 4.0, src.clone());
+        let mut clip = Clip::audio(&mut edit, BeatPos(0.0), 4.0, src);
         clip.fade_in_s = 0.0;
         clip.fade_out_s = 0.0;
         t.clips.push(clip);
@@ -217,7 +219,7 @@ fn identical_clips_are_deduplicated_and_latency_is_compensated() {
     let mut s = EditSession::new(edit, e).unwrap();
     let stats = s.last_compile_stats().unwrap();
     assert_eq!(stats.deduplicated, 2, "clip reader and its sum are shared");
-    assert_eq!(stats.delays_inserted, 1);
+    assert_eq!(stats.delays_inserted, 2, "one on the latency-free track, one to keep the metronome in time");
     assert_eq!(stats.output_latency, 100);
     s.play().unwrap();
     let out = render_offline(&mut p, 256, 2);
@@ -296,4 +298,132 @@ fn stop_releases_notes_and_loop_retriggers() {
     assert!(peak(&render_offline(&mut p, 4800, 2)) < 1e-4);
     // Content check: the MIDI clip's audio source matches the model.
     assert!(matches!(s.edit().tracks[0].clips[0].content, ClipContent::Midi { .. }));
+}
+
+#[test]
+fn clips_play_once_their_source_is_loaded() {
+    let mut edit = Edit::new(120.0);
+    let mut t = Track::new(&mut edit, "audio");
+    let src = edit.new_source();
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 16.0, src);
+    t.clips.push(clip);
+    edit.tracks.push(t);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    assert_eq!(peak(&render_offline(&mut p, 4800, 2)), 0.0, "silent while loading");
+
+    s.set_source(src, sine(48000 * 8)).unwrap();
+    assert!(peak(&render_offline(&mut p, 4800, 2)) > 0.1);
+    assert!(!s.undo_manager().can_undo(), "loading is not an edit");
+}
+
+#[test]
+fn resize_and_move_clips_across_tracks_undo() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000 * 8));
+    let mut a = Track::new(&mut edit, "a");
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 8.0, src);
+    let cid = clip.id;
+    a.clips.push(clip);
+    let b = Track::new(&mut edit, "b");
+    let (ta, tb) = (a.id, b.id);
+    edit.tracks.extend([a, b]);
+    let (e, _p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+
+    s.begin_transaction("Trim and move");
+    s.perform(ResizeClip::new(ta, cid, BeatPos(1.0), 2.0, 0.5)).unwrap();
+    s.perform(MoveClip::to_track(ta, cid, tb, BeatPos(4.0))).unwrap();
+    s.commit_transaction();
+    assert!(s.edit().track(ta).unwrap().clips.is_empty());
+    let c = s.edit().track(tb).unwrap().clip(cid).unwrap();
+    assert_eq!((c.start, c.length), (BeatPos(4.0), 2.0));
+    assert!(matches!(c.content, ClipContent::Audio { source_offset_s: 0.5, .. }));
+
+    assert!(s.undo().unwrap());
+    assert!(s.edit().track(tb).unwrap().clips.is_empty());
+    let c = s.edit().track(ta).unwrap().clip(cid).unwrap();
+    assert_eq!((c.start, c.length), (BeatPos(0.0), 8.0));
+    assert!(matches!(c.content, ClipContent::Audio { source_offset_s: 0.0, .. }));
+    assert!(s.perform(ResizeClip::new(ta, cid, BeatPos(0.0), 0.0, 0.0)).is_err());
+}
+
+#[test]
+fn tracks_can_be_reordered_renamed_and_duplicated() {
+    let mut edit = Edit::new(120.0);
+    let t = synth_track(&mut edit, vec![note(0.0, 1.0, 60)], 4.0);
+    let (tid, vol) = (t.id, t.channel.volume.id);
+    edit.tracks.push(t);
+    let (e, _p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+
+    let original = s.edit().track(tid).unwrap().clone();
+    let copy = s.create(|e| original.duplicate(e));
+    let (cid, cvol) = (copy.id, copy.channel.volume.id);
+    assert_ne!(cvol, vol);
+    assert_ne!(copy.clips[0].id, original.clips[0].id);
+    assert_ne!(copy.channel.plugins[0].id, original.channel.plugins[0].id);
+    s.perform(AddTrack::new(copy)).unwrap();
+    s.perform(SetParam::new(cvol, 0.5)).unwrap();
+    assert_eq!(s.edit().param(vol).unwrap().get(), 1.0, "copy has its own params");
+
+    s.perform(MoveTrack::new(cid, 0)).unwrap();
+    s.perform(RenameTrack::new(cid, "copy")).unwrap();
+    assert_eq!(s.edit().tracks[0].id, cid);
+    assert_eq!(s.edit().tracks[0].name, "copy");
+    s.undo().unwrap();
+    s.undo().unwrap();
+    assert_eq!(s.edit().tracks[1].id, cid);
+    assert_eq!(s.edit().tracks[1].name, "synth");
+}
+
+#[test]
+fn meters_report_post_fader_levels() {
+    let mut edit = Edit::new(120.0);
+    let mut t = Track::new(&mut edit, "audio");
+    let src = edit.add_source(sine(48000 * 8));
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 16.0, src);
+    t.clips.push(clip);
+    let tid = t.id;
+    edit.tracks.push(t);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    render_offline(&mut p, 4800, 2);
+    let [l, _] = s.edit().track(tid).unwrap().channel.meter().take_levels().unwrap();
+    assert!((l.peak - 0.5).abs() < 0.01, "sine peaks at 0.5, got {}", l.peak);
+    assert!((l.rms - 0.5 / 2f32.sqrt()).abs() < 0.01);
+    assert!(s.edit().master.meter().take_levels().unwrap()[1].peak > 0.4);
+
+    let vol = s.edit().track(tid).unwrap().channel.volume.id;
+    s.perform(SetParam::new(vol, 0.0)).unwrap();
+    render_offline(&mut p, 4800, 2); // ramp down
+    s.edit().track(tid).unwrap().channel.meter().take_levels();
+    render_offline(&mut p, 4800, 2);
+    assert_eq!(s.edit().track(tid).unwrap().channel.meter().take_levels().unwrap()[0].peak, 0.0);
+
+    let mut scope = [0.0; 64];
+    s.edit().master.meter().read_scope(0, &mut scope);
+    assert!(scope.iter().all(|x| *x == 0.0));
+}
+
+#[test]
+fn metronome_clicks_on_beats_when_enabled() {
+    let edit = Edit::new(120.0);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    assert_eq!(peak(&render_offline(&mut p, 24000, 2)), 0.0, "off by default");
+
+    s.edit().metronome.set(1.0, 0.0);
+    s.seek(BeatPos(0.0)).unwrap();
+    let out = render_offline(&mut p, 48000, 2); // two beats at 120 bpm
+    let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+    assert!(peak(&left[..4800]) > 0.5, "click on beat 1");
+    assert_eq!(peak(&left[4800..24000]), 0.0, "silence between beats");
+    assert!(peak(&left[24000..28800]) > 0.5, "click on beat 2");
+
+    s.stop().unwrap();
+    assert_eq!(peak(&render_offline(&mut p, 4800, 2)), 0.0, "silent when stopped");
 }

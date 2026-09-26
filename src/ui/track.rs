@@ -1,10 +1,7 @@
 use crate::{
     core::{
         state::ToniqueProjectState,
-        track::{
-            DEFAULT_TRACK_HEIGHT, MutableTrackCore, TRACK_CLOSED_HEIGHT, TrackCore,
-            TrackReferenceCore,
-        },
+        track::{DEFAULT_TRACK_HEIGHT, MutableTrackCore, TRACK_CLOSED_HEIGHT, TrackReferenceCore},
     },
     ui::{
         font::PHOSPHOR_FILL,
@@ -63,7 +60,7 @@ impl UITrack {
         state: &mut ToniqueProjectState,
     ) -> Response {
         // Create persisant id
-        let id = ui.make_persistent_id(format!("ui_track_state_{}", track.id));
+        let id = ui.make_persistent_id(format!("ui_track_state_{:?}", track.id));
         // Get previous state
         if let Some(data) = ui.ctx().data(|r| r.get_temp::<Self>(id)) {
             *self = data;
@@ -107,7 +104,7 @@ impl UITrack {
                                 track.height - 2. * PADDING - 2. * STROKE_WIDTH,
                             ),
                         ),
-                        ui.make_persistent_id(format!("track-{}", track.id)),
+                        ui.make_persistent_id(format!("track-{:?}", track.id)),
                         Sense::click_and_drag(),
                     );
 
@@ -239,7 +236,7 @@ impl UITrack {
                     .add(ContextMenuButton::new(PLUS, "Add Audio Track"))
                     .clicked()
                 {
-                    state.add_track_at(TrackCore::new(), track.index);
+                    state.add_track_at(track.index);
                 }
                 if ui.add(ContextMenuButton::new(COPY, "Duplicate")).clicked() {
                     state.duplicate_track(&track.id);

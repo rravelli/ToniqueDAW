@@ -2,7 +2,7 @@ use egui::{Color32, FontId, Rect, Sense, Ui, pos2, vec2};
 use egui_phosphor::fill::PLUS;
 
 use crate::{
-    core::{state::ToniqueProjectState, track::TrackCore},
+    core::state::ToniqueProjectState,
     ui::{
         font::PHOSPHOR_REGULAR,
         panels::{central_panel::SCROLLBAR_WIDTH, left_panel::DragPayload},
@@ -143,7 +143,7 @@ impl UITracks {
                 )
                 .clicked()
             {
-                state.add_track(TrackCore::new());
+                state.add_track();
             }
         });
 
@@ -166,7 +166,7 @@ impl UITracks {
             .add(ContextMenuButton::new(PLUS, "Add audio track"))
             .clicked()
         {
-            state.add_track(TrackCore::new());
+            state.add_track();
             ui.close();
         }
     }

@@ -31,7 +31,8 @@ fn busy_edit() -> Edit {
             let clip = Clip::midi(&mut edit, BeatPos(0.0), 4.0, notes);
             t.clips.push(clip);
         } else {
-            let clip = Clip::audio(&mut edit, BeatPos(i as f64 * 0.1), 4.0, sample.clone());
+            let source = edit.add_source(sample.clone());
+            let clip = Clip::audio(&mut edit, BeatPos(i as f64 * 0.1), 4.0, source);
             t.clips.push(clip);
             let lat = Plugin::new(&mut edit, PluginKind::Latency { samples: 64 * i as usize });
             t.channel.plugins.push(lat);
@@ -47,6 +48,7 @@ fn busy_edit() -> Edit {
         ];
         edit.tracks.push(t);
     }
+    edit.metronome.set(0.5, 0.0);
     let mut bus = bus;
     let echo = Plugin::new(&mut edit, PluginKind::Echo { time_s: 0.3 });
     bus.channel.plugins.push(echo);
@@ -90,6 +92,16 @@ fn rt_path_never_allocates() {
             43 => {
                 s.undo().unwrap();
             }
+            47 => s.perform(ResizeClip::new(tid, cid, BeatPos(0.25), 3.0, 0.01)).unwrap(),
+            // Preview: new streams arrive, old ones are retired.
+            3 => s.engine_mut().preview_play(Box::new(Noise(44100.0)), 0).unwrap(),
+            17 => s.engine_mut().preview_seek(1000).unwrap(),
+            33 if block % 100 == 33 => s.engine_mut().preview_stop().unwrap(),
+            49 => {
+                // UI-side meter reads while the audio thread writes.
+                s.edit().master.meter().take_levels();
+                s.edit().master.meter().read_scope(0, &mut [0.0; 256]);
+            }
             _ => {}
         }
         if block % 10 == 0 {
@@ -103,4 +115,21 @@ fn rt_path_never_allocates() {
     let v: Vec<u8> = rt::no_alloc(|| Vec::with_capacity(16));
     drop(v);
     assert_eq!(rt::alloc_violations(), 1);
+}
+
+/// Endless preview source at a different rate than the engine's.
+struct Noise(f64);
+
+impl tonique_engine::preview::PreviewSource for Noise {
+    fn sample_rate(&self) -> f64 {
+        self.0
+    }
+    fn seek(&mut self, _frame: usize) {}
+    fn read(&mut self, left: &mut [f32], right: &mut [f32]) -> usize {
+        for (i, (l, r)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
+            *l = (i as f32 * 0.37).sin() * 0.1;
+            *r = -*l;
+        }
+        left.len()
+    }
 }

@@ -48,10 +48,10 @@ pub fn demo_edit(sample_rate: f64) -> Edit {
 
     // Percussion: a synthesized "kick" sample, one clip per beat. All clips
     // share the same Arc'd sample data.
-    let kick = Arc::new(synth_kick(sample_rate));
+    let kick = edit.add_source(Arc::new(synth_kick(sample_rate)));
     let mut perc = Track::new(&mut edit, "Kick");
     for beat in 0..16 {
-        let clip = Clip::audio(&mut edit, BeatPos(beat as f64), 0.9, kick.clone());
+        let clip = Clip::audio(&mut edit, BeatPos(beat as f64), 0.9, kick);
         perc.clips.push(clip);
     }
     perc.channel.pan.value.set(0.1, 0.0);

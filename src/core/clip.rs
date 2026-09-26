@@ -1,10 +1,11 @@
 use crate::analysis::AudioInfo;
 use std::{fmt::Debug, time::Duration};
+use tonique_engine::edit::ClipId;
 
 /// A clip representing an audio file placed on a track
 #[derive(Clone)]
 pub struct ClipCore {
-    pub id: String,
+    pub id: ClipId,
     /// Audio metadata
     pub audio: AudioInfo,
     /// Position in beat
@@ -18,9 +19,10 @@ pub struct ClipCore {
 }
 
 impl ClipCore {
-    pub fn new(audio: AudioInfo, position: f32) -> Self {
+    /// Get `id` from `ToniqueProjectState::new_clip_id`.
+    pub fn new(id: ClipId, audio: AudioInfo, position: f32) -> Self {
         Self {
-            id: uuid::Uuid::new_v4().into(),
+            id,
             audio,
             position,
             trim_start: 0.,
@@ -28,10 +30,15 @@ impl ClipCore {
         }
     }
 
-    pub fn clone_with_new_id(&self) -> Self {
+    pub fn with_id(&self, id: ClipId) -> Self {
         let mut clone = self.clone();
-        clone.id = uuid::Uuid::new_v4().into();
+        clone.id = id;
         clone
+    }
+
+    /// Length of the whole source file, in seconds.
+    pub fn source_seconds(&self) -> f32 {
+        self.audio.duration.map_or(0., |d| d.as_secs_f32())
     }
 
     pub fn duration(&self) -> Option<Duration> {

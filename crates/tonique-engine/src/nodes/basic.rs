@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::audio::AudioBuffer;
 use crate::graph::{ContentId, Node, NodeIdentity, NodeProperties, ProcessContext, StateTransfer};
+use crate::meter::ChannelMeter;
 use crate::midi::{MAX_MIDI_EVENTS_PER_BLOCK, MidiMessage};
 use crate::param::{AtomicParam, Smoother};
 
@@ -130,6 +131,7 @@ pub struct VolumePanNode {
     pan: Arc<AtomicParam>,
     /// Extra gain stage (mute/solo), ramped so toggling never clicks.
     gain: Option<Arc<AtomicParam>>,
+    meter: Option<Arc<ChannelMeter>>,
     vol_s: Smoother,
     pan_s: Smoother,
     gain_s: Smoother,
@@ -146,12 +148,19 @@ impl VolumePanNode {
             volume,
             pan,
             gain: None,
+            meter: None,
             identity: None,
         }
     }
 
     pub fn with_gain(mut self, gain: Arc<AtomicParam>) -> Self {
         self.gain = Some(gain);
+        self
+    }
+
+    /// Record the output (post-fader) levels into `meter`.
+    pub fn with_meter(mut self, meter: Arc<ChannelMeter>) -> Self {
+        self.meter = Some(meter);
         self
     }
 
@@ -197,6 +206,9 @@ impl Node for VolumePanNode {
             let (gl, gr) = (angle.cos() * std::f32::consts::SQRT_2, angle.sin() * std::f32::consts::SQRT_2);
             *l *= v * gl;
             *r *= v * gr;
+        }
+        if let Some(m) = &self.meter {
+            m.record(&ctx.audio_out.as_block());
         }
     }
 

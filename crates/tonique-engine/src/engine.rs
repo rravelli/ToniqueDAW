@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use crate::graph::scheduler::WorkerPool;
 use crate::graph::{BlockInfo, CompileError, CompileOptions, CompileStats, CompiledGraph, GraphDescription, NodeIdentity, NodeMessage, compile};
+use crate::preview::{PreviewControl, PreviewShared, PreviewSource, PreviewStream};
 use crate::rt;
 use crate::time::SamplePos;
 
@@ -66,6 +67,8 @@ pub enum Command {
     /// Deliver a message to the node with this identity (e.g. swap in a new
     /// automation curve without rebuilding the graph).
     SendToNode { target: NodeIdentity, msg: NodeMessage },
+    /// Replace the preview stream (`None` stops the preview).
+    SetPreview { stream: Option<PreviewStream>, generation: u64 },
 }
 
 /// Things the RT thread has let go of, to be dropped elsewhere.
@@ -140,6 +143,7 @@ pub struct Engine {
     shared: Arc<Shared>,
     garbage: Arc<Mutex<rtrb::Consumer<Garbage>>>,
     housekeeping: Option<(JoinHandle<()>, Arc<AtomicBool>)>,
+    preview: PreviewControl,
 }
 
 /// RT-side processor. Move it into the audio callback; call
@@ -156,6 +160,9 @@ pub struct AudioProcessor {
     position: SamplePos,
     loop_range: Option<(SamplePos, SamplePos)>,
     jumped: bool,
+    preview: Option<PreviewStream>,
+    preview_generation: u64,
+    preview_shared: Arc<PreviewShared>,
 }
 
 const COMMAND_CAPACITY: usize = 1024;
@@ -191,6 +198,7 @@ impl Engine {
         });
 
         let pool = (config.worker_threads > 0).then(|| WorkerPool::new(config.worker_threads));
+        let preview = PreviewControl::new(config.sample_rate);
         let processor = AudioProcessor {
             config,
             commands: cmd_rx,
@@ -203,8 +211,11 @@ impl Engine {
             position: 0,
             loop_range: None,
             jumped: true,
+            preview: None,
+            preview_generation: 0,
+            preview_shared: preview.shared(),
         };
-        (Engine { config, commands: cmd_tx, graphs, shared, garbage, housekeeping }, processor)
+        (Engine { config, commands: cmd_tx, graphs, shared, garbage, housekeeping, preview }, processor)
     }
 
     pub fn config(&self) -> &EngineConfig {
@@ -292,6 +303,37 @@ impl Engine {
         self.shared.load_permille.load(Ordering::Relaxed) as f32 / 1000.0
     }
 
+    /// Play `source` from source frame `from`, alongside (and independent
+    /// of) the transport. Replaces any preview already playing.
+    pub fn preview_play(&mut self, source: Box<dyn PreviewSource>, from: usize) -> Result<(), EngineError> {
+        let (stream, generation) = self.preview.play(source, from);
+        self.send(Command::SetPreview { stream: Some(stream), generation })
+    }
+
+    /// Continue the last previewed source from `from` (does nothing if
+    /// nothing was previewed yet).
+    pub fn preview_seek(&mut self, from: usize) -> Result<(), EngineError> {
+        match self.preview.seek(from) {
+            Some((stream, generation)) => self.send(Command::SetPreview { stream: Some(stream), generation }),
+            None => Ok(()),
+        }
+    }
+
+    pub fn preview_stop(&mut self) -> Result<(), EngineError> {
+        let generation = self.preview.stop();
+        self.send(Command::SetPreview { stream: None, generation })
+    }
+
+    /// True from `preview_play`/`preview_seek` until stopped or played to the end.
+    pub fn is_previewing(&self) -> bool {
+        self.preview.is_playing()
+    }
+
+    /// Preview position in frames of the source, while previewing.
+    pub fn preview_position(&self) -> Option<usize> {
+        self.preview.position()
+    }
+
     /// Free everything the RT thread has retired so far, and hand over any
     /// pending graph. Called periodically by the housekeeping thread.
     pub fn collect_garbage(&self) -> usize {
@@ -353,6 +395,7 @@ impl AudioProcessor {
                 self.render_chunk(&mut out[done * channels..(done + n) * channels], channels, n);
                 done += n;
             }
+            self.mix_preview(out, channels);
             self.shared.position.store(self.position, Ordering::Relaxed);
             self.shared.playing.store(self.playing, Ordering::Relaxed);
             self.shared.blocks.fetch_add(1, Ordering::Relaxed);
@@ -361,6 +404,28 @@ impl AudioProcessor {
         if budget > 0.0 {
             let load = started.elapsed().as_secs_f64() / budget;
             self.shared.load_permille.store((load * 1000.0) as u64, Ordering::Relaxed);
+        }
+    }
+
+    /// Add queued preview frames to the first two channels of `out`.
+    fn mix_preview(&mut self, out: &mut [f32], channels: usize) {
+        let Some(stream) = &mut self.preview else { return };
+        let frames = out.len() / channels.max(1);
+        let n = stream.slots().min(frames);
+        if let Ok(chunk) = stream.read_chunk(n) {
+            let (a, b) = chunk.as_slices();
+            for (frame, [l, r]) in out.chunks_exact_mut(channels).zip(a.iter().chain(b)) {
+                frame[0] += l;
+                if channels > 1 {
+                    frame[1] += r;
+                }
+            }
+            chunk.commit_all();
+        }
+        self.preview_shared.played.fetch_add(n as u64, Ordering::Relaxed);
+        // The feeder abandons the ring at the end of the source.
+        if stream.is_empty() && stream.is_abandoned() {
+            self.preview_shared.finished.store(self.preview_generation, Ordering::Relaxed);
         }
     }
 
@@ -424,6 +489,14 @@ impl AudioProcessor {
                         g.deliver(target, &mut msg);
                     }
                     let _ = self.garbage.push(Garbage::Message(msg));
+                }
+                Command::SetPreview { mut stream, generation } => {
+                    std::mem::swap(&mut self.preview, &mut stream);
+                    self.preview_generation = generation;
+                    self.preview_shared.played.store(0, Ordering::Relaxed);
+                    self.preview_shared.generation.store(generation, Ordering::Relaxed);
+                    // The old stream is freed off the RT thread.
+                    let _ = self.garbage.push(Garbage::Command(Command::SetPreview { stream, generation }));
                 }
             }
         }

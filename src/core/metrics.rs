@@ -1,13 +1,17 @@
 use rustfft::{FftPlanner, num_complex::Complex};
 use std::collections::HashMap;
+use tonique_engine::{
+    edit::TrackId,
+    meter::{ChannelMeter, SCOPE_LEN},
+};
 
 #[derive(Clone)]
 pub struct AudioMetrics {
     peak: [f32; 2],
     rms: [f32; 2],
-    prev_rms: [f32; 2],
     /// Smoothing factor
     alpha: f32,
+    /// Most recent samples, for the spectrum view.
     pub samples: [Vec<f32>; 2],
 }
 
@@ -16,26 +20,24 @@ impl AudioMetrics {
         Self {
             peak: [0., 0.],
             rms: [0., 0.],
-            prev_rms: [0., 0.],
             alpha: 0.6,
             samples: [vec![], vec![]],
         }
     }
 
-    pub fn reset(&mut self) {
-        if !self.samples[0].is_empty() {
-            self.prev_rms = self.get_rms();
+    /// Pull the latest levels and samples from an engine channel meter.
+    /// Keeps the previous levels if no audio was processed since the last call.
+    pub fn update(&mut self, meter: &ChannelMeter) {
+        if let Some(levels) = meter.take_levels() {
+            for ch in 0..2 {
+                self.peak[ch] = levels[ch].peak;
+                self.rms[ch] = self.alpha * levels[ch].rms + (1. - self.alpha) * self.rms[ch];
+            }
         }
-        self.peak = [0., 0.];
-        self.rms = [0., 0.];
-        self.samples[0].clear();
-        self.samples[1].clear();
-    }
-
-    pub fn add_sample(&mut self, value: f32, channel: usize) {
-        self.peak[channel] = self.peak[channel].max(value);
-        self.rms[channel] += value * value;
-        self.samples[channel].push(value);
+        for ch in 0..2 {
+            self.samples[ch].resize(SCOPE_LEN, 0.);
+            meter.read_scope(ch, &mut self.samples[ch]);
+        }
     }
 
     pub fn get_fft(&mut self) -> Vec<f32> {
@@ -66,24 +68,8 @@ impl AudioMetrics {
         spectrum
     }
 
-    fn compute_rms(&self) -> [f32; 2] {
-        let num_sample = self.samples[0].len();
-        [
-            (self.rms[0] / num_sample as f32).sqrt(),
-            (self.rms[1] / num_sample as f32).sqrt(),
-        ]
-    }
-
-    fn smooth(&self, val: [f32; 2], prev: [f32; 2]) -> [f32; 2] {
-        [
-            self.alpha * val[0] + (1. - self.alpha) * prev[0],
-            self.alpha * val[1] + (1. - self.alpha) * prev[1],
-        ]
-    }
-
     pub fn get_rms(&self) -> [f32; 2] {
-        // smooth rms
-        self.smooth(self.compute_rms(), self.prev_rms)
+        self.rms
     }
 
     pub fn get_peak(&self) -> [f32; 2] {
@@ -94,7 +80,7 @@ impl AudioMetrics {
 #[derive(Clone)]
 pub struct GlobalMetrics {
     pub master: AudioMetrics,
-    pub tracks: HashMap<String, AudioMetrics>,
+    pub tracks: HashMap<TrackId, AudioMetrics>,
     pub latency: f32,
 }
 

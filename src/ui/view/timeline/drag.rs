@@ -1,9 +1,5 @@
 use crate::{
-    core::{
-        clip::ClipCore,
-        state::ToniqueProjectState,
-        track::{DEFAULT_TRACK_HEIGHT, TrackCore, TrackSoloState},
-    },
+    core::{clip::ClipCore, state::ToniqueProjectState, track::DEFAULT_TRACK_HEIGHT},
     ui::{
         clip::UIClip,
         track::HANDLE_HEIGHT,
@@ -13,6 +9,7 @@ use crate::{
 };
 use egui::{Color32, Pos2, Rect, Ui, pos2, vec2};
 use std::f32::INFINITY;
+use tonique_engine::edit::ClipId;
 
 #[derive(Clone)]
 pub struct DragState {
@@ -28,8 +25,8 @@ pub struct ClipDragState {
 }
 
 impl DragState {
-    pub fn dragged_ids(&self) -> Vec<String> {
-        self.elements.iter().map(|e| e.clip.id.clone()).collect()
+    pub fn dragged_ids(&self) -> Vec<ClipId> {
+        self.elements.iter().map(|e| e.clip.id).collect()
     }
 }
 
@@ -65,7 +62,7 @@ impl UITimeline {
                     if self.selected_clips.clip_ids.contains(&clip.id) {
                         // Create a clone
                         let new_clip = if duplicate {
-                            clip.clone_with_new_id()
+                            clip.with_id(state.new_clip_id())
                         } else {
                             clip.clone()
                         };
@@ -186,24 +183,18 @@ impl UITimeline {
     ) {
         let ids = drag_state.dragged_ids();
 
-        let mut tracks: Vec<_> = state.tracks().collect();
+        let mut tracks: Vec<_> = state.tracks().map(|t| t.id).collect();
         state.begin_batch();
         for (i, element) in drag_state.elements.iter().enumerate() {
-            let length = tracks.len();
             let track_index = track_indexes[i];
-            // Create
-            if track_index >= length {
-                for _ in 0..(track_index - length + 1) {
-                    let new_track = TrackCore::new();
-                    tracks.push(new_track.get_reference(0, false, TrackSoloState::NotSoloing));
-                    state.add_track(new_track);
-                }
+            // Create missing tracks
+            while tracks.len() <= track_index {
+                tracks.push(state.add_track());
             }
 
             let clone = element.clip.clone();
 
-            let track = &tracks[track_index];
-            let track_id = track.id.clone();
+            let track_id = tracks[track_index];
             if drag_state.duplicate {
                 state.add_clips(&track_id, vec![clone]);
             } else {

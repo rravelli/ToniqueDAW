@@ -1,6 +1,5 @@
 use crate::{
-    audio::midi::spawn_midi_thread,
-    core::message::{GuiToPlayerMsg, ProcessToGuiMsg},
+    audio::{host::start_audio, midi::spawn_midi_thread},
     ui::spawn_ui_thread,
 };
 
@@ -11,20 +10,16 @@ mod audio;
 mod cache;
 mod config;
 mod core;
-mod output;
 mod ui;
 
 pub mod utils;
 mod waveform;
 fn main() {
-    // Create channels
-    let (to_gui_tx, from_process_rx) = RingBuffer::<ProcessToGuiMsg>::new(256);
-    let (to_process_tx, from_gui_rx) = RingBuffer::<GuiToPlayerMsg>::new(256);
-    let (midi_tx, midi_rx) = RingBuffer::<Vec<u8>>::new(256);
-    // Midi thread that collects midi inputs
+    // Midi thread that collects midi inputs (not routed to the engine yet)
+    let (midi_tx, _midi_rx) = RingBuffer::<Vec<u8>>::new(256);
     spawn_midi_thread(midi_tx);
-    // Audio thread that plays sound to the device
-    let _cpal_stream = output::spawn_cpal_stream(to_gui_tx, from_gui_rx, midi_rx);
+    // Audio output: the engine on the default device
+    let (_stream, engine) = start_audio().expect("failed to start audio output");
     // Ui thread (main thread). Opens the app window
-    spawn_ui_thread(to_process_tx, from_process_rx).unwrap();
+    spawn_ui_thread(engine).unwrap();
 }

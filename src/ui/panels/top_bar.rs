@@ -5,7 +5,7 @@ use egui::{
 use egui_phosphor::{fill::SIDEBAR_SIMPLE, regular::RECORD};
 
 use crate::{
-    core::state::{PlaybackState, ToniqueProjectState},
+    core::state::{MASTER_TRACK_ID, PlaybackState, ToniqueProjectState},
     ui::{
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::PRIMARY_COLOR,
@@ -185,7 +185,7 @@ impl UITopBar {
         painter.rect_filled(rect, 1.0, PRIMARY_BUTTON_COLOR);
 
         // If we have waveform data
-        if let Some(m) = state.metrics.tracks.get("master")
+        if let Some(m) = state.metrics.tracks.get(&MASTER_TRACK_ID)
             && m.samples.len() >= 2
             && m.samples[0].len() > 3
         {
