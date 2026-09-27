@@ -130,12 +130,8 @@ impl TrackClips<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::AudioInfo;
-    use std::{
-        path::PathBuf,
-        sync::{Arc, RwLock},
-        time::Duration,
-    };
+    use crate::analysis::{AudioData, AudioInfo};
+    use std::{path::PathBuf, sync::Arc, time::Duration};
 
     const BPM: f32 = 60.; // one beat per second: clip seconds == beats
 
@@ -143,8 +139,7 @@ mod tests {
         let audio = AudioInfo {
             name: "test".into(),
             duration: Some(Duration::from_secs_f32(seconds)),
-            data: Arc::new(RwLock::new((vec![], vec![]))),
-            ready: Arc::new(RwLock::new(true)),
+            data: Arc::new(AudioData::default()),
             sample_rate: 48000,
             channels: 2,
             bit_depth: None,

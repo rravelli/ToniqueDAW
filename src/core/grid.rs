@@ -179,7 +179,12 @@ impl GridService {
         let clip_offset = self.offset.x + rect.left() - viewport.left();
         let mut step_index = (clip_offset / step).floor() as i32;
         let mut x = rect.left() - clip_offset.rem_euclid(step);
-        while x < rect.right() {
+        // Jump to the first visible line
+        let skipped = ((viewport.left() - x) / step).floor().max(0.);
+        x += skipped * step;
+        step_index += skipped as i32;
+        let right = rect.right().min(viewport.right());
+        while x < right {
             // Skip if out of bounds
             if step_index < 0 {
                 step_index += 1;

@@ -31,11 +31,7 @@ impl eframe::App for ToniqueApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Update state
         self.state.update();
-        if self.state.playback_state() == PlaybackState::Playing
-            || self.state.preview_playback_state() == PlaybackState::Playing
-        {
-            ctx.request_repaint();
-        }
+        ctx.request_repaint();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

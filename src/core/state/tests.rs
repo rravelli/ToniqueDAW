@@ -1,16 +1,13 @@
 use crate::{
-    analysis::AudioInfo,
+    analysis::{AudioData, AudioInfo},
     core::{clip::ClipCore, state::ToniqueProjectState},
     ui::effects::EffectId,
 };
-use std::{
-    path::PathBuf,
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tonique_engine::{
     edit::{ClipId, TrackId},
     engine::{Engine, EngineConfig},
+    sample::SampleBuffer,
 };
 
 fn setup_state() -> ToniqueProjectState {
@@ -23,8 +20,10 @@ fn audio(seconds: f32) -> AudioInfo {
     AudioInfo {
         name: "test.wav".into(),
         duration: Some(Duration::from_secs_f32(seconds)),
-        data: Arc::new(RwLock::new((vec![0.; 480], vec![0.; 480]))),
-        ready: Arc::new(RwLock::new(true)),
+        data: Arc::new(AudioData::from_samples(SampleBuffer::new(
+            vec![vec![0.; 480], vec![0.; 480]],
+            48000.,
+        ))),
         sample_rate: 48000,
         channels: 2,
         bit_depth: None,
@@ -260,7 +259,10 @@ fn clips_play_through_the_engine_once_loaded() {
     let wave: Vec<f32> = (0..44100)
         .map(|i| if i / 50 % 2 == 0 { 0.5 } else { -0.5 })
         .collect();
-    info.data = Arc::new(RwLock::new((wave.clone(), wave)));
+    info.data = Arc::new(AudioData::from_samples(SampleBuffer::new(
+        vec![wave.clone(), wave],
+        44100.,
+    )));
     info.sample_rate = 44100;
     let id = state.new_clip_id();
     state.add_clips(&track, vec![ClipCore::new(id, info, 0.)]);

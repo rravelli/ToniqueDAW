@@ -53,7 +53,7 @@ impl SourceRegistry {
         let (audio, rate, tx) = (audio.clone(), self.engine_rate, self.loaded_tx.clone());
         std::thread::spawn(move || {
             if let Some(buffer) = convert_when_ready(&audio, rate) {
-                let _ = tx.send((id, Arc::new(buffer)));
+                let _ = tx.send((id, buffer));
             }
         });
         id
@@ -69,21 +69,21 @@ impl SourceRegistry {
     }
 }
 
-fn convert_when_ready(audio: &AudioInfo, engine_rate: f64) -> Option<SampleBuffer> {
+fn convert_when_ready(audio: &AudioInfo, engine_rate: f64) -> Option<Arc<SampleBuffer>> {
     let started = Instant::now();
-    while !audio.ready.read().is_ok_and(|r| *r) {
+    loop {
+        if let Some(samples) = audio.data.samples() {
+            // Share the decoded data when no conversion is needed.
+            return Some(if samples.sample_rate() == engine_rate {
+                samples.clone()
+            } else {
+                Arc::new(samples.resampled(engine_rate))
+            });
+        }
         if started.elapsed() > LOAD_TIMEOUT {
             eprintln!("Gave up waiting for {} to decode", audio.name);
             return None;
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    let data = audio.data.read().ok()?;
-    let channels = if data.1.is_empty() {
-        vec![data.0.clone()]
-    } else {
-        vec![data.0.clone(), data.1.clone()]
-    };
-    let buffer = SampleBuffer::new(channels, audio.sample_rate as f64);
-    Some(buffer.resampled(engine_rate))
 }

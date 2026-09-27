@@ -1,12 +1,13 @@
 use crate::{
     core::{clip::ClipCore, state::ToniqueProjectState, track::TRACK_CLOSED_HEIGHT},
-    ui::{waveform::UIWaveform, widget::context_menu::ContextMenuButton},
+    ui::{waveform::paint_waveform, widget::context_menu::ContextMenuButton},
 };
 use egui::{
     Align2, Color32, CursorIcon, FontFamily, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2,
     pos2, vec2,
 };
 use egui_phosphor::fill::TRASH;
+use std::time::Duration;
 
 const PADDING_TEXT: f32 = 4.;
 const BORDER_WIDTH: f32 = 2.;
@@ -21,16 +22,13 @@ enum Edge {
     End,
 }
 
+const LOADING_REPAINT: Duration = Duration::from_millis(100);
 #[derive(Clone)]
-pub struct UIClip {
-    waveform: UIWaveform,
-}
+pub struct UIClip {}
 
 impl UIClip {
     pub fn new() -> Self {
-        Self {
-            waveform: UIWaveform::new(),
-        }
+        Self {}
     }
 
     pub fn ui(
@@ -129,38 +127,38 @@ impl UIClip {
             Stroke::new(1.0, color.blend(Color32::from_black_alpha(50))),
         );
         // Waveform
-        if show_waveform && let Ok(data) = clip.audio.data.read() {
-            let mut shapes = Vec::new();
+        if show_waveform && let Some(frames) = clip.audio.total_frames() {
             let waveform_rect = Rect::from_min_max(
-                Pos2::new(pos.x.max(viewport.left()), pos.y + HEADER_HEIGHT),
-                Pos2::new((pos.x + size.x).min(viewport.right()), pos.y + size.y),
+                pos2(pos.x, pos.y + HEADER_HEIGHT),
+                pos2(pos.x + size.x, pos.y + size.y),
             );
-
-            let start_ratio = (waveform_rect.left() - pos.x) / size.x
-                * (clip.trim_end - clip.trim_start)
-                + clip.trim_start;
-
-            let end_ratio = clip.trim_end
-                - (pos.x + size.x - waveform_rect.right()) / size.x
-                    * (clip.trim_end - clip.trim_start);
-
-            self.waveform.paint(
-                &mut shapes,
-                waveform_rect,
-                data,
-                start_ratio,
-                end_ratio,
-                clip.audio.num_samples.unwrap(),
+            // Lay out the whole untrimmed file and only show the clip's part,
+            // so trimming doesn't shift which samples fall in each column.
+            let source_width = state
+                .grid
+                .duration_to_width(clip.audio.duration.unwrap_or_default(), state.bpm());
+            let source_rect = Rect::from_min_size(
+                pos2(
+                    waveform_rect.left() - clip.trim_start * source_width,
+                    waveform_rect.top(),
+                ),
+                vec2(source_width, waveform_rect.height()),
+            );
+            paint_waveform(
+                &painter,
+                source_rect,
+                waveform_rect.intersect(viewport),
+                &clip.audio.data,
+                0.0..frames,
                 clip.audio.channels >= 2,
                 Color32::BLACK,
             );
-            painter.add(shapes);
-        };
+        }
         // Draw an overlay when audio not ready
-        if let Ok(ready) = clip.audio.ready.read()
-            && !*ready
-        {
+        if !clip.audio.data.is_ready() {
             painter.rect_filled(sample_rect, 1.0, Color32::from_white_alpha(80));
+            // Show the waveform growing while the file decodes.
+            ui.ctx().request_repaint_after(LOADING_REPAINT);
         }
 
         response.context_menu(|ui| self.contex_menu(ui, clip, state));

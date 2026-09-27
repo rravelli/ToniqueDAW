@@ -7,21 +7,17 @@ use crate::{
     analysis::AudioInfo,
     core::state::{PlaybackState, ToniqueProjectState},
     ui::{
-        font::PHOSPHOR_FILL, theme::PRIMARY_COLOR, waveform::UIWaveform,
+        font::PHOSPHOR_FILL, theme::PRIMARY_COLOR, waveform::paint_waveform,
         widget::square_button::SquareButton,
     },
 };
 
 const PREVIEW_WINDOW_HEIGHT: f32 = 60.;
-pub struct UIPreview {
-    waveform: UIWaveform,
-}
+pub struct UIPreview {}
 
 impl UIPreview {
     pub fn new() -> Self {
-        Self {
-            waveform: UIWaveform::new(),
-        }
+        Self {}
     }
 
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState, selected_audio: &AudioInfo) {
@@ -96,14 +92,18 @@ impl UIPreview {
             Stroke::new(1.0, Color32::from_black_alpha(80)),
         ));
 
-        if let Ok(data) = audio.data.read() {
-            self.waveform.paint(
-                &mut shapes,
-                response.rect,
-                data,
-                0.,
-                1.,
-                audio.num_samples.unwrap(),
+        painter.add(std::mem::take(&mut shapes));
+        if !audio.data.is_ready() {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        if let Some(frames) = audio.total_frames() {
+            paint_waveform(
+                &painter,
+                rect,
+                rect,
+                &audio.data,
+                0.0..frames,
                 false,
                 PRIMARY_COLOR,
             );
