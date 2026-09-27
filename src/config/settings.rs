@@ -1,5 +1,4 @@
-use crate::config::keymap::Keymap;
-use directories::ProjectDirs;
+use crate::config::{config_dir, keymap::Keymap};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 use tonique_engine::{device::DeviceOptions, engine::EngineConfig};
@@ -25,6 +24,8 @@ pub struct Settings {
     pub metronome_level: f32,
     /// Keyboard shortcuts that differ from the defaults.
     pub keymap: Keymap,
+    /// Built-in theme name, or file name (without `.toml`) of a user theme.
+    pub theme: String,
 }
 
 impl Default for Settings {
@@ -39,6 +40,7 @@ impl Default for Settings {
             parallel_threshold: EngineConfig::default().parallel_threshold,
             metronome_level: 0.4,
             keymap: Keymap::default(),
+            theme: "dark".into(),
         }
     }
 }
@@ -103,8 +105,7 @@ impl Settings {
 }
 
 fn settings_path() -> Option<PathBuf> {
-    ProjectDirs::from("com", "Bytenosis", "Tonique")
-        .map(|dirs| dirs.config_dir().join("settings.json"))
+    config_dir().map(|dir| dir.join("settings.json"))
 }
 
 #[cfg(test)]

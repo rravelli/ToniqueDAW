@@ -1,0 +1,46 @@
+# Inspired by Bitwig Studio: near-black, flat greys and a vivid orange.
+
+name = "Graphite"
+
+bg_deep = "#0b0b0b"
+bg_base = "#161616"
+bg_panel = "#1d1d1d"
+bg_raised = "#252525"
+bg_control = "#303030"
+bg_control_hover = "#3c3c3c"
+
+border = "#3f3f3f"
+separator = "#262626"
+
+text = "#e3e3e3"
+text_muted = "#a3a3a3"
+text_disabled = "#666666"
+text_on_accent = "#140800"
+
+accent = "#ff6a13"
+accent_hover = "#ff8540"
+
+danger = "#ff5a5a"
+warning = "#ffc233"
+success = "#5ed16a"
+record = "#ff3b3b"
+
+hover_overlay = "#ffffff0e"
+shadow = "#000000a0"
+
+playhead = "#e3e3e3"
+edit_cursor = "#ff6a13"
+selection_fill = "#e3e3e30d"
+selection_stroke = "#e3e3e366"
+loop_region = "#ff6a1330"
+grid_bar = "#ffffff14"
+grid_beat = "#ffffff08"
+
+meter_low = "#5ed16a"
+meter_mid = "#ffc233"
+meter_high = "#ff3b3b"
+
+palette = [
+    "#f25c54", "#ff8a3d", "#f2c14e", "#9bd65b", "#44c7a0",
+    "#3fb7e0", "#5c8ff2", "#9a7cf0", "#e06cd0", "#b8b8b8",
+]

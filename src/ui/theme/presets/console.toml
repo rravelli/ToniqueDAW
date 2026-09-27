@@ -1,0 +1,47 @@
+# Inspired by Pro Tools: dark blue-grey mixing-console panels with a
+# periwinkle accent.
+
+name = "Console"
+
+bg_deep = "#14161e"
+bg_base = "#1b1e28"
+bg_panel = "#222634"
+bg_raised = "#2a2f40"
+bg_control = "#363c50"
+bg_control_hover = "#434a61"
+
+border = "#4a5269"
+separator = "#282d3c"
+
+text = "#e5e8f1"
+text_muted = "#a3aabe"
+text_disabled = "#686f84"
+text_on_accent = "#0d0d26"
+
+accent = "#8c8cff"
+accent_hover = "#a6a6ff"
+
+danger = "#ff6b7a"
+warning = "#f2b544"
+success = "#52d49a"
+record = "#ff4757"
+
+hover_overlay = "#ffffff0f"
+shadow = "#0000008c"
+
+playhead = "#e5e8f1"
+edit_cursor = "#8c8cff"
+selection_fill = "#e5e8f10d"
+selection_stroke = "#e5e8f166"
+loop_region = "#8c8cff30"
+grid_bar = "#ffffff16"
+grid_beat = "#ffffff09"
+
+meter_low = "#52d49a"
+meter_mid = "#f2d544"
+meter_high = "#ff4757"
+
+palette = [
+    "#e57a8a", "#e89a62", "#e3c86a", "#9fd070", "#5cc9a4",
+    "#5cbbe0", "#7896f0", "#a58af0", "#d488d8", "#e08ab0",
+]

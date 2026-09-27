@@ -627,3 +627,17 @@ fn snapping_prefers_targets_in_reach_over_the_grid() {
     );
     assert_eq!(grid.snap_to_targets(2.5, &[]), None);
 }
+
+#[test]
+fn new_tracks_go_through_the_palette() {
+    use egui::Color32;
+    let mut state = setup_state();
+    state.set_track_palette(&[Color32::RED, Color32::BLUE]);
+    let colors: Vec<_> = (0..3)
+        .map(|_| {
+            let id = state.add_track();
+            state.track_mut(&id).color
+        })
+        .collect();
+    assert_eq!(colors, [Color32::RED, Color32::BLUE, Color32::RED]);
+}

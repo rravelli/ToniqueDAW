@@ -1,7 +1,8 @@
-use crate::ui::font::PHOSPHOR_REGULAR;
+use crate::ui::{font::PHOSPHOR_REGULAR, theme::ThemeExt};
 use egui::{
-    Align2, Color32, FontId, Label, Response, RichText, Sense, Stroke, Ui, Vec2, Widget,
-    containers::menu::{MenuState, SubMenu},
+    Align2, Color32, FontId, Label, PopupCloseBehavior, Response, RichText, Sense, Stroke, Ui,
+    Vec2, Widget,
+    containers::menu::{MenuConfig, MenuState, SubMenu},
 };
 use egui_phosphor::fill::CARET_RIGHT;
 
@@ -10,8 +11,10 @@ const FONT_SIZE: f32 = 9.0;
 pub struct ContextMenuButton {
     icon: String,
     text: String,
-    text_color: Color32,
+    text_color: Option<Color32>,
     submenu: bool,
+    /// Highlighted while its submenu is open.
+    open: bool,
 }
 
 impl ContextMenuButton {
@@ -19,32 +22,32 @@ impl ContextMenuButton {
         Self {
             icon: icon.into(),
             text: text.into(),
-            text_color: Color32::WHITE,
+            text_color: None,
             submenu: false,
+            open: false,
         }
     }
 
     pub fn text_color(mut self, color: Color32) -> Self {
-        self.text_color = color;
+        self.text_color = Some(color);
         self
     }
 
     pub fn submenu<R>(mut self, ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> Response {
         self.submenu = true;
-        let response = self.ui(ui);
-
-        let my_id = ui.next_auto_id();
-        let open = MenuState::from_ui(ui, |state, _| {
-            state.open_item == Some(SubMenu::id_from_widget_id(my_id))
+        // The id the button is about to get, which names its submenu.
+        let id = ui.next_auto_id();
+        self.open = MenuState::from_ui(ui, |state, _| {
+            state.open_item == Some(SubMenu::id_from_widget_id(id))
         });
-        let inactive = ui.style().visuals.widgets.inactive;
-        // TODO(lucasmerlin) add `open` function to `Button`
-        if open {
-            ui.style_mut().visuals.widgets.inactive = ui.style().visuals.widgets.open;
-        }
-        ui.style_mut().visuals.widgets.inactive = inactive;
+        let response = self.ui(ui);
+        debug_assert_eq!(response.id, id, "submenu open state read for the wrong id");
 
-        SubMenu::default().show(ui, &response, content);
+        // Items decide when to close (`ui.close()`), so a submenu can hold
+        // controls that take several clicks.
+        SubMenu::default()
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .show(ui, &response, content);
         response
     }
 }
@@ -59,15 +62,17 @@ impl Widget for ContextMenuButton {
         // Allocate a rectangular region for interaction
         let (rect, response) = ui.allocate_exact_size(desired_size, Sense::all());
 
+        let theme = ui.app_theme();
         // Paint hover/click background
-        if response.hovered() || response.highlighted() {
+        if response.hovered() || response.highlighted() || self.open {
             let fill = if response.clicked() {
-                Color32::from_rgb(80, 80, 80)
+                theme.bg_control_hover
             } else {
-                Color32::from_rgb(60, 60, 60)
+                theme.bg_control
             };
             ui.painter().rect_filled(rect, 2.0, fill);
         }
+        let text_color = self.text_color.unwrap_or(theme.text);
 
         // Draw the icon + text manually inside that region
         let icon_font = FontId::new(FONT_SIZE, egui::FontFamily::Name(PHOSPHOR_REGULAR.into()));
@@ -85,7 +90,7 @@ impl Widget for ContextMenuButton {
             Align2::LEFT_CENTER,
             self.icon,
             icon_font.clone(),
-            self.text_color,
+            text_color,
         );
 
         // Text
@@ -94,7 +99,7 @@ impl Widget for ContextMenuButton {
             Align2::LEFT_CENTER,
             self.text,
             text_font.clone(),
-            self.text_color,
+            text_color,
         );
 
         if self.submenu {
@@ -103,7 +108,7 @@ impl Widget for ContextMenuButton {
                 Align2::RIGHT_CENTER,
                 CARET_RIGHT,
                 icon_font,
-                self.text_color,
+                text_color,
             );
         };
         response
@@ -159,7 +164,7 @@ impl Widget for ContextMenuLabel {
         let res = ui.add(Label::new(
             RichText::new(self.text)
                 .font(text_font)
-                .color(Color32::from_gray(210)),
+                .color(ui.app_theme().text_muted),
         ));
         ui.add_space(3.0);
         res

@@ -1,0 +1,46 @@
+# Light counterpart of Dark. Anything not listed (the palette) comes from
+# Dark.
+
+name = "Light"
+
+# Surfaces: the timeline canvas is the darkest, controls are white
+bg_deep = "#d3d7dd"
+bg_base = "#dfe2e7"
+bg_panel = "#eaecf0"
+bg_raised = "#f5f6f8"
+bg_control = "#ffffff"
+bg_control_hover = "#e6e9ed"
+
+border = "#b9bec6"
+separator = "#d9dce1"
+
+text = "#1b1e23"
+text_muted = "#4f5560"
+text_disabled = "#8d939c"
+text_on_accent = "#ffffff"
+
+# A deeper teal, so it stays readable on light surfaces
+accent = "#00805f"
+accent_hover = "#006b50"
+
+danger = "#c62a30"
+warning = "#9a5b00"
+success = "#1c7a37"
+record = "#d92d33"
+
+hover_overlay = "#0000000f"
+# Behind floating labels: a light veil rather than a shadow
+shadow = "#ffffffd2"
+
+playhead = "#1b1e23"
+edit_cursor = "#00805f"
+selection_fill = "#1b1e230d"
+selection_stroke = "#1b1e2366"
+clip_selected = "#1b1e23"
+loop_region = "#00805f28"
+grid_bar = "#0000001e"
+grid_beat = "#0000000c"
+
+meter_low = "#2fa84f"
+meter_mid = "#e0a100"
+meter_high = "#e5383b"

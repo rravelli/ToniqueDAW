@@ -3,12 +3,12 @@ use crate::{
     core::state::{PlaybackState, ToniqueProjectState},
     ui::{
         font::PHOSPHOR_FILL,
-        theme::PRIMARY_COLOR,
+        theme::ThemeExt,
         view::filebrowser::{items::UIItems, preview::UIPreview},
         widget::{context_menu::ContextMenuButton, square_button::SquareButton},
     },
 };
-use egui::{Button, Color32, FontId, RichText, ScrollArea, Ui, Widget};
+use egui::{Button, FontId, RichText, ScrollArea, Ui, Widget};
 use egui_phosphor::{
     fill::{FOLDER_PLUS, TRASH},
     regular::FOLDER,
@@ -54,7 +54,6 @@ impl FileBrowser {
         ScrollArea::horizontal().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                ui.visuals_mut().selection.bg_fill = PRIMARY_COLOR;
                 self.choose_dir_button(ui);
                 let paths = self.config.list_dirs();
                 for path in paths {
@@ -73,7 +72,7 @@ impl FileBrowser {
                         if ui
                             .add(
                                 ContextMenuButton::new(TRASH, "Delete")
-                                    .text_color(Color32::LIGHT_RED),
+                                    .text_color(ui.app_theme().danger),
                             )
                             .clicked()
                         {

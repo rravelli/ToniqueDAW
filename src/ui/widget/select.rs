@@ -1,12 +1,12 @@
 use egui::{
-    Align2, Color32, CursorIcon, FontFamily, FontId, Id, Popup, Response, ScrollArea, Sense,
-    Stroke, StrokeKind, Ui, Vec2, Widget,
+    Align2, CursorIcon, FontFamily, FontId, Id, Popup, Response, ScrollArea, Sense, Stroke,
+    StrokeKind, Ui, Vec2, Widget,
     text::{LayoutJob, TextWrapping},
     vec2,
 };
 use egui_phosphor::fill::CARET_DOWN;
 
-use crate::ui::{font::PHOSPHOR_FILL, theme::PRIMARY_COLOR, widget::item_button::ItemButton};
+use crate::ui::{font::PHOSPHOR_FILL, theme::ThemeExt, widget::item_button::ItemButton};
 
 const HEIGHT: f32 = 20.;
 const PADDING: f32 = 6.;
@@ -63,22 +63,23 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
         let open = Popup::is_id_open(ui.ctx(), popup_id);
         let (rect, mut response) = ui.allocate_exact_size(vec2(self.width, HEIGHT), Sense::click());
 
+        let theme = ui.app_theme();
         let fill = if !enabled {
-            Color32::from_gray(45)
+            theme.bg_raised
         } else if open || response.hovered() {
-            Color32::from_gray(70)
+            theme.bg_control_hover
         } else {
-            Color32::from_gray(58)
+            theme.bg_control
         };
         let stroke = if open || response.has_focus() {
-            Stroke::new(1., PRIMARY_COLOR)
+            Stroke::new(1., theme.accent)
         } else {
             Stroke::NONE
         };
         let text_color = if enabled {
-            Color32::WHITE
+            theme.text
         } else {
-            Color32::from_gray(120)
+            theme.text_disabled
         };
         let painter = ui.painter();
         painter.rect(rect, 2., fill, stroke, StrokeKind::Inside);

@@ -2,16 +2,14 @@ use crate::{
     core::{clip::ClipCore, state::ToniqueProjectState, track::DEFAULT_TRACK_HEIGHT},
     ui::{
         clip::UIClip,
+        theme::ThemeExt,
         track::HANDLE_HEIGHT,
         utils::{find_track_at, get_track_y},
         view::timeline::{UITimeline, scroll::autoscroll},
     },
 };
-use egui::{Color32, Pos2, Rect, Stroke, Ui, pos2, vec2};
+use egui::{Pos2, Rect, Stroke, Ui, pos2, vec2};
 use tonique_engine::edit::ClipId;
-
-/// Line showing what dragged clips snapped to.
-const SNAP_INDICATOR_COLOR: Color32 = Color32::from_gray(190);
 
 #[derive(Clone)]
 pub struct DragState {
@@ -157,7 +155,7 @@ impl UITimeline {
                 ui.painter_at(viewport).vline(
                     x,
                     viewport.y_range(),
-                    Stroke::new(1., SNAP_INDICATOR_COLOR),
+                    Stroke::new(1., ui.app_theme().text_muted),
                 );
             }
 
@@ -182,7 +180,7 @@ impl UITimeline {
                     let x = state.grid.beats_to_x(new_position, viewport);
 
                     let mut show_waveform = true;
-                    let mut color = Color32::WHITE;
+                    let mut color = ui.app_theme().text_muted;
                     let mut height = DEFAULT_TRACK_HEIGHT;
                     if let Some(t) = state.track_from_index(track_index) {
                         show_waveform = !t.closed;

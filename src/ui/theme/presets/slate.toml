@@ -1,0 +1,47 @@
+# Inspired by FL Studio: blue-grey slate panels with an orange accent and
+# bright meters.
+
+name = "Slate"
+
+bg_deep = "#1a2126"
+bg_base = "#212a30"
+bg_panel = "#28323a"
+bg_raised = "#303c45"
+bg_control = "#3a4852"
+bg_control_hover = "#44535e"
+
+border = "#566874"
+separator = "#2f3b43"
+
+text = "#f2f6f8"
+text_muted = "#b3c0c6"
+text_disabled = "#6d7e88"
+text_on_accent = "#1b1206"
+
+accent = "#ff9f2e"
+accent_hover = "#ffb55c"
+
+danger = "#ff8a80"
+warning = "#ffd24d"
+success = "#8ade5c"
+record = "#ff4d4d"
+
+hover_overlay = "#ffffff10"
+shadow = "#0000008c"
+
+playhead = "#8ade5c"
+edit_cursor = "#ff9f2e"
+selection_fill = "#f2f6f80d"
+selection_stroke = "#f2f6f866"
+loop_region = "#ff9f2e30"
+grid_bar = "#ffffff1a"
+grid_beat = "#ffffff0a"
+
+meter_low = "#8ade5c"
+meter_mid = "#ffd24d"
+meter_high = "#ff4d4d"
+
+palette = [
+    "#ef7f7f", "#f0a35e", "#e8cf63", "#a6d86a", "#6fd3a0",
+    "#62c6e0", "#7fa8f0", "#a592f0", "#dd86d8", "#f08fb3",
+]

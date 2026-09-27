@@ -31,6 +31,7 @@ serde_json = "1.0.141"
 rustfft = "6.4.0"
 midir = "0.11"
 midly = "0.5.3"
+toml = "1"
 
 # Profiles only take effect at the workspace root.
 [profile.test]

@@ -1,7 +1,6 @@
-use crate::core::metrics::AudioMetrics;
+use crate::{core::metrics::AudioMetrics, ui::theme::ThemeExt};
 use egui::{
-    Button, Color32, Frame, InnerResponse, Label, Margin, Rect, Response, RichText, Sense, Stroke,
-    Ui, Vec2,
+    Button, Frame, InnerResponse, Label, Margin, Rect, Response, RichText, Sense, Stroke, Ui, Vec2,
 };
 use std::fmt::Debug;
 use tonique_engine::edit::{Plugin, PluginId, PluginKind, TrackId};
@@ -113,20 +112,17 @@ impl UIEffect {
         // state: &mut ToniqueProjectState,
     ) -> InnerResponse<Response> {
         ui.set_height(ui.available_height());
-        let stroke_color = if selected {
-            Color32::WHITE
-        } else {
-            Color32::from_gray(100)
-        };
+        let theme = ui.app_theme();
+        let stroke_color = if selected { theme.accent } else { theme.border };
 
         let response = Frame::new()
-            .fill(ui.visuals().faint_bg_color)
+            .fill(theme.bg_raised)
             .stroke(Stroke::new(1.0 / ui.pixels_per_point(), stroke_color))
             .corner_radius(2.0)
             .show(ui, |ui| {
                 Frame::new()
                     .corner_radius(2.0)
-                    .stroke(Stroke::new(2.0, Color32::from_gray(100)))
+                    .stroke(Stroke::new(2.0, theme.border))
                     .show(ui, |ui| {
                         ui.set_height(ui.available_height());
                         ui.vertical(|ui| {
@@ -144,6 +140,7 @@ impl UIEffect {
     }
 
     fn top_bar(&mut self, ui: &mut Ui) -> Response {
+        let theme = ui.app_theme();
         let response = ui.interact(
             Rect::from_min_size(
                 ui.next_widget_position(),
@@ -154,7 +151,7 @@ impl UIEffect {
         );
 
         Frame::new()
-            .fill(Color32::from_gray(100))
+            .fill(theme.bg_control)
             .inner_margin(Margin {
                 bottom: 0,
                 top: 0,
@@ -170,15 +167,19 @@ impl UIEffect {
                                 RichText::new(egui_phosphor::regular::POWER)
                                     .size(8.)
                                     .family(egui::FontFamily::Name("phosphor_regular".into()))
-                                    .color(Color32::from_gray(20)),
+                                    .color(if self.enabled {
+                                        theme.text_on_accent
+                                    } else {
+                                        theme.text_muted
+                                    }),
                             )
                             .small()
                             .fill(if self.enabled {
-                                ui.visuals().selection.bg_fill
+                                theme.accent
                             } else {
-                                Color32::from_gray(60)
+                                theme.bg_deep
                             })
-                            .stroke(Stroke::new(0.5, Color32::from_gray(20)))
+                            .stroke(Stroke::NONE)
                             .min_size(Vec2::new(15., 15.)),
                         )
                         .clicked()
@@ -187,12 +188,8 @@ impl UIEffect {
                     };
                     ui.add_space(4.0);
                     ui.add(
-                        Label::new(
-                            RichText::new(self.name.clone())
-                                .size(8.0)
-                                .color(Color32::from_gray(20)),
-                        )
-                        .selectable(false),
+                        Label::new(RichText::new(self.name.clone()).size(8.0).color(theme.text))
+                            .selectable(false),
                     );
                 });
             });

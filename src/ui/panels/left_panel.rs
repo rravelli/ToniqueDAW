@@ -3,6 +3,7 @@ use crate::{
     core::state::ToniqueProjectState,
     ui::{
         effects::EffectId,
+        theme::ThemeExt,
         view::filebrowser::FileBrowser,
         widget::{item_button::ItemButton, search_bar::SearchBar, tab_bar::TabBar},
     },
@@ -52,7 +53,7 @@ impl UILeftPanel {
                         right: 2,
                         top: 0,
                     })
-                    .fill(ui.style().visuals.panel_fill)
+                    .fill(ui.app_theme().bg_panel)
                     .corner_radius(4.0),
             )
             .default_size(220.)

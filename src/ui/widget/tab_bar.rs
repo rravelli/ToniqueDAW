@@ -1,6 +1,6 @@
-use egui::{Color32, FontId, Response, Ui, Widget, vec2};
+use egui::{FontId, Response, Ui, Widget, vec2};
 
-use crate::ui::{theme::PRIMARY_COLOR, widget::square_button::SquareButton};
+use crate::ui::widget::square_button::SquareButton;
 
 const GAP: f32 = 2.;
 
@@ -44,16 +44,7 @@ impl<T: PartialEq + Copy> Widget for TabBar<'_, T> {
                         .size(vec2(width, self.height))
                         .font(FontId::proportional(12.))
                         .border_radius(2.)
-                        .fill(if selected {
-                            PRIMARY_COLOR
-                        } else {
-                            Color32::from_gray(58)
-                        })
-                        .color(if selected {
-                            Color32::BLACK
-                        } else {
-                            Color32::WHITE
-                        });
+                        .selected(selected);
                     if ui.add(button).clicked() && !selected {
                         *self.value = tab;
                         changed = true;

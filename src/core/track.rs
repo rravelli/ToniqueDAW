@@ -1,6 +1,5 @@
 use crate::core::clip::ClipCore;
 use egui::Color32;
-use rand::Rng;
 use tonique_engine::edit::TrackId;
 
 #[derive(Debug, Clone)]
@@ -50,16 +49,11 @@ pub struct MutableTrackCore {
 
 impl MutableTrackCore {
     pub fn new() -> Self {
-        let mut rng = rand::rng();
-        let color = Color32::from_rgb(
-            rng.random_range(0..=255),
-            rng.random_range(0..=255),
-            rng.random_range(0..=255),
-        );
         Self {
             closed: false,
             height: DEFAULT_TRACK_HEIGHT,
-            color,
+            // New tracks get a palette colour from `ToniqueProjectState`.
+            color: Color32::GRAY,
             name: "# Audio Track".into(),
             arm: false,
         }

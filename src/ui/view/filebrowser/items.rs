@@ -9,8 +9,7 @@ use std::{
 };
 
 use egui::{
-    Color32, Frame, Key, Label, Layout, Margin, Rect, RichText, ScrollArea, Spinner, Ui, Widget,
-    pos2,
+    Frame, Key, Label, Layout, Margin, Rect, RichText, ScrollArea, Spinner, Ui, Widget, pos2,
 };
 
 use crate::{
@@ -19,6 +18,7 @@ use crate::{
     core::state::ToniqueProjectState,
     ui::{
         panels::left_panel::DragPayload,
+        theme::ThemeExt,
         view::filebrowser::file_tree::{FileNode, FileTree},
         widget::item_button::ItemButton,
     },
@@ -113,7 +113,7 @@ impl UIItems {
 
     pub fn result_ui(&self, ui: &mut Ui, len: usize, is_loading: bool) {
         Frame::new()
-            .fill(Color32::from_gray(80))
+            .fill(ui.app_theme().bg_control)
             .inner_margin(Margin::symmetric(4, 2))
             .corner_radius(2.0)
             .show(ui, |ui| {

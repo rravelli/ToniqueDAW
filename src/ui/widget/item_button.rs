@@ -1,6 +1,6 @@
-use egui::{Color32, Sense, Vec2, Widget};
+use egui::{Sense, Vec2, Widget};
 
-use crate::ui::theme::PRIMARY_COLOR;
+use crate::ui::theme::{ThemeExt, with_alpha};
 
 pub struct ItemButton {
     text: String,
@@ -28,12 +28,13 @@ impl Widget for ItemButton {
             Sense::click_and_drag(),
         );
 
+        let theme = ui.app_theme();
         let bg_color = if self.selected || response.has_focus() {
-            PRIMARY_COLOR.gamma_multiply_u8(60)
+            with_alpha(theme.accent, 60)
         } else if response.hovered() {
-            Color32::from_gray(40)
+            theme.hover_overlay
         } else {
-            Color32::from_gray(30)
+            egui::Color32::TRANSPARENT
         };
         let painter = ui.painter_at(rect);
 
@@ -44,12 +45,12 @@ impl Widget for ItemButton {
 
         let galley = ui
             .painter()
-            .layout_no_wrap(self.text.to_string(), font_id, Color32::WHITE);
+            .layout_no_wrap(self.text.to_string(), font_id, theme.text);
 
         painter.galley(
             response.rect.left_top() + Vec2::new(6.0, 1.0),
             galley,
-            Color32::WHITE,
+            theme.text,
         );
 
         response

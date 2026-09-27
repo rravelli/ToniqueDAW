@@ -1,0 +1,59 @@
+# Tonique's default theme, and the base every other theme builds on: it
+# must set every colour. Other themes only list what they change.
+#
+# Colours are "#rrggbb", or "#rrggbbaa" for translucent ones.
+
+name = "Dark"
+
+# Surfaces, from the deepest to the most raised
+bg_deep = "#111316"
+bg_base = "#1b1d21"
+bg_panel = "#222529"
+bg_raised = "#2a2d32"
+bg_control = "#363a40"
+bg_control_hover = "#42474e"
+
+# Lines
+border = "#464b53"
+separator = "#2f3338"
+
+# Text and icons
+text = "#e8eaed"
+text_muted = "#a4a9b1"
+text_disabled = "#6c717a"
+text_on_accent = "#0b1a15"
+
+# Accent
+accent = "#00c896"
+accent_hover = "#33d6ab"
+
+# Status
+danger = "#ff6b6b"
+warning = "#f5a524"
+success = "#4cc864"
+record = "#f0484e"
+
+# Overlays
+hover_overlay = "#ffffff0e"
+shadow = "#0000008c"
+
+# Timeline
+playhead = "#f2f3f5"
+edit_cursor = "#00c896"
+selection_fill = "#e8eaed0d"
+selection_stroke = "#e8eaed66"
+clip_selected = "#f2f3f5"
+loop_region = "#00c89628"
+grid_bar = "#ffffff16"
+grid_beat = "#ffffff09"
+
+# Level meters
+meter_low = "#4cc864"
+meter_mid = "#f5c542"
+meter_high = "#ff4d4f"
+
+# New tracks and graph node kinds
+palette = [
+    "#e5736b", "#eba35a", "#e3c85a", "#9ccf6a", "#4fc49a",
+    "#4fb8d9", "#6f9ceb", "#9a86e8", "#d17ad1", "#e07aa0",
+]

@@ -1,11 +1,9 @@
 use crate::{
     core::{metrics::AudioMetrics, state::ToniqueProjectState, track::TrackReferenceCore},
-    ui::panels::left_panel::DragPayload,
+    ui::{panels::left_panel::DragPayload, theme::ThemeExt},
     utils::parse_name,
 };
-use egui::{
-    Color32, Frame, Key, Layout, Margin, Rangef, RichText, ScrollArea, Separator, Stroke, Ui,
-};
+use egui::{Frame, Key, Layout, Margin, Rangef, RichText, ScrollArea, Separator, Stroke, Ui};
 
 pub const BOTTOM_BAR_HEIGHT: f32 = 20.;
 
@@ -131,9 +129,10 @@ impl UIBottomPanel {
     }
 
     fn top_bar(&mut self, ui: &mut Ui, track: &TrackReferenceCore) {
+        let theme = ui.app_theme();
         Frame::new()
             .fill(track.color)
-            .stroke(Stroke::new(1.0, Color32::DARK_GRAY))
+            .stroke(Stroke::new(1.0, theme.border))
             .inner_margin(Margin {
                 bottom: 1,
                 top: 1,
@@ -146,7 +145,7 @@ impl UIBottomPanel {
                     ui.label(
                         RichText::new(parse_name(&track.name, track.index))
                             .size(10.)
-                            .color(Color32::from_gray(20)),
+                            .color(theme.text_on(track.color)),
                     );
                 });
             });

@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use egui::{Align2, Color32, FontId, Painter, Rect, Stroke, Vec2, pos2};
 
+use crate::ui::theme::{Theme, with_alpha};
+
 const DEFAULT_THRESHOLD: f32 = 0.3;
 /// How close (in points) edits snap to clip edges, loop edges and the edit
 /// cursor. They win over the grid when in reach.
@@ -202,7 +204,7 @@ impl GridService {
         }
     }
 
-    pub fn render_grid(&self, painter: &Painter, viewport: Rect) {
+    pub fn render_grid(&self, painter: &Painter, viewport: Rect, theme: &Theme) {
         let divisions_per_beat = self.resolution.divisions_per_beat(self.beats_per_bar);
         let step = self.pixels_per_beat / divisions_per_beat; // pixel spacing between grid lines
 
@@ -224,11 +226,11 @@ impl GridService {
             let is_major_beat = step_index % lines_per_beat == 0;
 
             let color = if is_bar {
-                Color32::from_gray(90)
+                theme.grid_bar
             } else if is_major_beat {
-                Color32::from_gray(70)
+                theme.grid_beat
             } else {
-                Color32::from_gray(60)
+                with_alpha(theme.grid_beat, theme.grid_beat.a() / 2)
             };
 
             painter.line_segment(
@@ -241,7 +243,7 @@ impl GridService {
         }
     }
 
-    pub fn render_labels(&self, painter: &Painter, rect: Rect, bpm: f32) {
+    pub fn render_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
         let divisions_per_beat = self.resolution.divisions_per_beat(self.beats_per_bar);
         let step = self.pixels_per_beat / divisions_per_beat; // pixel spacing between grid lines
 
@@ -271,11 +273,11 @@ impl GridService {
                     Align2::LEFT_BOTTOM,
                     text,
                     FontId::new(8., egui::FontFamily::Monospace),
-                    Color32::WHITE,
+                    theme.text_muted,
                 );
                 painter.line_segment(
                     [pos2(x, rect.bottom() - 8.0), pos2(x, rect.bottom())],
-                    Stroke::new(2.0, Color32::from_gray(120)),
+                    Stroke::new(2.0, theme.text_disabled),
                 );
             }
             let beat_index =
@@ -289,11 +291,11 @@ impl GridService {
                     Align2::LEFT_BOTTOM,
                     text,
                     FontId::new(8., egui::FontFamily::Monospace),
-                    Color32::WHITE,
+                    theme.text_muted,
                 );
                 painter.line_segment(
                     [pos2(x, rect.bottom() - 8.0), pos2(x, rect.bottom())],
-                    Stroke::new(1.0, Color32::from_gray(120)),
+                    Stroke::new(1.0, theme.text_disabled),
                 );
             }
 
@@ -301,10 +303,10 @@ impl GridService {
             x += step;
         }
 
-        self.render_time_labels(painter, rect, bpm);
+        self.render_time_labels(painter, rect, bpm, theme);
     }
 
-    fn render_time_labels(&self, painter: &Painter, rect: Rect, bpm: f32) {
+    fn render_time_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
         let seconds_step = self.resolution.step_size_secs();
         let step = self.pixels_per_beat * bpm / 60. * seconds_step;
         let mut step_index = (self.offset.x / step).floor() as i32;
@@ -326,11 +328,11 @@ impl GridService {
                 Align2::LEFT_TOP,
                 text,
                 FontId::new(8., egui::FontFamily::Monospace),
-                Color32::from_gray(120),
+                theme.text_disabled,
             );
             painter.line_segment(
                 [pos2(x, rect.top()), pos2(x, rect.top() + 8.0)],
-                Stroke::new(2.0, Color32::from_gray(120)),
+                Stroke::new(2.0, theme.text_disabled),
             );
             step_index += 1;
             x += step;

@@ -1,8 +1,12 @@
 use crate::{
     core::metrics::AudioMetrics,
-    ui::{buttons::paint_circle_button, effect::UIEffectContent},
+    ui::{
+        buttons::paint_circle_button,
+        effect::UIEffectContent,
+        theme::{Theme, ThemeExt},
+    },
 };
-use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
+use egui::{Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use std::f32::consts::PI;
 use tonique_engine::{
     edit::{Parameter, Plugin, PluginKind},
@@ -46,7 +50,7 @@ impl EqualizerEffect {
         }
     }
 
-    fn paint_grid(&self, shapes: &mut Vec<Shape>, rect: Rect) {
+    fn paint_grid(&self, shapes: &mut Vec<Shape>, rect: Rect, theme: &Theme) {
         let mut f = self.min_freq;
         let mut mul = 10.;
         let mut pow = 2.;
@@ -62,12 +66,18 @@ impl EqualizerEffect {
                     * rect.width();
             shapes.push(Shape::line_segment(
                 [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                Stroke::new(1.0, Color32::from_gray(40)),
+                Stroke::new(1.0, theme.grid_beat),
             ));
         }
     }
 
-    fn paint_spectrum(&self, shapes: &mut Vec<Shape>, rect: Rect, metrics: &mut AudioMetrics) {
+    fn paint_spectrum(
+        &self,
+        shapes: &mut Vec<Shape>,
+        rect: Rect,
+        metrics: &mut AudioMetrics,
+        theme: &Theme,
+    ) {
         let spectrum = metrics.get_fft();
         let n = spectrum.len();
         let sample_rate = 44100.;
@@ -88,7 +98,7 @@ impl EqualizerEffect {
             if let Some(prev) = prev {
                 shapes.push(Shape::line_segment(
                     [prev, pos],
-                    Stroke::new(1.0, Color32::from_gray(80)),
+                    Stroke::new(1.0, theme.text_disabled),
                 ));
             }
             prev = Some(pos);
@@ -126,9 +136,9 @@ impl UIEffectContent for EqualizerEffect {
 
         let n_points = 500;
 
-        self.paint_grid(&mut shapes, rect);
+        self.paint_grid(&mut shapes, rect, &ui.app_theme());
         if enabled {
-            self.paint_spectrum(&mut shapes, rect, metrics);
+            self.paint_spectrum(&mut shapes, rect, metrics, &ui.app_theme());
         }
         for i in 0..n_points {
             let freq = self.min_freq
@@ -161,14 +171,14 @@ impl UIEffectContent for EqualizerEffect {
             if let Some(last) = last_pos {
                 shapes.push(Shape::line_segment(
                     [last, egui::pos2(x, y)],
-                    egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
+                    egui::Stroke::new(2.0, ui.app_theme().accent),
                 ));
             }
             last_pos = Some(egui::pos2(x, y));
         }
         shapes.push(Shape::line_segment(
             [rect.left_bottom(), rect.right_bottom()],
-            Stroke::new(1.0, Color32::DARK_GRAY),
+            Stroke::new(1.0, ui.app_theme().separator),
         ));
 
         let label = Self::format_freq(self.cutoff);

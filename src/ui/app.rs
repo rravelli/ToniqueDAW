@@ -10,6 +10,7 @@ use crate::{
             menu_bar::{UIMenuBar, set_ui_scale},
             top_bar::UITopBar,
         },
+        theme::{ThemeExt, ThemeLibrary},
         windows::settings::UISettingsWindow,
     },
 };
@@ -30,8 +31,11 @@ impl ToniqueApp {
         engine: Engine,
         audio: AudioHost,
         settings: Settings,
-        _cc: &eframe::CreationContext<'_>,
+        cc: &eframe::CreationContext<'_>,
     ) -> Self {
+        let themes = ThemeLibrary::load();
+        let (theme, theme_warnings) = themes.resolve(&settings.theme);
+        theme.install(&cc.egui_ctx);
         let mut state = ToniqueProjectState::new(engine);
         state.attach_audio(audio, settings);
         Self {
@@ -41,7 +45,7 @@ impl ToniqueApp {
             bottom_panel: UIBottomPanel::new(),
             left_panel: UILeftPanel::new(),
             central_panel: UICentralPanel::new(),
-            setting_window: UISettingsWindow::new(),
+            setting_window: UISettingsWindow::new(themes, theme_warnings),
         }
     }
 }
@@ -59,6 +63,7 @@ impl eframe::App for ToniqueApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_shortcuts(ui);
+        self.state.set_track_palette(&ui.app_theme().palette);
         let actions = self.menu_bar.show(ui, &mut self.state);
         self.top_bar.show(ui, &mut self.state);
         self.bottom_panel.show(ui, &mut self.state);
