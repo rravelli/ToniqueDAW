@@ -1,7 +1,8 @@
-use egui::{Event, Key, Rect, Ui};
+use egui::{Event, Rect, Ui};
 
 use crate::{
-    core::state::{PlaybackState, ToniqueProjectState},
+    config::keymap::Action,
+    core::state::ToniqueProjectState,
     ui::view::timeline::{UITimeline, scroll::reveal},
 };
 
@@ -17,112 +18,64 @@ impl UITimeline {
             return;
         }
 
-        if ui.input(|i| i.focused && i.key_pressed(egui::Key::Space)) {
-            if state.playback_state() == PlaybackState::Playing {
-                state.stop();
-            } else {
-                state.play();
-            }
-        }
-
         self.handle_clipboard(ui, state, viewport);
-        // Left/Right: nudge the selected clips by a grid step, or move the
-        // edit cursor when nothing is selected.
-        let nudge = ui.input(|i| {
-            if !i.modifiers.is_none() {
-                0.
-            } else if i.key_pressed(Key::ArrowLeft) {
-                -1.
-            } else if i.key_pressed(Key::ArrowRight) {
-                1.
-            } else {
-                0.
-            }
-        });
-        if nudge != 0. {
-            let step = nudge * state.grid.step_beats();
-            if state.selected_clips().is_empty() {
-                let cursor = state.grid.snap_to_step(state.edit_cursor() + step);
-                state.set_edit_cursor(cursor);
-                reveal(ui, state, viewport, (cursor, cursor));
-            } else {
-                state.nudge_selection(step);
-                reveal_selection(ui, state, viewport);
-            }
+
+        if !ui.input(|i| i.focused) {
+            return;
         }
-
-        // Up/Down: move the selected clips to the track above/below.
-        let track_move = ui.input(|i| {
-            if !i.modifiers.is_none() {
-                0
-            } else if i.key_pressed(Key::ArrowUp) {
-                -1
-            } else if i.key_pressed(Key::ArrowDown) {
-                1
-            } else {
-                0
-            }
-        });
-        if track_move != 0 {
-            state.move_selection_tracks(track_move);
+        // The other actions work in every view: `ToniqueApp` runs them.
+        let actions = ui.input(|i| state.settings().keymap.triggered(i));
+        for action in actions.into_iter().filter(|a| a.is_timeline()) {
+            self.run_action(action, ui, state, viewport);
         }
+    }
 
-        let duplicate_pressed = ui.input(|i| {
-            i.events.iter().any(|event| {
-                matches!(
-                    event,
-                    Event::Key {
-                        key: Key::D,
-                        pressed: true,
-                        repeat: false,
-                        modifiers,
-                        ..
-                    } if modifiers.ctrl
-                )
-            })
-        });
-
-        if duplicate_pressed {
-            // Duplicate clips
-            if !state.selected_clips().is_empty() {
-                state.duplicate_selected_clips();
-                reveal_selection(ui, state, viewport);
-            } else if let Some(selected) = state.selected_track() {
-                state.duplicate_track(&selected.id);
+    fn run_action(
+        &mut self,
+        action: Action,
+        ui: &mut Ui,
+        state: &mut ToniqueProjectState,
+        viewport: Rect,
+    ) {
+        match action {
+            // Nudge the selected clips by a grid step, or move the edit
+            // cursor when nothing is selected.
+            Action::NudgeLeft | Action::NudgeRight => {
+                let direction = if action == Action::NudgeLeft { -1. } else { 1. };
+                let step = direction * state.grid.step_beats();
+                if state.selected_clips().is_empty() {
+                    let cursor = state.grid.snap_to_step(state.edit_cursor() + step);
+                    state.set_edit_cursor(cursor);
+                    reveal(ui, state, viewport, (cursor, cursor));
+                } else {
+                    state.nudge_selection(step);
+                    reveal_selection(ui, state, viewport);
+                }
             }
-        } else if ui
-            .input(|i| i.focused && (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace)))
-        {
-            // Delete
-            if !state.selected_clips().is_empty() {
-                state.delete_selected_clips();
-            } else if let Some(selected) = state.selected_track() {
-                state.delete_track(&selected.id);
+            Action::MoveTrackUp => state.move_selection_tracks(-1),
+            Action::MoveTrackDown => state.move_selection_tracks(1),
+            Action::Duplicate => {
+                if !state.selected_clips().is_empty() {
+                    state.duplicate_selected_clips();
+                    reveal_selection(ui, state, viewport);
+                } else if let Some(selected) = state.selected_track() {
+                    state.duplicate_track(&selected.id);
+                }
             }
-        } else if ui.input(|i| i.key_pressed(Key::K) && i.modifiers.ctrl) {
-            // Cut clips
-            for id in state.selected_tracks().clone() {
-                state.cut_clip_at(&id, state.edit_cursor());
+            Action::Delete => {
+                if !state.selected_clips().is_empty() {
+                    state.delete_selected_clips();
+                } else if let Some(selected) = state.selected_track() {
+                    state.delete_track(&selected.id);
+                }
             }
-        } else if ui.input(|i| i.key_pressed(Key::L) && i.modifiers.ctrl) {
-            // Loop the selection, or toggle looping
-            if !state.loop_selection() {
-                state.set_looping(!state.looping());
+            Action::SplitAtCursor => {
+                for id in state.selected_tracks().clone() {
+                    state.cut_clip_at(&id, state.edit_cursor());
+                }
             }
-        } else if ui.input(|i| i.key_pressed(Key::J) && i.modifiers.ctrl) {
-            // Close bottom panel
-            state.bottom_panel_open = !state.bottom_panel_open;
-        } else if ui.input(|i| {
-            i.modifiers.ctrl
-                && (i.key_pressed(Key::Y) || i.modifiers.shift && i.key_pressed(Key::Z))
-        }) {
-            // Redo (Ctrl+Y or Ctrl+Shift+Z)
-            state.redo();
-        } else if ui.input(|i| i.modifiers.ctrl && i.key_pressed(Key::Z)) {
-            // Undo
-            state.undo();
-        } else if ui.input(|i| i.modifiers.ctrl && i.key_pressed(Key::A)) {
-            state.select_all_clips();
+            Action::SelectAll => state.select_all_clips(),
+            _ => {}
         }
     }
 

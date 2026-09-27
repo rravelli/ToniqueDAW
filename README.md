@@ -35,7 +35,8 @@ cargo run --release
 Install required tools:
 
 ```bash
-cargo install cargo-tarpaulin
+rustup component add llvm-tools-preview
+cargo install cargo-llvm-cov
 ```
 
 Tests only
@@ -47,9 +48,9 @@ cargo test
 Tests and coverage
 
 ```bash
-cargo tarpaulin --out Html
+cargo llvm-cov --workspace --all-features --html
 ```
 
-Then coverage report can be found in `tarpaulin-report.html`
+Then coverage report can be found in `target/llvm-cov/html/index.html`
 
 [![codecov](https://codecov.io/github/rravelli/ToniqueDAW/graph/badge.svg?token=R3Y36TXT7D)](https://codecov.io/github/rravelli/ToniqueDAW)

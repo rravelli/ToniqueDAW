@@ -8,6 +8,7 @@ use egui_phosphor::{
 };
 
 use crate::{
+    config::keymap::Action,
     core::state::{CentralView, MASTER_TRACK_ID, PlaybackState, ToniqueProjectState},
     ui::{
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
@@ -53,7 +54,7 @@ impl UITopBar {
             self.sidebar_ui(ui, state);
             self.graph_view_ui(ui, state);
             self.metronome_ui(ui, state);
-            if self.play_button_ui(ui, state.playback_state()).clicked() {
+            if self.play_button_ui(ui, state).clicked() {
                 if state.playback_state() == PlaybackState::Playing {
                     state.stop();
                 } else {
@@ -83,18 +84,25 @@ impl UITopBar {
         });
     }
 
-    fn play_button_ui(&mut self, ui: &mut Ui, playback_state: PlaybackState) -> Response {
+    fn play_button_ui(&mut self, ui: &mut Ui, state: &ToniqueProjectState) -> Response {
+        let playback_state = state.playback_state();
+        let tooltip = tooltip(
+            ui,
+            state,
+            if playback_state == PlaybackState::Playing {
+                "Stop"
+            } else {
+                "Play"
+            },
+            Action::PlayStop,
+        );
         ui.add(
             SquareButton::new(if playback_state == PlaybackState::Playing {
                 egui_phosphor::fill::STOP
             } else {
                 egui_phosphor::fill::PLAY
             })
-            .tooltip(if playback_state == PlaybackState::Playing {
-                "Stop"
-            } else {
-                "Play"
-            })
+            .tooltip(tooltip)
             .square(BUTTON_SIZE)
             .font(FontId::new(
                 12.,
@@ -139,7 +147,8 @@ impl UITopBar {
                     PRIMARY_COLOR
                 } else {
                     Color32::from_gray(180)
-                }),
+                })
+                .tooltip(tooltip(ui, state, "Browser", Action::ToggleBrowser)),
         );
 
         if res.clicked() {
@@ -170,7 +179,7 @@ impl UITopBar {
                 } else {
                     Color32::from_gray(180)
                 })
-                .tooltip("Audio graph"),
+                .tooltip(tooltip(ui, state, "Audio graph", Action::ToggleGraphView)),
         );
 
         if res.clicked() {
@@ -206,7 +215,12 @@ impl UITopBar {
                     PRIMARY_BUTTON_COLOR
                 })
                 .color(Color32::from_gray(30))
-                .tooltip("Follow playhead"),
+                .tooltip(tooltip(
+                    ui,
+                    state,
+                    "Follow playhead",
+                    Action::ToggleFollowPlayhead,
+                )),
         );
         if res.clicked() {
             state.set_follow_playhead(!follow);
@@ -235,7 +249,7 @@ impl UITopBar {
                     PRIMARY_BUTTON_COLOR
                 })
                 .color(Color32::from_gray(30))
-                .tooltip("Loop (Ctrl+L)"),
+                .tooltip(tooltip(ui, state, "Loop", Action::Loop)),
         );
         if res.clicked() {
             state.set_looping(!looping);
@@ -266,7 +280,8 @@ impl UITopBar {
                     Color32::from_black_alpha(70)
                 } else {
                     Color32::from_gray(30)
-                }),
+                })
+                .tooltip(tooltip(ui, state, "Metronome", Action::ToggleMetronome)),
         );
         if res.clicked() {
             state.toggle_metronome();
@@ -353,7 +368,7 @@ impl UITopBar {
                     15.,
                     egui::FontFamily::Name(PHOSPHOR_REGULAR.into()),
                 ))
-                .tooltip("Undo"),
+                .tooltip(tooltip(ui, state, "Undo", Action::Undo)),
         )
     }
 
@@ -366,7 +381,15 @@ impl UITopBar {
                     15.,
                     egui::FontFamily::Name(PHOSPHOR_REGULAR.into()),
                 ))
-                .tooltip("Redo"),
+                .tooltip(tooltip(ui, state, "Redo", Action::Redo)),
         )
     }
+}
+
+/// `text` with the shortcut of `action`, e.g. `Loop (Ctrl+L)`.
+fn tooltip(ui: &Ui, state: &ToniqueProjectState, text: &str, action: Action) -> String {
+    state
+        .settings()
+        .keymap
+        .with_shortcut(ui.ctx(), text, action)
 }

@@ -118,7 +118,11 @@ impl UIBottomPanel {
             );
         });
 
-        if ui.input(|i| i.key_pressed(Key::Delete)) && self.selected.len() > 0 {
+        // Not while a widget has focus, e.g. the shortcut recorder.
+        if ui.input(|i| i.key_pressed(Key::Delete))
+            && ui.memory(|m| m.focused().is_none())
+            && self.selected.len() > 0
+        {
             state.remove_effects(&track.id, &self.selected);
         }
 

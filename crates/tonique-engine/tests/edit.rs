@@ -502,3 +502,23 @@ fn node_meters_measure_only_when_enabled() {
     assert!(!Arc::ptr_eq(&rebuilt, &topology));
     assert!(rebuilt.meters().take().iter().any(|r| r.peak > 0.4));
 }
+
+#[test]
+fn the_edit_moves_to_a_new_engine_with_its_history() {
+    let mut edit = Edit::new(120.0);
+    let t = synth_track(&mut edit, vec![note(0.0, 4.0, 60)], 4.0);
+    edit.tracks.push(t);
+    let (e, _old_p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    let t2 = s.create(|e| Track::new(e, "second"));
+    s.perform(AddTrack::new(t2)).unwrap();
+
+    let (e, mut p) = Engine::new(EngineConfig { sample_rate: 44100.0, max_block: 128, housekeeping_thread: false, ..Default::default() });
+    let old = s.replace_engine(e).unwrap();
+    assert_eq!(old.config().sample_rate, SR);
+    assert_eq!(s.engine().config().sample_rate, 44100.0);
+    s.play().unwrap();
+    assert!(peak(&render_offline(&mut p, 4410, 2)) > 0.05, "plays on the new engine");
+    assert!(s.undo().unwrap(), "history survives");
+    assert_eq!(s.edit().tracks.len(), 1);
+}

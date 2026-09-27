@@ -18,6 +18,8 @@ pub struct NumberInput {
     buffer: String,
     pub value: f32,
     range: Rangef,
+    decimals: usize,
+    suffix: String,
 }
 
 impl NumberInput {
@@ -31,6 +33,8 @@ impl NumberInput {
             buffer: "".into(),
             value: 0.,
             range: Rangef::new(0., 1000.),
+            decimals: 1,
+            suffix: String::new(),
         }
     }
 
@@ -49,6 +53,17 @@ impl NumberInput {
         self
     }
 
+    pub fn decimals(mut self, decimals: usize) -> Self {
+        self.decimals = decimals;
+        self
+    }
+
+    /// Unit shown after the value (not while editing).
+    pub fn suffix(mut self, suffix: impl ToString) -> Self {
+        self.suffix = suffix.to_string();
+        self
+    }
+
     fn parse_to_int(&mut self) {
         let result = self.buffer.parse::<f32>();
         match result {
@@ -58,7 +73,7 @@ impl NumberInput {
     }
 
     fn parse_to_string(&mut self, value: f32) -> String {
-        format!("{:.1}", value)
+        format!("{:.*}", self.decimals, value)
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) -> Response {
@@ -68,7 +83,7 @@ impl NumberInput {
         // Paint widget
         painter.rect_filled(rect, 1.0, curr_color);
 
-        let mut text = self.parse_to_string(self.value);
+        let mut text = self.parse_to_string(self.value) + &self.suffix;
         // Text
         let text_edit_rect = Rect::from_min_max(
             rect.min,
@@ -141,12 +156,12 @@ impl NumberInput {
         }
         if res1.clicked() || (focused && ui.input(|i| i.key_pressed(egui::Key::ArrowUp))) {
             res1.request_focus();
-            self.value += 1.0;
+            self.value = (self.value + 1.0).clamp(self.range.min, self.range.max);
         }
         if res2.clicked() || (focused && ui.input(|i| i.key_pressed(egui::Key::ArrowDown))) {
             ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
             res1.request_focus();
-            self.value -= 1.0;
+            self.value = (self.value - 1.0).clamp(self.range.min, self.range.max);
         }
         // Make sure the input has the correct size
         ui.allocate_rect(rect, Sense::empty());

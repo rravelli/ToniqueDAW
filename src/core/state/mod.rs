@@ -5,7 +5,11 @@ mod sources;
 #[cfg(test)]
 mod tests;
 use crate::{
-    audio::preview::FilePreview,
+    audio::{
+        host::{AudioHost, start_audio},
+        preview::FilePreview,
+    },
+    config::settings::Settings,
     core::{
         clip::ClipCore,
         graph_monitor::GraphMonitor,
@@ -78,6 +82,12 @@ pub enum PlaybackState {
 pub struct ToniqueProjectState {
     session: EditSession,
     sources: SourceRegistry,
+    /// `None` without an audio device (e.g. in tests).
+    audio: Option<AudioHost>,
+    /// Applied preferences; change them with `apply_settings`.
+    settings: Settings,
+    /// Why the last audio restart failed, if it did.
+    pub audio_error: Option<String>,
 
     /// Where the transport is, in beats (follows the engine while playing).
     playhead: f32,
@@ -132,6 +142,9 @@ impl ToniqueProjectState {
             session,
             sources: SourceRegistry::new(sample_rate),
             playhead: 0.,
+            audio: None,
+            settings: Settings::default(),
+            audio_error: None,
             edit_cursor: 0.,
             playback_state: PlaybackState::Paused,
             follow_playhead: false,
@@ -188,6 +201,81 @@ impl ToniqueProjectState {
         self.update_metrics();
         let show_graph = self.central_view == CentralView::Graph;
         self.graph.update(self.session.engine_mut(), show_graph);
+    }
+
+    // Settings and audio output
+    /// Take over the running audio output and the settings it was opened with.
+    pub fn attach_audio(&mut self, audio: AudioHost, settings: Settings) {
+        self.audio = Some(audio);
+        self.settings = settings;
+        self.apply_metronome_level();
+    }
+    pub fn audio(&self) -> Option<&AudioHost> {
+        self.audio.as_ref()
+    }
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+    /// The engine running now (its settings may differ from the saved ones
+    /// until an audio restart).
+    pub fn engine_config(&self) -> tonique_engine::engine::EngineConfig {
+        *self.session.engine().config()
+    }
+    pub fn cpu_load(&self) -> f32 {
+        self.session.engine().cpu_load()
+    }
+    /// Save and apply `settings`, restarting audio if device or engine
+    /// settings changed. If the new audio settings don't work, the previous
+    /// ones are restored and `audio_error` says why.
+    pub fn apply_settings(&mut self, settings: Settings) {
+        let previous = std::mem::replace(&mut self.settings, settings);
+        self.apply_metronome_level();
+        if self.audio.is_some() && previous.audio_differs(&self.settings) {
+            self.audio_error = None;
+            if let Err(e) = self.restart_audio() {
+                self.audio_error = Some(e);
+                let attempted = std::mem::replace(&mut self.settings, previous);
+                // Keep the non-audio changes.
+                self.settings.ui_scale = attempted.ui_scale;
+                self.settings.metronome_level = attempted.metronome_level;
+                if let Err(e) = self.restart_audio() {
+                    self.audio_error = Some(format!(
+                        "{}; restoring the previous device failed too: {e}",
+                        self.audio_error.take().unwrap_or_default()
+                    ));
+                }
+            }
+        }
+        self.settings.save();
+    }
+
+    /// Reopen the output device and move the project to a fresh engine with
+    /// the current settings. Keeps the undo history and the playhead; keeps
+    /// playing unless the sample rate changed (files are converted again).
+    fn restart_audio(&mut self) -> Result<(), String> {
+        let position = self.playhead;
+        let playing = self.playback_state == PlaybackState::Playing;
+        self.pause_preview();
+        // Release the device first: some drivers only allow one stream.
+        self.audio = None;
+        let (audio, engine) = start_audio(&self.settings).map_err(|e| e.to_string())?;
+        let rate = engine.config().sample_rate;
+        let rate_changed = rate != self.session.engine().config().sample_rate;
+        let old_engine = self
+            .session
+            .replace_engine(engine)
+            .map_err(|e| e.to_string())?;
+        drop(old_engine);
+        self.audio = Some(audio);
+        self.sources.set_engine_rate(rate);
+        self.graph.reset();
+        self.seek(position);
+        if playing && !rate_changed {
+            self.play();
+        } else {
+            self.playback_state = PlaybackState::Paused;
+        }
+        Ok(())
     }
 
     // Engine plumbing
@@ -359,7 +447,14 @@ impl ToniqueProjectState {
     }
     pub fn toggle_metronome(&mut self) {
         self.metronome = !self.metronome;
-        let gain = if self.metronome { 0.4 } else { 0. };
+        self.apply_metronome_level();
+    }
+    fn apply_metronome_level(&self) {
+        let gain = if self.metronome {
+            self.settings.metronome_level
+        } else {
+            0.
+        };
         self.edit().metronome.set(gain, 0.);
     }
     pub fn metronome(&self) -> bool {

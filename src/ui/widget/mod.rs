@@ -4,4 +4,8 @@ pub mod item_button;
 pub mod meter;
 pub mod rectangle;
 pub mod search_bar;
+pub mod section;
+pub mod select;
+pub mod slider;
 pub mod square_button;
+pub mod tab_bar;

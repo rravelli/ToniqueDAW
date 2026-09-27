@@ -3,12 +3,11 @@ use crate::{
     core::state::ToniqueProjectState,
     ui::{
         effects::EffectId,
-        theme::PRIMARY_COLOR,
         view::filebrowser::FileBrowser,
-        widget::{item_button::ItemButton, search_bar::SearchBar, square_button::SquareButton},
+        widget::{item_button::ItemButton, search_bar::SearchBar, tab_bar::TabBar},
     },
 };
-use egui::{Color32, Frame, Margin, Ui, vec2};
+use egui::{Frame, Margin, Ui};
 
 /// Space around and between the tab bar and the search bar.
 const HEADER_SPACING: f32 = 4.;
@@ -70,7 +69,16 @@ impl UILeftPanel {
                 .inner_margin(Margin::symmetric(2, HEADER_SPACING as i8))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = HEADER_SPACING;
-                    self.tab_bar(ui);
+                    ui.add(
+                        TabBar::new(
+                            &mut self.tab,
+                            [
+                                (LeftPanelTabs::Files, "Files"),
+                                (LeftPanelTabs::Effects, "Effects"),
+                            ],
+                        )
+                        .height(25.),
+                    );
                     if let Some(query) = self.search.ui(ui) {
                         self.file_browser.trigger_search(query);
                     }
@@ -90,28 +98,5 @@ impl UILeftPanel {
                 }
             }
         });
-    }
-
-    fn tab_bar(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-            self.tab_bar_button(ui, LeftPanelTabs::Files, "Files", width);
-            self.tab_bar_button(ui, LeftPanelTabs::Effects, "Effects", width);
-        });
-    }
-
-    fn tab_bar_button(&mut self, ui: &mut Ui, value: LeftPanelTabs, name: &str, width: f32) {
-        let res = ui.add(SquareButton::new(name).size(vec2(width, 25.)).fill(
-            if self.tab == value {
-                PRIMARY_COLOR
-            } else {
-                Color32::from_gray(100)
-            },
-        ));
-
-        if res.clicked() {
-            self.tab = value;
-        }
     }
 }
