@@ -1,5 +1,5 @@
 use crate::{
-    config::settings::UI_SCALE_RANGE,
+    config::{keymap::Action, settings::UI_SCALE_RANGE},
     core::state::{CentralView, ToniqueProjectState},
 };
 use egui::{Button, Color32, Context, Frame, Margin, MenuBar, Ui};
@@ -34,7 +34,12 @@ impl UIMenuBar {
                     ui.spacing_mut().item_spacing.x = 8.;
                     self.edit_menu(ui, state);
                     self.view_menu(ui, state);
-                    if ui.button("Settings").clicked() {
+                    let tooltip = state.settings().keymap.with_shortcut(
+                        ui.ctx(),
+                        "Settings",
+                        Action::OpenSettings,
+                    );
+                    if ui.button("Settings").on_hover_text(tooltip).clicked() {
                         actions.open_settings = true;
                     }
                 });
@@ -44,24 +49,42 @@ impl UIMenuBar {
 
     fn edit_menu(&self, ui: &mut Ui, state: &mut ToniqueProjectState) {
         ui.menu_button("Edit", |ui| {
-            let undo = Button::new("Undo").shortcut_text("Ctrl+Z");
+            let keymap = &state.settings().keymap;
+            let undo =
+                Button::new("Undo").shortcut_text(keymap.shortcut_text(ui.ctx(), Action::Undo));
+            let redo =
+                Button::new("Redo").shortcut_text(keymap.shortcut_text(ui.ctx(), Action::Redo));
             if ui.add_enabled(state.can_undo(), undo).clicked() {
                 state.undo();
             }
-            let redo = Button::new("Redo").shortcut_text("Ctrl+Y");
             if ui.add_enabled(state.can_redo(), redo).clicked() {
                 state.redo();
+            }
+            ui.separator();
+            let add_track = Button::new("Add audio track").shortcut_text(
+                state
+                    .settings()
+                    .keymap
+                    .shortcut_text(ui.ctx(), Action::AddTrack),
+            );
+            if ui.add(add_track).clicked() {
+                state.add_track();
             }
         });
     }
 
     fn view_menu(&self, ui: &mut Ui, state: &mut ToniqueProjectState) {
         ui.menu_button("View", |ui| {
+            let keymap = state.settings().keymap.clone();
+            let label = |text, action| keymap.with_shortcut(ui.ctx(), text, action);
+            let graph = label("Audio graph", Action::ToggleGraphView);
+            let browser = label("Browser", Action::ToggleBrowser);
+            let effects = label("Effects panel", Action::ToggleEffectsPanel);
             ui.radio_value(&mut state.central_view, CentralView::Timeline, "Timeline");
-            ui.radio_value(&mut state.central_view, CentralView::Graph, "Audio graph");
+            ui.radio_value(&mut state.central_view, CentralView::Graph, graph);
             ui.separator();
-            ui.checkbox(&mut state.left_panel_open, "Browser");
-            ui.checkbox(&mut state.bottom_panel_open, "Effects panel (Ctrl+J)");
+            ui.checkbox(&mut state.left_panel_open, browser);
+            ui.checkbox(&mut state.bottom_panel_open, effects);
             ui.separator();
             let scale = state.settings().ui_scale;
             if ui

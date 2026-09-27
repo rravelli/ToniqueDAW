@@ -1,7 +1,7 @@
 use crate::{
     audio::host::AudioHost,
-    config::settings::Settings,
-    core::state::{PlaybackState, ToniqueProjectState},
+    config::{keymap::Action, settings::Settings},
+    core::state::{CentralView, PlaybackState, ToniqueProjectState},
     ui::{
         panels::{
             bottom_panel::UIBottomPanel,
@@ -58,6 +58,7 @@ impl eframe::App for ToniqueApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.handle_shortcuts(ui);
         let actions = self.menu_bar.show(ui, &mut self.state);
         self.top_bar.show(ui, &mut self.state);
         self.bottom_panel.show(ui, &mut self.state);
@@ -68,5 +69,52 @@ impl eframe::App for ToniqueApp {
             self.setting_window.open(&self.state);
         }
         self.setting_window.show(ui, &mut self.state);
+    }
+}
+
+impl ToniqueApp {
+    /// Shortcuts that work in every view. The timeline handles the ones
+    /// acting on its selection ([`Action::is_timeline`]).
+    fn handle_shortcuts(&mut self, ui: &egui::Ui) {
+        // Keys typed into a widget (or recorded as a shortcut) aren't commands.
+        if ui.memory(|m| m.focused().is_some()) || !ui.input(|i| i.focused) {
+            return;
+        }
+        let actions = ui.input(|i| self.state.settings().keymap.triggered(i));
+        let state = &mut self.state;
+        for action in actions.into_iter().filter(|a| !a.is_timeline()) {
+            match action {
+                Action::PlayStop => {
+                    if state.playback_state() == PlaybackState::Playing {
+                        state.stop();
+                    } else {
+                        state.play();
+                    }
+                }
+                // Loop the selection, or toggle looping
+                Action::Loop => {
+                    if !state.loop_selection() {
+                        state.set_looping(!state.looping());
+                    }
+                }
+                Action::ToggleMetronome => state.toggle_metronome(),
+                Action::ToggleFollowPlayhead => state.set_follow_playhead(!state.follow_playhead()),
+                Action::Undo => state.undo(),
+                Action::Redo => state.redo(),
+                Action::AddTrack => {
+                    state.add_track();
+                }
+                Action::ToggleBrowser => state.left_panel_open = !state.left_panel_open,
+                Action::ToggleEffectsPanel => state.bottom_panel_open = !state.bottom_panel_open,
+                Action::ToggleGraphView => {
+                    state.central_view = match state.central_view {
+                        CentralView::Graph => CentralView::Timeline,
+                        _ => CentralView::Graph,
+                    }
+                }
+                Action::OpenSettings => self.setting_window.toggle(state),
+                _ => {}
+            }
+        }
     }
 }

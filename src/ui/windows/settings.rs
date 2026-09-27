@@ -7,8 +7,9 @@ use crate::{
         theme::PRIMARY_COLOR,
         widget::{
             input::NumberInput, section::SectionHeader, select::Select, slider::ValueSlider,
-            square_button::SquareButton,
+            square_button::SquareButton, tab_bar::TabBar,
         },
+        windows::shortcuts::UIShortcutsTab,
     },
 };
 use egui::{
@@ -23,6 +24,14 @@ const LABEL_WIDTH: f32 = 120.;
 const CONTROL_WIDTH: f32 = 240.;
 const BUTTON_HEIGHT: f32 = 22.;
 const ERROR_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
+const WINDOW_WIDTH: f32 = 440.;
+
+#[derive(Clone, Copy, PartialEq)]
+enum SettingsTab {
+    General,
+    Audio,
+    Shortcuts,
+}
 
 /// What a device can do, for the device selected in the form.
 struct DeviceCapabilities {
@@ -31,11 +40,13 @@ struct DeviceCapabilities {
     buffer_range: Option<(u32, u32)>,
 }
 
-/// Preferences window. Interface and metronome changes apply immediately;
-/// audio device and engine changes are collected in a draft and applied
-/// together, since they restart the audio.
+/// Preferences window. Interface, metronome and shortcut changes apply
+/// immediately; audio device and engine changes are collected in a draft
+/// and applied together, since they restart the audio.
 pub struct UISettingsWindow {
     pub open: bool,
+    tab: SettingsTab,
+    shortcuts: UIShortcutsTab,
     draft: Settings,
     /// Probed when the window opens (probing hardware is slow).
     devices: Vec<DeviceInfo>,
@@ -47,6 +58,8 @@ impl UISettingsWindow {
     pub fn new() -> Self {
         Self {
             open: false,
+            tab: SettingsTab::General,
+            shortcuts: UIShortcutsTab::new(),
             draft: Settings::default(),
             devices: Vec::new(),
             capabilities: None,
@@ -61,7 +74,17 @@ impl UISettingsWindow {
     pub fn open(&mut self, state: &ToniqueProjectState) {
         self.open = true;
         self.draft = state.settings().clone();
+        self.shortcuts.cancel();
         self.refresh_devices();
+    }
+
+    pub fn toggle(&mut self, state: &ToniqueProjectState) {
+        if self.open {
+            self.open = false;
+            self.shortcuts.cancel();
+        } else {
+            self.open(state);
+        }
     }
 
     fn refresh_devices(&mut self) {
@@ -78,17 +101,41 @@ impl UISettingsWindow {
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .frame(Frame::window(ui.style()).inner_margin(Margin::same(12)))
+            .frame(Frame::window(ui.style()).inner_margin(Margin::same(5)))
             .show(ui.ctx(), |ui| {
+                ui.set_width(WINDOW_WIDTH);
                 ui.spacing_mut().item_spacing = vec2(6., 4.);
-                self.interface_section(ui, state);
+                let tabs = ui.add(TabBar::new(
+                    &mut self.tab,
+                    [
+                        (SettingsTab::General, "General"),
+                        (SettingsTab::Audio, "Audio"),
+                        (SettingsTab::Shortcuts, "Shortcuts"),
+                    ],
+                ));
+                if tabs.changed() {
+                    self.shortcuts.cancel();
+                }
                 ui.add_space(10.);
-                self.audio_section(ui, state);
-                ui.add_space(10.);
-                self.engine_section(ui, state);
-                ui.add_space(10.);
-                self.buttons(ui, state);
+                match self.tab {
+                    SettingsTab::General => {
+                        self.interface_section(ui, state);
+                        ui.add_space(10.);
+                        self.general_buttons(ui, state);
+                    }
+                    SettingsTab::Audio => {
+                        self.audio_section(ui, state);
+                        ui.add_space(10.);
+                        self.engine_section(ui, state);
+                        ui.add_space(10.);
+                        self.audio_buttons(ui, state);
+                    }
+                    SettingsTab::Shortcuts => self.shortcuts.show(ui, state),
+                }
             });
+        if !open {
+            self.shortcuts.cancel();
+        }
         self.open = open;
     }
 
@@ -290,7 +337,22 @@ impl UISettingsWindow {
         );
     }
 
-    fn buttons(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn general_buttons(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+        ui.separator();
+        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.add(secondary_button("Restore defaults")).clicked() {
+                let defaults = Settings::default();
+                self.draft.ui_scale = defaults.ui_scale;
+                self.draft.metronome_level = defaults.metronome_level;
+                set_ui_scale(ui.ctx(), state, self.draft.ui_scale);
+                let mut settings = state.settings().clone();
+                settings.metronome_level = self.draft.metronome_level;
+                state.apply_settings(settings);
+            }
+        });
+    }
+
+    fn audio_buttons(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
         let pending = state.settings().audio_differs(&self.draft);
         if let Some(error) = &state.audio_error {
             ui.label(
@@ -314,10 +376,9 @@ impl UISettingsWindow {
                 .on_hover_text("Restarts the audio output. The playhead and undo history are kept.")
                 .clicked()
             {
-                // Only the audio fields: interface changes are already applied.
-                let mut settings = self.draft.clone();
-                settings.ui_scale = state.settings().ui_scale;
-                settings.metronome_level = state.settings().metronome_level;
+                // Only the audio fields: the others are already applied.
+                let mut settings = state.settings().clone();
+                settings.set_audio(&self.draft);
                 state.apply_settings(settings);
                 self.draft = state.settings().clone();
             }
@@ -328,12 +389,9 @@ impl UISettingsWindow {
                 self.draft = state.settings().clone();
             }
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                // Only fills the draft: applying still restarts the audio.
                 if ui.add(secondary_button("Restore defaults")).clicked() {
-                    self.draft = Settings::default();
-                    set_ui_scale(ui.ctx(), state, self.draft.ui_scale);
-                    let mut settings = state.settings().clone();
-                    settings.metronome_level = self.draft.metronome_level;
-                    state.apply_settings(settings);
+                    self.draft.set_audio(&Settings::default());
                 }
             });
         });

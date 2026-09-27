@@ -1,3 +1,4 @@
+use crate::config::keymap::Keymap;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
@@ -22,6 +23,8 @@ pub struct Settings {
     /// Graphs smaller than this run on the audio thread alone.
     pub parallel_threshold: usize,
     pub metronome_level: f32,
+    /// Keyboard shortcuts that differ from the defaults.
+    pub keymap: Keymap,
 }
 
 impl Default for Settings {
@@ -35,6 +38,7 @@ impl Default for Settings {
             worker_threads: 2,
             parallel_threshold: EngineConfig::default().parallel_threshold,
             metronome_level: 0.4,
+            keymap: Keymap::default(),
         }
     }
 }
@@ -79,6 +83,16 @@ impl Settings {
         }
     }
 
+    /// Copy the fields that need the audio restarted from `other`.
+    pub fn set_audio(&mut self, other: &Settings) {
+        self.device_id = other.device_id.clone();
+        self.sample_rate = other.sample_rate;
+        self.buffer_frames = other.buffer_frames;
+        self.block_size = other.block_size;
+        self.worker_threads = other.worker_threads;
+        self.parallel_threshold = other.parallel_threshold;
+    }
+
     /// Whether switching from `self` to `other` needs the audio restarted.
     pub fn audio_differs(&self, other: &Settings) -> bool {
         self.device_options() != other.device_options()
@@ -102,7 +116,8 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{ "ui_scale": 1.5 }"#).unwrap();
         assert_eq!(s.ui_scale, 1.5);
         assert_eq!(s.block_size, Settings::default().block_size);
-        let round_trip: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        let round_trip: Settings =
+            serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(round_trip, s);
     }
 
@@ -120,5 +135,22 @@ mod tests {
             ..a.clone()
         };
         assert!(a.audio_differs(&c));
+    }
+
+    #[test]
+    fn set_audio_copies_exactly_the_audio_fields() {
+        let other = Settings {
+            ui_scale: 2.,
+            metronome_level: 0.1,
+            device_id: Some("dev".into()),
+            block_size: 512,
+            worker_threads: 0,
+            ..Settings::default()
+        };
+        let mut s = Settings::default();
+        s.set_audio(&other);
+        assert!(!s.audio_differs(&other));
+        assert_eq!(s.ui_scale, Settings::default().ui_scale);
+        assert_eq!(s.metronome_level, Settings::default().metronome_level);
     }
 }

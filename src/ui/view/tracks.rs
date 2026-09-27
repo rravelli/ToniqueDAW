@@ -2,6 +2,7 @@ use egui::{Color32, FontId, Rect, Sense, Ui, pos2, vec2};
 use egui_phosphor::fill::PLUS;
 
 use crate::{
+    config::keymap::Action,
     core::state::ToniqueProjectState,
     ui::{
         font::PHOSPHOR_REGULAR,
@@ -139,7 +140,11 @@ impl UITracks {
                             egui::FontFamily::Name(PHOSPHOR_REGULAR.into()),
                         ))
                         .size(vec2(ui.available_width(), 20.))
-                        .tooltip("Add audio track"),
+                        .tooltip(state.settings().keymap.with_shortcut(
+                            ui.ctx(),
+                            "Add audio track",
+                            Action::AddTrack,
+                        )),
                 )
                 .clicked()
             {

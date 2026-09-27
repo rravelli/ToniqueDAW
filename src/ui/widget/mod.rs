@@ -8,3 +8,4 @@ pub mod section;
 pub mod select;
 pub mod slider;
 pub mod square_button;
+pub mod tab_bar;

@@ -1,3 +1,4 @@
+pub mod keymap;
 pub mod settings;
 
 use directories::ProjectDirs;
