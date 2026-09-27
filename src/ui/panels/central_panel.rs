@@ -1,5 +1,5 @@
 use crate::{
-    core::state::{CentralView, ToniqueProjectState},
+    core::state::{CentralView, PlaybackState, ToniqueProjectState},
     ui::{
         theme::PRIMARY_COLOR,
         view::{
@@ -11,6 +11,8 @@ use crate::{
 use egui::{Color32, Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
 pub const SCROLLBAR_WIDTH: f32 = 5.;
+/// Empty bars after the end of the arrangement.
+const TIMELINE_SLACK_BARS: f32 = 16.;
 pub const PLAYHEAD_COLOR: Color32 = Color32::WHITE;
 pub const EDIT_CURSOR_COLOR: Color32 = PRIMARY_COLOR;
 
@@ -19,6 +21,10 @@ pub struct UICentralPanel {
     navigation_bar: UINavigationBar,
     tracks: UITracks,
     graph: UIGraphView,
+    /// Following the playhead is paused after scrolling by hand during
+    /// playback, until playback starts again.
+    follow_paused: bool,
+    was_playing: bool,
 }
 
 impl UICentralPanel {
@@ -28,6 +34,8 @@ impl UICentralPanel {
             navigation_bar: UINavigationBar::new(),
             tracks: UITracks::new(),
             graph: UIGraphView::new(),
+            follow_paused: false,
+            was_playing: false,
         }
     }
 
@@ -65,15 +73,21 @@ impl UICentralPanel {
         // Draw tracks
         self.tracks.ui(ui, state, viewport);
 
-        // Set timeline width
-        ui.set_width(1000. * state.grid.pixels_per_beat());
+        // The timeline spans the content plus some room to add more, and
+        // never shrinks under the part being looked at.
+        let ppb = state.grid.pixels_per_beat();
+        let slack = TIMELINE_SLACK_BARS * state.grid.beats_per_bar() as f32;
+        let visible_end = (state.grid.offset.x + timeline_viewport.width()) / ppb;
+        ui.set_width((state.arrangement_end() + slack).max(visible_end) * ppb);
         let content_size = ui.min_size();
 
+        let mut scrolled_x = false;
         if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
             && ui.input(|i| i.smooth_scroll_delta != Vec2::ZERO && !i.modifiers.ctrl)
         {
             let delta = ui.input(|i| i.smooth_scroll_delta);
             if timeline_viewport.contains(mouse_pos) {
+                scrolled_x |= delta.x != 0.;
                 state.grid.offset.x -= delta.x;
                 let max_x = (content_size.x - timeline_viewport.right()).max(0.);
                 state.grid.offset.x = state.grid.offset.x.clamp(0., max_x);
@@ -84,7 +98,8 @@ impl UICentralPanel {
                 state.grid.offset.y = state.grid.offset.y.clamp(0., max_y);
             }
         }
-        self.draw_scrollbars(ui, viewport, content_size, &mut state.grid.offset);
+        scrolled_x |= self.draw_scrollbars(ui, viewport, content_size, &mut state.grid.offset);
+        self.follow_playhead(ui, state, timeline_viewport, scrolled_x);
         self.draw_cursors(
             ui,
             state,
@@ -98,8 +113,46 @@ impl UICentralPanel {
         );
     }
 
-    /// Draw horizontal and vertical scrollbars.
-    fn draw_scrollbars(&self, ui: &mut Ui, viewport: Rect, content_size: Vec2, offset: &mut Vec2) {
+    /// Keep the playhead in the middle of the view during playback. Near the
+    /// start of the arrangement the view stays put and the playhead moves
+    /// towards the middle.
+    fn follow_playhead(
+        &mut self,
+        ui: &Ui,
+        state: &mut ToniqueProjectState,
+        viewport: Rect,
+        scrolled_by_hand: bool,
+    ) {
+        let playing = state.playback_state() == PlaybackState::Playing;
+        if playing && !self.was_playing {
+            self.follow_paused = false;
+        }
+        self.was_playing = playing;
+        if playing && scrolled_by_hand {
+            self.follow_paused = true;
+        }
+        // Don't move the view under a drag.
+        if !playing
+            || !state.follow_playhead()
+            || self.follow_paused
+            || ui.input(|i| i.pointer.any_down())
+        {
+            return;
+        }
+        let x = state.playhead() * state.grid.pixels_per_beat();
+        state.grid.offset.x = (x - viewport.width() / 2.).max(0.);
+    }
+
+    /// Draw horizontal and vertical scrollbars. Returns whether the
+    /// horizontal one was dragged.
+    fn draw_scrollbars(
+        &self,
+        ui: &mut Ui,
+        viewport: Rect,
+        content_size: Vec2,
+        offset: &mut Vec2,
+    ) -> bool {
+        let mut scrolled_x = false;
         let style = ui.style();
         let painter = ui.painter();
         let handle_color = Color32::WHITE;
@@ -127,6 +180,7 @@ impl UICentralPanel {
             painter.rect_filled(thumb_rect, 4.0, handle_color);
 
             if resp.dragged() {
+                scrolled_x = true;
                 let drag_x = resp.drag_delta().x;
                 let ratio = max_scroll / (track_rect.width() - thumb_width);
                 offset.x = (offset.x + drag_x * ratio).clamp(0., max_scroll);
@@ -162,6 +216,7 @@ impl UICentralPanel {
                 offset.y = (offset.y + drag_y * ratio).clamp(0., max_scroll);
             }
         }
+        scrolled_x
     }
 
     /// Loop bounds (while looping), edit cursor (only while it differs from

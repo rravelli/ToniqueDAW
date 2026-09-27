@@ -1,44 +1,16 @@
 use crate::{
-    core::state::ToniqueProjectState,
+    core::state::{SelectionBounds, ToniqueProjectState},
     ui::{
         utils::{find_track_at, get_track_y},
         view::timeline::UITimeline,
     },
 };
 use egui::{Color32, Pos2, Rect, Response, Stroke, StrokeKind, Ui};
-use tonique_engine::edit::ClipId;
 
-#[derive(Debug, Clone, Copy)]
-pub struct SelectionBounds {
-    pub start_track_index: usize,
-    pub start_pos: f32,
-    pub end_track_index: usize,
-    pub end_pos: f32,
-}
-
-#[derive(Debug, Clone)]
-pub struct ClipSelection {
-    pub clip_ids: Vec<ClipId>,
-    pub bounds: Option<SelectionBounds>,
-}
-
+/// A rubber-band selection being drawn, from where it started.
 pub struct Multiselect {
     start_pos: f32,
     start_track_index: usize,
-}
-
-impl ClipSelection {
-    pub fn reset(&mut self) {
-        self.bounds = None;
-        self.clip_ids.clear();
-    }
-
-    pub fn new() -> Self {
-        Self {
-            bounds: None,
-            clip_ids: vec![],
-        }
-    }
 }
 
 impl UITimeline {
@@ -87,32 +59,13 @@ impl UITimeline {
                 .unwrap_or(position);
             let length = state.track_len();
             let track_index = current_track.map_or(length - 1, |t| t.index);
-            let min_index = track_index.min(start.start_track_index);
-            let max_index = track_index.max(start.start_track_index);
-
-            let min_pos = current_pos.min(start.start_pos);
-            let max_pos = current_pos.max(start.start_pos);
-
-            self.selected_clips.reset();
-            self.selected_clips.bounds = Some(SelectionBounds {
-                start_track_index: min_index,
-                start_pos: min_pos,
-                end_track_index: max_index,
-                end_pos: max_pos,
-            });
-            for (track_index, track) in state.tracks().enumerate() {
-                if min_index <= track_index && track_index <= max_index {
-                    for clip in track.clips.iter() {
-                        let end = clip.end(state.bpm());
-                        if end >= min_pos && clip.position < max_pos {
-                            self.selected_clips.clip_ids.push(clip.id.clone());
-                        }
-                    }
-                }
-            }
+            state.select_in_bounds(SelectionBounds::between(
+                (start.start_track_index, start.start_pos),
+                (track_index, current_pos),
+            ));
         }
 
-        if let Some(bounds) = self.selected_clips.bounds {
+        if let Some(bounds) = state.selection_bounds() {
             self.render_zone(ui, state, bounds, response.rect);
         }
     }

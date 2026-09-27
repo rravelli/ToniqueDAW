@@ -4,12 +4,14 @@ use crate::{
         clip::UIClip,
         track::HANDLE_HEIGHT,
         utils::{find_track_at, get_track_y},
-        view::timeline::UITimeline,
+        view::timeline::{UITimeline, scroll::autoscroll},
     },
 };
-use egui::{Color32, Pos2, Rect, Ui, pos2, vec2};
-use std::f32::INFINITY;
+use egui::{Color32, Pos2, Rect, Stroke, Ui, pos2, vec2};
 use tonique_engine::edit::ClipId;
+
+/// Line showing what dragged clips snapped to.
+const SNAP_INDICATOR_COLOR: Color32 = Color32::from_gray(190);
 
 #[derive(Clone)]
 pub struct DragState {
@@ -46,10 +48,8 @@ impl UITimeline {
             && let Some(mouse_pos) = mouse_pos
             && let Some(old_track) = dragged_track_index
         {
-            self.selected_clips.bounds = None;
-
-            if !self.selected_clips.clip_ids.contains(&clip.id) {
-                self.selected_clips.clip_ids = vec![clip.id];
+            if !state.is_clip_selected(clip.id) {
+                state.select_clips(vec![clip.id]);
             }
             let mut elements = Vec::new();
             let mut new_selected_clips = Vec::new();
@@ -59,7 +59,7 @@ impl UITimeline {
             let tracks: Vec<_> = state.tracks().collect();
             for track in tracks {
                 for clip in track.clips.iter() {
-                    if self.selected_clips.clip_ids.contains(&clip.id) {
+                    if state.is_clip_selected(clip.id) {
                         // Create a clone
                         let new_clip = if duplicate {
                             clip.with_id(state.new_clip_id())
@@ -80,7 +80,7 @@ impl UITimeline {
                 }
                 y += track.height + HANDLE_HEIGHT;
             }
-            self.selected_clips.clip_ids = new_selected_clips;
+            state.select_clips(new_selected_clips);
             self.drag_state = Some(DragState {
                 elements,
                 duplicate,
@@ -101,24 +101,64 @@ impl UITimeline {
                 .max(-drag_state.min_track_delta as usize)
                 as i32;
 
-            // Find nearest grid to snap to
-            let mut beat_delta: f32 = INFINITY;
+            // Snap the nearest clip edge: starts to the grid or to snap
+            // targets (other clips, loop, edit cursor), ends to targets only.
+            // Alt disables snapping.
+            let mut beat_delta: f32 = f32::INFINITY;
+            let mut snapped_to = None;
             if ui.input(|i| !i.modifiers.alt) {
+                let targets = state.snap_targets(&drag_state.dragged_ids());
+                let bpm = state.bpm();
                 for element in drag_state.elements.iter() {
-                    let new_position = state
+                    let start = state
                         .grid
                         .x_to_beats(mouse_pos.x - element.mouse_delta.x, viewport);
-                    let snapped_position = state.grid.snap_at_grid_option(new_position);
-                    if let Some(pos) = snapped_position
-                        && (pos - new_position).abs() < beat_delta.abs()
-                    {
-                        beat_delta = pos - new_position;
+                    let end = start + element.clip.end(bpm) - element.clip.position;
+                    let candidates = [
+                        state
+                            .grid
+                            .snap_to_targets(start, &targets)
+                            .map(|s| (s, start)),
+                        state
+                            .grid
+                            .snap_to_targets(end, &targets)
+                            .filter(|(_, target)| *target)
+                            .map(|s| (s, end)),
+                    ];
+                    for ((pos, target), edge) in candidates.into_iter().flatten() {
+                        if (pos - edge).abs() < beat_delta.abs() {
+                            beat_delta = pos - edge;
+                            snapped_to = target.then_some(pos);
+                        }
                     }
                 }
             }
             // No clip are snapped
-            if beat_delta == INFINITY {
+            if beat_delta == f32::INFINITY {
                 beat_delta = 0.;
+            }
+            // Keep the group from starting before the first beat.
+            let first = drag_state
+                .elements
+                .iter()
+                .map(|e| {
+                    state
+                        .grid
+                        .x_to_beats(mouse_pos.x - e.mouse_delta.x, viewport)
+                })
+                .fold(f32::INFINITY, f32::min);
+            if -first > beat_delta {
+                beat_delta = -first;
+                snapped_to = None;
+            }
+            // Show what the clips snapped to.
+            if let Some(beats) = snapped_to {
+                let x = state.grid.beats_to_x(beats, viewport);
+                ui.painter_at(viewport).vline(
+                    x,
+                    viewport.y_range(),
+                    Stroke::new(1., SNAP_INDICATOR_COLOR),
+                );
             }
 
             let mut track_indexes = Vec::new();
@@ -171,6 +211,7 @@ impl UITimeline {
                 self.commit_drag(state, drag_state, track_indexes);
             } else if !drag_state.duplicate || ui.input(|i| i.modifiers.ctrl) {
                 self.drag_state = Some(drag_state);
+                autoscroll(ui, state, viewport, mouse_pos);
             }
         }
     }

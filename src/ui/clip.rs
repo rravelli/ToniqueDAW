@@ -1,7 +1,5 @@
 use crate::{
-    core::{
-        clip::ClipCore, grid::GridService, state::ToniqueProjectState, track::TRACK_CLOSED_HEIGHT,
-    },
+    core::{clip::ClipCore, state::ToniqueProjectState, track::TRACK_CLOSED_HEIGHT},
     ui::{waveform::UIWaveform, widget::context_menu::ContextMenuButton},
 };
 use egui::{
@@ -13,7 +11,16 @@ use egui_phosphor::fill::TRASH;
 const PADDING_TEXT: f32 = 4.;
 const BORDER_WIDTH: f32 = 2.;
 const HEADER_HEIGHT: f32 = 16.;
-const MIN_HANDLE_WIDTH: f32 = 20.;
+/// Width of the trim handles inside each edge of a clip.
+const HANDLE_WIDTH: f32 = 7.;
+const MIN_HANDLE_WIDTH: f32 = 2.;
+const HANDLE_HOVER_COLOR: Color32 = Color32::from_rgba_premultiplied(140, 140, 140, 140);
+#[derive(Clone, Copy)]
+enum Edge {
+    Start,
+    End,
+}
+
 #[derive(Clone)]
 pub struct UIClip {
     waveform: UIWaveform,
@@ -41,38 +48,7 @@ impl UIClip {
         let sample_rect = Rect::from_min_max(viewport.clamp(pos), viewport.clamp(pos + size));
         // let response = ui.allocate_rect(sample_rect, Sense::all());
         let painter = ui.painter_at(sample_rect);
-        let mut resized = false;
-        let mut drag_stopped = false;
         let mut clip_copy = clip.clone();
-
-        if size.x > MIN_HANDLE_WIDTH {
-            let left_resize = self.left_resize_handle(
-                ui,
-                &state.grid,
-                Rect::from_min_size(Pos2::new(pos.x - 2.0, pos.y), Vec2::new(4., size.y)),
-                state.bpm(),
-                viewport,
-                &mut clip_copy,
-            );
-            resized = resized || left_resize.dragged();
-            drag_stopped = drag_stopped || left_resize.drag_stopped();
-        }
-
-        if size.x > MIN_HANDLE_WIDTH {
-            let right_resize = self.right_resize_handle(
-                ui,
-                &state.grid,
-                Rect::from_min_size(
-                    Pos2::new(pos.x + size.x - 2.0, pos.y),
-                    Vec2::new(4., size.y),
-                ),
-                state.bpm(),
-                viewport,
-                &mut clip_copy,
-            );
-            resized = resized || right_resize.dragged();
-            drag_stopped = drag_stopped || right_resize.drag_stopped();
-        }
 
         let stroke = if selected {
             Stroke::new(BORDER_WIDTH, Color32::WHITE)
@@ -115,6 +91,31 @@ impl UIClip {
             format!("{:?}{}", clip.id, clip.position).into(),
             Sense::all(),
         );
+        // Trim handles just inside each edge, registered after the header so
+        // they win where they overlap it. Narrow clips get narrower handles,
+        // leaving the middle to grab the clip.
+        let handle_width = (size.x / 4.).clamp(MIN_HANDLE_WIDTH, HANDLE_WIDTH);
+        let left_resize = self.trim_handle(
+            ui,
+            state,
+            Rect::from_min_size(pos, vec2(handle_width, size.y)),
+            viewport,
+            &mut clip_copy,
+            Edge::Start,
+        );
+        let right_resize = self.trim_handle(
+            ui,
+            state,
+            Rect::from_min_size(
+                pos2(pos.x + size.x - handle_width, pos.y),
+                vec2(handle_width, size.y),
+            ),
+            viewport,
+            &mut clip_copy,
+            Edge::End,
+        );
+        let resized = left_resize.dragged() || right_resize.dragged();
+        let drag_stopped = left_resize.drag_stopped() || right_resize.drag_stopped();
         painter.text(
             Pos2::new(pos.x + PADDING_TEXT, pos.y + 2.),
             Align2::LEFT_TOP,
@@ -190,58 +191,42 @@ impl UIClip {
         response
     }
 
-    fn left_resize_handle(
+    /// A trim handle: dragging it moves that edge of `clip`, snapping to
+    /// the grid, other clips' edges, the loop and the edit cursor (Alt
+    /// disables snapping).
+    fn trim_handle(
         &mut self,
         ui: &mut Ui,
-        grid: &GridService,
+        state: &ToniqueProjectState,
         rect: Rect,
-        bpm: f32,
         viewport: Rect,
         clip: &mut ClipCore,
+        edge: Edge,
     ) -> Response {
         let response = ui.allocate_rect(rect, Sense::drag());
 
         if response.dragged()
             && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
         {
-            clip.trim_start_at(
-                grid.snap_at_grid(grid.x_to_beats(mouse_pos.x, viewport)),
-                bpm,
-            );
+            let beats = state.grid.x_to_beats(mouse_pos.x, viewport);
+            let beats = if ui.input(|i| i.modifiers.alt) {
+                beats
+            } else {
+                let targets = state.snap_targets(&[clip.id]);
+                state
+                    .grid
+                    .snap_to_targets(beats, &targets)
+                    .map_or(beats, |(snapped, _)| snapped)
+            };
+            match edge {
+                Edge::Start => clip.trim_start_at(beats, state.bpm()),
+                Edge::End => clip.trim_end_at(beats, state.bpm()),
+            }
         }
 
         if response.hovered() {
             let painter = ui.painter_at(rect);
-            painter.rect_filled(rect, 1.0, Color32::WHITE);
-            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ResizeHorizontal);
-        }
-
-        response
-    }
-
-    fn right_resize_handle(
-        &mut self,
-        ui: &mut Ui,
-        grid: &GridService,
-        rect: Rect,
-        bpm: f32,
-        viewport: Rect,
-        clip: &mut ClipCore,
-    ) -> Response {
-        let response = ui.allocate_rect(rect, Sense::drag());
-
-        if response.dragged()
-            && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
-        {
-            clip.trim_end_at(
-                grid.snap_at_grid(grid.x_to_beats(mouse_pos.x, viewport)),
-                bpm,
-            );
-        }
-
-        if response.hovered() {
-            let painter = ui.painter_at(rect);
-            painter.rect_filled(rect, 1.0, Color32::WHITE);
+            painter.rect_filled(rect, 1.0, HANDLE_HOVER_COLOR);
             ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ResizeHorizontal);
         }
 

@@ -1,4 +1,6 @@
 mod clip_ops;
+mod clipboard;
+mod selection;
 mod sources;
 #[cfg(test)]
 mod tests;
@@ -11,6 +13,8 @@ use crate::{
         metrics::{AudioMetrics, GlobalMetrics},
         state::{
             clip_ops::{ClipOp, TrackClips},
+            clipboard::Clipboard,
+            selection::ClipSelection,
             sources::SourceRegistry,
         },
         track::{
@@ -24,6 +28,8 @@ use crate::{
     },
 };
 use std::{collections::HashMap, mem::take, path::PathBuf};
+
+pub use selection::SelectionBounds;
 use tonique_engine::{
     edit::{
         ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, EditSession, Plugin, PluginId,
@@ -79,6 +85,8 @@ pub struct ToniqueProjectState {
     /// starts and returns here, and edits (cuts) happen here.
     edit_cursor: f32,
     playback_state: PlaybackState,
+    /// Whether the timeline scrolls to keep the playhead in view.
+    follow_playhead: bool,
     preview_playback_state: PlaybackState,
     preview_position: usize,
     pub metrics: GlobalMetrics,
@@ -89,6 +97,8 @@ pub struct ToniqueProjectState {
     /// UI-only track fields; kept for deleted tracks so undo restores them.
     views: HashMap<TrackId, MutableTrackCore>,
     selected_tracks: Vec<TrackId>,
+    clip_selection: ClipSelection,
+    clipboard: Clipboard,
     /// Effect editors per track, in plugin order.
     effects: HashMap<TrackId, Vec<UIEffect>>,
     /// Editors of plugins not currently in a chain (removed, or not synced yet).
@@ -124,6 +134,7 @@ impl ToniqueProjectState {
             playhead: 0.,
             edit_cursor: 0.,
             playback_state: PlaybackState::Paused,
+            follow_playhead: false,
             preview_playback_state: PlaybackState::Paused,
             preview_position: 0,
             metrics: GlobalMetrics::new(),
@@ -131,6 +142,8 @@ impl ToniqueProjectState {
             central_view: CentralView::Timeline,
             views: HashMap::from([(MASTER_TRACK_ID, master)]),
             selected_tracks: Vec::new(),
+            clip_selection: ClipSelection::default(),
+            clipboard: Clipboard::default(),
             effects: HashMap::new(),
             detached_effects: HashMap::new(),
             pending_actions: Vec::new(),
@@ -269,6 +282,12 @@ impl ToniqueProjectState {
     }
     pub fn edit_cursor(&self) -> f32 {
         self.edit_cursor
+    }
+    pub fn follow_playhead(&self) -> bool {
+        self.follow_playhead
+    }
+    pub fn set_follow_playhead(&mut self, follow: bool) {
+        self.follow_playhead = follow;
     }
     // Transport state
     /// Stop playback and return the playhead to the edit cursor.
@@ -437,17 +456,23 @@ impl ToniqueProjectState {
     }
 
     /// Add clips and fix all overlaps on the track.
-    pub fn add_clips(&mut self, track_id: &TrackId, clips: Vec<ClipCore>) {
+    pub fn add_clips(&mut self, track_id: &TrackId, mut clips: Vec<ClipCore>) {
+        // Clips never start before the first beat.
+        for clip in &mut clips {
+            clip.position = clip.position.max(0.);
+        }
         self.clip_ops("Add clips", |s, ops| {
             let mut clips_on_track = s.track_clips(*track_id, ops);
             clips_on_track.add(clips, &mut || s.new_clip_id());
         });
     }
     /// Move clip to a new position and a new track fixing all overlaps on this track.
+    /// Clips never start before the first beat.
     pub fn move_clip(&mut self, id: &ClipId, to_track: &TrackId, to_pos: f32, ignore: &[ClipId]) {
         let Some((from, clip)) = self.find_clip(*id) else {
             return;
         };
+        let to_pos = to_pos.max(0.);
         self.clip_ops("Move clips", |s, ops| {
             let mut moved = clip.clone();
             moved.position = to_pos;
@@ -786,6 +811,28 @@ impl ToniqueProjectState {
     pub fn selected_tracks(&self) -> &Vec<TrackId> {
         &self.selected_tracks
     }
+    /// Positions (in beats) edits snap to besides the grid: the edges of the
+    /// clips not in `exclude`, the loop edges and the edit cursor.
+    pub fn snap_targets(&self, exclude: &[ClipId]) -> Vec<f32> {
+        let bpm = self.bpm();
+        let (loop_start, loop_end) = self.loop_range;
+        self.tracks()
+            .flat_map(|t| t.clips)
+            .filter(|c| !exclude.contains(&c.id))
+            .flat_map(|c| [c.position, c.end(bpm)])
+            .chain([loop_start, loop_end, self.edit_cursor])
+            .collect()
+    }
+    /// Where the arrangement's content ends, in beats: the last clip end,
+    /// the loop end while looping, or the playhead, whichever is furthest.
+    pub fn arrangement_end(&self) -> f32 {
+        let bpm = self.bpm();
+        let loop_end = if self.looping { self.loop_range.1 } else { 0. };
+        self.tracks()
+            .flat_map(|t| t.clips)
+            .map(|c| c.end(bpm))
+            .fold(self.playhead.max(loop_end), f32::max)
+    }
     pub fn track_len(&self) -> usize {
         self.edit().tracks.len()
     }
@@ -876,6 +923,7 @@ impl ToniqueProjectState {
         }
         self.selected_tracks
             .retain(|id| *id == MASTER_TRACK_ID || self.session.edit().track(*id).is_ok());
+        self.prune_clip_selection();
         self.sync_effects();
     }
     /// Whether there is still actions to undo

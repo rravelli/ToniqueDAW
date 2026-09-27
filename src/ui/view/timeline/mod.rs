@@ -12,21 +12,17 @@ use crate::{
         theme::PRIMARY_COLOR,
         track::HANDLE_HEIGHT,
         utils::find_track_at,
-        view::timeline::{
-            drag::DragState,
-            selection::{ClipSelection, Multiselect},
-        },
+        view::timeline::{drag::DragState, selection::Multiselect},
     },
 };
 use egui::{Color32, DragAndDrop, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use tonique_engine::edit::ClipId;
 mod drag;
 mod keys;
+mod scroll;
 mod selection;
 
 pub struct UITimeline {
-    // TODO: Merge into state
-    selected_clips: ClipSelection,
     drag_state: Option<DragState>,
     clicked_pos: Option<Pos2>,
     multiselect_start: Option<Multiselect>,
@@ -35,7 +31,6 @@ pub struct UITimeline {
 impl UITimeline {
     pub fn new() -> Self {
         Self {
-            selected_clips: ClipSelection::new(),
             drag_state: None,
             clicked_pos: None,
             multiselect_start: None,
@@ -50,7 +45,7 @@ impl UITimeline {
         offset: Vec2,
     ) {
         // First handle key presses
-        self.handle_key_press(ui, state);
+        self.handle_key_press(ui, state, viewport);
         // Create timeline area
         let timeline_res = ui.allocate_rect(viewport, Sense::all());
         let painter = ui.painter_at(viewport);
@@ -90,16 +85,16 @@ impl UITimeline {
         if response.clicked()
             && let Some(mouse_pos) = response.interact_pointer_pos()
         {
-            self.selected_clips.reset();
-            state.pause_preview();
+            state.clear_clip_selection();
             let beats = state.grid.x_to_beats(mouse_pos.x, viewport);
             state.set_edit_cursor(state.grid.snap_at_grid(beats));
         }
-        if let Some(mouse_pos) = response.hover_pos()
-            && ui.input(|i| i.smooth_scroll_delta.y != 0. && i.modifiers.alt)
+        // Ctrl+wheel (and pinch) zooms; egui reports it as a zoom factor.
+        let zoom = ui.input(|i| i.zoom_delta());
+        if zoom != 1.
+            && let Some(mouse_pos) = response.hover_pos()
         {
-            let delta = ui.input(|i| i.smooth_scroll_delta.y);
-            state.grid.zoom_around(delta, mouse_pos.x, viewport);
+            state.grid.zoom_by(zoom, mouse_pos.x, viewport);
         }
     }
 
@@ -245,30 +240,21 @@ impl UITimeline {
             pos,
             size,
             viewport,
-            !dragged && self.selected_clips.clip_ids.contains(&clip.id),
+            !dragged && state.is_clip_selected(clip.id),
             &clip,
             state,
             !track.closed,
             color,
         );
         // Select clip
+        // Shift-click adds or removes the clip; a plain click selects it alone.
         if response.clicked() {
-            let shift = ui.input(|r| r.modifiers.shift);
-            if self.selected_clips.clip_ids.contains(&clip.id) {
-                if shift {
-                    self.selected_clips.clip_ids.retain(|id| *id != clip.id);
-                } else {
-                    self.selected_clips.reset();
-                }
+            if ui.input(|r| r.modifiers.shift) {
+                state.toggle_clip_selected(clip.id);
             } else {
-                self.selected_clips.bounds = None;
-                if shift {
-                    self.selected_clips.clip_ids.push(clip.id.clone());
-                } else {
-                    self.selected_clips.clip_ids = vec![clip.id.clone()];
-                }
-                state.select_track(&track.id);
+                state.select_clips(vec![clip.id]);
             }
+            state.select_track(&track.id);
         }
 
         response.dragged()

@@ -3,6 +3,9 @@ use std::time::Duration;
 use egui::{Align2, Color32, FontId, Painter, Rect, Stroke, Vec2, pos2};
 
 const DEFAULT_THRESHOLD: f32 = 0.3;
+/// How close (in points) edits snap to clip edges, loop edges and the edit
+/// cursor. They win over the grid when in reach.
+pub const TARGET_REACH: f32 = 8.;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GridResolution {
@@ -87,8 +90,13 @@ impl GridService {
         (x + self.offset.x - viewport.left()) / self.pixels_per_beat
     }
 
+    /// Zoom from a scroll delta, keeping the beat under `cursor_x` in place.
     pub fn zoom_around(&mut self, delta: f32, cursor_x: f32, viewport: Rect) {
-        let factor = (1.0 - delta * 0.007).clamp(0., 2.0);
+        self.zoom_by((1.0 - delta * 0.007).clamp(0., 2.0), cursor_x, viewport);
+    }
+
+    /// Multiply the zoom by `factor`, keeping the beat under `cursor_x` in place.
+    pub fn zoom_by(&mut self, factor: f32, cursor_x: f32, viewport: Rect) {
         let old_ppb = self.pixels_per_beat;
         let old_offset_x = self.offset.x;
 
@@ -105,6 +113,22 @@ impl GridService {
         let new_offset_x = beat_under_cursor * new_ppb - (cursor_x - viewport.left());
 
         self.offset.x = new_offset_x.max(0.);
+    }
+
+    /// Snap `beats` to the nearest of `targets` within [`TARGET_REACH`]
+    /// points, or else to the grid. Returns the snapped position and
+    /// whether it came from `targets`.
+    pub fn snap_to_targets(&self, beats: f32, targets: &[f32]) -> Option<(f32, bool)> {
+        let reach = TARGET_REACH / self.pixels_per_beat;
+        let target = targets
+            .iter()
+            .copied()
+            .filter(|t| (t - beats).abs() <= reach)
+            .min_by(|a, b| (a - beats).abs().total_cmp(&(b - beats).abs()));
+        match target {
+            Some(t) => Some((t, true)),
+            None => self.snap_at_grid_option(beats).map(|g| (g, false)),
+        }
     }
 
     pub fn snap_at_grid(&self, beats: f32) -> f32 {

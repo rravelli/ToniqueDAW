@@ -345,7 +345,283 @@ fn playback_wraps_inside_the_loop_after_a_tempo_change() {
         render_offline(&mut processor, 256, 2);
         state.update();
         furthest = furthest.max(state.playhead());
-        assert!(state.playhead() < 1., "played past the loop: {}", state.playhead());
+        assert!(
+            state.playhead() < 1.,
+            "played past the loop: {}",
+            state.playhead()
+        );
     }
     assert!(furthest > 0.9, "never reached the loop end ({furthest})");
+}
+
+#[test]
+fn zone_selects_overlapping_clips_on_its_tracks() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let (t0, t1, t2) = (state.add_track(), state.add_track(), state.add_track());
+    let a = add_clip(&mut state, t0, 0., 1.); // beats 0..2
+    let b = add_clip(&mut state, t1, 3., 1.); // beats 3..5
+    let _outside_range = add_clip(&mut state, t1, 8., 1.);
+    let _outside_tracks = add_clip(&mut state, t2, 0., 1.);
+
+    // Dragged from bottom right to top left: corners in any order.
+    state.select_in_bounds(SelectionBounds::between((1, 4.), (0, 1.)));
+    assert_eq!(state.selected_clips(), &[a, b]);
+    assert_eq!(state.selection_range(), Some((1., 4.)));
+}
+
+#[test]
+fn clicking_toggles_and_replaces_the_selection() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let a = add_clip(&mut state, track, 0., 1.);
+    let b = add_clip(&mut state, track, 4., 1.);
+
+    state.select_clips(vec![a]);
+    state.toggle_clip_selected(b);
+    assert_eq!(state.selected_clips(), &[a, b]);
+    state.toggle_clip_selected(a);
+    assert_eq!(state.selected_clips(), &[b]);
+    // Without a zone, the range spans the selected clips.
+    assert_eq!(state.selection_range(), Some((4., 6.)));
+    state.clear_clip_selection();
+    assert_eq!(state.selection_range(), None);
+}
+
+#[test]
+fn loop_selection_loops_over_the_selected_clips() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let a = add_clip(&mut state, track, 2., 1.);
+    let b = add_clip(&mut state, track, 6., 1.);
+    assert!(!state.loop_selection());
+
+    state.select_clips(vec![a, b]);
+    assert!(state.loop_selection());
+    assert!(state.looping());
+    assert_eq!(state.loop_range(), (2., 8.));
+}
+
+#[test]
+fn duplicating_selects_the_copies() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let track = state.add_track();
+    add_clip(&mut state, track, 0., 1.);
+    state.select_in_bounds(SelectionBounds::between((0, 0.), (0, 4.)));
+    let originals = state.selected_clips().to_vec();
+
+    state.duplicate_selected_clips();
+    assert_eq!(state.selected_clips().len(), 1);
+    assert_ne!(state.selected_clips(), originals.as_slice());
+    assert_eq!(state.selection_range(), Some((4., 8.)));
+    assert_eq!(spans(&state, track), vec![(0., 2.), (4., 6.)]);
+}
+
+#[test]
+fn deleted_or_undone_clips_leave_the_selection() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let a = add_clip(&mut state, track, 0., 1.);
+    let b = add_clip(&mut state, track, 4., 1.);
+
+    state.select_clips(vec![a, b]);
+    state.undo(); // removes b
+    assert_eq!(state.selected_clips(), &[a]);
+
+    state.delete_selected_clips();
+    assert!(state.selected_clips().is_empty());
+    assert!(spans(&state, track).is_empty());
+}
+
+#[test]
+fn arrangement_end_covers_clips_loop_and_playhead() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    assert_eq!(state.arrangement_end(), 0.);
+    add_clip(&mut state, track, 4., 1.);
+    assert_eq!(state.arrangement_end(), 6.);
+    state.set_loop_range(0., 12.);
+    assert_eq!(state.arrangement_end(), 6.); // the loop counts only when on
+    state.set_looping(true);
+    assert_eq!(state.arrangement_end(), 12.);
+    state.seek(20.);
+    assert_eq!(state.arrangement_end(), 20.);
+}
+
+#[test]
+fn paste_goes_to_the_edit_cursor_on_the_selected_track_and_appends() {
+    let mut state = setup_state();
+    let (t0, t1) = (state.add_track(), state.add_track());
+    let a = add_clip(&mut state, t0, 2., 1.); // beats 2..4
+    state.select_clips(vec![a]);
+    assert!(state.copy_selection());
+
+    state.select_track(&t1);
+    state.set_edit_cursor(8.);
+    state.paste();
+    state.paste(); // the cursor moved past the first paste
+    assert_eq!(spans(&state, t1), vec![(8., 10.), (10., 12.)]);
+    assert_eq!(state.edit_cursor(), 12.);
+    assert_eq!(state.selected_clips().len(), 1);
+
+    state.undo(); // each paste is one step
+    assert_eq!(spans(&state, t1), vec![(8., 10.)]);
+    assert_eq!(spans(&state, t0), vec![(2., 4.)]);
+}
+
+#[test]
+fn paste_keeps_track_offsets_and_creates_missing_tracks() {
+    let mut state = setup_state();
+    let (t0, t1) = (state.add_track(), state.add_track());
+    let a = add_clip(&mut state, t0, 0., 1.);
+    let b = add_clip(&mut state, t1, 2., 1.);
+    state.select_clips(vec![a, b]);
+    state.copy_selection();
+
+    state.select_track(&t1);
+    state.set_edit_cursor(8.);
+    state.paste();
+    assert_eq!(state.track_len(), 3);
+    let t2 = state.tracks().nth(2).unwrap().id;
+    assert_eq!(spans(&state, t1), vec![(2., 4.), (8., 10.)]);
+    assert_eq!(spans(&state, t2), vec![(10., 12.)]);
+}
+
+#[test]
+fn cutting_a_zone_removes_only_its_part() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let track = state.add_track();
+    add_clip(&mut state, track, 0., 2.); // beats 0..4
+    state.select_in_bounds(SelectionBounds::between((0, 1.), (0, 3.)));
+    state.cut_selection();
+    assert_eq!(spans(&state, track), vec![(0., 1.), (3., 4.)]);
+    assert!(state.selected_clips().is_empty());
+
+    state.set_edit_cursor(8.);
+    state.paste();
+    assert_eq!(spans(&state, track), vec![(0., 1.), (3., 4.), (8., 10.)]);
+}
+
+#[test]
+fn nudging_moves_the_selection_as_a_block() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let a = add_clip(&mut state, track, 1., 1.); // beats 1..3
+    let b = add_clip(&mut state, track, 3., 1.); // beats 3..5
+    add_clip(&mut state, track, 6., 1.); // unselected, beats 6..8
+    state.select_clips(vec![a, b]);
+
+    state.nudge_selection(2.);
+    // Moved onto the unselected clip, which gets trimmed.
+    assert_eq!(spans(&state, track), vec![(3., 5.), (5., 7.), (7., 8.)]);
+    state.nudge_selection(-10.); // stops at the start
+    assert_eq!(spans(&state, track), vec![(0., 2.), (2., 4.), (7., 8.)]);
+
+    state.undo();
+    state.undo();
+    assert_eq!(spans(&state, track), vec![(1., 3.), (3., 5.), (6., 8.)]);
+}
+
+#[test]
+fn clips_never_start_before_the_first_beat() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let id = state.new_clip_id();
+    state.add_clips(&track, vec![ClipCore::new(id, audio(1.), -3.)]);
+    assert_eq!(spans(&state, track), vec![(0., 2.)]);
+
+    state.move_clip(&id, &track, -1., &[]);
+    assert_eq!(spans(&state, track), vec![(0., 2.)]);
+}
+
+#[test]
+fn trimming_the_start_stops_at_the_first_beat() {
+    let bpm = 120.;
+    let mut clip = ClipCore::new(ClipId(1), audio(2.), 1.); // beats 1..5
+    clip.trim_start_at(2., bpm); // hide the first 1 beat of the file: 2..5
+    clip.position -= 1.5; // moved near the start: 0.5..3.5, file starts at -0.5
+
+    clip.trim_start_at(-4., bpm);
+    assert_eq!(clip.position, 0.);
+    assert!(
+        (clip.end(bpm) - 3.5).abs() < 1e-4,
+        "the end moved: {}",
+        clip.end(bpm)
+    );
+}
+
+#[test]
+fn select_all_selects_every_clip() {
+    let mut state = setup_state();
+    let (t0, t1) = (state.add_track(), state.add_track());
+    let a = add_clip(&mut state, t0, 0., 1.);
+    let b = add_clip(&mut state, t1, 4., 1.);
+    state.select_all_clips();
+    assert_eq!(state.selected_clips(), &[a, b]);
+}
+
+#[test]
+fn moving_between_tracks_keeps_the_block_and_stays_in_range() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let (t0, t1, t2) = (state.add_track(), state.add_track(), state.add_track());
+    add_clip(&mut state, t0, 0., 1.); // beats 0..2
+    add_clip(&mut state, t1, 0., 1.);
+    add_clip(&mut state, t2, 1., 1.); // unselected, beats 1..3
+    state.select_in_bounds(SelectionBounds::between((0, 0.), (1, 1.)));
+
+    state.move_selection_tracks(5); // only one track of room below
+    assert!(spans(&state, t0).is_empty());
+    assert_eq!(spans(&state, t1), vec![(0., 2.)]);
+    // Landed on the unselected clip, which gets trimmed.
+    assert_eq!(spans(&state, t2), vec![(0., 2.), (2., 3.)]);
+    let bounds = state.selection_bounds().unwrap();
+    assert_eq!((bounds.start_track_index, bounds.end_track_index), (1, 2));
+
+    state.move_selection_tracks(-1);
+    state.move_selection_tracks(-1); // already on the first track: no-op
+    assert_eq!(spans(&state, t0), vec![(0., 2.)]);
+    state.undo(); // back down
+    assert!(spans(&state, t0).is_empty());
+    state.undo(); // back to the start
+    assert_eq!(spans(&state, t0), vec![(0., 2.)]);
+    assert_eq!(spans(&state, t2), vec![(1., 3.)]);
+}
+
+#[test]
+fn snap_targets_are_other_clips_loop_and_edit_cursor() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let a = add_clip(&mut state, track, 0., 1.); // beats 0..2
+    add_clip(&mut state, track, 3., 1.); // beats 3..5
+    state.set_loop_range(8., 12.);
+    state.set_edit_cursor(6.);
+    let mut targets = state.snap_targets(&[a]);
+    targets.sort_by(f32::total_cmp);
+    assert_eq!(targets, vec![3., 5., 6., 8., 12.]);
+}
+
+#[test]
+fn snapping_prefers_targets_in_reach_over_the_grid() {
+    use crate::core::grid::{GridService, TARGET_REACH};
+
+    let grid = GridService::new(); // one grid line per beat
+    let reach = TARGET_REACH / grid.pixels_per_beat();
+    // A target in reach wins over a nearer grid line.
+    assert_eq!(
+        grid.snap_to_targets(2.1, &[2.1 + reach * 0.9]),
+        Some((2.1 + reach * 0.9, true))
+    );
+    // Out of reach: the grid, when close enough to a line.
+    assert_eq!(
+        grid.snap_to_targets(2.1, &[2.1 + reach * 2.]),
+        Some((2., false))
+    );
+    assert_eq!(grid.snap_to_targets(2.5, &[]), None);
 }

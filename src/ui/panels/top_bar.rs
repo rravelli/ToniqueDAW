@@ -62,6 +62,7 @@ impl UITopBar {
             };
             self.record_button_ui(ui);
             self.loop_ui(ui, state);
+            self.follow_ui(ui, state);
             self.bpm_input.value = state.bpm();
             self.bpm_input.ui(ui);
             if self.bpm_input.value != state.bpm() {
@@ -181,6 +182,35 @@ impl UITopBar {
         };
 
         res
+    }
+
+    fn follow_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+        let follow = state.follow_playhead();
+        let res = ui.add(
+            SquareButton::new(egui_phosphor::fill::CARET_LINE_RIGHT)
+                .square(BUTTON_SIZE)
+                .font(FontId::new(
+                    14.,
+                    FontFamily::Name(
+                        if follow {
+                            PHOSPHOR_FILL
+                        } else {
+                            PHOSPHOR_REGULAR
+                        }
+                        .into(),
+                    ),
+                ))
+                .fill(if follow {
+                    PRIMARY_COLOR
+                } else {
+                    PRIMARY_BUTTON_COLOR
+                })
+                .color(Color32::from_gray(30))
+                .tooltip("Follow playhead"),
+        );
+        if res.clicked() {
+            state.set_follow_playhead(!follow);
+        }
     }
 
     fn loop_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {

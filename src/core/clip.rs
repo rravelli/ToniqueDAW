@@ -50,9 +50,12 @@ impl ClipCore {
             None
         }
     }
+    /// Move the clip's start to `beats`, keeping its end: no earlier than
+    /// the start of the file or the first beat, no later than the end.
     pub fn trim_start_at(&mut self, beats: f32, bpm: f32) {
         let duration = self.audio.duration.unwrap().as_secs_f32() * bpm / 60.;
-        let clamped_beats = beats.clamp(self.position - duration * self.trim_start, self.end(bpm));
+        let file_start = self.position - duration * self.trim_start;
+        let clamped_beats = beats.clamp(file_start.max(0.), self.end(bpm));
         self.trim_start += (clamped_beats - self.position) / duration;
         self.position = clamped_beats;
 
@@ -63,6 +66,14 @@ impl ClipCore {
         let duration = self.audio.duration.unwrap().as_secs_f32() * bpm / 60.;
         self.trim_end = (beats - self.position) / duration + self.trim_start;
         self.trim_end = self.trim_end.clamp(0., 1.);
+    }
+
+    /// Keep only the part of the clip inside `start..end` (in beats). Never
+    /// reveals audio that was trimmed away.
+    pub fn crop(&mut self, start: f32, end: f32, bpm: f32) {
+        let clip_end = self.end(bpm);
+        self.trim_start_at(start.max(self.position), bpm);
+        self.trim_end_at(end.min(clip_end), bpm);
     }
 
     pub fn end(&self, bpm: f32) -> f32 {
