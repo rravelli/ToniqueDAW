@@ -8,6 +8,7 @@ pub mod effect;
 pub mod effects;
 pub mod font;
 pub mod panels;
+pub mod project;
 pub mod theme;
 mod track;
 mod utils;

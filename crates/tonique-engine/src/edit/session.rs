@@ -32,6 +32,22 @@ impl EditSession {
         Ok(s)
     }
 
+    /// Replace the edit (a new or loaded project) on the same engine, with an
+    /// empty undo history. The transport is left stopped.
+    pub fn reset(&mut self, edit: Edit) -> Result<(), EditError> {
+        self.engine.stop()?;
+        edit.refresh_mute_gains();
+        self.edit = edit;
+        self.undo.clear();
+        self.rebuild()?;
+        Ok(())
+    }
+
+    /// Forget the undo history, keeping the edit.
+    pub fn clear_history(&mut self) {
+        self.undo.clear();
+    }
+
     pub fn edit(&self) -> &Edit {
         &self.edit
     }

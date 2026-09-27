@@ -10,6 +10,7 @@ use crate::{
             menu_bar::{UIMenuBar, set_ui_scale},
             top_bar::UITopBar,
         },
+        project::{ProjectAction, UIProject},
         theme::{ThemeExt, ThemeLibrary},
         windows::settings::UISettingsWindow,
     },
@@ -24,6 +25,7 @@ pub struct ToniqueApp {
     left_panel: UILeftPanel,
     central_panel: UICentralPanel,
     setting_window: UISettingsWindow,
+    project: UIProject,
 }
 
 impl ToniqueApp {
@@ -39,6 +41,7 @@ impl ToniqueApp {
         let mut state = ToniqueProjectState::new(engine);
         state.attach_audio(audio, settings);
         Self {
+            project: UIProject::new(&state),
             state,
             menu_bar: UIMenuBar::new(),
             top_bar: UITopBar::new(),
@@ -64,7 +67,9 @@ impl eframe::App for ToniqueApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_shortcuts(ui);
         self.state.set_track_palette(&ui.app_theme().palette);
-        let actions = self.menu_bar.show(ui, &mut self.state);
+        let actions = self
+            .menu_bar
+            .show(ui, &mut self.state, self.project.recent());
         self.top_bar.show(ui, &mut self.state);
         self.bottom_panel.show(ui, &mut self.state);
         self.left_panel.show(ui, &mut self.state);
@@ -74,6 +79,10 @@ impl eframe::App for ToniqueApp {
             self.setting_window.open(&self.state);
         }
         self.setting_window.show(ui, &mut self.state);
+        if let Some(action) = actions.project {
+            self.project.request(action, &mut self.state);
+        }
+        self.project.ui(ui, &mut self.state);
     }
 }
 
@@ -118,6 +127,10 @@ impl ToniqueApp {
                     }
                 }
                 Action::OpenSettings => self.setting_window.toggle(state),
+                Action::NewProject => self.project.request(ProjectAction::New, state),
+                Action::OpenProject => self.project.request(ProjectAction::Open, state),
+                Action::SaveProject => self.project.request(ProjectAction::Save, state),
+                Action::SaveProjectAs => self.project.request(ProjectAction::SaveAs, state),
                 _ => {}
             }
         }

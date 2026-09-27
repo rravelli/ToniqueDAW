@@ -8,6 +8,11 @@ use std::collections::BTreeMap;
 /// themselves, so they can't be rebound.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Action {
+    // File
+    NewProject,
+    OpenProject,
+    SaveProject,
+    SaveProjectAs,
     // Transport
     PlayStop,
     Loop,
@@ -34,7 +39,11 @@ pub enum Action {
 
 impl Action {
     /// In the order shown in the settings.
-    pub const ALL: [Action; 19] = [
+    pub const ALL: [Action; 23] = [
+        Action::NewProject,
+        Action::OpenProject,
+        Action::SaveProject,
+        Action::SaveProjectAs,
         Action::PlayStop,
         Action::Loop,
         Action::ToggleMetronome,
@@ -78,6 +87,10 @@ impl Action {
             Action::ToggleEffectsPanel => "toggle_effects_panel",
             Action::ToggleGraphView => "toggle_graph_view",
             Action::OpenSettings => "open_settings",
+            Action::NewProject => "new_project",
+            Action::OpenProject => "open_project",
+            Action::SaveProject => "save_project",
+            Action::SaveProjectAs => "save_project_as",
         }
     }
 
@@ -106,11 +119,19 @@ impl Action {
             Action::ToggleEffectsPanel => "Show / hide effects panel",
             Action::ToggleGraphView => "Switch timeline / audio graph",
             Action::OpenSettings => "Open / close settings",
+            Action::NewProject => "New project",
+            Action::OpenProject => "Open project…",
+            Action::SaveProject => "Save project",
+            Action::SaveProjectAs => "Save project as…",
         }
     }
 
     pub fn group(self) -> &'static str {
         match self {
+            Action::NewProject
+            | Action::OpenProject
+            | Action::SaveProject
+            | Action::SaveProjectAs => "File",
             Action::PlayStop
             | Action::Loop
             | Action::ToggleMetronome
@@ -173,6 +194,10 @@ impl Action {
             Action::MoveTrackUp => vec![none(Key::ArrowUp)],
             Action::MoveTrackDown => vec![none(Key::ArrowDown)],
             Action::ToggleBrowser => vec![cmd(Key::B)],
+            Action::NewProject => vec![cmd(Key::N)],
+            Action::OpenProject => vec![cmd(Key::O)],
+            Action::SaveProject => vec![cmd(Key::S)],
+            Action::SaveProjectAs => vec![cmd_shift(Key::S)],
             Action::ToggleEffectsPanel => vec![cmd(Key::J)],
             Action::ToggleGraphView => vec![cmd(Key::G)],
             Action::OpenSettings => vec![cmd(Key::Comma)],

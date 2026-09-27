@@ -1,4 +1,7 @@
-use crate::{core::metrics::AudioMetrics, ui::theme::ThemeExt};
+use crate::{
+    core::metrics::AudioMetrics,
+    ui::{effects::EffectId, theme::ThemeExt},
+};
 use egui::{
     Button, Frame, InnerResponse, Label, Margin, Rect, Response, RichText, Sense, Stroke, Ui, Vec2,
 };
@@ -22,6 +25,10 @@ pub trait UIEffectContent: UIEffectContentClone {
     fn bind(&mut self, plugin: &Plugin);
     // effect id
     fn id(&self) -> String;
+    /// Which effect this is, as saved in projects.
+    fn effect_id(&self) -> EffectId;
+    /// Update the editor from its bound parameters (after a project load).
+    fn read_params(&mut self);
 }
 
 pub trait UIEffectContentClone {
@@ -98,6 +105,15 @@ impl UIEffect {
     pub fn toggle(&mut self) {
         self.enabled = !self.enabled;
         self.toggled = true;
+    }
+
+    pub fn effect_id(&self) -> EffectId {
+        self.content.effect_id()
+    }
+
+    /// See [`UIEffectContent::read_params`].
+    pub fn read_params(&mut self) {
+        self.content.read_params();
     }
 
     pub fn take_toggled(&mut self) -> bool {
