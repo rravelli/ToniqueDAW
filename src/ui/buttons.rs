@@ -1,6 +1,5 @@
-use egui::{
-    Align2, Color32, FontId, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2,
-};
+use crate::ui::theme::ThemeExt;
+use egui::{Align2, FontId, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
 
 pub fn paint_circle_button(
     ui: &mut Ui,
@@ -39,8 +38,9 @@ pub fn paint_circle_button(
         }
     }
 
+    let theme = ui.app_theme();
     // Draw base circle
-    painter.circle_stroke(center, radius, Stroke::new(2.0, Color32::DARK_GRAY));
+    painter.circle_stroke(center, radius, Stroke::new(2.0, theme.bg_control));
 
     // Arc fill from top clockwise
     if ratio > 0.01 {
@@ -59,18 +59,14 @@ pub fn paint_circle_button(
             points.push(Pos2::new(x, y));
         }
 
-        painter.add(Shape::convex_polygon(
-            points,
-            Color32::from_rgb(80, 160, 240),
-            Stroke::NONE,
-        ));
+        painter.add(Shape::convex_polygon(points, theme.accent, Stroke::NONE));
     }
     painter.text(
         Pos2::new(center.x, center.y - radius - 2.0),
         Align2::CENTER_BOTTOM,
         name,
         FontId::new(10., egui::FontFamily::Proportional),
-        Color32::DARK_GRAY,
+        theme.text_muted,
     );
     if let Some(label) = label {
         painter.text(
@@ -78,11 +74,11 @@ pub fn paint_circle_button(
             Align2::CENTER_TOP,
             label,
             FontId::new(10., egui::FontFamily::Proportional),
-            Color32::DARK_GRAY,
+            theme.text_muted,
         );
     }
     // Optional: draw inner circle for contrast
-    painter.circle_filled(center, radius - 3.0, Color32::DARK_GRAY);
+    painter.circle_filled(center, radius - 3.0, theme.bg_control);
 
     response
 }

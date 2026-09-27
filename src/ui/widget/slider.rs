@@ -1,8 +1,6 @@
-use egui::{
-    Align2, Color32, CursorIcon, FontId, Response, Sense, Ui, Widget, emath::Numeric, pos2, vec2,
-};
+use egui::{Align2, CursorIcon, FontId, Response, Sense, Ui, Widget, emath::Numeric, pos2, vec2};
 
-use crate::ui::theme::PRIMARY_COLOR;
+use crate::ui::theme::ThemeExt;
 
 const HEIGHT: f32 = 18.;
 const TRACK_HEIGHT: f32 = 4.;
@@ -114,20 +112,17 @@ impl<N: Numeric> Widget for ValueSlider<'_, N> {
             response.mark_changed();
         }
 
+        let theme = ui.app_theme();
         let active = response.dragged() || response.hovered();
         let fill = match (enabled, active) {
-            (false, _) => Color32::from_gray(110),
-            (true, true) => PRIMARY_COLOR.gamma_multiply(1.2),
-            (true, false) => PRIMARY_COLOR,
+            (false, _) => theme.text_disabled,
+            (true, true) => theme.accent_hover,
+            (true, false) => theme.accent,
         };
         let painter = ui.painter();
         let handle_x = track.left() + self.ratio() * track.width();
-        painter.rect_filled(track, TRACK_HEIGHT / 2., Color32::from_gray(60));
-        painter.rect_filled(
-            track.with_max_x(handle_x),
-            TRACK_HEIGHT / 2.,
-            fill.gamma_multiply(0.8),
-        );
+        painter.rect_filled(track, TRACK_HEIGHT / 2., theme.bg_control);
+        painter.rect_filled(track.with_max_x(handle_x), TRACK_HEIGHT / 2., fill);
         painter.circle_filled(
             pos2(handle_x, track.center().y),
             if active && enabled {
@@ -136,9 +131,9 @@ impl<N: Numeric> Widget for ValueSlider<'_, N> {
                 HANDLE_RADIUS
             },
             if enabled {
-                Color32::from_gray(230)
+                theme.text
             } else {
-                Color32::from_gray(130)
+                theme.text_disabled
             },
         );
         painter.text(
@@ -147,9 +142,9 @@ impl<N: Numeric> Widget for ValueSlider<'_, N> {
             (self.formatter)(self.value.to_f64()),
             FontId::proportional(11.),
             if enabled {
-                Color32::from_gray(210)
+                theme.text_muted
             } else {
-                Color32::from_gray(120)
+                theme.text_disabled
             },
         );
 

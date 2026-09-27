@@ -1,0 +1,48 @@
+# Warm and vintage: walnut browns, cream text and an amber accent, like
+# an old tape machine.
+
+name = "Tape"
+
+bg_deep = "#15100c"
+bg_base = "#1f1813"
+bg_panel = "#271f19"
+bg_raised = "#312720"
+bg_control = "#3e3229"
+bg_control_hover = "#4b3e33"
+
+border = "#57483b"
+separator = "#2e251e"
+
+text = "#f2e8da"
+text_muted = "#bdab95"
+text_disabled = "#7f6e5d"
+text_on_accent = "#1f1405"
+
+accent = "#f2a93b"
+accent_hover = "#f7bf66"
+
+danger = "#ff735c"
+warning = "#e8cf52"
+success = "#a3cf6b"
+record = "#e8483f"
+
+hover_overlay = "#fff4e012"
+shadow = "#0000008c"
+
+playhead = "#f2e8da"
+edit_cursor = "#f2a93b"
+selection_fill = "#f2e8da0d"
+selection_stroke = "#f2e8da66"
+clip_selected = "#f2e8da"
+loop_region = "#f2a93b30"
+grid_bar = "#fff4e016"
+grid_beat = "#fff4e009"
+
+meter_low = "#a3cf6b"
+meter_mid = "#e8cf52"
+meter_high = "#ff735c"
+
+palette = [
+    "#d9745a", "#e0a050", "#d8c060", "#a8b860", "#6fa88c",
+    "#6aa0b0", "#8890c0", "#a888b8", "#c07890", "#b89070",
+]

@@ -55,6 +55,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - uses: Swatinem/rust-cache@v2
         with:
+          # Own key: the job id alone matched the old `cargo test` cache,
+          # and an exact match is never re-saved, so the coverage build
+          # (target/llvm-cov-target) was never cached.
+          key: llvm-cov
           cache-on-failure: true
           # Only master writes the cache; PRs restore it without evicting it.
           save-if: ${{ github.ref == 'refs/heads/master' }}

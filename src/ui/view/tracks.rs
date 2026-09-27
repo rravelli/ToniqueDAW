@@ -1,9 +1,10 @@
-use egui::{Color32, FontId, Rect, Sense, Ui, pos2, vec2};
+use egui::{FontId, Rect, Sense, Ui, pos2, vec2};
 use egui_phosphor::fill::PLUS;
 
 use crate::{
     config::keymap::Action,
     core::state::ToniqueProjectState,
+    ui::theme::ThemeExt,
     ui::{
         font::PHOSPHOR_REGULAR,
         panels::{central_panel::SCROLLBAR_WIDTH, left_panel::DragPayload},
@@ -38,10 +39,11 @@ impl UITracks {
 
         let painter = ui.painter_at(dragger_rect);
 
+        let theme = ui.app_theme();
         let color = if response.hovered() || response.dragged() {
-            Color32::WHITE
+            theme.accent
         } else {
-            Color32::from_gray(70)
+            theme.separator
         };
         painter.rect_filled(dragger_rect, 0., color);
         if response.dragged() {
@@ -106,7 +108,7 @@ impl UITracks {
                 if response.dragged() {
                     dragged_track = Some(track.clone());
                     ui.painter()
-                        .rect_filled(response.rect, 1.0, Color32::from_white_alpha(20));
+                        .rect_filled(response.rect, 1.0, ui.app_theme().hover_overlay);
                 }
                 // Open bottom panel
                 if response.double_clicked() {

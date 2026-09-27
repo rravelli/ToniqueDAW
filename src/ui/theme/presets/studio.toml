@@ -1,0 +1,47 @@
+# Inspired by Logic Pro: neutral charcoal, a system-blue accent and a
+# yellow cycle region.
+
+name = "Studio"
+
+bg_deep = "#111113"
+bg_base = "#1a1a1c"
+bg_panel = "#222224"
+bg_raised = "#2c2c2e"
+bg_control = "#3a3a3c"
+bg_control_hover = "#48484a"
+
+border = "#48484a"
+separator = "#2e2e30"
+
+text = "#f2f2f7"
+text_muted = "#aeaeb2"
+text_disabled = "#6e6e73"
+text_on_accent = "#06121f"
+
+accent = "#4da3ff"
+accent_hover = "#73b7ff"
+
+danger = "#ff6961"
+warning = "#ffd60a"
+success = "#32d74b"
+record = "#ff453a"
+
+hover_overlay = "#ffffff0f"
+shadow = "#00000099"
+
+playhead = "#f2f2f7"
+edit_cursor = "#4da3ff"
+selection_fill = "#f2f2f70d"
+selection_stroke = "#f2f2f766"
+loop_region = "#ffd60a40"
+grid_bar = "#ffffff17"
+grid_beat = "#ffffff09"
+
+meter_low = "#32d74b"
+meter_mid = "#ffd60a"
+meter_high = "#ff453a"
+
+palette = [
+    "#ff6961", "#ff9f0a", "#ffd60a", "#32d74b", "#66d4cf",
+    "#64d2ff", "#5e9eff", "#bf8cff", "#ff7ab8", "#ac8e68",
+]

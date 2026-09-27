@@ -1,8 +1,10 @@
 use egui::{
-    Align2, Color32, FontId, Margin, Painter, Pos2, Rangef, Rect, Response, Sense, Stroke,
-    StrokeKind, TextEdit, UiBuilder, Vec2,
+    Align2, FontId, Margin, Painter, Pos2, Rangef, Rect, Response, Sense, Stroke, StrokeKind,
+    TextEdit, UiBuilder, Vec2,
 };
 use egui_phosphor::fill::{CARET_DOWN, CARET_UP};
+
+use crate::ui::theme::ThemeExt;
 
 const BUTTON_SIZE: Vec2 = Vec2::new(14., 8.0);
 
@@ -10,8 +12,6 @@ const BUTTONS_GAP: f32 = 1.0;
 const STROKE_SIZE: f32 = 1.0;
 pub struct NumberInput {
     size: Vec2,
-    bg_color: Color32,
-    text_color: Color32,
     font: FontId,
 
     edit_mode: bool,
@@ -26,8 +26,6 @@ impl NumberInput {
     pub fn new(size: Vec2) -> Self {
         Self {
             size,
-            bg_color: Color32::from_gray(80),
-            text_color: Color32::WHITE,
             font: FontId::new(12., egui::FontFamily::Proportional),
             edit_mode: false,
             buffer: "".into(),
@@ -40,16 +38,6 @@ impl NumberInput {
 
     pub fn with_range(mut self, range: Rangef) -> Self {
         self.range = range;
-        self
-    }
-
-    pub fn fill(mut self, fill: Color32) -> Self {
-        self.bg_color = fill;
-        self
-    }
-
-    pub fn text_color(mut self, color: Color32) -> Self {
-        self.text_color = color;
         self
     }
 
@@ -79,9 +67,9 @@ impl NumberInput {
     pub fn ui(&mut self, ui: &mut egui::Ui) -> Response {
         let (res, painter) = ui.allocate_painter(self.size, Sense::click());
         let rect = res.rect;
-        let curr_color = self.bg_color;
+        let theme = ui.app_theme();
         // Paint widget
-        painter.rect_filled(rect, 1.0, curr_color);
+        painter.rect_filled(rect, 1.0, theme.bg_control);
 
         let mut text = self.parse_to_string(self.value) + &self.suffix;
         // Text
@@ -102,7 +90,7 @@ impl NumberInput {
                 .interactive(self.edit_mode)
                 .horizontal_align(egui::Align::Center)
                 .margin(Margin::ZERO)
-                .text_color(self.text_color)
+                .text_color(theme.text)
                 .show(ui)
             })
             .inner
@@ -141,7 +129,7 @@ impl NumberInput {
             painter.rect_stroke(
                 rect,
                 1.0,
-                Stroke::new(STROKE_SIZE, Color32::from_white_alpha(200)),
+                Stroke::new(STROKE_SIZE, theme.accent),
                 StrokeKind::Inside,
             );
         }
@@ -177,10 +165,12 @@ impl NumberInput {
         icon: &str,
     ) -> Response {
         let res = ui.allocate_rect(rect, Sense::click());
-        let mut bg = Color32::from_gray(30);
-        if res.hovered() {
-            bg = bg.gamma_multiply(0.7);
-        }
+        let theme = ui.app_theme();
+        let bg = if res.hovered() {
+            theme.bg_control_hover
+        } else {
+            theme.bg_raised
+        };
 
         painter.rect_filled(rect, 1.0, bg);
         painter.text(
@@ -188,7 +178,7 @@ impl NumberInput {
             Align2::CENTER_CENTER,
             icon,
             FontId::new(8., egui::FontFamily::Proportional),
-            Color32::WHITE,
+            theme.text_muted,
         );
 
         res

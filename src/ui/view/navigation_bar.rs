@@ -1,9 +1,9 @@
-use egui::{Color32, CursorIcon, Painter, Rect, Sense, Stroke, Ui, Vec2, vec2};
+use egui::{CursorIcon, Painter, Rect, Sense, Stroke, Ui, Vec2, vec2};
 use egui_phosphor::fill::{ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL, LINE_SEGMENTS};
 
 use crate::{
     core::state::ToniqueProjectState,
-    ui::{theme::PRIMARY_COLOR, view::tracks::DRAGGER_WIDTH, widget::square_button::SquareButton},
+    ui::{theme::ThemeExt, view::tracks::DRAGGER_WIDTH, widget::square_button::SquareButton},
 };
 
 pub const NAVIGATION_BAR_HEIGHT: f32 = 30.;
@@ -11,7 +11,6 @@ pub const NAVIGATION_BAR_HEIGHT: f32 = 30.;
 const LOOP_LANE_HEIGHT: f32 = 14.;
 /// How close to an edge of the loop brace grabs that edge, in points.
 const EDGE_GRAB: f32 = 5.;
-const LOOP_OFF_COLOR: Color32 = Color32::from_gray(160);
 
 /// What a drag in the loop lane is doing.
 #[derive(Clone, Copy)]
@@ -51,11 +50,11 @@ impl UINavigationBar {
             );
 
             // Draw rectangle
-            painter.rect_filled(nav_bar_rect, 0.0, egui::Color32::from_gray(80));
+            painter.rect_filled(nav_bar_rect, 0.0, ui.app_theme().bg_raised);
             // Draw Labels
             state
                 .grid
-                .render_labels(&painter, nav_bar_rect, state.bpm());
+                .render_labels(&painter, nav_bar_rect, state.bpm(), &ui.app_theme());
             let loop_lane = Rect::from_min_size(
                 nav_bar_rect.min,
                 vec2(nav_bar_rect.width(), LOOP_LANE_HEIGHT),
@@ -176,10 +175,11 @@ impl UINavigationBar {
             state.grid.beats_to_x(start, lane)..=state.grid.beats_to_x(end, lane),
             lane.y_range(),
         );
+        let theme = ui.app_theme();
         let color = if state.looping() {
-            PRIMARY_COLOR
+            theme.accent
         } else {
-            LOOP_OFF_COLOR
+            theme.text_disabled
         };
         let fill = if response.hovered() || self.loop_drag.is_some() {
             0.45

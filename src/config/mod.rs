@@ -101,6 +101,10 @@ impl Config {
 
 /// Returns the configuration file path.
 fn get_config_path() -> Option<PathBuf> {
-    ProjectDirs::from("com", "Bytenosis", "Tonique")
-        .map(|proj_dirs| proj_dirs.config_dir().join("config.json"))
+    config_dir().map(|dir| dir.join("config.json"))
+}
+
+/// Where Tonique keeps its configuration, settings and themes.
+pub fn config_dir() -> Option<PathBuf> {
+    ProjectDirs::from("com", "Bytenosis", "Tonique").map(|dirs| dirs.config_dir().to_path_buf())
 }

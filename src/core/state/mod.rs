@@ -29,8 +29,10 @@ use crate::{
     ui::{
         effect::UIEffect,
         effects::{EffectId, create_effect_from_id},
+        theme::Theme,
     },
 };
+use egui::Color32;
 use std::{collections::HashMap, mem::take, path::PathBuf};
 
 pub use selection::SelectionBounds;
@@ -126,6 +128,8 @@ pub struct ToniqueProjectState {
     loop_bpm: f32,
 
     pub resized_clip: Option<(ClipId, f32, f32, f32)>,
+    /// Colours given to new tracks: the installed theme's palette.
+    track_palette: Vec<Color32>,
     // Panels
     pub left_panel_open: bool,
     pub bottom_panel_open: bool,
@@ -169,6 +173,7 @@ impl ToniqueProjectState {
             ),
             looping: false,
             loop_bpm: DEFAULT_BPM as f32,
+            track_palette: Theme::dark().palette,
             left_panel_open: true,
             bottom_panel_open: false,
             metronome: false,
@@ -479,9 +484,34 @@ impl ToniqueProjectState {
     pub fn add_track_at(&mut self, index: usize) -> TrackId {
         let track = self.session.create(|e| Track::new(e, TRACK_NAME));
         let id = track.id;
-        self.views.insert(id, MutableTrackCore::new());
+        let mut view = MutableTrackCore::new();
+        view.color = self.next_track_color();
+        self.views.insert(id, view);
         self.perform(AddTrack::at(track, index));
         id
+    }
+
+    /// The palette colour the fewest tracks use, the first one on ties, so
+    /// new tracks go through the palette before repeating a colour.
+    fn next_track_color(&self) -> Color32 {
+        let uses = |color: Color32| {
+            self.views
+                .iter()
+                .filter(|(id, view)| **id != MASTER_TRACK_ID && view.color == color)
+                .count()
+        };
+        self.track_palette
+            .iter()
+            .copied()
+            .min_by_key(|color| uses(*color))
+            .unwrap_or(Color32::GRAY)
+    }
+
+    /// Colours for new tracks; the UI passes the installed theme's.
+    pub fn set_track_palette(&mut self, palette: &[Color32]) {
+        if self.track_palette != palette {
+            self.track_palette = palette.to_vec();
+        }
     }
     /// Duplicate track. New track is inserted after the current track.
     pub fn duplicate_track(&mut self, id: &TrackId) {

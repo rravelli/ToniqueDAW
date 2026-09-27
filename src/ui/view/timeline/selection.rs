@@ -1,11 +1,12 @@
 use crate::{
     core::state::{SelectionBounds, ToniqueProjectState},
     ui::{
+        theme::ThemeExt,
         utils::{find_track_at, get_track_y},
         view::timeline::UITimeline,
     },
 };
-use egui::{Color32, Pos2, Rect, Response, Stroke, StrokeKind, Ui};
+use egui::{Pos2, Rect, Response, Shape, Stroke, Ui};
 
 /// A rubber-band selection being drawn, from where it started.
 pub struct Multiselect {
@@ -91,13 +92,23 @@ impl UITimeline {
             get_track_y(bounds.end_track_index, viewport, state) + height - state.grid.offset.y,
         );
         let zone = Rect::from_min_max(min_point, max_point);
+        let theme = ui.app_theme();
         let painter = ui.painter();
-        painter.rect(
-            zone,
-            2.0,
-            Color32::LIGHT_BLUE.gamma_multiply(0.1),
-            Stroke::new(1. / ui.pixels_per_point(), Color32::WHITE),
-            StrokeKind::Inside,
-        );
+        painter.rect_filled(zone, 2.0, theme.selection_fill);
+        // Dashed: reads as an area being drawn, not as something selected.
+        let edge = zone.shrink(0.5);
+        let outline = [
+            edge.left_top(),
+            edge.right_top(),
+            edge.right_bottom(),
+            edge.left_bottom(),
+            edge.left_top(),
+        ];
+        painter.extend(Shape::dashed_line(
+            &outline,
+            Stroke::new(1. / ui.pixels_per_point(), theme.selection_stroke),
+            4.,
+            3.,
+        ));
     }
 }

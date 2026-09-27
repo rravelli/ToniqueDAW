@@ -1,14 +1,12 @@
 use std::time::{Duration, Instant};
 
 use egui::{
-    Align, Color32, CursorIcon, FontFamily, FontId, Frame, Key, Layout, Margin, RichText, Sense,
-    Shape, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, vec2,
+    Align, CursorIcon, FontFamily, FontId, Frame, Key, Layout, Margin, RichText, Sense, Shape,
+    Stroke, StrokeKind, TextEdit, Ui, UiBuilder, vec2,
 };
 use egui_phosphor::regular::{MAGNIFYING_GLASS, X};
 
-use crate::ui::{
-    font::PHOSPHOR_REGULAR, theme::PRIMARY_COLOR, widget::square_button::SquareButton,
-};
+use crate::ui::{font::PHOSPHOR_REGULAR, theme::ThemeExt, widget::square_button::SquareButton};
 
 const HEIGHT: f32 = 22.;
 const PADDING_X: f32 = 6.;
@@ -17,11 +15,6 @@ const ICON_SIZE: f32 = 12.;
 const FONT_SIZE: f32 = 11.;
 /// How long typing must pause before the query is reported.
 const DEBOUNCE: Duration = Duration::from_millis(300);
-
-const BG_COLOR: Color32 = Color32::from_gray(180);
-const BORDER_COLOR: Color32 = Color32::from_gray(100);
-const TEXT_COLOR: Color32 = Color32::from_gray(30);
-const HINT_COLOR: Color32 = Color32::from_gray(100);
 
 /// Single-line search field with a clear button, spanning the available
 /// width. The query is reported once typing pauses, or right away on Enter
@@ -47,6 +40,7 @@ impl SearchBar {
 
     /// Draws the bar; returns the query when the search should (re)run.
     pub fn ui(&mut self, ui: &mut Ui) -> Option<&str> {
+        let theme = ui.app_theme();
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEIGHT), Sense::hover());
         // Painted once we know whether the field has focus.
         let background = ui.painter().add(Shape::Noop);
@@ -62,17 +56,17 @@ impl SearchBar {
                     ui.label(
                         RichText::new(MAGNIFYING_GLASS)
                             .size(ICON_SIZE)
-                            .color(TEXT_COLOR)
+                            .color(theme.text_muted)
                             .family(FontFamily::Name(PHOSPHOR_REGULAR.into())),
                     );
                     // The clear button's space is always reserved, so the
                     // field doesn't resize when it appears.
                     let field = TextEdit::singleline(&mut self.query)
-                        .hint_text(RichText::new(self.hint).color(HINT_COLOR))
+                        .hint_text(RichText::new(self.hint).color(theme.text_disabled))
                         .frame(Frame::NONE)
                         .margin(Margin::ZERO)
                         .font(FontId::new(FONT_SIZE, FontFamily::Proportional))
-                        .text_color(TEXT_COLOR)
+                        .text_color(theme.text)
                         .desired_width(ui.available_width() - GAP - ICON_SIZE)
                         .show(ui)
                         .response;
@@ -89,7 +83,7 @@ impl SearchBar {
                                 SquareButton::ghost(X)
                                     .square(ICON_SIZE)
                                     .border_radius(ICON_SIZE / 2.)
-                                    .color(TEXT_COLOR)
+                                    .color(theme.text_muted)
                                     .font(FontId::new(
                                         FONT_SIZE,
                                         FontFamily::Name(PHOSPHOR_REGULAR.into()),
@@ -107,9 +101,9 @@ impl SearchBar {
             )
             .inner;
 
-        let border = if focused { PRIMARY_COLOR } else { BORDER_COLOR };
+        let border = if focused { theme.accent } else { theme.border };
         ui.painter()
-            .set(background, Shape::rect_filled(rect, 2.0, BG_COLOR));
+            .set(background, Shape::rect_filled(rect, 2.0, theme.bg_deep));
         ui.painter()
             .rect_stroke(rect, 2.0, Stroke::new(1.0, border), StrokeKind::Inside);
 

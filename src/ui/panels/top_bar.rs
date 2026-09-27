@@ -1,6 +1,5 @@
 use egui::{
-    Color32, FontFamily, FontId, Frame, Layout, Margin, Pos2, Rangef, Response, Sense, Stroke, Ui,
-    Vec2,
+    FontFamily, FontId, Frame, Layout, Margin, Pos2, Rangef, Response, Sense, Stroke, Ui, Vec2,
 };
 use egui_phosphor::{
     fill::SIDEBAR_SIMPLE,
@@ -12,14 +11,11 @@ use crate::{
     core::state::{CentralView, MASTER_TRACK_ID, PlaybackState, ToniqueProjectState},
     ui::{
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
-        theme::PRIMARY_COLOR,
+        theme::{ThemeExt, with_alpha},
         widget::{input::NumberInput, square_button::SquareButton},
     },
 };
 const BUTTON_SIZE: f32 = 22.;
-const PRIMARY_BUTTON_COLOR: Color32 = Color32::from_gray(150);
-const WAVE_LOW: Color32 = Color32::from_gray(60);
-const WAVE_HIGH: Color32 = Color32::BLACK;
 
 pub struct UITopBar {
     bpm_input: NumberInput,
@@ -29,8 +25,6 @@ impl UITopBar {
     pub fn new() -> Self {
         Self {
             bpm_input: NumberInput::new(Vec2::new(50., BUTTON_SIZE))
-                .fill(PRIMARY_BUTTON_COLOR)
-                .text_color(Color32::from_gray(30))
                 .with_range(Rangef::new(10., 1000.)),
         }
     }
@@ -40,7 +34,7 @@ impl UITopBar {
             .resizable(false)
             .frame(
                 Frame::new()
-                    .fill(Color32::from_gray(40))
+                    .fill(ui.app_theme().bg_panel)
                     .inner_margin(Margin::same(4)),
             )
             .show(ui, |ui| {
@@ -108,12 +102,7 @@ impl UITopBar {
                 12.,
                 egui::FontFamily::Name(PHOSPHOR_FILL.into()),
             ))
-            .fill(if playback_state == PlaybackState::Playing {
-                PRIMARY_COLOR
-            } else {
-                PRIMARY_BUTTON_COLOR
-            })
-            .color(Color32::from_gray(30)),
+            .selected(playback_state == PlaybackState::Playing),
         )
     }
 
@@ -125,8 +114,7 @@ impl UITopBar {
                     14.,
                     egui::FontFamily::Name(PHOSPHOR_FILL.into()),
                 ))
-                .fill(PRIMARY_BUTTON_COLOR)
-                .color(Color32::from_gray(30))
+                .color(ui.app_theme().record)
                 .tooltip("Record"),
         );
     }
@@ -143,11 +131,7 @@ impl UITopBar {
                         egui::FontFamily::Name(PHOSPHOR_REGULAR.into())
                     },
                 ))
-                .color(if state.left_panel_open {
-                    PRIMARY_COLOR
-                } else {
-                    Color32::from_gray(180)
-                })
+                .selected(state.left_panel_open)
                 .tooltip(tooltip(ui, state, "Browser", Action::ToggleBrowser)),
         );
 
@@ -174,11 +158,7 @@ impl UITopBar {
                         .into(),
                     ),
                 ))
-                .color(if active {
-                    PRIMARY_COLOR
-                } else {
-                    Color32::from_gray(180)
-                })
+                .selected(active)
                 .tooltip(tooltip(ui, state, "Audio graph", Action::ToggleGraphView)),
         );
 
@@ -209,12 +189,7 @@ impl UITopBar {
                         .into(),
                     ),
                 ))
-                .fill(if follow {
-                    PRIMARY_COLOR
-                } else {
-                    PRIMARY_BUTTON_COLOR
-                })
-                .color(Color32::from_gray(30))
+                .selected(follow)
                 .tooltip(tooltip(
                     ui,
                     state,
@@ -243,12 +218,7 @@ impl UITopBar {
                         .into(),
                     ),
                 ))
-                .fill(if looping {
-                    PRIMARY_COLOR
-                } else {
-                    PRIMARY_BUTTON_COLOR
-                })
-                .color(Color32::from_gray(30))
+                .selected(looping)
                 .tooltip(tooltip(ui, state, "Loop", Action::Loop)),
         );
         if res.clicked() {
@@ -257,6 +227,7 @@ impl UITopBar {
     }
 
     fn metronome_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
+        let theme = ui.app_theme();
         let click = state.metronome()
             && matches!(state.playback_state(), PlaybackState::Playing)
             && state.playhead() % 1.0 < 0.5;
@@ -271,15 +242,12 @@ impl UITopBar {
                         egui::FontFamily::Name(PHOSPHOR_REGULAR.into())
                     },
                 ))
-                .fill(if state.metronome() {
-                    PRIMARY_COLOR
-                } else {
-                    PRIMARY_BUTTON_COLOR
-                })
-                .color(if click {
-                    Color32::from_black_alpha(70)
-                } else {
-                    Color32::from_gray(30)
+                .selected(state.metronome())
+                // Blink on the beat.
+                .color(match (state.metronome(), click) {
+                    (false, _) => theme.text,
+                    (true, false) => theme.text_on_accent,
+                    (true, true) => with_alpha(theme.text_on_accent, 110),
                 })
                 .tooltip(tooltip(ui, state, "Metronome", Action::ToggleMetronome)),
         );
@@ -296,7 +264,8 @@ impl UITopBar {
         let painter = ui.painter_at(rect);
 
         // Background rectangle
-        painter.rect_filled(rect, 1.0, PRIMARY_BUTTON_COLOR);
+        let theme = ui.app_theme();
+        painter.rect_filled(rect, 1.0, theme.bg_deep);
 
         // If we have waveform data
         if let Some(m) = state.metrics.tracks.get(&MASTER_TRACK_ID)
@@ -313,11 +282,7 @@ impl UITopBar {
 
                 // Gradient color based on amplitude intensity
                 let amp = ((l.abs() + r.abs()) / 2.0).clamp(0.0, 1.0);
-                let color = Color32::from_rgb(
-                    (WAVE_LOW.r() as f32 * (1.0 - amp) + WAVE_HIGH.r() as f32 * amp) as u8,
-                    (WAVE_LOW.g() as f32 * (1.0 - amp) + WAVE_HIGH.g() as f32 * amp) as u8,
-                    (WAVE_LOW.b() as f32 * (1.0 - amp) + WAVE_HIGH.b() as f32 * amp) as u8,
-                );
+                let color = theme.text_disabled.lerp_to_gamma(theme.accent, amp);
 
                 // Draw connecting lines for smoother waveform
                 if let Some(last) = last_point {
@@ -329,7 +294,7 @@ impl UITopBar {
             // Draw center line if no waveform
             painter.line_segment(
                 [rect.left_center(), rect.right_center()],
-                Stroke::new(1.0, Color32::DARK_GRAY),
+                Stroke::new(1.0, theme.separator),
             );
         };
     }
@@ -339,8 +304,7 @@ impl UITopBar {
             SquareButton::new(format!("{:.0}%", (state.metrics.latency * 100.).round()))
                 .square(BUTTON_SIZE)
                 .font(FontId::new(10., egui::FontFamily::Proportional))
-                .fill(PRIMARY_BUTTON_COLOR)
-                .color(Color32::from_gray(30))
+                .color(ui.app_theme().text_muted)
                 .tooltip("CPU usage"),
         )
     }
@@ -353,8 +317,7 @@ impl UITopBar {
             ))
             .square(BUTTON_SIZE)
             .font(FontId::new(10., egui::FontFamily::Proportional))
-            .fill(PRIMARY_BUTTON_COLOR)
-            .color(Color32::from_gray(30))
+            .color(ui.app_theme().text_muted)
             .tooltip("FPS"),
         )
     }

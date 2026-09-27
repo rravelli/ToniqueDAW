@@ -1,0 +1,10 @@
+# Colours come from the theme (`ui.app_theme()`), so themes can change them.
+# Only `src/ui/theme.rs` may build colours from values.
+disallowed-methods = [
+    { path = "egui::Color32::from_rgb", reason = "use a colour from `ui.app_theme()`" },
+    { path = "egui::Color32::from_rgba_unmultiplied", reason = "use a colour from `ui.app_theme()`" },
+    { path = "egui::Color32::from_rgba_premultiplied", reason = "use a colour from `ui.app_theme()`" },
+    { path = "egui::Color32::from_gray", reason = "use a colour from `ui.app_theme()`" },
+    { path = "egui::Color32::from_black_alpha", reason = "use a colour from `ui.app_theme()`" },
+    { path = "egui::Color32::from_white_alpha", reason = "use a colour from `ui.app_theme()`" },
+]

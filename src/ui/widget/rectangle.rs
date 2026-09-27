@@ -9,7 +9,7 @@ impl Rectangle {
     pub fn new(size: Vec2) -> Self {
         Self {
             size,
-            bg_color: Color32::GRAY,
+            bg_color: Color32::TRANSPARENT,
         }
     }
     pub fn fill(mut self, bg: Color32) -> Self {

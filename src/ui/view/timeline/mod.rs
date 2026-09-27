@@ -9,13 +9,13 @@ use crate::{
     ui::{
         clip::UIClip,
         panels::left_panel::DragPayload,
-        theme::PRIMARY_COLOR,
+        theme::{ThemeExt, with_alpha},
         track::HANDLE_HEIGHT,
         utils::find_track_at,
         view::timeline::{drag::DragState, selection::Multiselect},
     },
 };
-use egui::{Color32, DragAndDrop, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{DragAndDrop, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use tonique_engine::edit::ClipId;
 mod drag;
 mod keys;
@@ -54,7 +54,7 @@ impl UITimeline {
 
         // Rendering
         // First render the grid
-        state.grid.render_grid(&painter, viewport);
+        state.grid.render_grid(&painter, viewport, &ui.app_theme());
         // Render all clips (except dragged clips)
         self.render_clips(ui, state, viewport, offset);
 
@@ -71,7 +71,7 @@ impl UITimeline {
 
         let hovered_files = ui.input(|i| i.raw.hovered_files.clone());
         if !hovered_files.is_empty() {
-            painter.rect_filled(viewport, 1.0, PRIMARY_COLOR.gamma_multiply_u8(20));
+            painter.rect_filled(viewport, 1.0, with_alpha(ui.app_theme().accent, 20));
         }
     }
 
@@ -191,7 +191,7 @@ impl UITimeline {
             && let DragPayload::Effect(_) = *payload
         {
             ui.painter()
-                .rect_filled(track_rect, 1.0, Color32::from_white_alpha(60));
+                .rect_filled(track_rect, 1.0, ui.app_theme().hover_overlay);
         }
 
         if let Some(pointer) = ui.input(|r| r.pointer.hover_pos())
@@ -233,10 +233,11 @@ impl UITimeline {
         }
         let pos = pos2(x, top);
         let size = vec2(width, track.height);
+        let theme = ui.app_theme();
         let color = if track.disabled() {
-            Color32::from_gray(100)
+            theme.bg_control_hover
         } else if dragged {
-            Color32::from_white_alpha(10)
+            theme.hover_overlay
         } else {
             track.color
         };
@@ -272,7 +273,7 @@ impl UITimeline {
                 pos2(viewport.left(), y + HANDLE_HEIGHT / 2. - offset.y),
                 pos2(viewport.right(), y + HANDLE_HEIGHT / 2. - offset.y),
             ],
-            Stroke::new(HANDLE_HEIGHT, Color32::from_gray(60)),
+            Stroke::new(HANDLE_HEIGHT, ui.app_theme().separator),
         );
     }
 
@@ -347,7 +348,9 @@ impl UITimeline {
 
             let height = track.as_ref().map_or(DEFAULT_TRACK_HEIGHT, |t| t.height);
             let show_waveform = track.as_ref().map_or(true, |t| !t.closed);
-            let color = track.as_ref().map_or(Color32::WHITE, |t| t.color);
+            let color = track
+                .as_ref()
+                .map_or(ui.app_theme().text_muted, |t| t.color);
             let width = state.grid.duration_to_width(duration, state.bpm());
 
             let pos = pos2(x, y - offset.y);

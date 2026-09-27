@@ -1,0 +1,47 @@
+# For readability first: black surfaces, white text, strong outlines and a
+# yellow accent.
+
+name = "High contrast"
+
+bg_deep = "#000000"
+bg_base = "#0d0d0d"
+bg_panel = "#1a1a1a"
+bg_raised = "#262626"
+bg_control = "#333333"
+bg_control_hover = "#4d4d4d"
+
+border = "#a6a6a6"
+separator = "#5c5c5c"
+
+text = "#ffffff"
+text_muted = "#d6d6d6"
+text_disabled = "#9a9a9a"
+text_on_accent = "#000000"
+
+accent = "#ffd400"
+accent_hover = "#ffe34d"
+
+danger = "#ff7070"
+warning = "#ffb000"
+success = "#3dff8a"
+record = "#ff4040"
+
+hover_overlay = "#ffffff1c"
+shadow = "#000000d0"
+
+playhead = "#ffffff"
+edit_cursor = "#ffd400"
+selection_fill = "#ffffff0d"
+selection_stroke = "#ffffffa6"
+loop_region = "#ffd40040"
+grid_bar = "#ffffff30"
+grid_beat = "#ffffff14"
+
+meter_low = "#3dff8a"
+meter_mid = "#ffd400"
+meter_high = "#ff4040"
+
+palette = [
+    "#ff8080", "#ffa64d", "#ffe066", "#b3ff66", "#4dffb8",
+    "#4de1ff", "#80a6ff", "#c299ff", "#ff80e6", "#ffffff",
+]

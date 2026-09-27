@@ -1,4 +1,7 @@
-use crate::core::metrics::AudioMetrics;
+use crate::{
+    core::metrics::AudioMetrics,
+    ui::theme::{ThemeExt, with_alpha},
+};
 use egui::{Color32, Painter, Pos2, Rect, Sense, Vec2, Widget};
 
 const RANGE: f32 = 60.;
@@ -62,22 +65,17 @@ impl Widget for LoudnessMeter {
         let peak = self.metrics.get_peak();
         let rms = self.metrics.get_rms();
 
-        let color1 = if self.disabled {
-            Color32::from_gray(40)
+        let theme = ui.app_theme();
+        // Peak behind, RMS in front.
+        let (color1, color2) = if self.disabled {
+            (theme.bg_control, theme.bg_control_hover)
         } else if peak[0] > 1. {
-            Color32::from_rgb(255, 100, 100)
+            (with_alpha(theme.meter_high, 150), theme.meter_high)
         } else {
-            Color32::ORANGE
-        };
-        let color2 = if self.disabled {
-            Color32::from_gray(70)
-        } else if peak[0] > 1. {
-            Color32::from_rgb(255, 3, 10)
-        } else {
-            Color32::GREEN
+            (theme.meter_mid, theme.meter_low)
         };
 
-        self.paint_rect(&[1., 1.], &painter, Color32::from_gray(0), rect);
+        self.paint_rect(&[1., 1.], &painter, theme.bg_deep, rect);
         self.paint_rect(&peak, &painter, color1, rect);
         self.paint_rect(&rms, &painter, color2, rect);
         res

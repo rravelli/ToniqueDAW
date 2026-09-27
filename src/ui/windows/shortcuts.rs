@@ -3,13 +3,13 @@ use crate::{
     core::state::ToniqueProjectState,
     ui::{
         font::PHOSPHOR_REGULAR,
-        theme::PRIMARY_COLOR,
+        theme::ThemeExt,
         widget::{section::SectionHeader, square_button::SquareButton},
     },
 };
 use egui::{
-    Color32, EventFilter, FontFamily, FontId, Grid, Id, Key, KeyboardShortcut, Layout, RichText,
-    ScrollArea, Sense, Ui, vec2,
+    EventFilter, FontFamily, FontId, Grid, Id, Key, KeyboardShortcut, Layout, RichText, ScrollArea,
+    Sense, Ui, vec2,
 };
 use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, PLUS};
 
@@ -17,7 +17,6 @@ const GROUPS: [&str; 3] = ["Transport", "Edit", "View"];
 const LABEL_WIDTH: f32 = 200.;
 const CHIP_HEIGHT: f32 = 20.;
 const LIST_HEIGHT: f32 = 380.;
-const CHIP_COLOR: Color32 = Color32::from_gray(58);
 
 /// The binding waiting for a key press.
 #[derive(Clone, Copy, PartialEq)]
@@ -65,15 +64,15 @@ impl UIShortcutsTab {
                         .spacing([12., 4.])
                         .show(ui, |ui| {
                             for action in Action::ALL.into_iter().filter(|a| a.group() == group) {
-                                ui.label(
-                                    RichText::new(action.label()).color(Color32::from_gray(200)),
-                                );
+                                ui.label(RichText::new(action.label()).color(ui.app_theme().text));
                                 self.bindings(ui, &mut keymap, action);
                                 ui.end_row();
                             }
                             for fixed in FIXED_SHORTCUTS.iter().filter(|f| f.group == group) {
-                                ui.label(RichText::new(fixed.label).color(Color32::GRAY))
-                                    .on_hover_text("Handled by the system, can't be changed.");
+                                ui.label(
+                                    RichText::new(fixed.label).color(ui.app_theme().text_muted),
+                                )
+                                .on_hover_text("Handled by the system, can't be changed.");
                                 ui.horizontal(|ui| {
                                     for shortcut in fixed.shortcuts {
                                         ui.add_enabled(
@@ -97,7 +96,7 @@ impl UIShortcutsTab {
         ui.label(
             RichText::new(self.message.as_deref().unwrap_or(hint))
                 .small()
-                .color(Color32::GRAY),
+                .color(ui.app_theme().text_muted),
         );
         ui.separator();
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
@@ -105,7 +104,6 @@ impl UIShortcutsTab {
                 .size(vec2(0., 22.))
                 .padding(10.)
                 .font(FontId::proportional(12.))
-                .fill(CHIP_COLOR)
                 .border_radius(2.);
             if ui
                 .add_enabled(!keymap.is_all_default(), reset_all)
@@ -181,11 +179,7 @@ impl UIShortcutsTab {
     /// Placeholder shown while recording. It holds keyboard focus, and
     /// recording stops if it loses it (e.g. a click elsewhere).
     fn recorder(&mut self, ui: &mut Ui) {
-        let response = ui.add(
-            chip("Press a key…")
-                .fill(PRIMARY_COLOR)
-                .color(Color32::BLACK),
-        );
+        let response = ui.add(chip("Press a key…").selected(true));
         let id = recorder_id();
         ui.interact(response.rect, id, Sense::focusable_noninteractive());
         // Let arrows, Tab and Esc reach us instead of moving focus.
@@ -261,7 +255,6 @@ fn chip(text: impl ToString) -> SquareButton {
         .size(vec2(0., CHIP_HEIGHT))
         .padding(8.)
         .font(FontId::proportional(12.))
-        .fill(CHIP_COLOR)
         .border_radius(2.)
 }
 

@@ -4,17 +4,15 @@ use crate::{
     ui::{
         font::PHOSPHOR_REGULAR,
         panels::menu_bar::set_ui_scale,
-        theme::PRIMARY_COLOR,
+        theme::{ThemeExt, ThemeLibrary},
         widget::{
             input::NumberInput, section::SectionHeader, select::Select, slider::ValueSlider,
             square_button::SquareButton, tab_bar::TabBar,
         },
-        windows::shortcuts::UIShortcutsTab,
+        windows::{appearance::UIAppearanceTab, shortcuts::UIShortcutsTab},
     },
 };
-use egui::{
-    Color32, FontFamily, FontId, Frame, Grid, Layout, Margin, Rangef, RichText, Ui, Vec2, vec2,
-};
+use egui::{FontFamily, FontId, Frame, Grid, Layout, Margin, Rangef, RichText, Ui, Vec2, vec2};
 use egui_phosphor::regular::ARROWS_CLOCKWISE;
 use tonique_engine::device::{DeviceInfo, DeviceOptions, OutputDevice, output_devices};
 
@@ -23,12 +21,12 @@ const BLOCK_SIZES: [usize; 5] = [64, 128, 256, 512, 1024];
 const LABEL_WIDTH: f32 = 120.;
 const CONTROL_WIDTH: f32 = 240.;
 const BUTTON_HEIGHT: f32 = 22.;
-const ERROR_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
 const WINDOW_WIDTH: f32 = 440.;
 
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsTab {
     General,
+    Appearance,
     Audio,
     Shortcuts,
 }
@@ -47,6 +45,7 @@ pub struct UISettingsWindow {
     pub open: bool,
     tab: SettingsTab,
     shortcuts: UIShortcutsTab,
+    appearance: UIAppearanceTab,
     draft: Settings,
     /// Probed when the window opens (probing hardware is slow).
     devices: Vec<DeviceInfo>,
@@ -55,8 +54,9 @@ pub struct UISettingsWindow {
 }
 
 impl UISettingsWindow {
-    pub fn new() -> Self {
+    pub fn new(themes: ThemeLibrary, theme_warnings: Vec<String>) -> Self {
         Self {
+            appearance: UIAppearanceTab::new(themes, theme_warnings),
             open: false,
             tab: SettingsTab::General,
             shortcuts: UIShortcutsTab::new(),
@@ -64,7 +64,6 @@ impl UISettingsWindow {
             devices: Vec::new(),
             capabilities: None,
             parallel_threshold: NumberInput::new(vec2(90., 20.))
-                .fill(Color32::from_gray(58))
                 .with_range(Rangef::new(1., 512.))
                 .decimals(0)
                 .suffix(" nodes"),
@@ -109,6 +108,7 @@ impl UISettingsWindow {
                     &mut self.tab,
                     [
                         (SettingsTab::General, "General"),
+                        (SettingsTab::Appearance, "Appearance"),
                         (SettingsTab::Audio, "Audio"),
                         (SettingsTab::Shortcuts, "Shortcuts"),
                     ],
@@ -130,6 +130,7 @@ impl UISettingsWindow {
                         ui.add_space(10.);
                         self.audio_buttons(ui, state);
                     }
+                    SettingsTab::Appearance => self.appearance.show(ui, state),
                     SettingsTab::Shortcuts => self.shortcuts.show(ui, state),
                 }
             });
@@ -202,7 +203,6 @@ impl UISettingsWindow {
                     .add(
                         SquareButton::new(ARROWS_CLOCKWISE)
                             .square(BUTTON_HEIGHT - 2.)
-                            .fill(Color32::from_gray(58))
                             .font(FontId::new(12., FontFamily::Name(PHOSPHOR_REGULAR.into())))
                             .border_radius(2.)
                             .tooltip("Refresh devices"),
@@ -357,7 +357,7 @@ impl UISettingsWindow {
         if let Some(error) = &state.audio_error {
             ui.label(
                 RichText::new(format!("Couldn't apply audio settings: {error}"))
-                    .color(ERROR_COLOR)
+                    .color(ui.app_theme().danger)
                     .small(),
             );
             ui.add_space(4.);
@@ -368,8 +368,7 @@ impl UISettingsWindow {
                 .size(vec2(0., BUTTON_HEIGHT))
                 .padding(10.)
                 .font(FontId::proportional(12.))
-                .fill(PRIMARY_COLOR)
-                .color(Color32::BLACK)
+                .selected(true)
                 .border_radius(2.);
             if ui
                 .add_enabled(pending, apply)
@@ -430,13 +429,14 @@ fn settings_grid(ui: &mut Ui, id: &str, content: impl FnOnce(&mut Ui)) {
 }
 
 fn row_label(ui: &mut Ui, text: &str, hint: &str) {
-    ui.label(RichText::new(text).color(Color32::from_gray(200)))
+    ui.label(RichText::new(text).color(ui.app_theme().text))
         .on_hover_text(hint);
 }
 
 fn status(ui: &mut Ui, text: String) {
     ui.add_space(2.);
-    ui.label(RichText::new(text).small().color(Color32::GRAY));
+    let color = ui.app_theme().text_muted;
+    ui.label(RichText::new(text).small().color(color));
 }
 
 fn secondary_button(text: &str) -> SquareButton {
@@ -444,6 +444,5 @@ fn secondary_button(text: &str) -> SquareButton {
         .size(Vec2::new(0., BUTTON_HEIGHT))
         .padding(10.)
         .font(FontId::proportional(12.))
-        .fill(Color32::from_gray(58))
         .border_radius(2.)
 }

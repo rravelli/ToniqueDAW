@@ -1,6 +1,6 @@
 use crate::{
     core::{graph_monitor::GraphMonitor, state::ToniqueProjectState},
-    ui::theme::PRIMARY_COLOR,
+    ui::theme::{Theme, ThemeExt},
     utils::parse_name,
 };
 use egui::{
@@ -49,8 +49,9 @@ impl UIGraphView {
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
         let (viewport, response) =
             ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+        let theme = ui.app_theme();
         let painter = ui.painter_at(viewport);
-        painter.rect_filled(viewport, 0., Color32::from_gray(35));
+        painter.rect_filled(viewport, 0., theme.bg_deep);
         // Levels move even with the transport stopped (e.g. previews).
         ui.ctx().request_repaint_after(Duration::from_millis(33));
 
@@ -61,7 +62,7 @@ impl UIGraphView {
                 Align2::CENTER_CENTER,
                 "No graph yet",
                 FontId::proportional(14.),
-                Color32::GRAY,
+                theme.text_muted,
             );
             return;
         };
@@ -80,7 +81,7 @@ impl UIGraphView {
                 let start = to_screen(positions[from])
                     + vec2(NODE_SIZE.x * self.zoom, NODE_SIZE.y / 2. * self.zoom);
                 let level = meter_unit(monitor.levels.get(from).copied().unwrap_or(0.));
-                let color = lerp_color(Color32::from_gray(80), PRIMARY_COLOR, level);
+                let color = theme.text_disabled.lerp_to_gamma(theme.accent, level);
                 painter.add(edge(start, to, Stroke::new(1. + 2. * level, color)));
             }
             for &from in &node.after {
@@ -89,7 +90,7 @@ impl UIGraphView {
                 let curve = edge(start, to, Stroke::NONE);
                 painter.extend(Shape::dashed_line(
                     &curve.flatten(Some(0.5)),
-                    Stroke::new(1., Color32::from_gray(110)),
+                    Stroke::new(1., theme.text_disabled),
                     4.,
                     4.,
                 ));
@@ -113,6 +114,7 @@ impl UIGraphView {
             let (title, stripe) = &titles[i];
             self.paint_node(
                 &painter,
+                &theme,
                 rect,
                 node,
                 title,
@@ -126,6 +128,7 @@ impl UIGraphView {
 
         paint_header(
             &painter,
+            &theme,
             viewport,
             &topology,
             state.metrics.latency,
@@ -209,6 +212,7 @@ impl UIGraphView {
     fn paint_node(
         &self,
         painter: &egui::Painter,
+        theme: &Theme,
         rect: Rect,
         node: &TopologyNode,
         title: &str,
@@ -219,13 +223,13 @@ impl UIGraphView {
         index: usize,
     ) {
         let z = self.zoom;
-        let fill = node_color(node.name);
+        let fill = node_color(node.name, theme);
         let stroke = if is_output {
-            Stroke::new(2., PRIMARY_COLOR)
+            Stroke::new(2., theme.accent)
         } else if hovered {
-            Stroke::new(1.5, Color32::WHITE)
+            Stroke::new(1.5, theme.text)
         } else {
-            Stroke::new(1., Color32::from_gray(20))
+            Stroke::new(1., theme.bg_deep)
         };
         painter.rect(
             rect,
@@ -249,14 +253,14 @@ impl UIGraphView {
             pos2(rect.left() + 6. * z, rect.bottom() - 9. * z),
             pos2(rect.right() - 6. * z, rect.bottom() - 5. * z),
         );
-        painter.rect_filled(bar, 1., Color32::from_black_alpha(90));
+        painter.rect_filled(bar, 1., theme.bg_deep);
         if node.channels > 0 {
             let mut lit = bar;
             lit.set_width(bar.width() * meter_unit(level));
             let color = if level > 1. {
-                Color32::from_rgb(255, 80, 80)
+                theme.meter_high
             } else {
-                PRIMARY_COLOR
+                theme.accent
             };
             painter.rect_filled(lit, 1., color);
         }
@@ -264,7 +268,7 @@ impl UIGraphView {
         if z < TEXT_ZOOM {
             return;
         }
-        let text = Color32::from_gray(235);
+        let text = theme.text;
         painter.text(
             rect.left_top() + vec2(8., 6.) * z,
             Align2::LEFT_TOP,
@@ -278,7 +282,7 @@ impl UIGraphView {
                 Align2::LEFT_TOP,
                 node.name,
                 FontId::proportional(9. * z),
-                Color32::from_gray(170),
+                theme.text_muted,
             );
         }
         let cpu = monitor.cpu.get(index).copied().unwrap_or(0.);
@@ -287,7 +291,7 @@ impl UIGraphView {
             Align2::RIGHT_TOP,
             format!("{:.1}%", cpu * 100.),
             FontId::monospace(9. * z),
-            Color32::from_gray(170),
+            theme.text_muted,
         );
     }
 }
@@ -381,6 +385,7 @@ fn edge(from: Pos2, to: Pos2, stroke: Stroke) -> CubicBezierShape {
 
 fn paint_header(
     painter: &egui::Painter,
+    theme: &Theme,
     viewport: Rect,
     topology: &GraphTopology,
     engine_load: f32,
@@ -400,19 +405,19 @@ fn paint_header(
         nodes_cpu * 100.,
     );
     let pos = viewport.left_top() + vec2(10., 8.);
-    let galley = painter.layout_no_wrap(text, FontId::proportional(11.), Color32::from_gray(200));
+    let galley = painter.layout_no_wrap(text, FontId::proportional(11.), theme.text_muted);
     painter.rect_filled(
         Rect::from_min_size(pos, galley.size()).expand(4.),
         3.,
-        Color32::from_black_alpha(140),
+        theme.shadow,
     );
-    painter.galley(pos, galley, Color32::from_gray(200));
+    painter.galley(pos, galley, theme.text_muted);
     painter.text(
         viewport.left_bottom() + vec2(10., -8.),
         Align2::LEFT_BOTTOM,
         "Drag to pan · Ctrl+scroll to zoom · Double-click to fit",
         FontId::proportional(10.),
-        Color32::from_gray(120),
+        theme.text_disabled,
     );
 }
 
@@ -487,21 +492,23 @@ fn meter_unit(peak: f32) -> f32 {
     ((20. * peak.log10() + METER_RANGE_DB) / METER_RANGE_DB).clamp(0., 1.)
 }
 
-fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
-    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t) as u8;
-    Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
-}
-
-/// Tint by what the node does.
-fn node_color(name: &str) -> Color32 {
-    match name {
-        "AudioClipNode" | "MidiClipNode" => Color32::from_rgb(52, 84, 122),
-        "VolumePanNode" => Color32::from_rgb(46, 104, 78),
-        "SumNode" => Color32::from_gray(70),
-        "DelayNode" => Color32::from_rgb(128, 88, 40),
-        "AutomationNode" => Color32::from_rgb(120, 108, 40),
-        "MetronomeNode" => Color32::from_rgb(40, 110, 116),
-        _ => Color32::from_rgb(92, 64, 120), // plugins
+/// Tint by what the node does: a palette colour mixed into the surface, so
+/// the text stays readable.
+fn node_color(name: &str, theme: &Theme) -> Color32 {
+    let slot = match name {
+        "AudioClipNode" | "MidiClipNode" => 6,
+        "VolumePanNode" => 4,
+        "SumNode" => return theme.bg_control,
+        "DelayNode" => 1,
+        "AutomationNode" => 2,
+        "MetronomeNode" => 5,
+        _ => 7, // plugins
+    };
+    match theme.palette.len() {
+        0 => theme.bg_control,
+        len => theme
+            .bg_raised
+            .lerp_to_gamma(theme.palette[slot % len], 0.35),
     }
 }
 

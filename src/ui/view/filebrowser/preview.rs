@@ -1,13 +1,11 @@
-use egui::{
-    Color32, FontFamily, FontId, Frame, Label, Pos2, RichText, Sense, Shape, Stroke, Ui, vec2,
-};
+use egui::{FontFamily, FontId, Frame, Label, Pos2, RichText, Sense, Shape, Stroke, Ui, vec2};
 use egui_phosphor::fill::{PLAY, STOP};
 
 use crate::{
     analysis::AudioInfo,
     core::state::{PlaybackState, ToniqueProjectState},
     ui::{
-        font::PHOSPHOR_FILL, theme::PRIMARY_COLOR, waveform::paint_waveform,
+        font::PHOSPHOR_FILL, theme::ThemeExt, waveform::paint_waveform,
         widget::square_button::SquareButton,
     },
 };
@@ -22,7 +20,7 @@ impl UIPreview {
 
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState, selected_audio: &AudioInfo) {
         Frame::new()
-            .stroke(Stroke::new(4.0, Color32::from_gray(100)))
+            .stroke(Stroke::new(4.0, ui.app_theme().bg_control))
             .show(ui, |ui| {
                 ui.set_height(PREVIEW_WINDOW_HEIGHT - 2.0 * 4.0);
                 ui.horizontal(|ui| {
@@ -74,6 +72,7 @@ impl UIPreview {
     ) {
         let (response, painter) = ui.allocate_painter(vec2(width, 14.), Sense::click());
         let rect = response.rect;
+        let theme = ui.app_theme();
 
         if response.clicked()
             && let Some(mouse_pos) = response.interact_pointer_pos()
@@ -89,7 +88,7 @@ impl UIPreview {
                 Pos2::new(rect.left(), rect.center().y),
                 Pos2::new(rect.right(), rect.center().y),
             ],
-            Stroke::new(1.0, Color32::from_black_alpha(80)),
+            Stroke::new(1.0, theme.separator),
         ));
 
         painter.add(std::mem::take(&mut shapes));
@@ -105,7 +104,7 @@ impl UIPreview {
                 &audio.data,
                 0.0..frames,
                 false,
-                PRIMARY_COLOR,
+                theme.accent,
             );
         }
 
@@ -117,7 +116,7 @@ impl UIPreview {
                 Pos2::new(x, response.rect.top()),
                 Pos2::new(x, response.rect.bottom()),
             ],
-            Stroke::new(1.0, Color32::from_white_alpha(200)),
+            Stroke::new(1.0, theme.playhead),
         ));
         painter.add(shapes);
     }

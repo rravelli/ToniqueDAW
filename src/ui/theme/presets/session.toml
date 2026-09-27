@@ -1,0 +1,49 @@
+# Inspired by Ableton Live's classic look: mid greys, flat controls and a
+# burnt-orange accent, with bright pastel clip colours.
+
+name = "Session"
+
+bg_deep = "#a3a3a3"
+bg_base = "#b0b0b0"
+bg_panel = "#bdbdbd"
+bg_raised = "#cacaca"
+bg_control = "#dadada"
+bg_control_hover = "#ececec"
+
+border = "#8a8a8a"
+separator = "#a6a6a6"
+
+text = "#0e0e0e"
+text_muted = "#2e2e2e"
+text_disabled = "#6b6b6b"
+text_on_accent = "#ffffff"
+
+# Deep enough to read as text on the grey panels
+accent = "#8f3900"
+accent_hover = "#7a3000"
+
+danger = "#a4161a"
+warning = "#704400"
+success = "#155c2a"
+record = "#d4302c"
+
+hover_overlay = "#00000012"
+shadow = "#ffffffc8"
+
+playhead = "#111111"
+edit_cursor = "#8f3900"
+selection_fill = "#0e0e0e0d"
+selection_stroke = "#0e0e0e66"
+clip_selected = "#111111"
+loop_region = "#8f390030"
+grid_bar = "#0000002a"
+grid_beat = "#00000012"
+
+meter_low = "#2e9e3e"
+meter_mid = "#e8a317"
+meter_high = "#e0302a"
+
+palette = [
+    "#ff94a6", "#ffa529", "#f7f47c", "#bffb00", "#25ffa8",
+    "#5cffe8", "#8bc5ff", "#92a7ff", "#d86ce4", "#ff8fcd",
+]

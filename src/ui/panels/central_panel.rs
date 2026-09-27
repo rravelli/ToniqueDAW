@@ -1,20 +1,18 @@
 use crate::{
     core::state::{CentralView, PlaybackState, ToniqueProjectState},
     ui::{
-        theme::PRIMARY_COLOR,
+        theme::{ThemeExt, with_alpha},
         view::{
             graph::UIGraphView, navigation_bar::UINavigationBar, timeline::UITimeline,
             tracks::UITracks,
         },
     },
 };
-use egui::{Color32, Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
 pub const SCROLLBAR_WIDTH: f32 = 5.;
 /// Empty bars after the end of the arrangement.
 const TIMELINE_SLACK_BARS: f32 = 16.;
-pub const PLAYHEAD_COLOR: Color32 = Color32::WHITE;
-pub const EDIT_CURSOR_COLOR: Color32 = PRIMARY_COLOR;
 
 pub struct UICentralPanel {
     timeline: UITimeline,
@@ -44,7 +42,7 @@ impl UICentralPanel {
             .frame(
                 Frame::central_panel(ui.style())
                     .inner_margin(Margin::ZERO)
-                    .fill(Color32::from_gray(55)),
+                    .fill(ui.app_theme().bg_base),
             )
             .show(ui, |ui| {
                 self.ui(ui, state);
@@ -153,9 +151,9 @@ impl UICentralPanel {
         offset: &mut Vec2,
     ) -> bool {
         let mut scrolled_x = false;
-        let style = ui.style();
+        let theme = ui.app_theme();
         let painter = ui.painter();
-        let handle_color = Color32::WHITE;
+        let handle_color = theme.text_disabled;
 
         // === HORIZONTAL SCROLLBAR ===
         if content_size.x > viewport.max.x {
@@ -176,7 +174,7 @@ impl UICentralPanel {
             );
 
             let resp = ui.interact(thumb_rect, ui.id().with("hscroll"), Sense::click_and_drag());
-            painter.rect_filled(track_rect, 2.0, style.visuals.extreme_bg_color);
+            painter.rect_filled(track_rect, 2.0, theme.bg_deep);
             painter.rect_filled(thumb_rect, 4.0, handle_color);
 
             if resp.dragged() {
@@ -206,7 +204,7 @@ impl UICentralPanel {
             );
 
             let resp = ui.interact(thumb_rect, ui.id().with("vscroll"), Sense::click_and_drag());
-            painter.rect_filled(track_rect, 2.0, style.visuals.extreme_bg_color);
+            painter.rect_filled(track_rect, 2.0, theme.bg_deep);
             painter.rect_filled(thumb_rect, 4.0, handle_color);
 
             if resp.dragged() {
@@ -224,27 +222,24 @@ impl UICentralPanel {
     /// with its draggable handle.
     fn draw_cursors(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {
         ui.set_clip_rect(rect);
+        let theme = ui.app_theme();
         let painter = ui.painter();
         if state.looping() {
             let (start, end) = state.loop_range();
             for beats in [start, end] {
                 let x = state.grid.beats_to_x(beats, rect);
-                painter.vline(
-                    x,
-                    rect.y_range(),
-                    Stroke::new(1.0, EDIT_CURSOR_COLOR.gamma_multiply(0.35)),
-                );
+                painter.vline(x, rect.y_range(), Stroke::new(1.0, theme.loop_region));
             }
         }
         if state.edit_cursor() != state.playhead() {
             let x = state.grid.beats_to_x(state.edit_cursor(), rect);
             painter.line_segment(
                 [pos2(x, rect.top()), pos2(x, rect.bottom())],
-                Stroke::new(1.0, EDIT_CURSOR_COLOR.gamma_multiply_u8(200)),
+                Stroke::new(1.0, theme.edit_cursor),
             );
         }
         let playhead_x = state.grid.beats_to_x(state.playhead(), rect);
-        let line_stroke = Stroke::new(2.0, PLAYHEAD_COLOR.gamma_multiply_u8(160));
+        let line_stroke = Stroke::new(2.0, with_alpha(theme.playhead, 160));
 
         // Draw vertical playhead line
         painter.line_segment(
@@ -286,16 +281,16 @@ impl UICentralPanel {
 
         // Highlight on hover
         let triangle_color = if handle_response.hovered() {
-            PLAYHEAD_COLOR.blend(Color32::from_white_alpha(50))
+            theme.accent
         } else {
-            PLAYHEAD_COLOR
+            theme.playhead
         };
 
         // Draw filled triangle
         painter.add(egui::Shape::convex_polygon(
             points.to_vec(),
             triangle_color,
-            Stroke::new(0., Color32::from_black_alpha(120)),
+            Stroke::NONE,
         ));
 
         // Dragging logic

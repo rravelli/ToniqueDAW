@@ -1,3 +1,4 @@
+pub mod color_select;
 pub mod context_menu;
 pub mod input;
 pub mod item_button;

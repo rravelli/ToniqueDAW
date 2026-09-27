@@ -1,8 +1,9 @@
 use crate::{
     config::{keymap::Action, settings::UI_SCALE_RANGE},
     core::state::{CentralView, ToniqueProjectState},
+    ui::theme::ThemeExt,
 };
-use egui::{Button, Color32, Context, Frame, Margin, MenuBar, Ui};
+use egui::{Button, Context, Frame, Margin, MenuBar, Ui};
 
 const ZOOM_STEP: f32 = 0.1;
 
@@ -26,7 +27,7 @@ impl UIMenuBar {
             .resizable(false)
             .frame(
                 Frame::new()
-                    .fill(Color32::from_gray(32))
+                    .fill(ui.app_theme().bg_panel)
                     .inner_margin(Margin::symmetric(4, 2)),
             )
             .show(ui, |ui| {

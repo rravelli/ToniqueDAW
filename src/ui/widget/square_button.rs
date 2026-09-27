@@ -2,16 +2,23 @@ use egui::{
     Align2, Color32, CursorIcon, FontFamily, FontId, RichText, Sense, Stroke, Vec2, Widget, vec2,
 };
 
+use crate::ui::theme::ThemeExt;
+
+/// Button with a solid fill. Colours default to the theme's control colours
+/// (or the accent when [`Self::selected`]); `fill`, `color` and
+/// `hover_color` override them.
 pub struct SquareButton {
     size: Vec2,
-    bg_color: Color32,
+    ghost: bool,
+    selected: bool,
+    fill: Option<Color32>,
     border_radius: f32,
     hover_color: Option<Color32>,
     /// Horizontal padding around the text when the width fits the text.
     padding: Option<f32>,
     // Text
     text: String,
-    text_color: Color32,
+    text_color: Option<Color32>,
     font: FontId,
     // Tooltip
     tooltip_text: String,
@@ -21,31 +28,32 @@ impl SquareButton {
     pub fn new(text: impl ToString) -> Self {
         Self {
             size: vec2(15., 15.),
-            bg_color: Color32::from_gray(100),
+            ghost: false,
+            selected: false,
+            fill: None,
             text: text.to_string(),
             font: FontId::proportional(8.),
-            text_color: Color32::WHITE,
+            text_color: None,
             tooltip_text: "".to_string(),
             border_radius: 1.0,
             hover_color: None,
             padding: None,
         }
     }
+    /// No fill until hovered; muted text, accent text when selected.
     pub fn ghost(text: impl ToString) -> Self {
         Self {
-            bg_color: Color32::TRANSPARENT,
-            size: vec2(15., 15.),
-            border_radius: 1.0,
-            font: FontId::proportional(8.),
-            hover_color: Some(Color32::from_white_alpha(30)),
-            text: text.to_string(),
-            text_color: Color32::from_gray(180),
-            tooltip_text: "".to_string(),
-            padding: None,
+            ghost: true,
+            ..Self::new(text)
         }
     }
+    /// Show as switched on: accent fill (accent text for a ghost button).
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
     pub fn fill(mut self, bg: Color32) -> Self {
-        self.bg_color = bg;
+        self.fill = Some(bg);
         self
     }
     pub fn font(mut self, font_id: FontId) -> Self {
@@ -53,7 +61,7 @@ impl SquareButton {
         self
     }
     pub fn color(mut self, color: Color32) -> Self {
-        self.text_color = color;
+        self.text_color = Some(color);
         self
     }
     pub fn square(mut self, size: f32) -> Self {
@@ -92,10 +100,26 @@ impl Widget for SquareButton {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         // Disabled through `ui.add_enabled` or a disabled parent
         let enabled = ui.is_enabled();
+        let theme = ui.app_theme();
+        let (fill, text_color, hover) = match (self.ghost, self.selected) {
+            (false, false) => (theme.bg_control, theme.text, theme.bg_control_hover),
+            (false, true) => (theme.accent, theme.text_on_accent, theme.accent_hover),
+            (true, false) => (Color32::TRANSPARENT, theme.text_muted, theme.hover_overlay),
+            (true, true) => (Color32::TRANSPARENT, theme.accent, theme.hover_overlay),
+        };
+        let fill = self.fill.unwrap_or(fill);
+        let text_color = self.text_color.unwrap_or(text_color);
+        let hover = match (self.hover_color, self.fill) {
+            (Some(hover), _) => hover,
+            // A custom fill lightens (or darkens) like the others.
+            (None, Some(fill)) if !self.ghost => fill.blend(theme.hover_overlay),
+            (None, _) => hover,
+        };
+
         let mut size = self.size;
         let galley = ui
             .painter()
-            .layout_no_wrap(self.text, self.font, self.text_color);
+            .layout_no_wrap(self.text, self.font, text_color);
         if let Some(padding) = self.padding {
             size.x = galley.size().x + 2. * padding;
         }
@@ -106,19 +130,17 @@ impl Widget for SquareButton {
         };
         let (mut res, painter) = ui.allocate_painter(size, sense);
         let rect = res.rect;
-        let mut curr_color = self.bg_color;
-        let mut text_color = self.text_color;
+        let mut curr_color = fill;
+        let mut text_color = text_color;
         let mut stroke = Stroke::NONE;
         if !enabled {
             curr_color = curr_color.gamma_multiply(0.5);
             text_color = text_color.gamma_multiply(0.5);
         } else if res.hovered() {
-            curr_color = self
-                .hover_color
-                .unwrap_or(self.bg_color.blend(Color32::from_white_alpha(40)));
+            curr_color = hover;
         }
         if res.has_focus() {
-            stroke = Stroke::new(1.0, Color32::from_white_alpha(200));
+            stroke = Stroke::new(1.0, theme.accent);
         }
         // Paint widget
         painter.rect(
@@ -144,7 +166,6 @@ impl Widget for SquareButton {
         if !self.tooltip_text.is_empty() {
             res = res.on_hover_text(
                 RichText::new(self.tooltip_text)
-                    .color(Color32::WHITE)
                     .font(FontId::new(8., egui::FontFamily::Proportional)),
             )
         }

@@ -1,6 +1,10 @@
 use crate::{
     core::{clip::ClipCore, state::ToniqueProjectState, track::TRACK_CLOSED_HEIGHT},
-    ui::{waveform::paint_waveform, widget::context_menu::ContextMenuButton},
+    ui::{
+        theme::{ThemeExt, with_alpha},
+        waveform::paint_waveform,
+        widget::context_menu::ContextMenuButton,
+    },
 };
 use egui::{
     Align2, Color32, CursorIcon, FontFamily, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2,
@@ -15,7 +19,6 @@ const HEADER_HEIGHT: f32 = 16.;
 /// Width of the trim handles inside each edge of a clip.
 const HANDLE_WIDTH: f32 = 7.;
 const MIN_HANDLE_WIDTH: f32 = 2.;
-const HANDLE_HOVER_COLOR: Color32 = Color32::from_rgba_premultiplied(140, 140, 140, 140);
 #[derive(Clone, Copy)]
 enum Edge {
     Start,
@@ -47,17 +50,27 @@ impl UIClip {
         // let response = ui.allocate_rect(sample_rect, Sense::all());
         let painter = ui.painter_at(sample_rect);
         let mut clip_copy = clip.clone();
+        let theme = ui.app_theme();
+        // Selected clips light up and get a neutral outline, rather than a
+        // UI colour that could clash with the clip's own.
+        let fill = if selected {
+            color.lerp_to_gamma(theme.clip_selected, 0.2)
+        } else {
+            color
+        };
+        // Name and waveform are drawn on the clip's colour.
+        let ink = theme.text_on(fill);
 
         let stroke = if selected {
-            Stroke::new(BORDER_WIDTH, Color32::WHITE)
+            Stroke::new(BORDER_WIDTH, theme.clip_selected)
         } else {
-            Stroke::new(BORDER_WIDTH, color)
+            Stroke::new(BORDER_WIDTH, fill)
         };
         // Main rect
         painter.rect(
             Rect::from_min_size(pos, size),
             2.0,
-            color.blend(Color32::from_white_alpha(20)),
+            fill,
             stroke,
             egui::StrokeKind::Inside,
         );
@@ -67,7 +80,9 @@ impl UIClip {
                 pos2(pos.x, pos.y + HEADER_HEIGHT - BORDER_WIDTH),
                 vec2(size.x, size.y - HEADER_HEIGHT),
             );
-            state.grid.render_clip_grid(&painter, viewport, rect, color);
+            state
+                .grid
+                .render_clip_grid(&painter, viewport, rect, with_alpha(ink, 25));
         }
         // Header area
         let hitbox = Rect::from_min_size(
@@ -119,12 +134,12 @@ impl UIClip {
             Align2::LEFT_TOP,
             format!("{}", clip.audio.name.clone()),
             FontId::new(10., FontFamily::Monospace),
-            Color32::BLACK,
+            ink,
         );
 
         painter.line(
             vec![hitbox.left_bottom(), hitbox.right_bottom()],
-            Stroke::new(1.0, color.blend(Color32::from_black_alpha(50))),
+            Stroke::new(1.0, with_alpha(ink, 60)),
         );
         // Waveform
         if show_waveform && let Some(frames) = clip.audio.total_frames() {
@@ -151,12 +166,12 @@ impl UIClip {
                 &clip.audio.data,
                 0.0..frames,
                 clip.audio.channels >= 2,
-                Color32::BLACK,
+                ink,
             );
         }
         // Draw an overlay when audio not ready
         if !clip.audio.data.is_ready() {
-            painter.rect_filled(sample_rect, 1.0, Color32::from_white_alpha(80));
+            painter.rect_filled(sample_rect, 1.0, theme.shadow);
             // Show the waveform growing while the file decodes.
             ui.ctx().request_repaint_after(LOADING_REPAINT);
         }
@@ -224,7 +239,7 @@ impl UIClip {
 
         if response.hovered() {
             let painter = ui.painter_at(rect);
-            painter.rect_filled(rect, 1.0, HANDLE_HOVER_COLOR);
+            painter.rect_filled(rect, 1.0, ui.app_theme().hover_overlay);
             ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ResizeHorizontal);
         }
 
@@ -234,7 +249,7 @@ impl UIClip {
     fn contex_menu(&self, ui: &mut Ui, clip: &ClipCore, state: &mut ToniqueProjectState) {
         ui.vertical(|ui| {
             if ui
-                .add(ContextMenuButton::new(TRASH, "Delete").text_color(Color32::LIGHT_RED))
+                .add(ContextMenuButton::new(TRASH, "Delete").text_color(ui.app_theme().danger))
                 .clicked()
             {
                 state.delete_clips(&vec![clip.id.clone()]);

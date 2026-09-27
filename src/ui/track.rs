@@ -5,7 +5,9 @@ use crate::{
     },
     ui::{
         font::PHOSPHOR_FILL,
+        theme::{Theme, ThemeExt, with_alpha},
         widget::{
+            color_select::ColorSelect,
             context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
             meter::LoudnessMeter as Meter,
             rectangle::Rectangle,
@@ -22,7 +24,6 @@ use egui_phosphor::{
     fill::{COPY, PALETTE, PLUS, TRASH},
     regular::{MUSIC_NOTE_SIMPLE, TEXT_T},
 };
-use rand::Rng;
 use std::ops::RangeInclusive;
 
 const STROKE_WIDTH: f32 = 0.5;
@@ -70,14 +71,15 @@ impl UITrack {
         let muted = track.disabled();
         let is_solo = matches!(track.solo, crate::core::track::TrackSoloState::Solo);
 
+        let theme = ui.app_theme();
         let main_frame = Frame::new()
             .inner_margin(MarginF32::same(PADDING))
             .fill(if track.selected {
-                Color32::from_gray(30)
+                theme.bg_control
             } else {
-                Color32::from_gray(40)
+                theme.bg_raised
             })
-            .stroke(Stroke::new(STROKE_WIDTH, Color32::from_gray(70)));
+            .stroke(Stroke::new(STROKE_WIDTH, theme.separator));
 
         let res = main_frame
             .show(ui, |ui| {
@@ -93,7 +95,7 @@ impl UITrack {
                         Rectangle::new(Vec2::new(4., actual_height)).fill(if !muted {
                             track.color
                         } else {
-                            Color32::from_gray(100)
+                            theme.text_disabled
                         }),
                     );
                     let response = ui.interact(
@@ -194,8 +196,8 @@ impl UITrack {
             let text_edit = ui.add(
                 TextEdit::singleline(&mut track_mut.name)
                     .font(FontId::new(9., egui::FontFamily::Proportional))
-                    .background_color(Color32::from_black_alpha(20))
-                    .text_color(Color32::WHITE)
+                    .background_color(ui.app_theme().bg_deep)
+                    .text_color(ui.app_theme().text)
                     .margin(Margin::ZERO),
             );
             if !text_edit.has_focus() && !self._edit_lost_focus {
@@ -213,9 +215,13 @@ impl UITrack {
         } else {
             let formatted_name = parse_name(&track.name, track.index);
             ui.add(
-                Label::new(RichText::new(formatted_name).color(Color32::WHITE).size(9.))
-                    .truncate()
-                    .selectable(false),
+                Label::new(
+                    RichText::new(formatted_name)
+                        .color(ui.app_theme().text)
+                        .size(9.),
+                )
+                .truncate()
+                .selectable(false),
             );
         }
     }
@@ -241,22 +247,17 @@ impl UITrack {
                 if ui.add(ContextMenuButton::new(COPY, "Duplicate")).clicked() {
                     state.duplicate_track(&track.id);
                 };
-                if ui
-                    .add(ContextMenuButton::new(PALETTE, "Change Color"))
-                    .clicked()
-                {
-                    let mut rng = rand::rng();
-                    let track_mut = state.track_mut(&track.id);
-                    track_mut.color = Color32::from_rgb(
-                        rng.random_range(0..=255),
-                        rng.random_range(0..=255),
-                        rng.random_range(0..=255),
-                    );
-                    state.commit_track_mut(&track.id);
-                }
+                ContextMenuButton::new(PALETTE, "Color").submenu(ui, |ui| {
+                    let mut color = track.color;
+                    let picker = ColorSelect::new(("track-color", track.id), &mut color);
+                    if ui.add(picker).changed() {
+                        state.track_mut(&track.id).color = color;
+                        state.commit_track_mut(&track.id);
+                    }
+                });
                 ui.add(ContextMenuSeparator::new());
                 if ui
-                    .add(ContextMenuButton::new(TRASH, "Delete").text_color(Color32::LIGHT_RED))
+                    .add(ContextMenuButton::new(TRASH, "Delete").text_color(ui.app_theme().danger))
                     .clicked()
                 {
                     state.delete_track(&track.id);
@@ -266,39 +267,28 @@ impl UITrack {
     }
 
     fn mute_button(&mut self, ui: &mut Ui, solo: bool, track: &TrackReferenceCore) -> Response {
-        ui.add(
-            SquareButton::new("M")
-                .square(BUTTON_SIZE)
-                .fill(if track.muted {
-                    if solo {
-                        Color32::from_rgb(60, 40, 20)
-                    } else {
-                        Color32::from_rgb(191, 74, 15)
-                    }
-                } else {
-                    ui.visuals().widgets.inactive.bg_fill
-                }),
-        )
+        let theme = ui.app_theme();
+        // Dimmed when a solo already silences the track.
+        let fill = match (track.muted, solo) {
+            (false, _) => None,
+            (true, false) => Some(theme.warning),
+            (true, true) => Some(with_alpha(theme.warning, 90)),
+        };
+        ui.add(toggle_button("M", fill, &theme))
     }
 
     fn solo_button(&mut self, ui: &mut Ui, solo: bool, track: &TrackReferenceCore) -> Response {
-        ui.add(SquareButton::new("S").square(BUTTON_SIZE).fill(if solo {
-            track.color
-        } else {
-            ui.visuals().widgets.inactive.bg_fill
-        }))
+        let theme = ui.app_theme();
+        ui.add(toggle_button("S", solo.then_some(track.color), &theme))
     }
 
     fn arm_button(&mut self, ui: &mut Ui) -> Response {
-        ui.add(
-            SquareButton::new(MUSIC_NOTE_SIMPLE)
-                .square(BUTTON_SIZE)
-                .fill(if self.arm {
-                    Color32::from_rgb(220, 30, 30)
-                } else {
-                    ui.visuals().widgets.inactive.bg_fill
-                }),
-        )
+        let theme = ui.app_theme();
+        ui.add(toggle_button(
+            MUSIC_NOTE_SIMPLE,
+            self.arm.then_some(theme.record),
+            &theme,
+        ))
     }
 
     fn open_button(
@@ -315,7 +305,6 @@ impl UITrack {
         };
         let response = ui.add(
             SquareButton::new(icon)
-                .fill(Color32::from_gray(80))
                 .family(egui::FontFamily::Name(PHOSPHOR_FILL.into()))
                 .square(BUTTON_SIZE),
         );
@@ -375,8 +364,8 @@ impl UITrack {
         let t = (self.gain - *range.start()) / (*range.end() - *range.start());
 
         // Paint background bar
-        let visuals = ui.style().visuals.clone();
-        let bg_fill = visuals.extreme_bg_color;
+        let theme = ui.app_theme();
+        let bg_fill = theme.bg_deep;
         let fill_color = track.color;
 
         let painter = ui.painter();
@@ -398,7 +387,7 @@ impl UITrack {
             Align2::CENTER_CENTER,
             text,
             FontId::new(10., egui::FontFamily::Proportional),
-            Color32::WHITE,
+            theme.text,
         );
 
         response
@@ -424,5 +413,14 @@ impl UITrack {
             track_mut.height = track_mut.height.clamp(TRACK_CLOSED_HEIGHT + 25., 400.);
             self.prev_height = track_mut.height;
         }
+    }
+}
+
+/// Track header toggle: `fill` when on, the default control colour when off.
+fn toggle_button(text: &str, fill: Option<Color32>, theme: &Theme) -> SquareButton {
+    let button = SquareButton::new(text).square(BUTTON_SIZE);
+    match fill {
+        Some(fill) => button.fill(fill).color(theme.text_on(fill)),
+        None => button,
     }
 }
