@@ -269,7 +269,7 @@ impl ToniqueProjectState {
         self.audio = Some(audio);
         self.sources.set_engine_rate(rate);
         self.graph.reset();
-        self.set_playback_position(position);
+        self.seek(position);
         if playing && !rate_changed {
             self.play();
         } else {
