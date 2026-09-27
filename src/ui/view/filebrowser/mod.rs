@@ -34,7 +34,7 @@ impl FileBrowser {
         let config = Config::load();
         let mut items = UIItems::new();
         let dirs = config.list_dirs();
-        let root = if dirs.len() > 0 {
+        let root = if !dirs.is_empty() {
             items.init(dirs[0].clone());
             Some(dirs[0].clone())
         } else {
@@ -140,13 +140,13 @@ impl FileBrowser {
     }
 
     pub fn trigger_search(&mut self, query: &str) {
-        if let Some(root) = self.root.clone() {
-            if query.is_empty() {
-                self.items.clear_search(root);
-                return;
-            } else {
-                self.items.search(query, root);
-            }
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        if query.is_empty() {
+            self.items.clear_search(root);
+        } else {
+            self.items.search(query, root);
         }
     }
 }

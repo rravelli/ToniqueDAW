@@ -44,6 +44,8 @@ impl FolderNode {
 pub struct FileNode {
     pub path: PathBuf,
     pub depth: usize,
+    name_lower: String,
+    pub is_dir: bool,
 }
 
 pub struct FileTree {
@@ -69,6 +71,8 @@ impl FileTree {
         let children = self.get_children(&FileNode {
             path: dir,
             depth: 0,
+            name_lower: String::new(),
+            is_dir: true,
         });
 
         self.items = children;
@@ -78,6 +82,8 @@ impl FileTree {
         let children = self.get_children(&FileNode {
             path: root,
             depth: 0,
+            name_lower: String::new(),
+            is_dir: true,
         });
         self.items = children;
     }
@@ -91,7 +97,7 @@ impl FileTree {
         while let Some(file) = stack.pop() {
             children.push(file.clone());
 
-            if file.path.is_file() {
+            if !file.is_dir {
                 continue;
             }
 
@@ -113,38 +119,37 @@ impl FileTree {
         children
     }
 
-    pub fn open_folder(&mut self, index: usize, new_items: &mut Vec<FileNode>) {
-        let file = self.items[index].clone();
-
-        // let file = self.items[index].clone();
-
-        if let Some(dir) = self.folders.get_mut(&file.path) {
-            dir.open = true
-        }
-
-        new_items.splice((index + 1)..(index + 1), self.get_children(&file));
-    }
-
-    pub fn close_folder(&mut self, index: usize, new_items: &mut Vec<FileNode>) {
-        let file = self.items[index].clone();
-
-        if let Some(dir) = self.folders.get_mut(&file.path) {
-            dir.open = false
-        } else {
+    pub fn toggle_folder(&mut self, index: usize) {
+        let Some(file) = self.items.get(index).cloned() else {
             return;
         };
-
-        let mut i = index + 1;
-        while i < new_items.len() && new_items[i].depth > file.depth {
-            i += 1;
+        if !file.is_dir {
+            return;
         }
-        if i > index + 1 {
-            new_items.drain(index + 1..i);
+
+        let is_open = self
+            .folders
+            .get(&file.path)
+            .is_some_and(|folder| folder.open);
+        if is_open {
+            if let Some(folder) = self.folders.get_mut(&file.path) {
+                folder.open = false;
+            }
+            let end = (index + 1..self.items.len())
+                .find(|&i| self.items[i].depth <= file.depth)
+                .unwrap_or(self.items.len());
+            self.items.drain(index + 1..end);
+        } else {
+            if let Some(folder) = self.folders.get_mut(&file.path) {
+                folder.open = true;
+            }
+            let children = self.get_children(&file);
+            self.items.splice(index + 1..index + 1, children);
         }
     }
 
     pub fn search(&mut self, root: PathBuf, query: &str) {
-        filter(root, &mut self.folders, query, 0, false);
+        filter(root, &mut self.folders, &query.to_lowercase(), 0, false);
     }
 }
 
@@ -167,9 +172,19 @@ fn read_entries(dir: PathBuf, depth: usize) -> Vec<FileNode> {
                 .filter_map(|entry| entry.ok())
                 .map(|f| f.path())
                 .filter(|path| path.is_dir() || is_audio_file(path))
-                .map(|entry| FileNode {
-                    depth: depth,
-                    path: entry,
+                .map(|entry| {
+                    let name_lower = entry
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    let is_dir = entry.is_dir();
+                    FileNode {
+                        depth,
+                        path: entry,
+                        name_lower,
+                        is_dir,
+                    }
                 })
                 .collect()
         })
@@ -206,15 +221,9 @@ fn filter(
     let mut results = Vec::new();
     let mut contains_valid = false;
     for child in children {
-        let name = child
-            .path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-        let is_valid = name.contains(query) || include_all;
+        let is_valid = child.name_lower.contains(query) || include_all;
 
-        if child.path.is_file() {
+        if !child.is_dir {
             if is_valid {
                 results.push(child);
                 contains_valid = true;

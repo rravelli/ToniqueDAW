@@ -55,12 +55,14 @@ impl UITopBar {
             self.metronome_ui(ui, state);
             if self.play_button_ui(ui, state.playback_state()).clicked() {
                 if state.playback_state() == PlaybackState::Playing {
-                    state.pause();
+                    state.stop();
                 } else {
                     state.play();
                 }
             };
             self.record_button_ui(ui);
+            self.loop_ui(ui, state);
+            self.follow_ui(ui, state);
             self.bpm_input.value = state.bpm();
             self.bpm_input.ui(ui);
             if self.bpm_input.value != state.bpm() {
@@ -84,12 +86,12 @@ impl UITopBar {
     fn play_button_ui(&mut self, ui: &mut Ui, playback_state: PlaybackState) -> Response {
         ui.add(
             SquareButton::new(if playback_state == PlaybackState::Playing {
-                egui_phosphor::fill::PAUSE
+                egui_phosphor::fill::STOP
             } else {
                 egui_phosphor::fill::PLAY
             })
             .tooltip(if playback_state == PlaybackState::Playing {
-                "Pause"
+                "Stop"
             } else {
                 "Play"
             })
@@ -182,10 +184,68 @@ impl UITopBar {
         res
     }
 
+    fn follow_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+        let follow = state.follow_playhead();
+        let res = ui.add(
+            SquareButton::new(egui_phosphor::fill::CARET_LINE_RIGHT)
+                .square(BUTTON_SIZE)
+                .font(FontId::new(
+                    14.,
+                    FontFamily::Name(
+                        if follow {
+                            PHOSPHOR_FILL
+                        } else {
+                            PHOSPHOR_REGULAR
+                        }
+                        .into(),
+                    ),
+                ))
+                .fill(if follow {
+                    PRIMARY_COLOR
+                } else {
+                    PRIMARY_BUTTON_COLOR
+                })
+                .color(Color32::from_gray(30))
+                .tooltip("Follow playhead"),
+        );
+        if res.clicked() {
+            state.set_follow_playhead(!follow);
+        }
+    }
+
+    fn loop_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+        let looping = state.looping();
+        let res = ui.add(
+            SquareButton::new(egui_phosphor::fill::REPEAT)
+                .square(BUTTON_SIZE)
+                .font(FontId::new(
+                    14.,
+                    FontFamily::Name(
+                        if looping {
+                            PHOSPHOR_FILL
+                        } else {
+                            PHOSPHOR_REGULAR
+                        }
+                        .into(),
+                    ),
+                ))
+                .fill(if looping {
+                    PRIMARY_COLOR
+                } else {
+                    PRIMARY_BUTTON_COLOR
+                })
+                .color(Color32::from_gray(30))
+                .tooltip("Loop (Ctrl+L)"),
+        );
+        if res.clicked() {
+            state.set_looping(!looping);
+        }
+    }
+
     fn metronome_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
         let click = state.metronome()
             && matches!(state.playback_state(), PlaybackState::Playing)
-            && state.playback_position() % 1.0 < 0.5;
+            && state.playhead() % 1.0 < 0.5;
         let res = ui.add(
             SquareButton::new(egui_phosphor::fill::METRONOME)
                 .square(BUTTON_SIZE)

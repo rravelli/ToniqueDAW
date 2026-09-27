@@ -116,8 +116,7 @@ impl TrackClips<'_> {
                 let mut copy = clip.with_id(new_id());
                 match bounds {
                     Some((start, end)) => {
-                        copy.trim_start_at(start.max(copy.position), bpm);
-                        copy.trim_end_at(end, bpm);
+                        copy.crop(start, end, bpm);
                         copy.position += end - start;
                     }
                     None => copy.position = clip.end(bpm),
@@ -245,5 +244,21 @@ mod tests {
         };
         assert_eq!(span(left), (0., 1.));
         assert_eq!(span(right), (1., 4.));
+    }
+
+    #[test]
+    fn duplicating_a_zone_past_a_trimmed_clip_keeps_the_trim() {
+        let mut ops = Vec::new();
+        let mut trimmed = clip(1, 0., 4.);
+        trimmed.trim_end_at(2., BPM); // audible 0..2 out of 0..4
+        let t = TrackClips {
+            track: TrackId(1),
+            clips: vec![trimmed],
+            bpm: BPM,
+            ops: &mut ops,
+        };
+        let copies = t.duplicates(&[ClipId(1)], Some((1., 6.)), &mut ids());
+        let (a, b) = span(&copies[0]);
+        assert!((a - 6.).abs() < 1e-4 && (b - 7.).abs() < 1e-4, "{a}..{b}");
     }
 }

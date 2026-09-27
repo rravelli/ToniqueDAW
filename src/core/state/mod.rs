@@ -1,4 +1,6 @@
 mod clip_ops;
+mod clipboard;
+mod selection;
 mod sources;
 #[cfg(test)]
 mod tests;
@@ -11,6 +13,8 @@ use crate::{
         metrics::{AudioMetrics, GlobalMetrics},
         state::{
             clip_ops::{ClipOp, TrackClips},
+            clipboard::Clipboard,
+            selection::ClipSelection,
             sources::SourceRegistry,
         },
         track::{
@@ -24,6 +28,8 @@ use crate::{
     },
 };
 use std::{collections::HashMap, mem::take, path::PathBuf};
+
+pub use selection::SelectionBounds;
 use tonique_engine::{
     edit::{
         ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, EditSession, Plugin, PluginId,
@@ -43,6 +49,8 @@ use tonique_engine::{
 pub const MASTER_TRACK_ID: TrackId = TrackId(0);
 
 const DEFAULT_BPM: f64 = 120.;
+/// Length of the loop region in a new project.
+const DEFAULT_LOOP_BARS: f32 = 4.;
 const TRACK_NAME: &str = "# Audio Track";
 
 #[derive(Clone, Debug)]
@@ -71,8 +79,14 @@ pub struct ToniqueProjectState {
     session: EditSession,
     sources: SourceRegistry,
 
-    playback_position: f32,
+    /// Where the transport is, in beats (follows the engine while playing).
+    playhead: f32,
+    /// Where the user last clicked in the arrangement, in beats. Playback
+    /// starts and returns here, and edits (cuts) happen here.
+    edit_cursor: f32,
     playback_state: PlaybackState,
+    /// Whether the timeline scrolls to keep the playhead in view.
+    follow_playhead: bool,
     preview_playback_state: PlaybackState,
     preview_position: usize,
     pub metrics: GlobalMetrics,
@@ -83,6 +97,8 @@ pub struct ToniqueProjectState {
     /// UI-only track fields; kept for deleted tracks so undo restores them.
     views: HashMap<TrackId, MutableTrackCore>,
     selected_tracks: Vec<TrackId>,
+    clip_selection: ClipSelection,
+    clipboard: Clipboard,
     /// Effect editors per track, in plugin order.
     effects: HashMap<TrackId, Vec<UIEffect>>,
     /// Editors of plugins not currently in a chain (removed, or not synced yet).
@@ -93,6 +109,11 @@ pub struct ToniqueProjectState {
 
     pub grid: GridService,
     metronome: bool,
+    /// Loop region in beats; playback wraps over it while `looping`.
+    loop_range: (f32, f32),
+    looping: bool,
+    /// Tempo the engine's loop (in samples) was computed with.
+    loop_bpm: f32,
 
     pub resized_clip: Option<(ClipId, f32, f32, f32)>,
     // Panels
@@ -110,8 +131,10 @@ impl ToniqueProjectState {
         Self {
             session,
             sources: SourceRegistry::new(sample_rate),
-            playback_position: 0.,
+            playhead: 0.,
+            edit_cursor: 0.,
             playback_state: PlaybackState::Paused,
+            follow_playhead: false,
             preview_playback_state: PlaybackState::Paused,
             preview_position: 0,
             metrics: GlobalMetrics::new(),
@@ -119,12 +142,20 @@ impl ToniqueProjectState {
             central_view: CentralView::Timeline,
             views: HashMap::from([(MASTER_TRACK_ID, master)]),
             selected_tracks: Vec::new(),
+            clip_selection: ClipSelection::default(),
+            clipboard: Clipboard::default(),
             effects: HashMap::new(),
             detached_effects: HashMap::new(),
             pending_actions: Vec::new(),
             batching: false,
             resized_clip: None,
             grid: GridService::new(),
+            loop_range: (
+                0.,
+                DEFAULT_LOOP_BARS * GridService::new().beats_per_bar() as f32,
+            ),
+            looping: false,
+            loop_bpm: DEFAULT_BPM as f32,
             left_panel_open: true,
             bottom_panel_open: false,
             metronome: false,
@@ -138,8 +169,12 @@ impl ToniqueProjectState {
             let result = self.session.set_source(id, data);
             report(result);
         }
+        // Tempo changes (edits, undo, redo) move the loop in samples.
+        if self.looping && self.bpm() != self.loop_bpm {
+            self.sync_loop();
+        }
         if self.playback_state == PlaybackState::Playing {
-            self.playback_position = self.session.position().0 as f32;
+            self.playhead = self.session.position().0 as f32;
         }
         let engine = self.session.engine();
         if let Some(pos) = engine.preview_position() {
@@ -223,20 +258,44 @@ impl ToniqueProjectState {
     pub fn bpm(&self) -> f32 {
         self.edit().tempo.bpm_at(BeatPos(0.)) as f32
     }
-    // Playback position
-    pub fn set_playback_position(&mut self, value: f32) {
-        self.playback_position = value.max(0.);
-        let result = self.session.seek(BeatPos(self.playback_position as f64));
+    // Playhead and edit cursor
+    /// Move the playhead and the edit cursor there (ruler, playhead handle).
+    pub fn seek(&mut self, beats: f32) {
+        self.edit_cursor = beats.max(0.);
+        self.seek_playhead(self.edit_cursor);
+    }
+    /// Place the edit cursor (a click in the arrangement). Doesn't interrupt
+    /// playback; when stopped, the playhead follows so play starts there.
+    pub fn set_edit_cursor(&mut self, beats: f32) {
+        self.edit_cursor = beats.max(0.);
+        if self.playback_state != PlaybackState::Playing {
+            self.seek_playhead(self.edit_cursor);
+        }
+    }
+    fn seek_playhead(&mut self, beats: f32) {
+        self.playhead = beats;
+        let result = self.session.seek(BeatPos(beats as f64));
         report(result);
     }
-    pub fn playback_position(&self) -> f32 {
-        self.playback_position
+    pub fn playhead(&self) -> f32 {
+        self.playhead
+    }
+    pub fn edit_cursor(&self) -> f32 {
+        self.edit_cursor
+    }
+    pub fn follow_playhead(&self) -> bool {
+        self.follow_playhead
+    }
+    pub fn set_follow_playhead(&mut self, follow: bool) {
+        self.follow_playhead = follow;
     }
     // Transport state
-    pub fn pause(&mut self) {
+    /// Stop playback and return the playhead to the edit cursor.
+    pub fn stop(&mut self) {
         self.playback_state = PlaybackState::Paused;
         let result = self.session.stop();
         report(result);
+        self.seek_playhead(self.edit_cursor);
     }
     pub fn play(&mut self) {
         self.playback_state = PlaybackState::Playing;
@@ -268,6 +327,35 @@ impl ToniqueProjectState {
         self.preview_playback_state = PlaybackState::Playing;
         let result = self.session.engine_mut().preview_seek(pos);
         report(result.map_err(EditError::from));
+    }
+    // Loop
+    pub fn looping(&self) -> bool {
+        self.looping
+    }
+    pub fn set_looping(&mut self, looping: bool) {
+        self.looping = looping;
+        self.sync_loop();
+    }
+    pub fn loop_range(&self) -> (f32, f32) {
+        self.loop_range
+    }
+    /// Set the loop region (in any order). Empty regions are ignored.
+    pub fn set_loop_range(&mut self, a: f32, b: f32) {
+        let (start, end) = (a.min(b).max(0.), a.max(b).max(0.));
+        if end > start && (start, end) != self.loop_range {
+            self.loop_range = (start, end);
+            self.sync_loop();
+        }
+    }
+    /// Hand the loop to the engine. It counts in samples, so this must run
+    /// again whenever the tempo changes.
+    fn sync_loop(&mut self) {
+        self.loop_bpm = self.bpm();
+        let (start, end) = self.loop_range;
+        let range = self
+            .looping
+            .then_some((BeatPos(start as f64), BeatPos(end as f64)));
+        report(self.session.set_loop(range));
     }
     pub fn toggle_metronome(&mut self) {
         self.metronome = !self.metronome;
@@ -368,17 +456,23 @@ impl ToniqueProjectState {
     }
 
     /// Add clips and fix all overlaps on the track.
-    pub fn add_clips(&mut self, track_id: &TrackId, clips: Vec<ClipCore>) {
+    pub fn add_clips(&mut self, track_id: &TrackId, mut clips: Vec<ClipCore>) {
+        // Clips never start before the first beat.
+        for clip in &mut clips {
+            clip.position = clip.position.max(0.);
+        }
         self.clip_ops("Add clips", |s, ops| {
             let mut clips_on_track = s.track_clips(*track_id, ops);
             clips_on_track.add(clips, &mut || s.new_clip_id());
         });
     }
     /// Move clip to a new position and a new track fixing all overlaps on this track.
+    /// Clips never start before the first beat.
     pub fn move_clip(&mut self, id: &ClipId, to_track: &TrackId, to_pos: f32, ignore: &[ClipId]) {
         let Some((from, clip)) = self.find_clip(*id) else {
             return;
         };
+        let to_pos = to_pos.max(0.);
         self.clip_ops("Move clips", |s, ops| {
             let mut moved = clip.clone();
             moved.position = to_pos;
@@ -413,16 +507,19 @@ impl ToniqueProjectState {
         });
     }
     /// Duplicate clips fixing all overlaps on the tracks.
-    pub fn duplicate_clips(&mut self, ids: &[ClipId], bounds: Option<(f32, f32)>) {
+    pub fn duplicate_clips(&mut self, ids: &[ClipId], bounds: Option<(f32, f32)>) -> Vec<ClipId> {
+        let mut copy_ids = Vec::new();
         self.clip_ops("Duplicate clips", |s, ops| {
             let tracks: Vec<_> = s.edit().tracks.iter().map(|t| t.id).collect();
             for track in tracks {
                 let mut clips_on_track = s.track_clips(track, ops);
                 let mut new_id = || s.new_clip_id();
                 let copies = clips_on_track.duplicates(ids, bounds, &mut new_id);
+                copy_ids.extend(copies.iter().map(|clip| clip.id));
                 clips_on_track.add(copies, &mut new_id);
             }
         });
+        copy_ids
     }
     /// Resize clip without computing overlap checks.
     /// Use `commit_resize_clip` to apply overlap checks and add to undo stack.
@@ -714,6 +811,28 @@ impl ToniqueProjectState {
     pub fn selected_tracks(&self) -> &Vec<TrackId> {
         &self.selected_tracks
     }
+    /// Positions (in beats) edits snap to besides the grid: the edges of the
+    /// clips not in `exclude`, the loop edges and the edit cursor.
+    pub fn snap_targets(&self, exclude: &[ClipId]) -> Vec<f32> {
+        let bpm = self.bpm();
+        let (loop_start, loop_end) = self.loop_range;
+        self.tracks()
+            .flat_map(|t| t.clips)
+            .filter(|c| !exclude.contains(&c.id))
+            .flat_map(|c| [c.position, c.end(bpm)])
+            .chain([loop_start, loop_end, self.edit_cursor])
+            .collect()
+    }
+    /// Where the arrangement's content ends, in beats: the last clip end,
+    /// the loop end while looping, or the playhead, whichever is furthest.
+    pub fn arrangement_end(&self) -> f32 {
+        let bpm = self.bpm();
+        let loop_end = if self.looping { self.loop_range.1 } else { 0. };
+        self.tracks()
+            .flat_map(|t| t.clips)
+            .map(|c| c.end(bpm))
+            .fold(self.playhead.max(loop_end), f32::max)
+    }
     pub fn track_len(&self) -> usize {
         self.edit().tracks.len()
     }
@@ -804,6 +923,7 @@ impl ToniqueProjectState {
         }
         self.selected_tracks
             .retain(|id| *id == MASTER_TRACK_ID || self.session.edit().track(*id).is_ok());
+        self.prune_clip_selection();
         self.sync_effects();
     }
     /// Whether there is still actions to undo

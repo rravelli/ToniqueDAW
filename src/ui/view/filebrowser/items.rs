@@ -1,7 +1,10 @@
 use std::{
     ffi::OsStr,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     thread,
 };
 
@@ -28,6 +31,7 @@ pub struct UIItems {
     pub selected_audio: Option<AudioInfo>,
     files: Arc<Mutex<FileTree>>,
     loading: Arc<Mutex<bool>>,
+    search_generation: Arc<AtomicU64>,
     query: String,
 }
 
@@ -38,11 +42,13 @@ impl UIItems {
             selected_audio: None,
             files: Arc::new(Mutex::new(FileTree::new())),
             loading: Arc::new(Mutex::new(false)),
+            search_generation: Arc::new(AtomicU64::new(0)),
             query: "".to_string(),
         }
     }
 
     pub fn init(&mut self, root: PathBuf) {
+        self.search_generation.fetch_add(1, Ordering::Relaxed);
         self.selected = None;
         self.selected_audio = None;
         if let Ok(mut files) = self.files.lock() {
@@ -55,29 +61,51 @@ impl UIItems {
 
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
         let is_loading = self.loading.lock().is_ok_and(|l| *l);
-
-        let mut next_items = if !is_loading && let Ok(files) = self.files.lock() {
-            files.items.clone()
+        let item_count = if !is_loading {
+            self.files.lock().map_or(0, |files| files.items.len())
         } else {
-            Vec::new()
+            0
         };
 
         if !self.query.is_empty() {
-            self.result_ui(ui, next_items.len(), is_loading);
+            self.result_ui(ui, item_count, is_loading);
         }
-        // If loading dont render the items
         if is_loading {
             return;
         }
 
-        ScrollArea::vertical().show_rows(ui, 16., next_items.len(), |ui, row_range| {
-            for index in row_range {
-                self.render_item(ui, index, &mut next_items, state);
+        let mut folder_toggles = Vec::new();
+        let files_arc = self.files.clone();
+        ScrollArea::vertical().show_rows(ui, 16., item_count, |ui, row_range| {
+            let visible_rows = files_arc
+                .lock()
+                .map(|files| {
+                    row_range
+                        .clone()
+                        .filter_map(|index| {
+                            files.items.get(index).map(|file| {
+                                let open = files
+                                    .folders
+                                    .get(&file.path)
+                                    .is_some_and(|folder| folder.open);
+                                (index, file.clone(), open)
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            for (index, file, open) in visible_rows {
+                if self.render_item(ui, index, &file, open, state) {
+                    folder_toggles.push(index);
+                }
             }
         });
 
         if let Ok(mut files) = self.files.lock() {
-            files.items = next_items;
+            for index in folder_toggles {
+                files.toggle_folder(index);
+            }
         }
 
         self.update(ui, state);
@@ -137,8 +165,7 @@ impl UIItems {
             };
             if updated {
                 let is_audio = PLAYABLE_FORMAT.contains(&extension);
-                let is_dir = file.path.is_dir();
-                if !is_dir && is_audio {
+                if !file.is_dir && is_audio {
                     self.selected_audio = AUDIO_ANALYSIS_CACHE.get_or_analyze(file.path.clone());
                     state.play_preview(file.path.clone());
                 }
@@ -150,26 +177,17 @@ impl UIItems {
         &mut self,
         ui: &mut Ui,
         index: usize,
-        new_items: &mut Vec<FileNode>,
+        file: &FileNode,
+        open: bool,
         state: &mut ToniqueProjectState,
-    ) {
-        let file = if let Ok(files) = self.files.lock() {
-            files.items[index].clone()
-        } else {
-            return;
-        };
-
-        let is_dir = file.path.is_dir();
+    ) -> bool {
+        let is_dir = file.is_dir;
         let selected = self.selected.is_some_and(|idx| idx == index);
         let extension = if let Some(ext) = file.path.extension() {
             ext.to_str().unwrap()
         } else {
             ""
         };
-        let open = self.files.lock().map_or(false, |f| {
-            f.folders.get(&file.path).map_or(false, |f| f.open)
-        });
-
         let is_audio = PLAYABLE_FORMAT.contains(&extension);
 
         let icon = if is_dir {
@@ -213,16 +231,7 @@ impl UIItems {
             state.play_preview(file.path.clone());
         }
 
-        if is_dir
-            && pressed
-            && let Ok(mut files) = self.files.lock()
-        {
-            if !open {
-                files.open_folder(index, new_items);
-            } else {
-                files.close_folder(index, new_items);
-            }
-        }
+        let toggle_folder = is_dir && pressed;
 
         if res.dragged() {
             if is_audio
@@ -241,9 +250,14 @@ impl UIItems {
                 None,
             );
         }
+        toggle_folder
     }
 
     pub fn clear_search(&mut self, root: PathBuf) {
+        self.search_generation.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut loading) = self.loading.lock() {
+            *loading = false;
+        }
         self.query = "".to_string();
         if let Ok(mut files) = self.files.lock() {
             files.query.clear();
@@ -258,18 +272,29 @@ impl UIItems {
         let query_clone = query.to_string();
         let files_clone = self.files.clone();
         let loading_clone = self.loading.clone();
+        let generation = self.search_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let generation_clone = self.search_generation.clone();
+        if let Ok(mut loading) = self.loading.lock() {
+            *loading = true;
+        }
         thread::spawn(move || {
-            if let Ok(mut loading) = loading_clone.lock() {
-                *loading = true;
+            if generation_clone.load(Ordering::Relaxed) != generation {
+                return;
             }
             if let Ok(mut files) = files_clone.lock() {
-                files.query = query_clone.to_string();
+                if generation_clone.load(Ordering::Relaxed) != generation {
+                    return;
+                }
+                files.query = query_clone.clone();
                 files.search(root.clone(), &query_clone);
-
-                files.rebuild(root);
+                if generation_clone.load(Ordering::Relaxed) == generation {
+                    files.rebuild(root);
+                }
             };
-            if let Ok(mut loading) = loading_clone.lock() {
-                *loading = false;
+            if generation_clone.load(Ordering::Relaxed) == generation {
+                if let Ok(mut loading) = loading_clone.lock() {
+                    *loading = false;
+                }
             }
         });
         self.selected = None;
