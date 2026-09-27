@@ -118,6 +118,10 @@ impl ToniqueApp {
                 Action::AddTrack => {
                     state.add_track();
                 }
+                Action::GroupTracks => {
+                    let selected = state.selected_tracks().clone();
+                    state.group(&selected);
+                }
                 Action::ToggleBrowser => state.left_panel_open = !state.left_panel_open,
                 Action::ToggleEffectsPanel => state.bottom_panel_open = !state.bottom_panel_open,
                 Action::ToggleGraphView => {

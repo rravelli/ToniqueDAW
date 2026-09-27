@@ -1,7 +1,7 @@
 use crate::{
     core::{
-        state::ToniqueProjectState,
-        track::{DEFAULT_TRACK_HEIGHT, MutableTrackCore, TRACK_CLOSED_HEIGHT, TrackReferenceCore},
+        state::{MIN_OPEN_HEIGHT, ToniqueProjectState},
+        track::{TrackKind, TrackReferenceCore},
     },
     ui::{
         font::PHOSPHOR_FILL,
@@ -21,7 +21,7 @@ use egui::{
     TextEdit, Ui, Vec2, epaint::MarginF32,
 };
 use egui_phosphor::{
-    fill::{COPY, PALETTE, PLUS, TRASH},
+    fill::{COPY, FOLDER_MINUS, FOLDER_PLUS, PALETTE, PLUS, TRASH},
     regular::{MUSIC_NOTE_SIMPLE, TEXT_T},
 };
 use std::ops::RangeInclusive;
@@ -31,12 +31,26 @@ const PADDING: f32 = 2.;
 const BUTTON_SIZE: f32 = 15.;
 const METER_WIDTH: f32 = 8.;
 pub const HANDLE_HEIGHT: f32 = 3.0;
+/// Indentation per level of groups, up to [`MAX_INDENT_LEVELS`] (deeper
+/// rows line up with the deepest shown level).
+const INDENT: f32 = 8.;
+const MAX_INDENT_LEVELS: usize = 6;
+/// Width of the coloured bar on the left of each header.
+pub const COLOR_BAR_WIDTH: f32 = 4.;
+
+/// Left of the coloured bar of a row at `depth`, in a header starting at
+/// `left`. Groups extend theirs down to their last row from there.
+pub fn color_bar_x(left: f32, depth: usize) -> f32 {
+    left + STROKE_WIDTH + PADDING + depth.min(MAX_INDENT_LEVELS) as f32 * INDENT
+}
+
+/// Space between a header's edge and its content, top and bottom.
+pub const HEADER_INSET: f32 = STROKE_WIDTH + PADDING;
 
 #[derive(Debug, Clone)]
 pub struct UITrack {
     gain: f32,
     old_volume: f32,
-    prev_height: f32,
     edit: bool,
     arm: bool,
     _edit_lost_focus: bool,
@@ -50,7 +64,6 @@ impl UITrack {
             edit: false,
             gain: 0.,
             old_volume: 1.0,
-            prev_height: DEFAULT_TRACK_HEIGHT,
         }
     }
 
@@ -68,6 +81,7 @@ impl UITrack {
         };
 
         let mut volume_changed = false;
+        let is_group = track.kind == TrackKind::Group;
         let muted = track.disabled();
         let is_solo = matches!(track.solo, crate::core::track::TrackSoloState::Solo);
 
@@ -90,9 +104,16 @@ impl UITrack {
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
 
+                    // Indentation: the bars of the groups it's in run here (see
+                    // `color_bar_x`).
+                    let levels = track.depth.min(MAX_INDENT_LEVELS);
+                    if levels > 0 {
+                        ui.add_space(levels as f32 * INDENT);
+                    }
+
                     // Left Side: Rectangle
                     ui.add(
-                        Rectangle::new(Vec2::new(4., actual_height)).fill(if !muted {
+                        Rectangle::new(Vec2::new(COLOR_BAR_WIDTH, actual_height)).fill(if !muted {
                             track.color
                         } else {
                             theme.text_disabled
@@ -110,9 +131,19 @@ impl UITrack {
                         Sense::click_and_drag(),
                     );
 
-                    if response.clicked() || response.dragged() {
+                    // Ctrl+click adds to the selection, Shift+click selects a range.
+                    if response.clicked() {
+                        let modifiers = ui.input(|i| i.modifiers);
+                        if modifiers.command {
+                            state.toggle_track_selected(track.id);
+                        } else if modifiers.shift {
+                            state.select_rows_to(track.id);
+                        } else {
+                            state.select_track(&track.id);
+                        }
+                    } else if response.drag_started() && !track.selected {
                         state.select_track(&track.id);
-                    };
+                    }
 
                     // Middle: Text & Controls
                     ui.vertical(|ui| {
@@ -122,9 +153,11 @@ impl UITrack {
                             // let track_mut = state.track_mut(&track.id);
                             self.open_button(ui, track, state);
 
+                            // Groups have no arm button.
+                            let buttons = if is_group { 2. } else { 3. };
                             let text_width = ui.available_width()
                                 - 4. * PADDING
-                                - 3. * BUTTON_SIZE
+                                - buttons * BUTTON_SIZE
                                 - METER_WIDTH;
                             // Track label
                             if text_width > 0. {
@@ -136,7 +169,7 @@ impl UITrack {
                             // Track controls
                             let mute_res = self.mute_button(ui, is_solo, track);
                             let solo_res = self.solo_button(ui, is_solo, track);
-                            let arm_res = self.arm_button(ui);
+                            let arm_res = (!is_group).then(|| self.arm_button(ui));
 
                             if mute_res.clicked() {
                                 state.set_mute(track.id.clone(), !track.muted);
@@ -145,7 +178,7 @@ impl UITrack {
                                 state
                                     .toggle_solo(track.id.clone(), ui.input(|i| i.modifiers.shift));
                             }
-                            if arm_res.clicked() {
+                            if arm_res.is_some_and(|r| r.clicked()) {
                                 self.arm = !self.arm;
                             }
                         });
@@ -232,6 +265,7 @@ impl UITrack {
         track: &TrackReferenceCore,
         state: &mut ToniqueProjectState,
     ) {
+        let is_group = track.kind == TrackKind::Group;
         Frame::new().show(ui, |ui| {
             ui.vertical(|ui| {
                 ui.add(ContextMenuLabel::new(parse_name(&track.name, track.index)));
@@ -244,7 +278,27 @@ impl UITrack {
                 {
                     state.add_track_at(track.index);
                 }
-                if ui.add(ContextMenuButton::new(COPY, "Duplicate")).clicked() {
+                // The whole selection when this row is part of it.
+                let selection = state.selected_tracks().clone();
+                let targets = if selection.contains(&track.id) {
+                    selection
+                } else {
+                    vec![track.id]
+                };
+                if ui
+                    .add(ContextMenuButton::new(FOLDER_PLUS, "Group"))
+                    .clicked()
+                {
+                    state.group(&targets);
+                }
+                if is_group {
+                    if ui
+                        .add(ContextMenuButton::new(FOLDER_MINUS, "Ungroup"))
+                        .clicked()
+                    {
+                        state.ungroup(track.id);
+                    }
+                } else if ui.add(ContextMenuButton::new(COPY, "Duplicate")).clicked() {
                     state.duplicate_track(&track.id);
                 };
                 ContextMenuButton::new(PALETTE, "Color").submenu(ui, |ui| {
@@ -256,8 +310,13 @@ impl UITrack {
                     }
                 });
                 ui.add(ContextMenuSeparator::new());
+                let delete = if is_group {
+                    "Delete group and contents"
+                } else {
+                    "Delete"
+                };
                 if ui
-                    .add(ContextMenuButton::new(TRASH, "Delete").text_color(ui.app_theme().danger))
+                    .add(ContextMenuButton::new(TRASH, delete).text_color(ui.app_theme().danger))
                     .clicked()
                 {
                     state.delete_track(&track.id);
@@ -308,20 +367,12 @@ impl UITrack {
                 .family(egui::FontFamily::Name(PHOSPHOR_FILL.into()))
                 .square(BUTTON_SIZE),
         );
+        let closed = track_mut.closed;
         if response.clicked() {
-            self.toggle_open(track_mut);
+            state.set_closed(&track.id, !closed);
         }
 
         response
-    }
-
-    fn toggle_open(&mut self, track_mut: &mut MutableTrackCore) {
-        track_mut.closed = !track_mut.closed;
-        if track_mut.closed {
-            track_mut.height = TRACK_CLOSED_HEIGHT;
-        } else {
-            track_mut.height = self.prev_height;
-        }
     }
 
     fn gain_slider(
@@ -410,8 +461,7 @@ impl UITrack {
         }
         if response.dragged() && !track_mut.closed {
             track_mut.height += response.drag_delta().y;
-            track_mut.height = track_mut.height.clamp(TRACK_CLOSED_HEIGHT + 25., 400.);
-            self.prev_height = track_mut.height;
+            track_mut.height = track_mut.height.clamp(MIN_OPEN_HEIGHT, 400.);
         }
     }
 }

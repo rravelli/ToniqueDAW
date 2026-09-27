@@ -40,6 +40,8 @@ pub enum EditError {
     ClipNotFound(ClipId),
     PluginNotFound(PluginId),
     ParamNotFound(ParamId),
+    /// Routing a bus there would feed it into itself.
+    RoutingCycle(BusId),
     Invalid(&'static str),
     Engine(String),
 }
@@ -214,6 +216,11 @@ pub struct Channel {
 }
 
 impl Channel {
+    /// Whether mute and solo let this channel through (as last refreshed).
+    pub fn audible(&self) -> bool {
+        self.mute_gain.get() > 0.5
+    }
+
     fn new(edit: &mut Edit) -> Self {
         Self {
             plugins: Vec::new(),
@@ -303,11 +310,13 @@ pub struct Bus {
     pub name: String,
     pub channel: Channel,
     pub output: Output,
+    /// Soloing a bus solos everything routed into it, however deep.
+    pub soloed: bool,
 }
 
 impl Bus {
     pub fn new(edit: &mut Edit, name: impl Into<String>) -> Self {
-        Self { id: BusId(edit.next_id()), name: name.into(), channel: Channel::new(edit), output: Output::Master }
+        Self { id: BusId(edit.next_id()), name: name.into(), channel: Channel::new(edit), output: Output::Master, soloed: false }
     }
 }
 
@@ -389,6 +398,25 @@ impl Edit {
         self.buses.iter().find(|b| b.id == id).ok_or(EditError::BusNotFound(id))
     }
 
+    pub fn bus_mut(&mut self, id: BusId) -> Result<&mut Bus, EditError> {
+        self.buses.iter_mut().find(|b| b.id == id).ok_or(EditError::BusNotFound(id))
+    }
+
+    /// The buses `output` leads through on its way to the master, nearest
+    /// first. Stops on a broken or cyclic route.
+    pub fn buses_along(&self, mut output: Output) -> Vec<BusId> {
+        let mut path = Vec::new();
+        while let Output::Bus(id) = output {
+            let Ok(bus) = self.bus(id) else { break };
+            if path.contains(&id) {
+                break;
+            }
+            path.push(id);
+            output = bus.output;
+        }
+        path
+    }
+
     pub fn channel(&self, r: ChannelRef) -> Result<&Channel, EditError> {
         Ok(match r {
             ChannelRef::Track(id) => &self.track(id)?.channel,
@@ -430,9 +458,12 @@ impl Edit {
     /// Push mute/solo state into each channel's ramped mute gain. Cheap and
     /// graph-free: toggling mute or solo never rebuilds anything.
     pub fn refresh_mute_gains(&self) {
-        let any_solo = self.tracks.iter().any(|t| t.soloed);
+        let any_solo = self.tracks.iter().any(|t| t.soloed) || self.buses.iter().any(|b| b.soloed);
         for t in &self.tracks {
-            let audible = !t.channel.muted && (!any_solo || t.soloed);
+            // A soloed bus solos everything routed into it.
+            let soloed = t.soloed
+                || self.buses_along(t.output).iter().any(|id| self.bus(*id).is_ok_and(|b| b.soloed));
+            let audible = !t.channel.muted && (!any_solo || soloed);
             t.channel.mute_gain.set(if audible { 1.0 } else { 0.0 }, 10.0);
         }
         for c in self.buses.iter().map(|b| &b.channel).chain([&self.master]) {

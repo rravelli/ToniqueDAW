@@ -756,6 +756,7 @@ mod projects {
             height: 60.,
             closed: false,
             soloed: false,
+            group: None,
             channel: project.master.clone(),
             clips: vec![ClipFile {
                 path: "gone.wav".into(),
@@ -787,5 +788,295 @@ mod projects {
         assert!(!state.looping());
         assert!(!state.can_undo());
         assert_eq!(state.project(None), setup_state().project(None));
+    }
+}
+
+mod groups {
+    use super::*;
+    use crate::core::{
+        state::RowTarget,
+        track::{TrackKind, TrackSoloState},
+    };
+    use std::path::Path;
+
+    /// A track named `name`, added last.
+    fn track(state: &mut ToniqueProjectState, name: &str) -> TrackId {
+        let id = state.add_track();
+        state.track_mut(&id).name = name.into();
+        state.commit_track_mut(&id);
+        id
+    }
+
+    fn rename(state: &mut ToniqueProjectState, id: TrackId, name: &str) {
+        state.track_mut(&id).name = name.into();
+        state.commit_track_mut(&id);
+    }
+
+    /// The visible rows, indented by depth.
+    fn tree(state: &ToniqueProjectState) -> Vec<String> {
+        state
+            .rows()
+            .iter()
+            .map(|r| format!("{}{}", "  ".repeat(r.depth), r.name))
+            .collect()
+    }
+
+    /// Every group appears once and its tracks are contiguous.
+    fn assert_tree_order(state: &ToniqueProjectState) {
+        let groups: Vec<_> = state
+            .rows()
+            .into_iter()
+            .filter(|r| r.kind == TrackKind::Group)
+            .map(|r| r.id)
+            .collect();
+        for (i, g) in groups.iter().enumerate() {
+            assert!(!groups[i + 1..].contains(g), "group listed twice");
+            let indices: Vec<usize> = state
+                .tracks_in(*g)
+                .iter()
+                .map(|t| state.track_index(*t).unwrap())
+                .collect();
+            assert!(!indices.is_empty(), "empty group left behind");
+            assert!(
+                indices.windows(2).all(|w| w[1] == w[0] + 1),
+                "group's tracks aren't together: {indices:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn grouping_and_ungrouping_are_single_steps() {
+        let mut state = setup_state();
+        let [_, b, _, d] = ["a", "b", "c", "d"].map(|n| track(&mut state, n));
+
+        let g = state.group(&[b, d]).unwrap();
+        rename(&mut state, g, "G");
+        assert_eq!(tree(&state), ["a", "G", "  b", "  d", "c"]);
+        assert_tree_order(&state);
+        state.undo(); // rename
+        state.undo(); // group
+        assert_eq!(tree(&state), ["a", "b", "c", "d"]);
+        state.redo();
+        state.redo();
+
+        state.ungroup(g);
+        assert_eq!(tree(&state), ["a", "b", "d", "c"]);
+        assert!(!state.is_group(g));
+        state.undo();
+        assert_eq!(tree(&state), ["a", "G", "  b", "  d", "c"]);
+    }
+
+    #[test]
+    fn groups_nest_without_limit_and_across_branches() {
+        let mut state = setup_state();
+        let [t1, t2, t3, t4, t5] = ["t1", "t2", "t3", "t4", "t5"].map(|n| track(&mut state, n));
+        // Five levels: each group goes into a new one.
+        let inner = state.group(&[t1, t2]).unwrap();
+        let mut outer = state.group(&[inner, t3]).unwrap();
+        for _ in 0..3 {
+            outer = state.group(&[outer]).unwrap();
+        }
+        assert_eq!(state.rows().iter().find(|r| r.id == t1).unwrap().depth, 5);
+        assert_eq!(state.ancestors(t1).len(), 5);
+        assert_tree_order(&state);
+
+        // A deep group and a track from another branch: the new group goes
+        // where the branches meet (the top level).
+        let side = state.group(&[t4, t5]).unwrap();
+        let both = state.group(&[inner, t4]).unwrap();
+        assert_eq!(state.parent(both), None);
+        assert_eq!(state.parent(inner), Some(both));
+        assert_eq!(state.parent(t4), Some(both));
+        assert_eq!(state.tracks_in(side), [t5]);
+        assert_eq!(state.parent(t3).map(|g| state.ancestors(g).len()), Some(3));
+        assert_tree_order(&state);
+
+        // Grouping a group together with what's inside it: the inside moves with it.
+        let again = state.group(&[both, t1]).unwrap();
+        assert_eq!(state.parent(both), Some(again));
+        assert_eq!(state.parent(t1), Some(inner));
+        assert_tree_order(&state);
+    }
+
+    #[test]
+    fn rows_move_in_and_out_of_groups() {
+        let mut state = setup_state();
+        let [a, b, c, d] = ["a", "b", "c", "d"].map(|n| track(&mut state, n));
+        let g1 = state.group(&[a, b]).unwrap();
+        rename(&mut state, g1, "G1");
+        let g2 = state.group(&[c]).unwrap();
+        rename(&mut state, g2, "G2");
+        assert_eq!(tree(&state), ["G1", "  a", "  b", "G2", "  c", "d"]);
+
+        // A group into another group, first inside.
+        assert!(state.move_row(g2, RowTarget::Into(g1)));
+        assert_eq!(tree(&state), ["G1", "  G2", "    c", "  a", "  b", "d"]);
+        // Not into itself or its own subgroup.
+        assert!(!state.move_row(g1, RowTarget::Into(g2)));
+        assert!(!state.move_row(g1, RowTarget::Before(c)));
+        assert!(!state.move_row(g1, RowTarget::Into(g1)));
+        // A track out, before another row.
+        assert!(state.move_row(b, RowTarget::Before(d)));
+        assert_eq!(tree(&state), ["G1", "  G2", "    c", "  a", "b", "d"]);
+        // Last track out of G2: the group goes, in the same step.
+        assert!(state.move_row(c, RowTarget::End));
+        assert_eq!(tree(&state), ["G1", "  a", "b", "d", "c"]);
+        assert!(!state.is_group(g2));
+        assert_tree_order(&state);
+        state.undo();
+        assert_eq!(tree(&state), ["G1", "  G2", "    c", "  a", "b", "d"]);
+    }
+
+    #[test]
+    fn deleting_groups_and_their_last_tracks() {
+        let mut state = setup_state();
+        let [a, b, c] = ["a", "b", "c"].map(|n| track(&mut state, n));
+        let inner = state.group(&[a]).unwrap();
+        let outer = state.group(&[inner, b]).unwrap();
+
+        state.delete_group(outer);
+        assert_eq!(tree(&state), ["c"]);
+        state.undo();
+        assert_eq!(state.tracks().count(), 3);
+        assert_eq!(state.parent(a), Some(inner));
+        assert_tree_order(&state);
+
+        // Deleting a group's last track removes the group too.
+        state.delete_track(&a);
+        state.update();
+        assert!(!state.is_group(inner));
+        assert_eq!(state.parent(b), Some(outer));
+        state.undo();
+        assert_eq!(state.parent(a), Some(inner));
+        let _ = c;
+    }
+
+    #[test]
+    fn folded_groups_hide_their_rows() {
+        let mut state = setup_state();
+        let [a, b, _] = ["a", "b", "c"].map(|n| track(&mut state, n));
+        let inner = state.group(&[a]).unwrap();
+        rename(&mut state, inner, "in");
+        let outer = state.group(&[inner, b]).unwrap();
+        rename(&mut state, outer, "out");
+        state.track_mut(&inner).closed = true;
+        assert_eq!(tree(&state), ["out", "  in", "  b", "c"]);
+        state.track_mut(&outer).closed = true;
+        assert_eq!(tree(&state), ["out", "c"]);
+        assert!(state.is_hidden(a) && state.is_hidden(inner));
+        assert!(!state.is_hidden(outer));
+
+        // A rubber band across the folded group doesn't pick what's hidden.
+        let clip = add_clip(&mut state, b, 0., 1.);
+        state.select_in_bounds(crate::core::state::SelectionBounds::between(
+            (0, 0.),
+            (2, 8.),
+        ));
+        assert!(!state.selected_clips().contains(&clip));
+    }
+
+    #[test]
+    fn soloing_and_muting_a_group() {
+        let mut state = setup_state();
+        let [a, b, c] = ["a", "b", "c"].map(|n| track(&mut state, n));
+        let inner = state.group(&[a]).unwrap();
+        let outer = state.group(&[inner, b]).unwrap();
+
+        state.toggle_solo(outer, false);
+        let solo =
+            |s: &ToniqueProjectState, id| s.rows().into_iter().find(|r| r.id == id).unwrap().solo;
+        assert!(
+            matches!(solo(&state, a), TrackSoloState::NotSoloing),
+            "audible through its group"
+        );
+        assert!(matches!(solo(&state, c), TrackSoloState::Soloing));
+        assert!(matches!(solo(&state, outer), TrackSoloState::Solo));
+        // A plain click elsewhere clears the group's solo.
+        state.toggle_solo(c, false);
+        assert!(matches!(solo(&state, outer), TrackSoloState::NotSoloing));
+        state.toggle_solo(c, false);
+
+        state.set_mute(inner, true);
+        assert!(
+            state
+                .rows()
+                .into_iter()
+                .find(|r| r.id == inner)
+                .unwrap()
+                .muted
+        );
+        // The group's bus is silenced; what's inside plays into it.
+        let bus = tonique_engine::edit::BusId(inner.0);
+        assert!(!state.edit().bus(bus).unwrap().channel.audible());
+        assert!(state.edit().track(a).unwrap().channel.audible());
+    }
+
+    #[test]
+    fn nested_groups_round_trip_through_a_project() {
+        let mut state = setup_state();
+        let [a, b, c] = ["a", "b", "c"].map(|n| track(&mut state, n));
+        let inner = state.group(&[a]).unwrap();
+        rename(&mut state, inner, "in");
+        let outer = state.group(&[inner, b]).unwrap();
+        rename(&mut state, outer, "out");
+        state.toggle_solo(inner, false);
+        state.set_mute(outer, true);
+        state.track_mut(&inner).closed = true;
+        let _ = c;
+
+        let saved = state.project(None);
+        assert_eq!(saved.groups.len(), 2);
+        assert_eq!(saved.groups[0].name, "out", "parents first");
+        assert_eq!(saved.groups[1].parent, Some(0));
+        let json = serde_json::to_string(&saved).unwrap();
+
+        let mut loaded = setup_state();
+        let file = serde_json::from_str(&json).unwrap();
+        assert!(loaded.load_project(&file, Path::new("/")).is_empty());
+        assert_eq!(loaded.project(None), saved);
+        assert_eq!(tree(&loaded), ["out", "  in", "  b", "c"]);
+        assert_tree_order(&loaded);
+    }
+
+    #[test]
+    fn projects_without_groups_still_open() {
+        // Version 1: no `groups`, no `group` on tracks.
+        let v1 = r##"{
+            "version": 1, "bpm": 120.0, "loop_range": [0.0, 16.0], "looping": false,
+            "master": {"volume": 1.0, "pan": 0.0, "muted": false},
+            "tracks": [{"name": "a", "color": "#ffffff", "height": 60.0, "closed": false,
+                        "soloed": false, "volume": 1.0, "pan": 0.0, "muted": false, "clips": []}]
+        }"##;
+        let mut state = setup_state();
+        let file = serde_json::from_str(v1).unwrap();
+        assert!(state.load_project(&file, Path::new("/")).is_empty());
+        assert_eq!(tree(&state), ["a"]);
+    }
+
+    #[test]
+    fn folding_keeps_the_open_height() {
+        let mut state = setup_state();
+        let a = track(&mut state, "a");
+        let g = state.group(&[a]).unwrap();
+        state.track_mut(&g).height = 120.;
+        state.set_closed(&g, true);
+        assert_eq!(
+            state.track_mut(&g).height,
+            crate::core::track::TRACK_CLOSED_HEIGHT
+        );
+        state.set_closed(&g, false);
+        assert_eq!(state.track_mut(&g).height, 120.);
+    }
+
+    #[test]
+    fn new_tracks_join_the_group_around_them() {
+        let mut state = setup_state();
+        let [a, b, _] = ["a", "b", "c"].map(|n| track(&mut state, n));
+        let g = state.group(&[a, b]).unwrap();
+        let between = state.add_track_at(1);
+        assert_eq!(state.parent(between), Some(g));
+        let after = state.add_track_at(2 + 1);
+        assert_eq!(state.parent(after), None, "between the group and c");
+        assert_tree_order(&state);
     }
 }

@@ -301,3 +301,109 @@ impl UICentralPanel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tonique_engine::engine::{Engine, EngineConfig};
+
+    /// The track list and timeline draw nested and folded groups without
+    /// trouble, headless.
+    #[test]
+    fn draws_groups_headless() {
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ToniqueProjectState::new(engine);
+        let tracks: Vec<_> = (0..5).map(|_| state.add_track()).collect();
+        let inner = state.group(&tracks[..2]).unwrap();
+        let outer = state.group(&[inner, tracks[2]]).unwrap();
+        state.group(&[tracks[4]]).unwrap();
+        state.track_mut(&outer).closed = false;
+        state.track_mut(&inner).closed = true;
+
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::get_fonts());
+        let input = || egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200., 800.))),
+            ..Default::default()
+        };
+        let mut panel = UICentralPanel::new();
+        let mut shapes = 0;
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(input(), |ui| panel.show(ui, &mut state));
+            output.textures_delta.clear();
+            shapes = output.shapes.len();
+        }
+        assert!(shapes > 0);
+        assert_eq!(
+            state.rows().len(),
+            6,
+            "outer, inner (folded), t3, t4, group, t5"
+        );
+    }
+
+    /// Dragging a file over a folded group opens it; leaving folds it
+    /// again; dropping inside leaves it open.
+    #[test]
+    fn folded_groups_open_while_dragging_over_them() {
+        use crate::ui::view::navigation_bar::NAVIGATION_BAR_HEIGHT;
+        use crate::{analysis::AudioInfo, ui::panels::left_panel::DragPayload};
+        use egui::{Event, PointerButton, Pos2};
+
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ToniqueProjectState::new(engine);
+        let tracks: Vec<_> = (0..3).map(|_| state.add_track()).collect();
+        let group = state.group(&tracks[..2]).unwrap();
+        state.set_closed(&group, true);
+
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::get_fonts());
+        let mut panel = UICentralPanel::new();
+        let audio = AudioInfo {
+            name: "a.wav".into(),
+            duration: Some(std::time::Duration::from_secs(1)),
+            data: Default::default(),
+            sample_rate: 48000,
+            channels: 2,
+            bit_depth: None,
+            num_samples: None,
+            path: Default::default(),
+        };
+        let mut frame = |state: &mut ToniqueProjectState, events: Vec<Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| panel.show(ui, state));
+            output.textures_delta.clear();
+        };
+        let closed = |state: &ToniqueProjectState| {
+            state.rows().iter().find(|r| r.id == group).unwrap().closed
+        };
+        // The group's row is the first lane, just below the ruler.
+        let over_group = Pos2::new(300., NAVIGATION_BAR_HEIGHT + 10.);
+        let far_below = Pos2::new(300., 600.);
+
+        frame(&mut state, Vec::new()); // lay out once
+        egui::DragAndDrop::set_payload(&ctx, DragPayload::File(audio.clone()));
+        frame(&mut state, vec![Event::PointerMoved(over_group)]);
+        assert!(!closed(&state), "opens while dragged over");
+
+        frame(&mut state, vec![Event::PointerMoved(far_below)]);
+        assert!(closed(&state), "folds again once left");
+
+        frame(&mut state, vec![Event::PointerMoved(over_group)]);
+        assert!(!closed(&state));
+        // Drop inside.
+        let release = Event::PointerButton {
+            pos: over_group,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        };
+        frame(&mut state, vec![release]);
+        frame(&mut state, vec![Event::PointerMoved(over_group)]);
+        frame(&mut state, vec![Event::PointerMoved(far_below)]);
+        assert!(!closed(&state), "stays open after a drop inside");
+    }
+}

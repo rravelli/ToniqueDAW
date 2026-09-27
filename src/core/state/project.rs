@@ -7,8 +7,8 @@ use std::{
 
 use egui::Vec2;
 use tonique_engine::edit::{
-    Channel, Edit, TrackId,
-    commands::{SetBypass, SetSolo},
+    Bus, BusId, Channel, Edit, Output, TrackId,
+    commands::{AddBus, SetBypass, SetOutput, SetSolo},
 };
 
 use super::{
@@ -20,8 +20,8 @@ use crate::{
     core::{
         clip::ClipCore,
         project::{
-            ChannelFile, ClipFile, EffectFile, ProjectFile, TrackFile, VERSION, resolve_path,
-            store_path,
+            ChannelFile, ClipFile, EffectFile, GroupFile, ProjectFile, TrackFile, VERSION,
+            resolve_path, store_path,
         },
         track::MutableTrackCore,
     },
@@ -64,6 +64,40 @@ impl ToniqueProjectState {
     pub fn project(&self, dir: Option<&Path>) -> ProjectFile {
         let edit = self.edit();
         let bpm = self.bpm();
+        // Groups in the order they're met, so parents come first.
+        let mut order: Vec<BusId> = Vec::new();
+        for track in &edit.tracks {
+            for bus in edit.buses_along(track.output).into_iter().rev() {
+                if !order.contains(&bus) {
+                    order.push(bus);
+                }
+            }
+        }
+        let index_of = |output: Output| match output {
+            Output::Bus(bus) => order.iter().position(|b| *b == bus),
+            Output::Master => None,
+        };
+        let groups = order
+            .iter()
+            .filter_map(|bus| edit.bus(*bus).ok())
+            .map(|group| {
+                let id = TrackId(group.id.0);
+                let view = self
+                    .views
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_else(MutableTrackCore::new);
+                GroupFile {
+                    name: group.name.clone(),
+                    color: format_color(view.color),
+                    height: view.height,
+                    folded: view.closed,
+                    soloed: group.soloed,
+                    parent: index_of(group.output),
+                    channel: self.channel_file(id, &group.channel),
+                }
+            })
+            .collect();
         let tracks = edit
             .tracks
             .iter()
@@ -79,6 +113,7 @@ impl ToniqueProjectState {
                     height: view.height,
                     closed: view.closed,
                     soloed: track.soloed,
+                    group: index_of(track.output),
                     channel: self.channel_file(track.id, &track.channel),
                     clips: track
                         .clips
@@ -100,6 +135,7 @@ impl ToniqueProjectState {
             loop_range: self.loop_range,
             looping: self.looping,
             master: self.channel_file(MASTER_TRACK_ID, &edit.master),
+            groups,
             tracks,
         }
     }
@@ -138,8 +174,36 @@ impl ToniqueProjectState {
         self.set_looping(project.looping);
         self.restore_channel(MASTER_TRACK_ID, &project.master, &mut problems);
 
+        // Parents come first, so each group can go straight into its parent.
+        let mut groups: Vec<TrackId> = Vec::new();
+        for group in &project.groups {
+            let mut bus = self.session.create(|e| Bus::new(e, group.name.clone()));
+            let parent = group.parent.and_then(|i| groups.get(i)).copied();
+            if let Some(parent) = parent {
+                bus.output = Output::Bus(BusId(parent.0));
+            }
+            let id = TrackId(bus.id.0);
+            self.perform(AddBus::new(bus));
+            let mut view = MutableTrackCore::new();
+            view.name.clone_from(&group.name);
+            view.height = group.height;
+            view.closed = group.folded;
+            if let Some(color) = parse_color(&group.color) {
+                view.color = color;
+            }
+            self.views.insert(id, view);
+            if group.soloed {
+                self.perform(SetSolo::bus(BusId(id.0), true));
+            }
+            self.restore_channel(id, &group.channel, &mut problems);
+            groups.push(id);
+        }
+
         for track in &project.tracks {
             let id = self.add_track();
+            if let Some(group) = track.group.and_then(|i| groups.get(i)) {
+                self.perform(SetOutput::new(id, Output::Bus(BusId(group.0))));
+            }
             let view = self.track_mut(&id);
             view.name.clone_from(&track.name);
             view.height = track.height;
@@ -160,6 +224,9 @@ impl ToniqueProjectState {
                 .collect();
             self.add_clips(&id, clips);
         }
+        // Whatever the file said, keep groups together and never empty.
+        self.normalize();
+        self.remove_empty_groups();
         self.sync_effects();
         self.session.clear_history();
         problems
@@ -192,7 +259,7 @@ impl ToniqueProjectState {
     }
 
     fn restore_channel(&mut self, id: TrackId, channel: &ChannelFile, problems: &mut Vec<String>) {
-        if let Ok(c) = self.edit().channel(Self::channel_ref(id)) {
+        if let Ok(c) = self.edit().channel(self.channel_ref(id)) {
             c.volume.set(channel.volume);
             c.pan.set(channel.pan);
         }
@@ -203,7 +270,7 @@ impl ToniqueProjectState {
             self.add_effect(&id, effect.kind, index);
             let Some(plugin) = self
                 .edit()
-                .channel(Self::channel_ref(id))
+                .channel(self.channel_ref(id))
                 .ok()
                 .and_then(|c| c.plugins.get(index))
                 .cloned()
@@ -217,7 +284,7 @@ impl ToniqueProjectState {
                 }
             }
             if !effect.enabled {
-                self.perform(SetBypass::new(Self::channel_ref(id), plugin.id, true));
+                self.perform(SetBypass::new(self.channel_ref(id), plugin.id, true));
             }
             self.sync_effects();
             if let Some(editor) = self.effects.get_mut(&id).and_then(|e| e.get_mut(index)) {

@@ -448,17 +448,27 @@ impl EditCommand for SetMute {
 }
 
 pub struct SetSolo {
-    track: TrackId,
+    target: ChannelRef,
     soloed: bool,
 }
 
 impl SetSolo {
     pub fn new(track: TrackId, soloed: bool) -> Self {
-        Self { track, soloed }
+        Self { target: ChannelRef::Track(track), soloed }
+    }
+
+    /// Solo a bus, and so everything routed into it.
+    pub fn bus(bus: BusId, soloed: bool) -> Self {
+        Self { target: ChannelRef::Bus(bus), soloed }
     }
 
     fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
-        std::mem::swap(&mut edit.track_mut(self.track)?.soloed, &mut self.soloed);
+        let soloed = match self.target {
+            ChannelRef::Track(id) => &mut edit.track_mut(id)?.soloed,
+            ChannelRef::Bus(id) => &mut edit.bus_mut(id)?.soloed,
+            ChannelRef::Master => return Err(EditError::Invalid("the master can't be soloed")),
+        };
+        std::mem::swap(soloed, &mut self.soloed);
         edit.refresh_mute_gains();
         Ok(Effects::none())
     }
@@ -621,5 +631,108 @@ impl EditCommand for AddSend {
         let i = t.sends.iter().position(|s| s.level.id == self.param).ok_or(EditError::ParamNotFound(self.param))?;
         self.send = Some(t.sends.remove(i));
         Ok(Effects::rebuild())
+    }
+}
+
+/// Route a bus into another bus or the master. Refused when the target is
+/// the bus itself or routes into it: that would feed the bus into itself.
+pub struct SetBusOutput {
+    bus: BusId,
+    output: Output,
+}
+
+impl SetBusOutput {
+    pub fn new(bus: BusId, output: Output) -> Self {
+        Self { bus, output }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        edit.bus(self.bus)?;
+        if let Output::Bus(target) = self.output {
+            edit.bus(target)?;
+            if target == self.bus || edit.buses_along(Output::Bus(target)).contains(&self.bus) {
+                return Err(EditError::RoutingCycle(self.bus));
+            }
+        }
+        std::mem::swap(&mut edit.bus_mut(self.bus)?.output, &mut self.output);
+        edit.refresh_mute_gains();
+        Ok(Effects::rebuild())
+    }
+}
+
+impl EditCommand for SetBusOutput {
+    fn label(&self) -> &'static str {
+        "Route bus"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+}
+
+/// Remove a bus nothing routes or sends into anymore.
+pub struct RemoveBus {
+    id: BusId,
+    removed: Option<(usize, Bus)>,
+}
+
+impl RemoveBus {
+    pub fn new(id: BusId) -> Self {
+        Self { id, removed: None }
+    }
+}
+
+impl EditCommand for RemoveBus {
+    fn label(&self) -> &'static str {
+        "Remove bus"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        let target = Output::Bus(self.id);
+        let in_use = edit.tracks.iter().any(|t| t.output == target || t.sends.iter().any(|s| s.bus == self.id))
+            || edit.buses.iter().any(|b| b.output == target);
+        if in_use {
+            return Err(EditError::Invalid("bus still has inputs"));
+        }
+        let i = edit.buses.iter().position(|b| b.id == self.id).ok_or(EditError::BusNotFound(self.id))?;
+        self.removed = Some((i, edit.buses.remove(i)));
+        edit.refresh_mute_gains();
+        Ok(Effects::rebuild())
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        let (i, bus) = self.removed.take().ok_or(TAKEN)?;
+        edit.buses.insert(i.min(edit.buses.len()), bus);
+        edit.refresh_mute_gains();
+        Ok(Effects::rebuild())
+    }
+}
+
+pub struct RenameBus {
+    id: BusId,
+    name: String,
+}
+
+impl RenameBus {
+    pub fn new(id: BusId, name: impl Into<String>) -> Self {
+        Self { id, name: name.into() }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        std::mem::swap(&mut edit.bus_mut(self.id)?.name, &mut self.name);
+        // Node labels carry the name.
+        Ok(Effects::rebuild())
+    }
+}
+
+impl EditCommand for RenameBus {
+    fn label(&self) -> &'static str {
+        "Rename bus"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
     }
 }
