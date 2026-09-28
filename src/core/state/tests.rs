@@ -530,6 +530,102 @@ fn cutting_a_zone_removes_only_its_part() {
 }
 
 #[test]
+fn a_zone_only_picks_clips_inside_it_not_touching_it() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let track = state.add_track();
+    add_clip(&mut state, track, 0., 1.); // beats 0..2, ends on the zone
+    let inside = add_clip(&mut state, track, 2., 1.); // beats 2..4
+    state.select_in_bounds(SelectionBounds::between((0, 2.), (0, 3.)));
+    assert_eq!(state.selected_clips(), &[inside]);
+}
+
+#[test]
+fn deleting_a_zone_removes_only_its_part() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let (t0, t1) = (state.add_track(), state.add_track());
+    add_clip(&mut state, t0, 0., 2.); // beats 0..4
+    add_clip(&mut state, t1, 2., 2.); // beats 2..6
+    state.select_in_bounds(SelectionBounds::between((0, 1.), (1, 3.)));
+    state.delete_selected_clips();
+    assert_eq!(spans(&state, t0), vec![(0., 1.), (3., 4.)]);
+    assert_eq!(spans(&state, t1), vec![(3., 6.)]);
+    assert!(state.selected_clips().is_empty());
+
+    state.undo(); // one step
+    assert_eq!(spans(&state, t0), vec![(0., 4.)]);
+    assert_eq!(spans(&state, t1), vec![(2., 6.)]);
+}
+
+#[test]
+fn nudging_a_zone_moves_only_its_part() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let track = state.add_track();
+    add_clip(&mut state, track, 0., 3.); // beats 0..6
+    state.select_in_bounds(SelectionBounds::between((0, 1.), (0, 3.)));
+
+    state.nudge_selection(1.);
+    // The part 1..3 moved to 2..4, over what was left of the clip.
+    assert_eq!(spans(&state, track), vec![(0., 1.), (2., 4.), (4., 6.)]);
+    assert_eq!(state.selection_range(), Some((2., 4.)));
+    assert_eq!(state.selected_clips().len(), 1);
+
+    // Stops at the start: the moved part, not the clip, starts at 0.
+    state.nudge_selection(-10.);
+    assert_eq!(spans(&state, track), vec![(0., 2.), (4., 6.)]);
+
+    state.undo();
+    state.undo();
+    assert_eq!(spans(&state, track), vec![(0., 6.)]);
+}
+
+#[test]
+fn moving_a_zone_between_tracks_moves_only_its_part() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let (t0, t1) = (state.add_track(), state.add_track());
+    add_clip(&mut state, t0, 0., 2.); // beats 0..4
+    state.select_in_bounds(SelectionBounds::between((0, 1.), (0, 3.)));
+
+    state.move_selection_tracks(1);
+    assert_eq!(spans(&state, t0), vec![(0., 1.), (3., 4.)]);
+    assert_eq!(spans(&state, t1), vec![(1., 3.)]);
+
+    state.undo();
+    assert_eq!(spans(&state, t0), vec![(0., 4.)]);
+    assert!(spans(&state, t1).is_empty());
+}
+
+#[test]
+fn splitting_at_a_zone_keeps_the_ids_inside_for_a_drop() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let (t0, t1) = (state.add_track(), state.add_track());
+    let clip = add_clip(&mut state, t0, 0., 2.); // beats 0..4
+    state.select_in_bounds(SelectionBounds::between((0, 1.), (0, 3.)));
+
+    // What dropping dragged clips does: split, then move by id.
+    state.begin_batch();
+    state.split_at_zone();
+    assert_eq!(state.selected_clips(), &[clip]);
+    state.move_clip(&clip, &t1, 5., &[clip]);
+    state.commit_batch();
+    assert_eq!(spans(&state, t0), vec![(0., 1.), (3., 4.)]);
+    assert_eq!(spans(&state, t1), vec![(5., 7.)]);
+
+    state.undo(); // one step
+    assert_eq!(spans(&state, t0), vec![(0., 4.)]);
+    assert!(spans(&state, t1).is_empty());
+}
+
+#[test]
 fn nudging_moves_the_selection_as_a_block() {
     let mut state = setup_state();
     let track = state.add_track();
@@ -596,7 +692,8 @@ fn moving_between_tracks_keeps_the_block_and_stays_in_range() {
     add_clip(&mut state, t0, 0., 1.); // beats 0..2
     add_clip(&mut state, t1, 0., 1.);
     add_clip(&mut state, t2, 1., 1.); // unselected, beats 1..3
-    state.select_in_bounds(SelectionBounds::between((0, 0.), (1, 1.)));
+    // Covering the clips whole: they move whole.
+    state.select_in_bounds(SelectionBounds::between((0, 0.), (1, 2.)));
 
     state.move_selection_tracks(5); // only one track of room below
     assert!(spans(&state, t0).is_empty());

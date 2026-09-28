@@ -1,8 +1,13 @@
 //! Clip selection: the selected clips, and the zone (a time range over a
 //! span of tracks) they were picked with, if any.
 
-use super::ProjectState;
+use super::{ProjectState, clip_ops::ClipOp};
+use crate::core::clip::AudioClip;
 use tonique_engine::edit::ClipId;
+
+/// How far a clip edge may be past a zone edge and still count as on it, in
+/// beats: trims don't land exactly.
+const EDGE: f32 = 1e-4;
 
 /// A time range, in beats, over a span of tracks (indices, inclusive).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -14,6 +19,12 @@ pub struct SelectionBounds {
 }
 
 impl SelectionBounds {
+    /// Whether some of `clip` is inside the zone's time range (touching an
+    /// edge isn't enough).
+    pub fn overlaps(&self, clip: &AudioClip, bpm: f32) -> bool {
+        clip.position < self.end_pos - EDGE && clip.end(bpm) > self.start_pos + EDGE
+    }
+
     /// Bounds between two corners, in any order.
     pub fn between(a: (usize, f32), b: (usize, f32)) -> Self {
         Self {
@@ -75,7 +86,7 @@ impl ProjectState {
             .enumerate()
             .filter(|(i, t)| tracks.contains(i) && !self.is_hidden(t.id))
             .flat_map(|(_, t)| t.clips)
-            .filter(|c| c.end(bpm) >= bounds.start_pos && c.position < bounds.end_pos)
+            .filter(|c| bounds.overlaps(c, bpm))
             .map(|c| c.id)
             .collect();
         self.clip_selection = ClipSelection {
@@ -97,9 +108,58 @@ impl ProjectState {
             .map(|(_, c)| (c.position, c.end(bpm)))
             .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))
     }
+    /// Delete the selected clips; with a zone, only their part inside it.
     pub fn delete_selected_clips(&mut self) {
+        if self.clip_selection.bounds.is_none() {
+            let ids = std::mem::take(&mut self.clip_selection).clips;
+            return self.delete_clips(&ids);
+        }
+        self.begin_batch();
+        self.split_at_zone();
         let ids = std::mem::take(&mut self.clip_selection).clips;
         self.delete_clips(&ids);
+        self.commit_batch();
+    }
+    /// Split the selected clips at the zone's edges, so that editing them
+    /// edits only what's inside it: that part keeps each clip's id and stays
+    /// selected; the parts outside become new clips. Does nothing without a
+    /// zone. Joins the open batch, if any.
+    pub fn split_at_zone(&mut self) {
+        let Some(bounds) = self.clip_selection.bounds else {
+            return;
+        };
+        let (start, end) = (bounds.start_pos, bounds.end_pos);
+        let bpm = self.bpm();
+        let clips: Vec<_> = self
+            .clip_selection
+            .clips
+            .iter()
+            .filter_map(|id| self.find_clip(*id))
+            .filter(|(_, clip)| bounds.overlaps(clip, bpm))
+            .collect();
+        self.clip_selection.clips = clips.iter().map(|(_, c)| c.id).collect();
+        self.clip_ops("Split clips", |s, ops| {
+            for (track, clip) in clips {
+                let before = clip.position < start - EDGE;
+                let after = clip.end(bpm) > end + EDGE;
+                if !before && !after {
+                    continue;
+                }
+                let mut inside = clip.clone();
+                inside.crop(start, end, bpm);
+                ops.push(ClipOp::Resize(track, inside));
+                if before {
+                    let mut left = clip.with_id(s.new_clip_id());
+                    left.trim_end_at(start, bpm);
+                    ops.push(ClipOp::Add(track, left));
+                }
+                if after {
+                    let mut right = clip.with_id(s.new_clip_id());
+                    right.trim_start_at(end, bpm);
+                    ops.push(ClipOp::Add(track, right));
+                }
+            }
+        });
     }
     /// Copy the selected clips right after the selection, and select the
     /// copies (with the zone moved along).
@@ -151,6 +211,14 @@ impl ProjectState {
         let tracks: Vec<_> = self.edit().tracks.iter().map(|t| t.id).collect();
         // One undo step; the selected clips don't carve each other.
         self.begin_batch();
+        // With a zone, only its part moves.
+        self.split_at_zone();
+        let ids = self.selected_clips().to_vec();
+        let moves: Vec<_> = ids
+            .iter()
+            .filter_map(|id| self.find_clip(*id))
+            .filter_map(|(track, clip)| Some((self.track_index(track)? as i32, clip)))
+            .collect();
         for (index, clip) in &moves {
             let to = tracks[(index + delta) as usize];
             self.move_clip(&clip.id, &to, clip.position, &ids);

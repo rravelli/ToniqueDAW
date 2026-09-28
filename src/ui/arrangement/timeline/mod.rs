@@ -314,7 +314,10 @@ impl Timeline {
             rect: Rect::from_min_size(pos, size),
             viewport,
             color,
-            selected: !dragged && state.is_clip_selected(clip.id),
+            // With a zone, only its part is selected: the zone shows it.
+            selected: !dragged
+                && state.selection_bounds().is_none()
+                && state.is_clip_selected(clip.id),
             show_waveform: !track.collapsed,
         }
         .ui(ui, state);

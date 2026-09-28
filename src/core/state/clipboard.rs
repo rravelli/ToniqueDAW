@@ -113,11 +113,18 @@ impl ProjectState {
     }
 
     /// Move the selected clips (and zone) by `delta` beats as one block,
-    /// without going before the start of the arrangement.
+    /// without going before the start of the arrangement. With a zone, only
+    /// its part of the clips moves.
     pub fn nudge_selection(&mut self, delta: f32) {
-        let ids = self.selected_clips().to_vec();
-        let moves: Vec<_> = ids.iter().filter_map(|id| self.find_clip(*id)).collect();
-        let Some(first) = moves.iter().map(|(_, c)| c.position).reduce(f32::min) else {
+        let zone_start = self.selection_bounds().map(|b| b.start_pos);
+        let Some(first) = self
+            .selected_clips()
+            .iter()
+            .filter_map(|id| self.find_clip(*id))
+            // Where each moved part starts: inside the zone, if any.
+            .map(|(_, c)| zone_start.map_or(c.position, |start| c.position.max(start)))
+            .reduce(f32::min)
+        else {
             return;
         };
         let delta = delta.max(-first);
@@ -126,6 +133,9 @@ impl ProjectState {
         }
         // One undo step; the selected clips don't carve each other.
         self.begin_batch();
+        self.split_at_zone();
+        let ids = self.selected_clips().to_vec();
+        let moves: Vec<_> = ids.iter().filter_map(|id| self.find_clip(*id)).collect();
         for (track, clip) in &moves {
             self.move_clip(&clip.id, track, clip.position + delta, &ids);
         }

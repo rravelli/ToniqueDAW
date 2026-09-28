@@ -49,9 +49,18 @@ impl Timeline {
             && let Some(mouse_pos) = mouse_pos
             && let Some(old_track) = dragged_track_index
         {
-            if !state.is_clip_selected(clip.id) {
+            // Grabbing a clip outside the selection (or outside its zone)
+            // drags that clip alone.
+            let grabbed = state.grid.x_to_beats(mouse_pos.x, viewport);
+            let outside_zone = state
+                .selection_bounds()
+                .is_some_and(|b| grabbed < b.start_pos || grabbed > b.end_pos);
+            if !state.is_clip_selected(clip.id) || outside_zone {
                 state.select_clips(vec![clip.id]);
             }
+            // With a zone, only its part of the clips moves.
+            let zone = state.selection_bounds();
+            let bpm = state.bpm();
             let mut clips = Vec::new();
             let mut new_selected_clips = Vec::new();
             let duplicate = ui.input(|i| i.modifiers.ctrl);
@@ -61,16 +70,19 @@ impl Timeline {
                 for clip in track.clips.iter() {
                     if state.is_clip_selected(clip.id) {
                         // Create a clone
-                        let new_clip = if duplicate {
+                        let mut new_clip = if duplicate {
                             clip.with_id(state.new_clip_id())
                         } else {
                             clip.clone()
                         };
+                        if let Some(b) = zone {
+                            new_clip.crop(b.start_pos, b.end_pos, bpm);
+                        }
                         // Update selected clips
                         new_selected_clips.push(new_clip.clone().id);
                         let track_index_delta = track.first_track_index as i32 - old_track as i32;
                         min_track_delta = min_track_delta.min(track_index_delta);
-                        let x = state.grid.beats_to_x(clip.position, viewport);
+                        let x = state.grid.beats_to_x(new_clip.position, viewport);
                         clips.push(DraggedClip {
                             clip: new_clip,
                             grab_x: mouse_pos.x - x,
@@ -79,7 +91,11 @@ impl Timeline {
                     }
                 }
             }
-            state.select_clips(new_selected_clips);
+            // Copies get selected. Moved clips already are, and keep their
+            // zone until dropped, to split the clips at it.
+            if duplicate {
+                state.select_clips(new_selected_clips);
+            }
             self.clip_drag = Some(ClipDrag {
                 clips,
                 duplicate,
@@ -218,6 +234,10 @@ impl Timeline {
 
         let mut tracks: Vec<_> = state.tracks().map(|t| t.id).collect();
         state.begin_batch();
+        if !clip_drag.duplicate {
+            // Only the zone's part moves: it keeps the clips' ids.
+            state.split_at_zone();
+        }
         for (i, dragged) in clip_drag.clips.iter().enumerate() {
             let track_index = track_indexes[i];
             // Create missing tracks
@@ -235,6 +255,8 @@ impl Timeline {
             }
         }
         state.commit_batch();
+        // The zone stayed behind: keep the moved clips selected without it.
+        state.select_clips(ids);
         self.clip_drag = None;
     }
 }
