@@ -3,6 +3,7 @@ use egui_phosphor::fill::{ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL, LIN
 
 use crate::{
     core::state::ToniqueProjectState,
+    ui::grid::PaintGrid,
     ui::{theme::ThemeExt, view::tracks::SPLITTER_WIDTH, widget::square_button::SquareButton},
 };
 

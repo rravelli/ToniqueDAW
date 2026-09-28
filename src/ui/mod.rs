@@ -6,6 +6,7 @@ mod buttons;
 mod clip;
 pub mod effects;
 pub mod font;
+pub mod grid;
 pub mod panels;
 pub mod project;
 pub mod theme;

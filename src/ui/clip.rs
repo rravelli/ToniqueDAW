@@ -1,5 +1,6 @@
 use crate::{
     core::{clip::ClipCore, state::ToniqueProjectState, track::TRACK_COLLAPSED_HEIGHT},
+    ui::grid::PaintGrid,
     ui::{
         theme::{ThemeExt, with_alpha},
         waveform::paint_waveform,

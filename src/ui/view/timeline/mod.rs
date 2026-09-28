@@ -6,6 +6,7 @@ use crate::{
         state::ToniqueProjectState,
         track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackReferenceCore},
     },
+    ui::grid::PaintGrid,
     ui::{
         clip::ClipView,
         panels::left_panel::DragPayload,
