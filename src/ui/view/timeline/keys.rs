@@ -3,25 +3,28 @@ use egui::{Event, Rect, Ui};
 use crate::{
     config::keymap::Action,
     core::state::ProjectState,
-    ui::view::timeline::{Timeline, scroll::reveal},
+    ui::{
+        commands::Commands,
+        view::timeline::{Timeline, scroll::reveal},
+    },
 };
 
 impl Timeline {
-    pub fn handle_key_press(&mut self, ui: &mut Ui, state: &mut ProjectState, viewport: Rect) {
-        // If other element focused do not check
-        if ui.memory(|m| m.focused().is_some()) {
-            return;
-        }
-
-        self.handle_clipboard(ui, state, viewport);
-
-        if !ui.input(|i| i.focused) {
-            return;
-        }
-        // The other actions work in every view: `ToniqueApp` runs them.
-        let actions = ui.input(|i| state.settings().keymap.triggered(i));
-        for action in actions.into_iter().filter(|a| a.is_timeline()) {
+    /// Run the queued actions acting on the selection or edit cursor, and
+    /// clipboard events. The app runs the other actions.
+    pub fn run_actions(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        commands: &mut Commands,
+        viewport: Rect,
+    ) {
+        for action in commands.take(Action::is_timeline) {
             self.run_action(action, ui, state, viewport);
+        }
+        // Not while typing into a widget.
+        if ui.memory(|m| m.focused().is_none()) {
+            self.handle_clipboard(ui, state, viewport);
         }
     }
 

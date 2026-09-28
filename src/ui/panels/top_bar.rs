@@ -10,6 +10,7 @@ use crate::{
     config::keymap::Action,
     core::state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
     ui::{
+        commands::Commands,
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::{ThemeExt, with_alpha},
         widget::{input::NumberInput, square_button::SquareButton},
@@ -30,7 +31,13 @@ impl TopBar {
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &Workspace,
+        commands: &mut Commands,
+    ) {
         egui::Panel::top("top-bar")
             .resizable(false)
             .frame(
@@ -39,26 +46,36 @@ impl TopBar {
                     .inner_margin(Margin::same(4)),
             )
             .show(ui, |ui| {
-                self.ui(ui, state, workspace);
+                self.ui(ui, state, workspace, commands);
             });
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &Workspace,
+        commands: &mut Commands,
+    ) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
-            self.sidebar_ui(ui, state, workspace);
-            self.graph_view_ui(ui, state, workspace);
-            self.metronome_ui(ui, state);
+            if self.sidebar_ui(ui, state, workspace).clicked() {
+                commands.push(Action::ToggleBrowser);
+            }
+            if self.graph_view_ui(ui, state, workspace).clicked() {
+                commands.push(Action::ToggleGraphView);
+            }
+            if self.metronome_ui(ui, state).clicked() {
+                commands.push(Action::ToggleMetronome);
+            }
             if self.play_button_ui(ui, state).clicked() {
-                if state.playback_state() == PlaybackState::Playing {
-                    state.stop();
-                } else {
-                    state.play();
-                }
-            };
+                commands.push(Action::PlayStop);
+            }
             self.record_button_ui(ui);
             self.loop_ui(ui, state);
-            self.follow_ui(ui, state);
+            if self.follow_ui(ui, state).clicked() {
+                commands.push(Action::ToggleFollowPlayhead);
+            }
             self.bpm_input.value = state.bpm();
             self.bpm_input.ui(ui);
             if self.bpm_input.value != state.bpm() {
@@ -67,11 +84,11 @@ impl TopBar {
 
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 if self.redo_ui(ui, state).clicked() {
-                    state.redo();
-                };
+                    commands.push(Action::Redo);
+                }
                 if self.undo_ui(ui, state).clicked() {
-                    state.undo();
-                };
+                    commands.push(Action::Undo);
+                }
                 self.usage_ui(ui, state);
                 self.fps_ui(ui);
                 self.waveform_ui(ui, state);
@@ -120,13 +137,8 @@ impl TopBar {
         );
     }
 
-    fn sidebar_ui(
-        &mut self,
-        ui: &mut Ui,
-        state: &ProjectState,
-        workspace: &mut Workspace,
-    ) -> Response {
-        let res = ui.add(
+    fn sidebar_ui(&mut self, ui: &mut Ui, state: &ProjectState, workspace: &Workspace) -> Response {
+        ui.add(
             SquareButton::ghost(SIDEBAR_SIMPLE)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
@@ -139,23 +151,17 @@ impl TopBar {
                 ))
                 .selected(workspace.left_panel_open)
                 .tooltip(tooltip(ui, state, "Browser", Action::ToggleBrowser)),
-        );
-
-        if res.clicked() {
-            workspace.left_panel_open = !workspace.left_panel_open;
-        };
-
-        res
+        )
     }
 
     fn graph_view_ui(
         &mut self,
         ui: &mut Ui,
         state: &ProjectState,
-        workspace: &mut Workspace,
+        workspace: &Workspace,
     ) -> Response {
         let active = workspace.main_view == MainView::Graph;
-        let res = ui.add(
+        ui.add(
             SquareButton::ghost(GRAPH)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
@@ -171,18 +177,12 @@ impl TopBar {
                 ))
                 .selected(active)
                 .tooltip(tooltip(ui, state, "Audio graph", Action::ToggleGraphView)),
-        );
-
-        if res.clicked() {
-            workspace.toggle_graph();
-        };
-
-        res
+        )
     }
 
-    fn follow_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
+    fn follow_ui(&mut self, ui: &mut Ui, state: &ProjectState) -> Response {
         let follow = state.follow_playhead();
-        let res = ui.add(
+        ui.add(
             SquareButton::new(egui_phosphor::fill::CARET_LINE_RIGHT)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
@@ -203,10 +203,7 @@ impl TopBar {
                     "Follow playhead",
                     Action::ToggleFollowPlayhead,
                 )),
-        );
-        if res.clicked() {
-            state.set_follow_playhead(!follow);
-        }
+        )
     }
 
     fn loop_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
@@ -233,7 +230,7 @@ impl TopBar {
         }
     }
 
-    fn metronome_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) -> Response {
+    fn metronome_ui(&mut self, ui: &mut Ui, state: &ProjectState) -> Response {
         let theme = ui.app_theme();
         let click = state.metronome()
             && matches!(state.playback_state(), PlaybackState::Playing)
@@ -258,9 +255,6 @@ impl TopBar {
                 })
                 .tooltip(tooltip(ui, state, "Metronome", Action::ToggleMetronome)),
         );
-        if res.clicked() {
-            state.toggle_metronome();
-        }
 
         res
     }

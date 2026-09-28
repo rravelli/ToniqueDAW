@@ -3,6 +3,7 @@ use crate::{
     core::project::project_name,
     core::state::ProjectState,
     ui::{
+        commands::Commands,
         project::ProjectAction,
         theme::ThemeExt,
         workspace::{MainView, Workspace},
@@ -16,27 +17,22 @@ const ZOOM_STEP: f32 = 0.1;
 /// Application menus at the very top of the window.
 pub struct AppMenuBar;
 
-/// What the menu bar asks the app to do.
-#[derive(Default)]
-pub struct MenuActions {
-    pub open_settings: bool,
-    pub project: Option<ProjectAction>,
-}
-
 impl AppMenuBar {
     pub fn new() -> Self {
         Self
     }
 
-    /// `recent`: recently opened projects, newest first.
+    /// `recent`: recently opened projects, newest first. Returns what was
+    /// picked in the recent projects menu; other items push actions.
     pub fn show(
         &mut self,
         ui: &mut Ui,
         state: &mut ProjectState,
         workspace: &mut Workspace,
+        commands: &mut Commands,
         recent: &[PathBuf],
-    ) -> MenuActions {
-        let mut actions = MenuActions::default();
+    ) -> Option<ProjectAction> {
+        let mut picked = None;
         egui::Panel::top("menu-bar")
             .resizable(false)
             .frame(
@@ -47,8 +43,8 @@ impl AppMenuBar {
             .show(ui, |ui| {
                 MenuBar::new().ui(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 8.;
-                    actions.project = self.file_menu(ui, state, recent);
-                    self.edit_menu(ui, state);
+                    picked = self.file_menu(ui, state, commands, recent);
+                    self.edit_menu(ui, state, commands);
                     self.view_menu(ui, state, workspace);
                     let tooltip = state.settings().keymap.with_shortcut(
                         ui.ctx(),
@@ -56,17 +52,18 @@ impl AppMenuBar {
                         Action::OpenSettings,
                     );
                     if ui.button("Settings").on_hover_text(tooltip).clicked() {
-                        actions.open_settings = true;
+                        commands.push(Action::OpenSettings);
                     }
                 });
             });
-        actions
+        picked
     }
 
     fn file_menu(
         &self,
         ui: &mut Ui,
         state: &ProjectState,
+        commands: &mut Commands,
         recent: &[PathBuf],
     ) -> Option<ProjectAction> {
         let mut picked = None;
@@ -80,10 +77,10 @@ impl AppMenuBar {
                 shortcut(Action::SaveProjectAs),
             );
             if menu_item(ui, "New", new) {
-                picked = Some(ProjectAction::New);
+                commands.push(Action::NewProject);
             }
             if menu_item(ui, "Open…", open) {
-                picked = Some(ProjectAction::Open);
+                commands.push(Action::OpenProject);
             }
             ui.menu_button("Open recent", |ui| {
                 if let Some(project) = recent_menu(ui, recent) {
@@ -92,16 +89,16 @@ impl AppMenuBar {
             });
             ui.separator();
             if menu_item(ui, "Save", save) {
-                picked = Some(ProjectAction::Save);
+                commands.push(Action::SaveProject);
             }
             if menu_item(ui, "Save as…", save_as) {
-                picked = Some(ProjectAction::SaveAs);
+                commands.push(Action::SaveProjectAs);
             }
         });
         picked
     }
 
-    fn edit_menu(&self, ui: &mut Ui, state: &mut ProjectState) {
+    fn edit_menu(&self, ui: &mut Ui, state: &ProjectState, commands: &mut Commands) {
         ui.menu_button("Edit", |ui| {
             let keymap = &state.settings().keymap;
             let undo =
@@ -109,10 +106,10 @@ impl AppMenuBar {
             let redo =
                 Button::new("Redo").shortcut_text(keymap.shortcut_text(ui.ctx(), Action::Redo));
             if ui.add_enabled(state.can_undo(), undo).clicked() {
-                state.undo();
+                commands.push(Action::Undo);
             }
             if ui.add_enabled(state.can_redo(), redo).clicked() {
-                state.redo();
+                commands.push(Action::Redo);
             }
             ui.separator();
             let add_track = Button::new("Add audio track").shortcut_text(
@@ -122,7 +119,7 @@ impl AppMenuBar {
                     .shortcut_text(ui.ctx(), Action::AddTrack),
             );
             if ui.add(add_track).clicked() {
-                state.add_track();
+                commands.push(Action::AddTrack);
             }
         });
     }

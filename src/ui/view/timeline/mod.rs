@@ -9,6 +9,7 @@ use crate::{
     ui::grid::PaintGrid,
     ui::{
         clip::ClipView,
+        commands::Commands,
         panels::left_panel::DragPayload,
         theme::{ThemeExt, with_alpha},
         track::ROW_GAP,
@@ -53,11 +54,12 @@ impl Timeline {
         ui: &mut Ui,
         state: &mut ProjectState,
         workspace: &mut Workspace,
+        commands: &mut Commands,
         layout: &mut RowLayout,
         viewport: Rect,
     ) {
-        // First handle key presses
-        self.handle_key_press(ui, state, viewport);
+        // First the actions on the selection
+        self.run_actions(ui, state, commands, viewport);
         // Create timeline area
         let timeline_res = ui.allocate_rect(viewport, Sense::all());
         let painter = ui.painter_at(viewport);

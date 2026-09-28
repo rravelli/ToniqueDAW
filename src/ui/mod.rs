@@ -4,6 +4,7 @@ use tonique_engine::engine::Engine;
 pub mod app;
 mod buttons;
 mod clip;
+mod commands;
 pub mod effects;
 pub mod font;
 pub mod grid;

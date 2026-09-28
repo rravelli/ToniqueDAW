@@ -1,17 +1,22 @@
 use crate::{
+    config::keymap::Action,
     core::{metrics::AudioMetrics, state::ProjectState, track::TrackRow},
     ui::{
-        effects::EffectRack, panels::left_panel::DragPayload, theme::ThemeExt, workspace::Workspace,
+        commands::Commands, effects::EffectRack, panels::left_panel::DragPayload, theme::ThemeExt,
+        workspace::Workspace,
     },
     utils::display_name,
 };
-use egui::{Frame, Key, Layout, Margin, Rangef, RichText, ScrollArea, Separator, Stroke, Ui};
+use egui::{Frame, Layout, Margin, Rangef, RichText, ScrollArea, Separator, Stroke, Ui};
+use tonique_engine::edit::TrackId;
 
 pub const HEADER_HEIGHT: f32 = 20.;
 
 pub struct BottomPanel {
     rack: EffectRack,
+    /// Selected effects, by index, of `track`'s. Delete removes them.
     selected: Vec<usize>,
+    track: Option<TrackId>,
     offset: f32,
     insert_index: Option<usize>,
 }
@@ -21,12 +26,19 @@ impl BottomPanel {
         Self {
             rack: EffectRack::default(),
             selected: vec![],
+            track: None,
             offset: 0.,
             insert_index: None,
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        commands: &mut Commands,
+    ) {
         let mut open = workspace.bottom_panel_open;
         egui::Panel::bottom("bottom-panel")
             .size_range(Rangef::new(50. + HEADER_HEIGHT, 400.))
@@ -36,13 +48,35 @@ impl BottomPanel {
                 ui.set_height(ui.available_height());
 
                 if let Some(selected) = state.selected_track() {
-                    self.ui(ui, selected, state);
+                    self.ui(ui, selected, state, commands);
                 }
             });
         workspace.bottom_panel_open = open;
+        // The selection only holds while its effects are shown.
+        if !open {
+            self.selected.clear();
+        }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, track: TrackRow, state: &mut ProjectState) {
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        track: TrackRow,
+        state: &mut ProjectState,
+        commands: &mut Commands,
+    ) {
+        if self.track != Some(track.id) {
+            self.selected.clear();
+            self.track = Some(track.id);
+        }
+        // Clicking elsewhere leaves the effects.
+        let panel = ui.max_rect();
+        if ui.input(|i| {
+            i.pointer.primary_pressed()
+                && i.pointer.interact_pos().is_some_and(|p| !panel.contains(p))
+        }) {
+            self.selected.clear();
+        }
         let mut metrics = state
             .metrics
             .tracks
@@ -126,12 +160,11 @@ impl BottomPanel {
             state.set_effect_enabled(&track.id, effect.plugin.id, !effect.enabled());
         }
 
-        // Not while a widget has focus, e.g. the shortcut recorder.
-        if ui.input(|i| i.key_pressed(Key::Delete))
-            && ui.memory(|m| m.focused().is_none())
-            && self.selected.len() > 0
-        {
+        // Delete acts on the selected effects rather than the timeline's
+        // selection.
+        if !self.selected.is_empty() && !commands.take(|a| a == Action::Delete).is_empty() {
             state.remove_effects(&track.id, &self.selected);
+            self.selected.clear();
         }
 
         self.insert_index = insert_index;
@@ -199,12 +232,57 @@ mod tests {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200., 800.))),
                 ..Default::default()
             };
-            let mut output = ctx.run_ui(input, |ui| panel.show(ui, &mut state, &mut workspace));
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(ui, &mut state, &mut workspace, &mut Commands::default())
+            });
             output.textures_delta.clear();
             shapes = output.shapes.len();
         }
         assert!(shapes > 0);
         assert_eq!(panel.rack.len(), 2, "an editor per effect");
         assert_eq!(cutoff.get(), 440.);
+    }
+
+    /// Delete removes the selected effects, and only then: otherwise it's
+    /// left for the timeline.
+    #[test]
+    fn delete_goes_to_selected_effects() {
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        let track = state.add_track();
+        state.add_effect(&track, EffectKind::Filter, 0);
+        state.add_effect(&track, EffectKind::Filter, 1);
+        state.select_track(&track);
+        let mut workspace = Workspace {
+            bottom_panel_open: true,
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let mut panel = BottomPanel::new();
+        let mut frame = |panel: &mut BottomPanel, state: &mut ProjectState, delete: bool| {
+            let mut commands = Commands::default();
+            if delete {
+                commands.push(Action::Delete);
+            }
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200., 800.))),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(ui, state, &mut workspace, &mut commands)
+            });
+            output.textures_delta.clear();
+            commands.take_all()
+        };
+        frame(&mut panel, &mut state, false);
+
+        assert_eq!(frame(&mut panel, &mut state, true), [Action::Delete]);
+        assert_eq!(state.effects(&track).len(), 2);
+
+        panel.selected = vec![0];
+        assert!(frame(&mut panel, &mut state, true).is_empty());
+        assert_eq!(state.effects(&track).len(), 1);
+        assert!(panel.selected.is_empty());
     }
 }

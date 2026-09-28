@@ -1,6 +1,7 @@
 use crate::{
     core::state::{PlaybackState, ProjectState},
     ui::{
+        commands::Commands,
         theme::{ThemeExt, with_alpha},
         view::{
             graph::GraphView, navigation_bar::NavigationBar, row_layout::RowLayout,
@@ -38,7 +39,13 @@ impl CentralPanel {
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        commands: &mut Commands,
+    ) {
         egui::CentralPanel::default()
             .frame(
                 Frame::central_panel(ui.style())
@@ -46,11 +53,17 @@ impl CentralPanel {
                     .fill(ui.app_theme().bg_base),
             )
             .show(ui, |ui| {
-                self.ui(ui, state, workspace);
+                self.ui(ui, state, workspace, commands);
             });
     }
 
-    fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
+    fn ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        commands: &mut Commands,
+    ) {
         if workspace.main_view == MainView::Graph {
             self.graph.ui(ui, state);
             return;
@@ -68,8 +81,14 @@ impl CentralPanel {
         );
         let mut layout = RowLayout::new(state, viewport.top(), state.grid.offset.y);
         // Draw timeline
-        self.timeline
-            .ui(ui, state, workspace, &mut layout, timeline_viewport);
+        self.timeline.ui(
+            ui,
+            state,
+            workspace,
+            commands,
+            &mut layout,
+            timeline_viewport,
+        );
         // Draw tracks
         self.tracks.ui(ui, state, workspace, &layout, viewport);
 
@@ -332,7 +351,12 @@ mod tests {
         let mut shapes = 0;
         for _ in 0..2 {
             let mut output = ctx.run_ui(input(), |ui| {
-                panel.show(ui, &mut state, &mut Workspace::default())
+                panel.show(
+                    ui,
+                    &mut state,
+                    &mut Workspace::default(),
+                    &mut Commands::default(),
+                )
             });
             output.textures_delta.clear();
             shapes = output.shapes.len();
@@ -378,8 +402,14 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let mut output =
-                ctx.run_ui(input, |ui| panel.show(ui, state, &mut Workspace::default()));
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(
+                    ui,
+                    state,
+                    &mut Workspace::default(),
+                    &mut Commands::default(),
+                )
+            });
             output.textures_delta.clear();
         };
         let collapsed = |state: &ProjectState| {
