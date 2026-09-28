@@ -1,7 +1,7 @@
 //! Clip selection: the selected clips, and the zone (a time range over a
 //! span of tracks) they were picked with, if any.
 
-use super::ToniqueProjectState;
+use super::ProjectState;
 use tonique_engine::edit::ClipId;
 
 /// A time range, in beats, over a span of tracks (indices, inclusive).
@@ -31,7 +31,7 @@ pub struct ClipSelection {
     bounds: Option<SelectionBounds>,
 }
 
-impl ToniqueProjectState {
+impl ProjectState {
     pub fn selected_clips(&self) -> &[ClipId] {
         &self.clip_selection.clips
     }

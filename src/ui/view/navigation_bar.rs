@@ -2,7 +2,7 @@ use egui::{CursorIcon, Painter, Rect, Sense, Stroke, Ui, Vec2, vec2};
 use egui_phosphor::fill::{ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL, LINE_SEGMENTS};
 
 use crate::{
-    core::state::ToniqueProjectState,
+    core::state::ProjectState,
     ui::grid::PaintGrid,
     ui::{theme::ThemeExt, view::tracks::SPLITTER_WIDTH, widget::square_button::SquareButton},
 };
@@ -37,7 +37,7 @@ impl NavigationBar {
         Self { loop_drag: None }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState, track_width: f32) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, track_width: f32) {
         ui.spacing_mut().interact_size.y = 0.;
         ui.horizontal(|ui| {
             // Rectangle for zoom control
@@ -88,7 +88,7 @@ impl NavigationBar {
         &mut self,
         ui: &mut Ui,
         painter: &Painter,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         lane: Rect,
     ) -> bool {
         let response = ui.interact(lane, ui.id().with("loop_lane"), Sense::click_and_drag());
@@ -199,7 +199,7 @@ impl NavigationBar {
         clicked_lane
     }
 
-    fn right_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn right_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
             if ui

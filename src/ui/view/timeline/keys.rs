@@ -2,17 +2,12 @@ use egui::{Event, Rect, Ui};
 
 use crate::{
     config::keymap::Action,
-    core::state::ToniqueProjectState,
+    core::state::ProjectState,
     ui::view::timeline::{Timeline, scroll::reveal},
 };
 
 impl Timeline {
-    pub fn handle_key_press(
-        &mut self,
-        ui: &mut Ui,
-        state: &mut ToniqueProjectState,
-        viewport: Rect,
-    ) {
+    pub fn handle_key_press(&mut self, ui: &mut Ui, state: &mut ProjectState, viewport: Rect) {
         // If other element focused do not check
         if ui.memory(|m| m.focused().is_some()) {
             return;
@@ -34,7 +29,7 @@ impl Timeline {
         &mut self,
         action: Action,
         ui: &mut Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         viewport: Rect,
     ) {
         match action {
@@ -82,7 +77,7 @@ impl Timeline {
     /// Ctrl+C/X/V. eframe reports them as clipboard events rather than
     /// keys, and only reports a paste when the system clipboard holds text,
     /// so copying also puts a line of text there.
-    fn handle_clipboard(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState, viewport: Rect) {
+    fn handle_clipboard(&mut self, ui: &mut Ui, state: &mut ProjectState, viewport: Rect) {
         let events = ui.input(|i| i.events.clone());
         for event in events {
             match event {
@@ -110,7 +105,7 @@ impl Timeline {
 }
 
 /// Scroll to what an edit just selected (copies, pasted or moved clips).
-fn reveal_selection(ui: &Ui, state: &mut ToniqueProjectState, viewport: Rect) {
+fn reveal_selection(ui: &Ui, state: &mut ProjectState, viewport: Rect) {
     if let Some(range) = state.selection_range() {
         reveal(ui, state, viewport, range);
     }

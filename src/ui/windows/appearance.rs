@@ -1,5 +1,5 @@
 use crate::{
-    core::state::ToniqueProjectState,
+    core::state::ProjectState,
     ui::{
         font::PHOSPHOR_REGULAR,
         theme::{COLORS, Theme, ThemeExt, ThemeLibrary},
@@ -52,7 +52,7 @@ impl AppearanceTab {
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn show(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let current = state.settings().theme.clone();
         if self.draft.as_ref().is_none_or(|d| d.id != current) {
             self.draft = Some(self.load_draft(&current));
@@ -98,7 +98,7 @@ impl AppearanceTab {
         }
     }
 
-    fn picker(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState, current: &str) {
+    fn picker(&mut self, ui: &mut Ui, state: &mut ProjectState, current: &str) {
         let mut picked = current.to_string();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.;
@@ -142,7 +142,7 @@ impl AppearanceTab {
     }
 
     /// Install theme `id` and save it as the chosen one.
-    pub fn select(&mut self, ui: &Ui, state: &mut ToniqueProjectState, id: &str) {
+    pub fn select(&mut self, ui: &Ui, state: &mut ProjectState, id: &str) {
         let (theme, warnings) = self.themes.resolve(id);
         theme.install(ui.ctx());
         self.warnings = warnings;

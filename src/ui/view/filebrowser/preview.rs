@@ -3,7 +3,7 @@ use egui_phosphor::fill::{PLAY, STOP};
 
 use crate::{
     analysis::AudioInfo,
-    core::state::{PlaybackState, ToniqueProjectState},
+    core::state::{PlaybackState, ProjectState},
     ui::{
         font::PHOSPHOR_FILL, theme::ThemeExt, waveform::paint_waveform,
         widget::square_button::SquareButton,
@@ -18,7 +18,7 @@ impl PreviewPanel {
         Self {}
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState, selected_audio: &AudioInfo) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, selected_audio: &AudioInfo) {
         Frame::new()
             .stroke(Stroke::new(4.0, ui.app_theme().bg_control))
             .show(ui, |ui| {
@@ -63,13 +63,7 @@ impl PreviewPanel {
             });
     }
 
-    fn waveform_ui(
-        &self,
-        ui: &mut Ui,
-        audio: &AudioInfo,
-        state: &mut ToniqueProjectState,
-        width: f32,
-    ) {
+    fn waveform_ui(&self, ui: &mut Ui, audio: &AudioInfo, state: &mut ProjectState, width: f32) {
         let (response, painter) = ui.allocate_painter(vec2(width, 14.), Sense::click());
         let rect = response.rect;
         let theme = ui.app_theme();
@@ -121,7 +115,7 @@ impl PreviewPanel {
         painter.add(shapes);
     }
 
-    fn play_control_ui(&self, ui: &mut Ui, state: &mut ToniqueProjectState, audio: &AudioInfo) {
+    fn play_control_ui(&self, ui: &mut Ui, state: &mut ProjectState, audio: &AudioInfo) {
         if ui
             .add(
                 SquareButton::ghost(if state.preview_playback_state() == PlaybackState::Paused {

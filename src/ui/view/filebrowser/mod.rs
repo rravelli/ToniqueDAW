@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    core::state::{PlaybackState, ToniqueProjectState},
+    core::state::{PlaybackState, ProjectState},
     ui::{
         font::PHOSPHOR_FILL,
         theme::ThemeExt,
@@ -49,7 +49,7 @@ impl FileBrowser {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         ui.spacing_mut().scroll.bar_width = 5.0;
         ScrollArea::horizontal().show(ui, |ui| {
             ui.horizontal(|ui| {

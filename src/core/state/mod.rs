@@ -13,7 +13,7 @@ use crate::{
     },
     config::settings::Settings,
     core::{
-        clip::ClipCore,
+        clip::AudioClip,
         effect::{Effect, EffectKind},
         graph_monitor::GraphMonitor,
         grid::GridService,
@@ -24,9 +24,7 @@ use crate::{
             selection::ClipSelection,
             sources::SourceRegistry,
         },
-        track::{
-            MutableTrackCore, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackReferenceCore, TrackSoloState,
-        },
+        track::{TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow, TrackSoloState, TrackView},
     },
 };
 use egui::Color32;
@@ -72,7 +70,7 @@ pub enum PlaybackState {
 /// The project as the UI sees it. The engine's [`EditSession`] owns the
 /// document and its undo history; this adds UI-only state (selection, track
 /// colors and heights, effect editors, meters) on top.
-pub struct ToniqueProjectState {
+pub struct ProjectState {
     session: EditSession,
     sources: SourceRegistry,
     /// `None` without an audio device (e.g. in tests).
@@ -99,7 +97,7 @@ pub struct ToniqueProjectState {
     monitor_graph: bool,
 
     /// UI-only track fields; kept for deleted tracks so undo restores them.
-    views: HashMap<TrackId, MutableTrackCore>,
+    views: HashMap<TrackId, TrackView>,
     selected_tracks: Vec<TrackId>,
     clip_selection: ClipSelection,
     clipboard: Clipboard,
@@ -121,12 +119,12 @@ pub struct ToniqueProjectState {
     track_palette: Vec<Color32>,
 }
 
-impl ToniqueProjectState {
+impl ProjectState {
     pub fn new(engine: Engine) -> Self {
         let sample_rate = engine.config().sample_rate;
         let session = EditSession::new(Edit::new(DEFAULT_BPM), engine)
             .expect("an empty edit always compiles");
-        let mut master = MutableTrackCore::new();
+        let mut master = TrackView::new();
         master.name = "Master".into();
         Self {
             session,
@@ -477,7 +475,7 @@ impl ToniqueProjectState {
             track.output = Output::Bus(BusId(group.0));
         }
         let id = track.id;
-        let mut view = MutableTrackCore::new();
+        let mut view = TrackView::new();
         view.color = self.next_track_color();
         self.views.insert(id, view);
         self.perform(AddTrack::at(track, index));
@@ -535,7 +533,7 @@ impl ToniqueProjectState {
     /// Collapse or expand a row, going back to its previous height when
     /// expanded.
     pub fn set_collapsed(&mut self, id: &TrackId, collapsed: bool) {
-        let view = self.track_mut(id);
+        let view = self.track_view_mut(id);
         if view.collapsed == collapsed {
             return;
         }
@@ -568,7 +566,7 @@ impl ToniqueProjectState {
     }
 
     /// Add clips and fix all overlaps on the track.
-    pub fn add_clips(&mut self, track_id: &TrackId, mut clips: Vec<ClipCore>) {
+    pub fn add_clips(&mut self, track_id: &TrackId, mut clips: Vec<AudioClip>) {
         // Clips never start before the first beat.
         for clip in &mut clips {
             clip.position = clip.position.max(0.);
@@ -690,7 +688,7 @@ impl ToniqueProjectState {
     }
 
     /// The engine clip for a UI clip, registering its audio file if needed.
-    fn engine_clip(&mut self, clip: &ClipCore, bpm: f32) -> Clip {
+    fn engine_clip(&mut self, clip: &AudioClip, bpm: f32) -> Clip {
         let session = &mut self.session;
         let source = self
             .sources
@@ -711,7 +709,7 @@ impl ToniqueProjectState {
 
     /// The UI view of an engine clip. `None` for MIDI clips, which the UI
     /// can't show yet.
-    fn clip_view(&self, clip: &Clip, bpm: f32) -> Option<ClipCore> {
+    fn clip_view(&self, clip: &Clip, bpm: f32) -> Option<AudioClip> {
         let ClipContent::Audio {
             source,
             source_offset_s,
@@ -724,7 +722,7 @@ impl ToniqueProjectState {
         let seconds = audio.duration?.as_secs_f64();
         let trim_start = (source_offset_s / seconds) as f32;
         let trim_end = trim_start + (clip.length * 60. / bpm as f64 / seconds) as f32;
-        Some(ClipCore {
+        Some(AudioClip {
             id: clip.id,
             audio,
             position: clip.start.0 as f32,
@@ -733,7 +731,7 @@ impl ToniqueProjectState {
         })
     }
 
-    fn clip_views(&self, track: TrackId) -> Vec<ClipCore> {
+    fn clip_views(&self, track: TrackId) -> Vec<AudioClip> {
         let bpm = self.bpm();
         self.edit()
             .track(track)
@@ -746,7 +744,7 @@ impl ToniqueProjectState {
             .unwrap_or_default()
     }
 
-    fn find_clip(&self, id: ClipId) -> Option<(TrackId, ClipCore)> {
+    fn find_clip(&self, id: ClipId) -> Option<(TrackId, AudioClip)> {
         let track = self.edit().tracks.iter().find(|t| t.clip(id).is_some())?;
         let clip = self.clip_view(track.clip(id)?, self.bpm())?;
         Some((track.id, clip))
@@ -882,7 +880,7 @@ impl ToniqueProjectState {
     pub fn clear_track_selection(&mut self) {
         self.selected_tracks.clear();
     }
-    pub fn selected_track(&self) -> Option<TrackReferenceCore> {
+    pub fn selected_track(&self) -> Option<TrackRow> {
         let id = *self.selected_tracks.first()?;
         if id == MASTER_TRACK_ID {
             return Some(self.master_track());
@@ -914,16 +912,16 @@ impl ToniqueProjectState {
         self.selected_tracks = rows[range].to_vec();
     }
     /// Get all tracks
-    pub fn tracks(&self) -> impl Iterator<Item = TrackReferenceCore> + use<> {
+    pub fn tracks(&self) -> impl Iterator<Item = TrackRow> + use<> {
         let refs: Vec<_> = (0..self.track_count())
             .filter_map(|i| self.track_from_index(i))
             .collect();
         refs.into_iter()
     }
-    pub fn master_track(&self) -> TrackReferenceCore {
+    pub fn master_track(&self) -> TrackRow {
         let view = &self.views[&MASTER_TRACK_ID];
         let master = &self.edit().master;
-        TrackReferenceCore {
+        TrackRow {
             id: MASTER_TRACK_ID,
             clips: Vec::new(),
             muted: master.muted,
@@ -971,13 +969,13 @@ impl ToniqueProjectState {
     fn track_index(&self, id: TrackId) -> Option<usize> {
         self.edit().tracks.iter().position(|t| t.id == id)
     }
-    /// Get mutable fields from track to be changed in place. Use `self.commit_track_mut` to update the undo stack.
-    pub fn track_mut(&mut self, id: &TrackId) -> &mut MutableTrackCore {
-        self.views.entry(*id).or_insert_with(MutableTrackCore::new)
+    /// Get mutable fields from track to be changed in place. Use `self.commit_track_view` to update the undo stack.
+    pub fn track_view_mut(&mut self, id: &TrackId) -> &mut TrackView {
+        self.views.entry(*id).or_insert_with(TrackView::new)
     }
     /// Commit changes made to the track mutable fields. Only the name is
     /// part of the undo history.
-    pub fn commit_track_mut(&mut self, id: &TrackId) {
+    pub fn commit_track_view(&mut self, id: &TrackId) {
         let Some(view) = self.views.get(id) else {
             return;
         };
@@ -992,16 +990,16 @@ impl ToniqueProjectState {
             self.perform(RenameBus::new(BusId(id.0), name));
         }
     }
-    pub fn track_from_index(&self, index: usize) -> Option<TrackReferenceCore> {
+    pub fn track_from_index(&self, index: usize) -> Option<TrackRow> {
         let track = self.edit().tracks.get(index)?;
         let any_solo = self.any_solo();
         let view = self
             .views
             .get(&track.id)
             .cloned()
-            .unwrap_or_else(MutableTrackCore::new);
+            .unwrap_or_else(TrackView::new);
         let bpm = self.bpm();
-        Some(TrackReferenceCore {
+        Some(TrackRow {
             id: track.id,
             clips: track
                 .clips

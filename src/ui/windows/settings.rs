@@ -1,6 +1,6 @@
 use crate::{
     config::settings::{Settings, UI_SCALE_RANGE},
-    core::state::ToniqueProjectState,
+    core::state::ProjectState,
     ui::{
         font::PHOSPHOR_REGULAR,
         panels::menu_bar::set_ui_scale,
@@ -70,14 +70,14 @@ impl SettingsWindow {
         }
     }
 
-    pub fn open(&mut self, state: &ToniqueProjectState) {
+    pub fn open(&mut self, state: &ProjectState) {
         self.open = true;
         self.draft = state.settings().clone();
         self.shortcuts.cancel();
         self.refresh_devices();
     }
 
-    pub fn toggle(&mut self, state: &ToniqueProjectState) {
+    pub fn toggle(&mut self, state: &ProjectState) {
         if self.open {
             self.open = false;
             self.shortcuts.cancel();
@@ -91,7 +91,7 @@ impl SettingsWindow {
         self.capabilities = None;
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn show(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         if !self.open {
             return;
         }
@@ -140,7 +140,7 @@ impl SettingsWindow {
         self.open = open;
     }
 
-    fn interface_section(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn interface_section(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         ui.add(SectionHeader::new("Interface"));
         settings_grid(ui, "settings-interface", |ui| {
             row_label(ui, "UI scale", "Also Ctrl + / Ctrl - / Ctrl 0.");
@@ -175,7 +175,7 @@ impl SettingsWindow {
         });
     }
 
-    fn audio_section(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn audio_section(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         ui.add(SectionHeader::new("Audio output"));
         let caps = self.capabilities();
         settings_grid(ui, "settings-audio", |ui| {
@@ -279,7 +279,7 @@ impl SettingsWindow {
         }
     }
 
-    fn engine_section(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn engine_section(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         ui.add(SectionHeader::new("Engine"));
         let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
         settings_grid(ui, "settings-engine", |ui| {
@@ -337,7 +337,7 @@ impl SettingsWindow {
         );
     }
 
-    fn general_buttons(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn general_buttons(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         ui.separator();
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.add(secondary_button("Restore defaults")).clicked() {
@@ -352,7 +352,7 @@ impl SettingsWindow {
         });
     }
 
-    fn audio_buttons(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn audio_buttons(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let pending = state.settings().audio_differs(&self.draft);
         if let Some(error) = &state.audio_error {
             ui.label(

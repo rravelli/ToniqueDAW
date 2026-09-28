@@ -8,7 +8,7 @@ use egui_phosphor::{
 
 use crate::{
     config::keymap::Action,
-    core::state::{MASTER_TRACK_ID, PlaybackState, ToniqueProjectState},
+    core::state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
     ui::{
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::{ThemeExt, with_alpha},
@@ -30,12 +30,7 @@ impl TopBar {
         }
     }
 
-    pub fn show(
-        &mut self,
-        ui: &mut Ui,
-        state: &mut ToniqueProjectState,
-        workspace: &mut Workspace,
-    ) {
+    pub fn show(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
         egui::Panel::top("top-bar")
             .resizable(false)
             .frame(
@@ -48,7 +43,7 @@ impl TopBar {
             });
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState, workspace: &mut Workspace) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
             self.sidebar_ui(ui, state, workspace);
@@ -84,7 +79,7 @@ impl TopBar {
         });
     }
 
-    fn play_button_ui(&mut self, ui: &mut Ui, state: &ToniqueProjectState) -> Response {
+    fn play_button_ui(&mut self, ui: &mut Ui, state: &ProjectState) -> Response {
         let playback_state = state.playback_state();
         let tooltip = tooltip(
             ui,
@@ -128,7 +123,7 @@ impl TopBar {
     fn sidebar_ui(
         &mut self,
         ui: &mut Ui,
-        state: &ToniqueProjectState,
+        state: &ProjectState,
         workspace: &mut Workspace,
     ) -> Response {
         let res = ui.add(
@@ -156,7 +151,7 @@ impl TopBar {
     fn graph_view_ui(
         &mut self,
         ui: &mut Ui,
-        state: &ToniqueProjectState,
+        state: &ProjectState,
         workspace: &mut Workspace,
     ) -> Response {
         let active = workspace.main_view == MainView::Graph;
@@ -185,7 +180,7 @@ impl TopBar {
         res
     }
 
-    fn follow_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn follow_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let follow = state.follow_playhead();
         let res = ui.add(
             SquareButton::new(egui_phosphor::fill::CARET_LINE_RIGHT)
@@ -214,7 +209,7 @@ impl TopBar {
         }
     }
 
-    fn loop_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn loop_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let looping = state.looping();
         let res = ui.add(
             SquareButton::new(egui_phosphor::fill::REPEAT)
@@ -238,7 +233,7 @@ impl TopBar {
         }
     }
 
-    fn metronome_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
+    fn metronome_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) -> Response {
         let theme = ui.app_theme();
         let click = state.metronome()
             && matches!(state.playback_state(), PlaybackState::Playing)
@@ -270,7 +265,7 @@ impl TopBar {
         res
     }
 
-    fn waveform_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn waveform_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let (rect, _) =
             ui.allocate_exact_size(Vec2::new(35., ui.available_height()), Sense::hover());
         let painter = ui.painter_at(rect);
@@ -311,7 +306,7 @@ impl TopBar {
         };
     }
 
-    fn usage_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
+    fn usage_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) -> Response {
         ui.add(
             SquareButton::new(format!("{:.0}%", (state.metrics.latency * 100.).round()))
                 .square(BUTTON_SIZE)
@@ -334,7 +329,7 @@ impl TopBar {
         )
     }
 
-    fn undo_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
+    fn undo_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) -> Response {
         ui.add_enabled(
             state.can_undo(),
             SquareButton::ghost(egui_phosphor::fill::ARROW_U_UP_LEFT)
@@ -347,7 +342,7 @@ impl TopBar {
         )
     }
 
-    fn redo_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
+    fn redo_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) -> Response {
         ui.add_enabled(
             state.can_redo(),
             SquareButton::ghost(egui_phosphor::fill::ARROW_U_UP_RIGHT)
@@ -362,7 +357,7 @@ impl TopBar {
 }
 
 /// `text` with the shortcut of `action`, e.g. `Loop (Ctrl+L)`.
-fn tooltip(ui: &Ui, state: &ToniqueProjectState, text: &str, action: Action) -> String {
+fn tooltip(ui: &Ui, state: &ProjectState, text: &str, action: Action) -> String {
     state
         .settings()
         .keymap

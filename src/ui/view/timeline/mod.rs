@@ -2,9 +2,9 @@ use crate::{
     analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,
     core::{
-        clip::ClipCore,
-        state::ToniqueProjectState,
-        track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackReferenceCore},
+        clip::AudioClip,
+        state::ProjectState,
+        track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow},
     },
     ui::grid::PaintGrid,
     ui::{
@@ -49,7 +49,7 @@ impl Timeline {
     pub fn ui(
         &mut self,
         ui: &mut Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         workspace: &mut Workspace,
         viewport: Rect,
         offset: Vec2,
@@ -89,7 +89,7 @@ impl Timeline {
         &mut self,
         ui: &mut Ui,
         response: &Response,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         viewport: Rect,
     ) {
         if response.clicked()
@@ -114,8 +114,8 @@ impl Timeline {
     fn expand_on_hover(
         &mut self,
         ui: &Ui,
-        state: &mut ToniqueProjectState,
-        rows: &[TrackReferenceCore],
+        state: &mut ProjectState,
+        rows: &[TrackRow],
         viewport: Rect,
         offset: Vec2,
     ) {
@@ -126,7 +126,7 @@ impl Timeline {
 
         // Each row's vertical span on screen.
         let mut y = viewport.top() - offset.y;
-        let spans: Vec<(&TrackReferenceCore, f32, f32)> = rows
+        let spans: Vec<(&TrackRow, f32, f32)> = rows
             .iter()
             .map(|row| {
                 let span = (row, y, y + row.height);
@@ -176,7 +176,7 @@ impl Timeline {
     pub fn clips_ui(
         &mut self,
         ui: &mut Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         workspace: &mut Workspace,
         viewport: Rect,
         offset: Vec2,
@@ -265,9 +265,9 @@ impl Timeline {
     fn handle_track_hover(
         &mut self,
         ui: &mut Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         workspace: &mut Workspace,
-        track: &TrackReferenceCore,
+        track: &TrackRow,
         track_rect: Rect,
     ) {
         if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
@@ -294,10 +294,10 @@ impl Timeline {
 
     fn clip_ui(
         &mut self,
-        track: &TrackReferenceCore,
-        clip: &ClipCore,
+        track: &TrackRow,
+        clip: &AudioClip,
         ui: &mut Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         viewport: Rect,
         offset: Vec2,
         y: f32,
@@ -380,12 +380,7 @@ impl Timeline {
         (dragged_audio, is_released)
     }
 
-    fn handle_dropped_audio(
-        &mut self,
-        ui: &mut Ui,
-        viewport: Rect,
-        state: &mut ToniqueProjectState,
-    ) {
+    fn handle_dropped_audio(&mut self, ui: &mut Ui, viewport: Rect, state: &mut ProjectState) {
         let dropped_files = ui.input(|i| i.raw.dropped_files.clone());
         state.begin_batch();
         if !dropped_files.is_empty() {
@@ -400,7 +395,7 @@ impl Timeline {
                     let snapped_position = state.grid.snap_at_grid(position);
 
                     let track = state.add_track();
-                    let clip = ClipCore::new(state.new_clip_id(), audio_info, snapped_position);
+                    let clip = AudioClip::new(state.new_clip_id(), audio_info, snapped_position);
                     state.add_clips(&track, vec![clip]);
                 }
             }
@@ -415,7 +410,7 @@ impl Timeline {
         offset: Vec2,
         audio_info: AudioInfo,
         is_released: bool,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
     ) {
         // Render preview clip
         if let Some(duration) = audio_info.duration
@@ -441,7 +436,7 @@ impl Timeline {
             let pos = pos2(x, y - offset.y);
             let size = Vec2::new(width, height);
             // Placeholder ID: the clip only gets a real one when dropped
-            let clip = ClipCore::new(ClipId(0), audio_info, snapped_position);
+            let clip = AudioClip::new(ClipId(0), audio_info, snapped_position);
             // render clip
             ClipView::new().ui(
                 ui,
@@ -472,12 +467,7 @@ impl Timeline {
 /// A group's content, in a band the height of a collapsed group at the top of
 /// its lane: a strip per track inside it, in order, with that track's clips
 /// in its colour, faint so they don't pass for real clips.
-fn paint_group_overview(
-    ui: &Ui,
-    state: &ToniqueProjectState,
-    group: &TrackReferenceCore,
-    lane: Rect,
-) {
+fn paint_group_overview(ui: &Ui, state: &ProjectState, group: &TrackRow, lane: Rect) {
     let tracks = state.group_tracks(group.id);
     if tracks.is_empty() {
         return;

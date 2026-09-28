@@ -4,7 +4,7 @@ use tonique_engine::edit::ClipId;
 
 /// A clip representing an audio file placed on a track
 #[derive(Clone)]
-pub struct ClipCore {
+pub struct AudioClip {
     pub id: ClipId,
     /// Audio metadata
     pub audio: AudioInfo,
@@ -18,8 +18,8 @@ pub struct ClipCore {
     pub trim_end: f32,
 }
 
-impl ClipCore {
-    /// Get `id` from `ToniqueProjectState::new_clip_id`.
+impl AudioClip {
+    /// Get `id` from `ProjectState::new_clip_id`.
     pub fn new(id: ClipId, audio: AudioInfo, position: f32) -> Self {
         Self {
             id,
@@ -84,9 +84,9 @@ impl ClipCore {
     }
 }
 
-impl Debug for ClipCore {
+impl Debug for AudioClip {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClipCore")
+        f.debug_struct("AudioClip")
             .field("id", &self.id)
             .field("audio", &self.audio.name)
             .field("position", &self.position)

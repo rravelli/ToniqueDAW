@@ -1,7 +1,7 @@
 use crate::{
     core::{
-        state::{MIN_EXPANDED_HEIGHT, ToniqueProjectState},
-        track::{TrackKind, TrackReferenceCore},
+        state::{MIN_EXPANDED_HEIGHT, ProjectState},
+        track::{TrackKind, TrackRow},
     },
     ui::{
         font::PHOSPHOR_FILL,
@@ -67,12 +67,7 @@ impl TrackHeader {
         }
     }
 
-    pub fn ui(
-        &mut self,
-        ui: &mut Ui,
-        track: &TrackReferenceCore,
-        state: &mut ToniqueProjectState,
-    ) -> Response {
+    pub fn ui(&mut self, ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) -> Response {
         // Create persistent id
         let id = ui.make_persistent_id(format!("ui_track_state_{:?}", track.id));
         // Get previous state
@@ -150,7 +145,7 @@ impl TrackHeader {
                         ui.horizontal(|ui| {
                             ui.set_height(BUTTON_SIZE);
 
-                            // let track_mut = state.track_mut(&track.id);
+                            // let track_view_mut = state.track_view_mut(&track.id);
                             self.collapse_button(ui, track, state);
 
                             // Groups have no arm button.
@@ -182,9 +177,9 @@ impl TrackHeader {
                                 self.arm = !self.arm;
                             }
                         });
-                        let track_mut = state.track_mut(&track.id);
+                        let track_view_mut = state.track_view_mut(&track.id);
                         // Extra controls
-                        if !track_mut.collapsed {
+                        if !track_view_mut.collapsed {
                             let prev_gain = self.gain;
                             self.gain_slider(ui, RangeInclusive::new(-40., 5.), track, state);
                             volume_changed = prev_gain != self.gain;
@@ -218,16 +213,11 @@ impl TrackHeader {
         res
     }
 
-    fn text_ui(
-        &mut self,
-        ui: &mut Ui,
-        track: &TrackReferenceCore,
-        state: &mut ToniqueProjectState,
-    ) {
+    fn text_ui(&mut self, ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
         if self.edit {
-            let track_mut = state.track_mut(&track.id);
+            let track_view_mut = state.track_view_mut(&track.id);
             let text_edit = ui.add(
-                TextEdit::singleline(&mut track_mut.name)
+                TextEdit::singleline(&mut track_view_mut.name)
                     .font(FontId::new(9., egui::FontFamily::Proportional))
                     .background_color(ui.app_theme().bg_deep)
                     .text_color(ui.app_theme().text)
@@ -240,10 +230,10 @@ impl TrackHeader {
             if text_edit.lost_focus() {
                 self.edit = false;
                 self.focus_requested = false;
-                if track_mut.name.is_empty() {
-                    track_mut.name = "Audio Track".to_string();
+                if track_view_mut.name.is_empty() {
+                    track_view_mut.name = "Audio Track".to_string();
                 }
-                state.commit_track_mut(&track.id);
+                state.commit_track_view(&track.id);
             }
         } else {
             let formatted_name = display_name(&track.name, track.index);
@@ -259,12 +249,7 @@ impl TrackHeader {
         }
     }
 
-    fn context_menu(
-        &mut self,
-        ui: &mut Ui,
-        track: &TrackReferenceCore,
-        state: &mut ToniqueProjectState,
-    ) {
+    fn context_menu(&mut self, ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
         let is_group = track.kind == TrackKind::Group;
         Frame::new().show(ui, |ui| {
             ui.vertical(|ui| {
@@ -308,8 +293,8 @@ impl TrackHeader {
                     let mut color = track.color;
                     let picker = ColorSelect::new(("track-color", track.id), &mut color);
                     if ui.add(picker).changed() {
-                        state.track_mut(&track.id).color = color;
-                        state.commit_track_mut(&track.id);
+                        state.track_view_mut(&track.id).color = color;
+                        state.commit_track_view(&track.id);
                     }
                 });
                 ui.add(ContextMenuSeparator::new());
@@ -328,7 +313,7 @@ impl TrackHeader {
         });
     }
 
-    fn mute_button(&mut self, ui: &mut Ui, solo: bool, track: &TrackReferenceCore) -> Response {
+    fn mute_button(&mut self, ui: &mut Ui, solo: bool, track: &TrackRow) -> Response {
         let theme = ui.app_theme();
         // Dimmed when a solo already silences the track.
         let fill = match (track.muted, solo) {
@@ -339,7 +324,7 @@ impl TrackHeader {
         ui.add(toggle_button("M", fill, &theme))
     }
 
-    fn solo_button(&mut self, ui: &mut Ui, solo: bool, track: &TrackReferenceCore) -> Response {
+    fn solo_button(&mut self, ui: &mut Ui, solo: bool, track: &TrackRow) -> Response {
         let theme = ui.app_theme();
         ui.add(toggle_button("S", solo.then_some(track.color), &theme))
     }
@@ -356,11 +341,11 @@ impl TrackHeader {
     fn collapse_button(
         &mut self,
         ui: &mut Ui,
-        track: &TrackReferenceCore,
-        state: &mut ToniqueProjectState,
+        track: &TrackRow,
+        state: &mut ProjectState,
     ) -> Response {
-        let track_mut = state.track_mut(&track.id);
-        let icon = if track_mut.collapsed {
+        let track_view_mut = state.track_view_mut(&track.id);
+        let icon = if track_view_mut.collapsed {
             egui_phosphor::fill::CARET_RIGHT
         } else {
             egui_phosphor::fill::CARET_DOWN
@@ -370,7 +355,7 @@ impl TrackHeader {
                 .family(egui::FontFamily::Name(PHOSPHOR_FILL.into()))
                 .square(BUTTON_SIZE),
         );
-        let collapsed = track_mut.collapsed;
+        let collapsed = track_view_mut.collapsed;
         if response.clicked() {
             state.set_collapsed(&track.id, !collapsed);
         }
@@ -382,8 +367,8 @@ impl TrackHeader {
         &mut self,
         ui: &mut Ui,
         range: std::ops::RangeInclusive<f32>,
-        track: &TrackReferenceCore,
-        state: &mut ToniqueProjectState,
+        track: &TrackRow,
+        state: &mut ProjectState,
     ) -> Response {
         let desired_size = egui::vec2(2. * BUTTON_SIZE + 1., 20.);
         let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
@@ -447,22 +432,17 @@ impl TrackHeader {
         response
     }
 
-    fn resize_handle(
-        &mut self,
-        ui: &mut Ui,
-        track: &TrackReferenceCore,
-        state: &mut ToniqueProjectState,
-    ) {
-        let track_mut = state.track_mut(&track.id);
+    fn resize_handle(&mut self, ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
+        let track_view_mut = state.track_view_mut(&track.id);
         let (_, mut response) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_GAP), Sense::drag());
 
-        if !track_mut.collapsed {
+        if !track_view_mut.collapsed {
             response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
         }
-        if response.dragged() && !track_mut.collapsed {
-            track_mut.height += response.drag_delta().y;
-            track_mut.height = track_mut.height.clamp(MIN_EXPANDED_HEIGHT, 400.);
+        if response.dragged() && !track_view_mut.collapsed {
+            track_view_mut.height += response.drag_delta().y;
+            track_view_mut.height = track_view_mut.height.clamp(MIN_EXPANDED_HEIGHT, 400.);
         }
     }
 }

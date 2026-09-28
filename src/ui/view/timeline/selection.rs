@@ -1,5 +1,5 @@
 use crate::{
-    core::state::{SelectionBounds, ToniqueProjectState},
+    core::state::{ProjectState, SelectionBounds},
     ui::{
         theme::ThemeExt,
         utils::{find_track_at, track_y},
@@ -18,7 +18,7 @@ impl Timeline {
     pub fn handle_multiselect(
         &mut self,
         ui: &mut Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         response: &Response,
     ) {
         if ui.input(|i| i.pointer.primary_down()) {
@@ -74,7 +74,7 @@ impl Timeline {
     fn paint_selection_zone(
         &self,
         ui: &Ui,
-        state: &ToniqueProjectState,
+        state: &ProjectState,
         bounds: SelectionBounds,
         viewport: Rect,
     ) {

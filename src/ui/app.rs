@@ -1,7 +1,7 @@
 use crate::{
     audio::host::AudioHost,
     config::{keymap::Action, settings::Settings},
-    core::state::{PlaybackState, ToniqueProjectState},
+    core::state::{PlaybackState, ProjectState},
     ui::{
         panels::{
             bottom_panel::BottomPanel,
@@ -19,7 +19,7 @@ use crate::{
 use tonique_engine::engine::Engine;
 
 pub struct ToniqueApp {
-    state: ToniqueProjectState,
+    state: ProjectState,
     workspace: Workspace,
     menu_bar: AppMenuBar,
     top_bar: TopBar,
@@ -41,7 +41,7 @@ impl ToniqueApp {
         let (theme, theme_warnings) = themes.resolve(&settings.theme);
         let palette = theme.palette.clone();
         theme.install(&cc.egui_ctx);
-        let mut state = ToniqueProjectState::new(engine);
+        let mut state = ProjectState::new(engine);
         state.set_track_palette(&palette);
         state.attach_audio(audio, settings);
         Self {

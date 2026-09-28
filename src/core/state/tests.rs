@@ -1,6 +1,6 @@
 use crate::{
     analysis::{AudioData, AudioInfo},
-    core::{clip::ClipCore, effect::EffectKind, state::ToniqueProjectState},
+    core::{clip::AudioClip, effect::EffectKind, state::ProjectState},
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tonique_engine::{
@@ -9,9 +9,9 @@ use tonique_engine::{
     sample::SampleBuffer,
 };
 
-fn setup_state() -> ToniqueProjectState {
+fn setup_state() -> ProjectState {
     let (engine, _processor) = Engine::new(EngineConfig::default());
-    ToniqueProjectState::new(engine)
+    ProjectState::new(engine)
 }
 
 /// A decoded (silent) file of `seconds`. At 120 bpm that's `2 * seconds` beats.
@@ -31,19 +31,14 @@ fn audio(seconds: f32) -> AudioInfo {
     }
 }
 
-fn add_clip(
-    state: &mut ToniqueProjectState,
-    track: TrackId,
-    position: f32,
-    seconds: f32,
-) -> ClipId {
+fn add_clip(state: &mut ProjectState, track: TrackId, position: f32, seconds: f32) -> ClipId {
     let id = state.new_clip_id();
-    state.add_clips(&track, vec![ClipCore::new(id, audio(seconds), position)]);
+    state.add_clips(&track, vec![AudioClip::new(id, audio(seconds), position)]);
     id
 }
 
 /// (position, end) of each clip on the track, sorted.
-fn spans(state: &ToniqueProjectState, track: TrackId) -> Vec<(f32, f32)> {
+fn spans(state: &ProjectState, track: TrackId) -> Vec<(f32, f32)> {
     let bpm = state.bpm();
     let track = state.tracks().find(|t| t.id == track).unwrap();
     let mut spans: Vec<_> = track
@@ -192,7 +187,7 @@ fn mixer_changes_undo() {
 
     state.toggle_solo(a, false);
     state.toggle_solo(b, true);
-    let soloed = |s: &ToniqueProjectState| {
+    let soloed = |s: &ProjectState| {
         s.tracks()
             .map(|t| matches!(t.solo, crate::core::track::TrackSoloState::Solo))
             .collect::<Vec<_>>()
@@ -208,12 +203,12 @@ fn mixer_changes_undo() {
 fn renames_are_undoable() {
     let mut state = setup_state();
     let track = state.add_track();
-    state.track_mut(&track).name = "Drums".into();
-    state.commit_track_mut(&track);
+    state.track_view_mut(&track).name = "Drums".into();
+    state.commit_track_view(&track);
     assert_eq!(state.tracks().next().unwrap().name, "Drums");
     state.undo();
     assert_eq!(state.tracks().next().unwrap().name, "# Audio Track");
-    assert_eq!(state.track_mut(&track).name, "# Audio Track");
+    assert_eq!(state.track_view_mut(&track).name, "# Audio Track");
 }
 
 #[test]
@@ -257,7 +252,7 @@ fn clips_play_through_the_engine_once_loaded() {
         housekeeping_thread: false,
         ..Default::default()
     });
-    let mut state = ToniqueProjectState::new(engine);
+    let mut state = ProjectState::new(engine);
     let track = state.add_track();
     // One second of a loud square wave, decoded at another rate so it's resampled.
     let mut info = audio(1.);
@@ -270,7 +265,7 @@ fn clips_play_through_the_engine_once_loaded() {
     )));
     info.sample_rate = 44100;
     let id = state.new_clip_id();
-    state.add_clips(&track, vec![ClipCore::new(id, info, 0.)]);
+    state.add_clips(&track, vec![AudioClip::new(id, info, 0.)]);
     state.play();
 
     // The file is converted on a background thread; the clip is silent until then.
@@ -338,7 +333,7 @@ fn playback_wraps_inside_the_loop_after_a_tempo_change() {
         housekeeping_thread: false,
         ..Default::default()
     });
-    let mut state = ToniqueProjectState::new(engine);
+    let mut state = ProjectState::new(engine);
     state.set_loop_range(0., 1.);
     state.set_looping(true);
     // The loop was sent in samples at 120 bpm: it must follow the new tempo.
@@ -539,7 +534,7 @@ fn clips_never_start_before_the_first_beat() {
     let mut state = setup_state();
     let track = state.add_track();
     let id = state.new_clip_id();
-    state.add_clips(&track, vec![ClipCore::new(id, audio(1.), -3.)]);
+    state.add_clips(&track, vec![AudioClip::new(id, audio(1.), -3.)]);
     assert_eq!(spans(&state, track), vec![(0., 2.)]);
 
     state.move_clip(&id, &track, -1., &[]);
@@ -549,7 +544,7 @@ fn clips_never_start_before_the_first_beat() {
 #[test]
 fn trimming_the_start_stops_at_the_first_beat() {
     let bpm = 120.;
-    let mut clip = ClipCore::new(ClipId(1), audio(2.), 1.); // beats 1..5
+    let mut clip = AudioClip::new(ClipId(1), audio(2.), 1.); // beats 1..5
     clip.trim_start_at(2., bpm); // hide the first 1 beat of the file: 2..5
     clip.position -= 1.5; // moved near the start: 0.5..3.5, file starts at -0.5
 
@@ -641,7 +636,7 @@ fn new_tracks_go_through_the_palette() {
     let colors: Vec<_> = (0..3)
         .map(|_| {
             let id = state.add_track();
-            state.track_mut(&id).color
+            state.track_view_mut(&id).color
         })
         .collect();
     assert_eq!(colors, [Color32::RED, Color32::BLUE, Color32::RED]);
@@ -715,7 +710,7 @@ mod projects {
         let audio = AUDIO_ANALYSIS_CACHE
             .get_or_analyze(dir.join("loop.wav"))
             .unwrap();
-        let mut clip = ClipCore::new(state.new_clip_id(), audio, 2.);
+        let mut clip = AudioClip::new(state.new_clip_id(), audio, 2.);
         clip.trim_start = 0.25;
         clip.trim_end = 0.75;
         state.add_clips(&track, vec![clip]);
@@ -723,12 +718,12 @@ mod projects {
         state.commit_volume(MASTER_TRACK_ID, 1.0, 0.8);
         state.set_mute(track, true);
         state.toggle_solo(track, false);
-        let view = state.track_mut(&track);
+        let view = state.track_view_mut(&track);
         view.name = "Drums".into();
         view.color = Color32::from_rgb(10, 20, 30);
         view.height = 90.;
         view.collapsed = true;
-        state.commit_track_mut(&track);
+        state.commit_track_view(&track);
         state.add_effect(&track, EffectKind::Filter, 0);
         let plugin = state.edit().track(track).unwrap().channel.plugins[0].clone();
         plugin.param("cutoff").unwrap().set(800.);
@@ -804,20 +799,20 @@ mod groups {
     use std::path::Path;
 
     /// A track named `name`, added last.
-    fn track(state: &mut ToniqueProjectState, name: &str) -> TrackId {
+    fn track(state: &mut ProjectState, name: &str) -> TrackId {
         let id = state.add_track();
-        state.track_mut(&id).name = name.into();
-        state.commit_track_mut(&id);
+        state.track_view_mut(&id).name = name.into();
+        state.commit_track_view(&id);
         id
     }
 
-    fn rename(state: &mut ToniqueProjectState, id: TrackId, name: &str) {
-        state.track_mut(&id).name = name.into();
-        state.commit_track_mut(&id);
+    fn rename(state: &mut ProjectState, id: TrackId, name: &str) {
+        state.track_view_mut(&id).name = name.into();
+        state.commit_track_view(&id);
     }
 
     /// The visible rows, indented by depth.
-    fn tree(state: &ToniqueProjectState) -> Vec<String> {
+    fn tree(state: &ProjectState) -> Vec<String> {
         state
             .rows()
             .iter()
@@ -826,7 +821,7 @@ mod groups {
     }
 
     /// Every group appears once and its tracks are contiguous.
-    fn assert_tree_order(state: &ToniqueProjectState) {
+    fn assert_tree_order(state: &ProjectState) {
         let groups: Vec<_> = state
             .rows()
             .into_iter()
@@ -963,9 +958,9 @@ mod groups {
         rename(&mut state, inner, "in");
         let outer = state.group(&[inner, b]).unwrap();
         rename(&mut state, outer, "out");
-        state.track_mut(&inner).collapsed = true;
+        state.track_view_mut(&inner).collapsed = true;
         assert_eq!(tree(&state), ["out", "  in", "  b", "c"]);
-        state.track_mut(&outer).collapsed = true;
+        state.track_view_mut(&outer).collapsed = true;
         assert_eq!(tree(&state), ["out", "c"]);
         assert!(state.is_hidden(a) && state.is_hidden(inner));
         assert!(!state.is_hidden(outer));
@@ -987,8 +982,7 @@ mod groups {
         let outer = state.group(&[inner, b]).unwrap();
 
         state.toggle_solo(outer, false);
-        let solo =
-            |s: &ToniqueProjectState, id| s.rows().into_iter().find(|r| r.id == id).unwrap().solo;
+        let solo = |s: &ProjectState, id| s.rows().into_iter().find(|r| r.id == id).unwrap().solo;
         assert!(
             matches!(solo(&state, a), TrackSoloState::NotSoloing),
             "audible through its group"
@@ -1025,7 +1019,7 @@ mod groups {
         rename(&mut state, outer, "out");
         state.toggle_solo(inner, false);
         state.set_mute(outer, true);
-        state.track_mut(&inner).collapsed = true;
+        state.track_view_mut(&inner).collapsed = true;
         let _ = c;
 
         let saved = state.project(None);
@@ -1083,14 +1077,14 @@ mod groups {
         let mut state = setup_state();
         let a = track(&mut state, "a");
         let g = state.group(&[a]).unwrap();
-        state.track_mut(&g).height = 120.;
+        state.track_view_mut(&g).height = 120.;
         state.set_collapsed(&g, true);
         assert_eq!(
-            state.track_mut(&g).height,
+            state.track_view_mut(&g).height,
             crate::core::track::TRACK_COLLAPSED_HEIGHT
         );
         state.set_collapsed(&g, false);
-        assert_eq!(state.track_mut(&g).height, 120.);
+        assert_eq!(state.track_view_mut(&g).height, 120.);
     }
 
     #[test]

@@ -2,15 +2,15 @@
 //! snapshots of a track's clips. They return [`ClipOp`]s, which the state
 //! turns into engine commands inside one undo transaction.
 
-use crate::core::clip::ClipCore;
+use crate::core::clip::AudioClip;
 use tonique_engine::edit::{ClipId, TrackId};
 
 #[derive(Debug, Clone)]
 pub enum ClipOp {
-    Add(TrackId, ClipCore),
+    Add(TrackId, AudioClip),
     Remove(TrackId, ClipId),
     /// Change the clip's position and trims to those of the given clip.
-    Resize(TrackId, ClipCore),
+    Resize(TrackId, AudioClip),
     Move {
         from: TrackId,
         to: TrackId,
@@ -23,7 +23,7 @@ pub enum ClipOp {
 /// operations see each other's effects.
 pub struct TrackClips<'a> {
     pub track: TrackId,
-    pub clips: Vec<ClipCore>,
+    pub clips: Vec<AudioClip>,
     pub bpm: f32,
     pub ops: &'a mut Vec<ClipOp>,
 }
@@ -73,7 +73,7 @@ impl TrackClips<'_> {
     }
 
     /// Add clips, trimming whatever they overlap.
-    pub fn add(&mut self, added: Vec<ClipCore>, new_id: &mut impl FnMut() -> ClipId) {
+    pub fn add(&mut self, added: Vec<AudioClip>, new_id: &mut impl FnMut() -> ClipId) {
         for clip in added {
             self.carve(clip.position, clip.end(self.bpm), &[], new_id);
             self.ops.push(ClipOp::Add(self.track, clip.clone()));
@@ -107,7 +107,7 @@ impl TrackClips<'_> {
         ids: &[ClipId],
         bounds: Option<(f32, f32)>,
         new_id: &mut impl FnMut() -> ClipId,
-    ) -> Vec<ClipCore> {
+    ) -> Vec<AudioClip> {
         let bpm = self.bpm;
         self.clips
             .iter()
@@ -135,7 +135,7 @@ mod tests {
 
     const BPM: f32 = 60.; // one beat per second: clip seconds == beats
 
-    fn clip(id: u64, position: f32, seconds: f32) -> ClipCore {
+    fn clip(id: u64, position: f32, seconds: f32) -> AudioClip {
         let audio = AudioInfo {
             name: "test".into(),
             duration: Some(Duration::from_secs_f32(seconds)),
@@ -146,7 +146,7 @@ mod tests {
             num_samples: None,
             path: PathBuf::from("test.wav"),
         };
-        ClipCore::new(ClipId(id), audio, position)
+        AudioClip::new(ClipId(id), audio, position)
     }
 
     fn ids() -> impl FnMut() -> ClipId {
@@ -157,7 +157,7 @@ mod tests {
         }
     }
 
-    fn span(c: &ClipCore) -> (f32, f32) {
+    fn span(c: &AudioClip) -> (f32, f32) {
         (c.position, c.end(BPM))
     }
 

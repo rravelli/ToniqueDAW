@@ -1,5 +1,5 @@
 use crate::{
-    core::state::{PlaybackState, ToniqueProjectState},
+    core::state::{PlaybackState, ProjectState},
     ui::{
         theme::{ThemeExt, with_alpha},
         view::{
@@ -38,12 +38,7 @@ impl CentralPanel {
         }
     }
 
-    pub fn show(
-        &mut self,
-        ui: &mut Ui,
-        state: &mut ToniqueProjectState,
-        workspace: &mut Workspace,
-    ) {
+    pub fn show(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
         egui::CentralPanel::default()
             .frame(
                 Frame::central_panel(ui.style())
@@ -55,7 +50,7 @@ impl CentralPanel {
             });
     }
 
-    fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState, workspace: &mut Workspace) {
+    fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
         if workspace.main_view == MainView::Graph {
             self.graph.ui(ui, state);
             return;
@@ -123,7 +118,7 @@ impl CentralPanel {
     fn follow_playhead(
         &mut self,
         ui: &Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         viewport: Rect,
         scrolled_by_hand: bool,
     ) {
@@ -226,7 +221,7 @@ impl CentralPanel {
     /// Loop bounds (while looping), edit cursor (only while it differs from
     /// the playhead) and playhead
     /// with its draggable handle.
-    fn cursors_ui(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {
+    fn cursors_ui(&self, ui: &mut Ui, state: &mut ProjectState, rect: Rect) {
         ui.set_clip_rect(rect);
         let theme = ui.app_theme();
         let painter = ui.painter();
@@ -318,13 +313,13 @@ mod tests {
     #[test]
     fn draws_groups_headless() {
         let (engine, _processor) = Engine::new(EngineConfig::default());
-        let mut state = ToniqueProjectState::new(engine);
+        let mut state = ProjectState::new(engine);
         let tracks: Vec<_> = (0..5).map(|_| state.add_track()).collect();
         let inner = state.group(&tracks[..2]).unwrap();
         let outer = state.group(&[inner, tracks[2]]).unwrap();
         state.group(&[tracks[4]]).unwrap();
-        state.track_mut(&outer).collapsed = false;
-        state.track_mut(&inner).collapsed = true;
+        state.track_view_mut(&outer).collapsed = false;
+        state.track_view_mut(&inner).collapsed = true;
 
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::ui::font::fonts());
@@ -358,7 +353,7 @@ mod tests {
         use egui::{Event, PointerButton, Pos2};
 
         let (engine, _processor) = Engine::new(EngineConfig::default());
-        let mut state = ToniqueProjectState::new(engine);
+        let mut state = ProjectState::new(engine);
         let tracks: Vec<_> = (0..3).map(|_| state.add_track()).collect();
         let group = state.group(&tracks[..2]).unwrap();
         state.set_collapsed(&group, true);
@@ -376,7 +371,7 @@ mod tests {
             num_samples: None,
             path: Default::default(),
         };
-        let mut frame = |state: &mut ToniqueProjectState, events: Vec<Event>| {
+        let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
             let input = egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
                 events,
@@ -386,7 +381,7 @@ mod tests {
                 ctx.run_ui(input, |ui| panel.show(ui, state, &mut Workspace::default()));
             output.textures_delta.clear();
         };
-        let collapsed = |state: &ToniqueProjectState| {
+        let collapsed = |state: &ProjectState| {
             state
                 .rows()
                 .iter()

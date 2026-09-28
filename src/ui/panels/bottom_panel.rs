@@ -1,5 +1,5 @@
 use crate::{
-    core::{metrics::AudioMetrics, state::ToniqueProjectState, track::TrackReferenceCore},
+    core::{metrics::AudioMetrics, state::ProjectState, track::TrackRow},
     ui::{
         effects::EffectRack, panels::left_panel::DragPayload, theme::ThemeExt, workspace::Workspace,
     },
@@ -26,12 +26,7 @@ impl BottomPanel {
         }
     }
 
-    pub fn show(
-        &mut self,
-        ui: &mut Ui,
-        state: &mut ToniqueProjectState,
-        workspace: &mut Workspace,
-    ) {
+    pub fn show(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
         let mut open = workspace.bottom_panel_open;
         egui::Panel::bottom("bottom-panel")
             .size_range(Rangef::new(50. + HEADER_HEIGHT, 400.))
@@ -47,7 +42,7 @@ impl BottomPanel {
         workspace.bottom_panel_open = open;
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, track: TrackReferenceCore, state: &mut ToniqueProjectState) {
+    pub fn ui(&mut self, ui: &mut Ui, track: TrackRow, state: &mut ProjectState) {
         let mut metrics = state
             .metrics
             .tracks
@@ -143,7 +138,7 @@ impl BottomPanel {
         self.offset = inner.state.offset.x;
     }
 
-    fn header(&mut self, ui: &mut Ui, track: &TrackReferenceCore) {
+    fn header(&mut self, ui: &mut Ui, track: &TrackRow) {
         let theme = ui.app_theme();
         Frame::new()
             .fill(track.color)
@@ -179,7 +174,7 @@ mod tests {
     #[test]
     fn draws_the_selected_tracks_effects_headless() {
         let (engine, _processor) = Engine::new(EngineConfig::default());
-        let mut state = ToniqueProjectState::new(engine);
+        let mut state = ProjectState::new(engine);
         let track = state.add_track();
         state.add_effect(&track, EffectKind::Filter, 0);
         state.add_effect(&track, EffectKind::Filter, 1);

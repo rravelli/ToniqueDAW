@@ -1,5 +1,5 @@
 use crate::{
-    core::{clip::ClipCore, state::ToniqueProjectState, track::DEFAULT_TRACK_HEIGHT},
+    core::{clip::AudioClip, state::ProjectState, track::DEFAULT_TRACK_HEIGHT},
     ui::{
         clip::ClipView,
         theme::ThemeExt,
@@ -19,7 +19,7 @@ pub struct DragState {
 }
 #[derive(Clone)]
 pub struct ClipDragState {
-    pub clip: ClipCore,
+    pub clip: AudioClip,
     pub mouse_delta: Pos2,
     pub track_index_delta: i32,
 }
@@ -36,8 +36,8 @@ impl Timeline {
         ui: &mut Ui,
         dragged_track_index: Option<usize>,
         viewport: Rect,
-        dragged_clip: Option<ClipCore>,
-        state: &mut ToniqueProjectState,
+        dragged_clip: Option<AudioClip>,
+        state: &mut ProjectState,
     ) {
         let mouse_pos = ui.ctx().input(|i| i.pointer.hover_pos());
         // Create dragging objects
@@ -216,7 +216,7 @@ impl Timeline {
 
     fn commit_drag(
         &mut self,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         drag_state: DragState,
         track_indexes: Vec<usize>,
     ) {

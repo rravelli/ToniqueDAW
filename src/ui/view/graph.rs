@@ -1,5 +1,5 @@
 use crate::{
-    core::{graph_monitor::GraphMonitor, state::ToniqueProjectState},
+    core::{graph_monitor::GraphMonitor, state::ProjectState},
     ui::theme::{Theme, ThemeExt},
     utils::display_name,
 };
@@ -46,7 +46,7 @@ impl GraphView {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let (viewport, response) =
             ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let theme = ui.app_theme();
@@ -455,7 +455,7 @@ fn node_tooltip(
 }
 
 /// Engine name, displayed name and color of each track, by owner ID.
-fn track_names(state: &ToniqueProjectState) -> HashMap<u64, (String, String, Color32)> {
+fn track_names(state: &ProjectState) -> HashMap<u64, (String, String, Color32)> {
     state
         .tracks()
         .chain(state.groups())
@@ -574,10 +574,10 @@ mod tests {
 
     #[test]
     fn draws_the_live_graph_headless() {
-        use crate::{core::state::ToniqueProjectState, ui::theme::Theme};
+        use crate::{core::state::ProjectState, ui::theme::Theme};
 
         let (engine, _p) = Engine::new(EngineConfig::default());
-        let mut state = ToniqueProjectState::new(engine);
+        let mut state = ProjectState::new(engine);
         state.set_track_palette(&Theme::dark().palette);
         state.add_track();
         state.add_track();

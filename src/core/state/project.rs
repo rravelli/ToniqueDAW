@@ -12,24 +12,23 @@ use tonique_engine::edit::{
 };
 
 use super::{
-    DEFAULT_BPM, DEFAULT_LOOP_BARS, MASTER_TRACK_ID, ToniqueProjectState, report,
-    sources::SourceRegistry,
+    DEFAULT_BPM, DEFAULT_LOOP_BARS, MASTER_TRACK_ID, ProjectState, report, sources::SourceRegistry,
 };
 use crate::{
     cache::AUDIO_ANALYSIS_CACHE,
     core::{
-        clip::ClipCore,
+        clip::AudioClip,
         effect::EffectKind,
         project::{
             ChannelFile, ClipFile, EffectFile, GroupFile, ProjectFile, TrackFile, VERSION,
             resolve_path, store_path,
         },
-        track::MutableTrackCore,
+        track::TrackView,
     },
     utils::color::{format_color, parse_color},
 };
 
-impl ToniqueProjectState {
+impl ProjectState {
     /// Start an empty project on the same engine: no tracks, default tempo
     /// and loop, empty undo history. Settings, the audio output and view
     /// preferences (panels, theme palette, metronome switch) are kept.
@@ -38,7 +37,7 @@ impl ToniqueProjectState {
         self.pause_preview();
         report(self.session.reset(Edit::new(DEFAULT_BPM)));
 
-        let mut master = MutableTrackCore::new();
+        let mut master = TrackView::new();
         master.name = "Master".into();
         self.views = HashMap::from([(MASTER_TRACK_ID, master)]);
         self.sources = SourceRegistry::new(self.session.engine().config().sample_rate);
@@ -81,11 +80,7 @@ impl ToniqueProjectState {
             .filter_map(|bus| edit.bus(*bus).ok())
             .map(|group| {
                 let id = TrackId(group.id.0);
-                let view = self
-                    .views
-                    .get(&id)
-                    .cloned()
-                    .unwrap_or_else(MutableTrackCore::new);
+                let view = self.views.get(&id).cloned().unwrap_or_else(TrackView::new);
                 GroupFile {
                     name: group.name.clone(),
                     color: format_color(view.color),
@@ -105,7 +100,7 @@ impl ToniqueProjectState {
                     .views
                     .get(&track.id)
                     .cloned()
-                    .unwrap_or_else(MutableTrackCore::new);
+                    .unwrap_or_else(TrackView::new);
                 TrackFile {
                     name: track.name.clone(),
                     color: format_color(view.color),
@@ -183,7 +178,7 @@ impl ToniqueProjectState {
             }
             let id = TrackId(bus.id.0);
             self.perform(AddBus::new(bus));
-            let mut view = MutableTrackCore::new();
+            let mut view = TrackView::new();
             view.name.clone_from(&group.name);
             view.height = group.height;
             view.collapsed = group.collapsed;
@@ -203,14 +198,14 @@ impl ToniqueProjectState {
             if let Some(group) = track.group.and_then(|i| groups.get(i)) {
                 self.perform(SetOutput::new(id, Output::Bus(BusId(group.0))));
             }
-            let view = self.track_mut(&id);
+            let view = self.track_view_mut(&id);
             view.name.clone_from(&track.name);
             view.height = track.height;
             view.collapsed = track.collapsed;
             if let Some(color) = parse_color(&track.color) {
                 view.color = color;
             }
-            self.commit_track_mut(&id);
+            self.commit_track_view(&id);
             if track.soloed {
                 self.perform(SetSolo::new(id, true));
             }
@@ -235,7 +230,7 @@ impl ToniqueProjectState {
         clip: &ClipFile,
         dir: &Path,
         problems: &mut Vec<String>,
-    ) -> Option<ClipCore> {
+    ) -> Option<AudioClip> {
         let path: PathBuf = resolve_path(&clip.path, dir);
         // The cache remembers files by path, even ones deleted since.
         let audio = path
@@ -247,7 +242,7 @@ impl ToniqueProjectState {
             problems.push(format!("Missing audio file: {}", clip.path.display()));
             return None;
         };
-        Some(ClipCore {
+        Some(AudioClip {
             id: self.new_clip_id(),
             audio,
             position: clip.position,

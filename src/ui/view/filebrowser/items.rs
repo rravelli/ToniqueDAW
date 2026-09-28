@@ -15,7 +15,7 @@ use egui::{
 use crate::{
     analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,
-    core::state::ToniqueProjectState,
+    core::state::ProjectState,
     ui::{
         panels::left_panel::DragPayload,
         theme::ThemeExt,
@@ -59,7 +59,7 @@ impl FileList {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let is_loading = self.loading.lock().is_ok_and(|l| *l);
         let item_count = if !is_loading {
             self.files.lock().map_or(0, |files| files.items.len())
@@ -140,7 +140,7 @@ impl FileList {
         ui.add_space(5.0);
     }
 
-    pub fn update(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn update(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         if let Some(index) = self.selected.as_mut() {
             let mut updated = false;
             if ui.input(|i| i.key_pressed(Key::ArrowUp)) && *index > 0 {
@@ -179,7 +179,7 @@ impl FileList {
         index: usize,
         file: &FileNode,
         open: bool,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
     ) -> bool {
         let is_dir = file.is_dir;
         let selected = self.selected.is_some_and(|idx| idx == index);

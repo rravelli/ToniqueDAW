@@ -5,8 +5,8 @@ use tonique_engine::edit::TrackId;
 use crate::{
     config::keymap::Action,
     core::{
-        state::{RowTarget, ToniqueProjectState},
-        track::{TrackKind, TrackReferenceCore},
+        state::{ProjectState, RowTarget},
+        track::{TrackKind, TrackRow},
     },
     ui::theme::ThemeExt,
     ui::{
@@ -42,7 +42,7 @@ impl TrackHeaders {
     pub fn ui(
         &mut self,
         ui: &mut Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         workspace: &mut Workspace,
         viewport: Rect,
     ) {
@@ -100,7 +100,7 @@ impl TrackHeaders {
     pub fn track_panel(
         &mut self,
         ui: &mut egui::Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         workspace: &mut Workspace,
         viewport: Rect,
     ) {
@@ -195,12 +195,7 @@ impl TrackHeaders {
 
     /// While a row is dragged, show where it would land; move it there on
     /// release.
-    fn drop_rows(
-        &mut self,
-        ui: &Ui,
-        state: &mut ToniqueProjectState,
-        placed: &[(TrackReferenceCore, Rect)],
-    ) {
+    fn drop_rows(&mut self, ui: &Ui, state: &mut ProjectState, placed: &[(TrackRow, Rect)]) {
         let Some(dragged) = self.dragging else {
             return;
         };
@@ -238,7 +233,7 @@ impl TrackHeaders {
         }
     }
 
-    fn context_menu_ui(&self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn context_menu_ui(&self, ui: &mut Ui, state: &mut ProjectState) {
         if ui
             .add(ContextMenuButton::new(PLUS, "Add audio track"))
             .clicked()
@@ -251,7 +246,7 @@ impl TrackHeaders {
 
 /// Where a row dropped at `y` lands, and where to mark it: the row's rect
 /// for dropping into a group, else a line at the rect's top.
-fn drop_target(placed: &[(TrackReferenceCore, Rect)], y: f32) -> Option<(RowTarget, Rect)> {
+fn drop_target(placed: &[(TrackRow, Rect)], y: f32) -> Option<(RowTarget, Rect)> {
     for (i, (row, rect)) in placed.iter().enumerate() {
         if y > rect.bottom() + ROW_GAP {
             continue;
@@ -275,7 +270,7 @@ fn drop_target(placed: &[(TrackReferenceCore, Rect)], y: f32) -> Option<(RowTarg
 
 /// Extend each expanded group's coloured bar down to its last row, so its
 /// scope shows.
-fn paint_group_scopes(ui: &Ui, placed: &[(TrackReferenceCore, Rect)]) {
+fn paint_group_scopes(ui: &Ui, placed: &[(TrackRow, Rect)]) {
     let theme = ui.app_theme();
     for (i, (group, rect)) in placed.iter().enumerate() {
         if group.kind != TrackKind::Group || group.collapsed {

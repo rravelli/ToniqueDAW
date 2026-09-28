@@ -1,6 +1,6 @@
 use crate::{
     analysis::AudioInfo,
-    core::{effect::EffectKind, state::ToniqueProjectState},
+    core::{effect::EffectKind, state::ProjectState},
     ui::{
         theme::ThemeExt,
         view::filebrowser::FileBrowser,
@@ -40,12 +40,7 @@ impl LeftPanel {
         }
     }
 
-    pub fn show(
-        &mut self,
-        ui: &mut Ui,
-        state: &mut ToniqueProjectState,
-        workspace: &mut Workspace,
-    ) {
+    pub fn show(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
         let mut open = workspace.left_panel_open;
         egui::Panel::left("left-panel")
             .min_size(100.)
@@ -68,7 +63,7 @@ impl LeftPanel {
         workspace.left_panel_open = open;
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         ui.vertical(|ui| {
             ui.set_width(ui.available_width());
             Frame::new()

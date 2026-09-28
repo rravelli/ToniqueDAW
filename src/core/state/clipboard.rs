@@ -1,13 +1,13 @@
 //! Copy, cut and paste of clips, and nudging the selection.
 
-use super::{MASTER_TRACK_ID, ToniqueProjectState};
-use crate::core::clip::ClipCore;
+use super::{MASTER_TRACK_ID, ProjectState};
+use crate::core::clip::AudioClip;
 
 /// Copied clips, placed relative to the copied range: time from its start,
 /// tracks from the topmost copied one.
 #[derive(Debug, Clone, Default)]
 pub struct Clipboard {
-    clips: Vec<(usize, ClipCore)>,
+    clips: Vec<(usize, AudioClip)>,
     /// Length of the copied range, in beats.
     length: f32,
     /// Index of the topmost copied track, to paste back there when no
@@ -15,7 +15,7 @@ pub struct Clipboard {
     top_track: usize,
 }
 
-impl ToniqueProjectState {
+impl ProjectState {
     pub fn can_paste(&self) -> bool {
         !self.clipboard.clips.is_empty()
     }
@@ -28,7 +28,7 @@ impl ToniqueProjectState {
         };
         let bpm = self.bpm();
         let cropped = self.selection_bounds().is_some();
-        let clips: Vec<(usize, ClipCore)> = self
+        let clips: Vec<(usize, AudioClip)> = self
             .selected_clips()
             .iter()
             .filter_map(|id| self.find_clip(*id))

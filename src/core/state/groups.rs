@@ -15,8 +15,8 @@ use tonique_engine::edit::{
     commands::{AddBus, MoveTrack, RemoveBus, RemoveTrack, SetBusOutput, SetOutput},
 };
 
-use super::{MASTER_TRACK_ID, ToniqueProjectState};
-use crate::core::track::{MutableTrackCore, TrackKind, TrackReferenceCore, TrackSoloState};
+use super::{MASTER_TRACK_ID, ProjectState};
+use crate::core::track::{TrackKind, TrackRow, TrackSoloState, TrackView};
 
 /// Where a dragged row lands.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,7 +35,7 @@ enum Node {
     Group(BusId),
 }
 
-impl ToniqueProjectState {
+impl ProjectState {
     pub fn is_group(&self, id: TrackId) -> bool {
         id != MASTER_TRACK_ID && self.edit().bus(BusId(id.0)).is_ok()
     }
@@ -73,7 +73,7 @@ impl ToniqueProjectState {
     }
 
     /// The tracks inside group `id` however deep, in order, as rows.
-    pub fn group_tracks(&self, id: TrackId) -> Vec<TrackReferenceCore> {
+    pub fn group_tracks(&self, id: TrackId) -> Vec<TrackRow> {
         self.tracks_in(id)
             .into_iter()
             .filter_map(|t| self.track_index(t).and_then(|i| self.track_from_index(i)))
@@ -159,7 +159,7 @@ impl ToniqueProjectState {
 
     /// The rows of the track list in display order: tracks and groups,
     /// without what's inside collapsed groups.
-    pub fn rows(&self) -> Vec<TrackReferenceCore> {
+    pub fn rows(&self) -> Vec<TrackRow> {
         let mut rows = Vec::new();
         // Depth of the collapsed group hiding the rows below it.
         let mut hiding: Option<usize> = None;
@@ -185,7 +185,7 @@ impl ToniqueProjectState {
     }
 
     /// Every group, collapsed ones and their subgroups included.
-    pub fn groups(&self) -> Vec<TrackReferenceCore> {
+    pub fn groups(&self) -> Vec<TrackRow> {
         self.edit()
             .buses
             .iter()
@@ -194,18 +194,14 @@ impl ToniqueProjectState {
     }
 
     /// The row of group `id`.
-    pub(super) fn group_row(&self, id: TrackId) -> Option<TrackReferenceCore> {
+    pub(super) fn group_row(&self, id: TrackId) -> Option<TrackRow> {
         self.group_ref(BusId(id.0), self.ancestors(id).len())
     }
 
-    fn group_ref(&self, bus: BusId, depth: usize) -> Option<TrackReferenceCore> {
+    fn group_ref(&self, bus: BusId, depth: usize) -> Option<TrackRow> {
         let group = self.edit().bus(bus).ok()?;
         let id = TrackId(bus.0);
-        let view = self
-            .views
-            .get(&id)
-            .cloned()
-            .unwrap_or_else(MutableTrackCore::new);
+        let view = self.views.get(&id).cloned().unwrap_or_else(TrackView::new);
         let tracks = self.tracks_in(id);
         let bpm = self.bpm();
         // Everything inside, for the lane's overview.
@@ -215,7 +211,7 @@ impl ToniqueProjectState {
             .flat_map(|t| t.clips.iter())
             .filter_map(|c| self.clip_view(c, bpm))
             .collect();
-        Some(TrackReferenceCore {
+        Some(TrackRow {
             id,
             clips,
             muted: group.channel.muted,
@@ -373,7 +369,7 @@ impl ToniqueProjectState {
             .session
             .create(|e| Bus::new(e, format!("Group {number}")));
         let id = TrackId(bus.id.0);
-        let mut view = MutableTrackCore::new();
+        let mut view = TrackView::new();
         view.name.clone_from(&bus.name);
         view.color = self.next_track_color();
         self.views.insert(id, view);

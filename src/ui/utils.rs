@@ -2,15 +2,15 @@ use egui::Rect;
 
 use crate::{
     core::{
-        state::ToniqueProjectState,
-        track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackReferenceCore},
+        state::ProjectState,
+        track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackRow},
     },
     ui::track::ROW_GAP,
 };
 
 /// Top of the lane of track `track_index` (in the engine's order). A track
 /// inside a collapsed group is at its group's row.
-pub fn track_y(track_index: usize, viewport: Rect, state: &ToniqueProjectState) -> f32 {
+pub fn track_y(track_index: usize, viewport: Rect, state: &ProjectState) -> f32 {
     let mut y = viewport.top();
     let mut last = None;
     for row in state.rows() {
@@ -37,10 +37,10 @@ pub fn track_y(track_index: usize, viewport: Rect, state: &ToniqueProjectState) 
 /// group's first track and its own row (the group's, when collapsed): clips
 /// always land, and are previewed, on tracks.
 pub fn find_track_at(
-    state: &mut ToniqueProjectState,
+    state: &mut ProjectState,
     viewport: Rect,
     y_pos: f32,
-) -> (Option<TrackReferenceCore>, f32) {
+) -> (Option<TrackRow>, f32) {
     let mut y = viewport.top();
 
     if y_pos <= viewport.top()

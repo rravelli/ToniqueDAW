@@ -1,6 +1,6 @@
 use crate::{
     config::keymap::{Action, FIXED_SHORTCUTS, Keymap, reserved_by, shortcut_from_press},
-    core::state::ToniqueProjectState,
+    core::state::ProjectState,
     ui::{
         font::PHOSPHOR_REGULAR,
         theme::ThemeExt,
@@ -48,7 +48,7 @@ impl ShortcutsTab {
         self.message = None;
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn show(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let mut keymap = state.settings().keymap.clone();
         self.record(ui, &mut keymap);
 

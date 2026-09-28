@@ -4,7 +4,7 @@
 use egui::{Pos2, Rect, Ui, Vec2, vec2};
 
 use crate::{
-    core::{state::ToniqueProjectState, track::DEFAULT_TRACK_HEIGHT},
+    core::{state::ProjectState, track::DEFAULT_TRACK_HEIGHT},
     ui::utils::track_y,
 };
 
@@ -24,7 +24,7 @@ const REVEAL_MARGIN: f32 = 40.;
 /// Scroll while a drag holds the pointer near or past an edge of
 /// `viewport`. Keeps repainting while it scrolls, as the pointer may be
 /// still.
-pub fn autoscroll(ui: &Ui, state: &mut ToniqueProjectState, viewport: Rect, pointer: Pos2) {
+pub fn autoscroll(ui: &Ui, state: &mut ProjectState, viewport: Rect, pointer: Pos2) {
     let velocity = vec2(
         edge_speed(pointer.x, (viewport.left(), viewport.right()), EDGE_X),
         edge_speed(
@@ -50,7 +50,7 @@ pub fn autoscroll(ui: &Ui, state: &mut ToniqueProjectState, viewport: Rect, poin
 
 /// Scroll horizontally so `start..end` (beats) is in view. When it doesn't
 /// fit, show its start.
-pub fn reveal(ui: &Ui, state: &mut ToniqueProjectState, viewport: Rect, (start, end): (f32, f32)) {
+pub fn reveal(ui: &Ui, state: &mut ProjectState, viewport: Rect, (start, end): (f32, f32)) {
     let ppb = state.grid.pixels_per_beat();
     let (start, end) = (start * ppb, end * ppb);
     let offset = state.grid.offset.x;

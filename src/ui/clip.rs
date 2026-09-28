@@ -1,5 +1,5 @@
 use crate::{
-    core::{clip::ClipCore, state::ToniqueProjectState, track::TRACK_COLLAPSED_HEIGHT},
+    core::{clip::AudioClip, state::ProjectState, track::TRACK_COLLAPSED_HEIGHT},
     ui::grid::PaintGrid,
     ui::{
         theme::{ThemeExt, with_alpha},
@@ -42,8 +42,8 @@ impl ClipView {
         size: Vec2,
         viewport: Rect,
         selected: bool,
-        clip: &ClipCore,
-        state: &mut ToniqueProjectState,
+        clip: &AudioClip,
+        state: &mut ProjectState,
         show_waveform: bool,
         color: Color32,
     ) -> Response {
@@ -211,10 +211,10 @@ impl ClipView {
     fn trim_handle(
         &mut self,
         ui: &mut Ui,
-        state: &ToniqueProjectState,
+        state: &ProjectState,
         rect: Rect,
         viewport: Rect,
-        clip: &mut ClipCore,
+        clip: &mut AudioClip,
         edge: Edge,
     ) -> Response {
         let response = ui.allocate_rect(rect, Sense::drag());
@@ -247,7 +247,7 @@ impl ClipView {
         response
     }
 
-    fn context_menu(&self, ui: &mut Ui, clip: &ClipCore, state: &mut ToniqueProjectState) {
+    fn context_menu(&self, ui: &mut Ui, clip: &AudioClip, state: &mut ProjectState) {
         ui.vertical(|ui| {
             if ui
                 .add(ContextMenuButton::new(TRASH, "Delete").text_color(ui.app_theme().danger))

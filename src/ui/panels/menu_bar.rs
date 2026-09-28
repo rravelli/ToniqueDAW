@@ -1,7 +1,7 @@
 use crate::{
     config::{keymap::Action, settings::UI_SCALE_RANGE},
     core::project::project_name,
-    core::state::ToniqueProjectState,
+    core::state::ProjectState,
     ui::{
         project::ProjectAction,
         theme::ThemeExt,
@@ -32,7 +32,7 @@ impl AppMenuBar {
     pub fn show(
         &mut self,
         ui: &mut Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         workspace: &mut Workspace,
         recent: &[PathBuf],
     ) -> MenuActions {
@@ -66,7 +66,7 @@ impl AppMenuBar {
     fn file_menu(
         &self,
         ui: &mut Ui,
-        state: &ToniqueProjectState,
+        state: &ProjectState,
         recent: &[PathBuf],
     ) -> Option<ProjectAction> {
         let mut picked = None;
@@ -101,7 +101,7 @@ impl AppMenuBar {
         picked
     }
 
-    fn edit_menu(&self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn edit_menu(&self, ui: &mut Ui, state: &mut ProjectState) {
         ui.menu_button("Edit", |ui| {
             let keymap = &state.settings().keymap;
             let undo =
@@ -127,7 +127,7 @@ impl AppMenuBar {
         });
     }
 
-    fn view_menu(&self, ui: &mut Ui, state: &mut ToniqueProjectState, workspace: &mut Workspace) {
+    fn view_menu(&self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
         ui.menu_button("View", |ui| {
             let keymap = state.settings().keymap.clone();
             let label = |text, action| keymap.with_shortcut(ui.ctx(), text, action);
@@ -164,7 +164,7 @@ impl AppMenuBar {
 }
 
 /// Apply and save a new interface scale.
-pub fn set_ui_scale(ctx: &Context, state: &mut ToniqueProjectState, scale: f32) {
+pub fn set_ui_scale(ctx: &Context, state: &mut ProjectState, scale: f32) {
     let scale = scale.clamp(*UI_SCALE_RANGE.start(), *UI_SCALE_RANGE.end());
     ctx.set_zoom_factor(scale);
     let mut settings = state.settings().clone();
