@@ -14,6 +14,7 @@ use crate::{
     config::settings::Settings,
     core::{
         clip::ClipCore,
+        effect::{Effect, EffectKind},
         graph_monitor::GraphMonitor,
         grid::GridService,
         metrics::{AudioMetrics, GlobalMetrics},
@@ -27,11 +28,7 @@ use crate::{
             MutableTrackCore, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackReferenceCore, TrackSoloState,
         },
     },
-    ui::{
-        effect::EffectSlot,
-        effects::{EffectId, create_effect_from_id},
-        theme::Theme,
-    },
+    ui::theme::Theme,
 };
 use egui::Color32;
 use std::{collections::HashMap, mem::take, path::PathBuf};
@@ -114,10 +111,6 @@ pub struct ToniqueProjectState {
     selected_tracks: Vec<TrackId>,
     clip_selection: ClipSelection,
     clipboard: Clipboard,
-    /// Effect editors per track, in plugin order.
-    effects: HashMap<TrackId, Vec<EffectSlot>>,
-    /// Editors of plugins not currently in a chain (removed, or not synced yet).
-    detached_effects: HashMap<PluginId, EffectSlot>,
 
     pending_actions: Vec<ProjectStatePendingAction>,
     batching: bool,
@@ -164,8 +157,6 @@ impl ToniqueProjectState {
             selected_tracks: Vec::new(),
             clip_selection: ClipSelection::default(),
             clipboard: Clipboard::default(),
-            effects: HashMap::new(),
-            detached_effects: HashMap::new(),
             pending_actions: Vec::new(),
             batching: false,
             resized_clip: None,
@@ -205,7 +196,6 @@ impl ToniqueProjectState {
             // Played to the end
             self.preview_playback_state = PlaybackState::Paused;
         }
-        self.sync_effects();
         self.update_metrics();
         let show_graph = self.central_view == CentralView::Graph;
         self.graph.update(self.session.engine_mut(), show_graph);
@@ -535,16 +525,7 @@ impl ToniqueProjectState {
         if let Some(view) = self.views.get(id).cloned() {
             self.views.insert(copy_id, view);
         }
-        // Effect editors follow the plugins, which keep their order.
-        for (from, to) in original.channel.plugins.iter().zip(&copy.channel.plugins) {
-            if let Some(editor) = self.effect(*id, from.id) {
-                let mut editor = editor.clone();
-                editor.bind(copy_id, to);
-                self.detached_effects.insert(to.id, editor);
-            }
-        }
         self.perform(AddTrack::at(copy, index + 1));
-        self.sync_effects();
         self.select_track(&copy_id);
     }
     /// Delete a track
@@ -780,86 +761,64 @@ impl ToniqueProjectState {
     }
 
     // Effects
-    /// Add a effect to the track
-    pub fn add_effect(&mut self, id: &TrackId, effect_id: EffectId, index: usize) {
-        let content = create_effect_from_id(effect_id);
-        let plugin = self
-            .session
-            .create(|e| Plugin::new(e, content.plugin_kind()));
-        let editor = EffectSlot::new(content, *id, &plugin);
-        self.detached_effects.insert(plugin.id, editor);
-        self.perform(AddPlugin::at(self.channel_ref(*id), plugin, index));
-        self.sync_effects();
+    /// Add an effect to a channel, at `index` among its effects.
+    pub fn add_effect(&mut self, id: &TrackId, kind: EffectKind, index: usize) {
+        let plugin = self.session.create(|e| Plugin::new(e, kind.plugin_kind()));
+        for (name, value) in kind.initial_params() {
+            if let Some(param) = plugin.param(name) {
+                param.set(*value);
+            }
+        }
+        // Past the plugins that aren't effects.
+        let position = self
+            .effects(id)
+            .get(index)
+            .and_then(|e| self.plugin_position(id, e.plugin.id))
+            .unwrap_or(usize::MAX);
+        self.perform(AddPlugin::at(self.channel_ref(*id), plugin, position));
     }
+    /// Remove the effects at `indexes` (see [`Self::effects`]), as one undo
+    /// step.
     pub fn remove_effects(&mut self, id: &TrackId, indexes: &[usize]) {
-        let plugins: Vec<_> = self
-            .effects
-            .get(id)
-            .map(|e| {
-                indexes
-                    .iter()
-                    .filter_map(|i| e.get(*i).map(|e| e.plugin_id()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let effects = self.effects(id);
+        let plugins: Vec<_> = indexes
+            .iter()
+            .filter_map(|i| effects.get(*i).map(|e| e.plugin.id))
+            .collect();
         self.transaction("Remove effects", |s| {
             for plugin in plugins {
                 s.perform(RemovePlugin::new(s.channel_ref(*id), plugin));
             }
         });
-        self.sync_effects();
     }
-    pub fn effects_mut(&mut self, id: &TrackId) -> Option<&mut [EffectSlot]> {
-        self.effects.get_mut(id).map(|e| e.as_mut_slice())
-    }
-    fn effect(&self, track: TrackId, plugin: PluginId) -> Option<&EffectSlot> {
-        self.effects
-            .get(&track)
-            .and_then(|e| e.iter().find(|e| e.plugin_id() == plugin))
-            .or_else(|| self.detached_effects.get(&plugin))
-    }
-
-    /// Push power-button clicks to the engine, then match effect editors to
-    /// the engine's plugin chains (which undo/redo may have changed).
-    fn sync_effects(&mut self) {
-        let mut toggled = Vec::new();
-        for (track, editors) in self.effects.drain() {
-            for mut editor in editors {
-                if editor.take_toggled() {
-                    toggled.push((track, editor.plugin_id(), !editor.enabled));
-                }
-                self.detached_effects.insert(editor.plugin_id(), editor);
-            }
-        }
-        for (track, plugin, bypassed) in toggled {
-            let cmd = SetBypass::new(self.channel_ref(track), plugin, bypassed);
-            self.perform(cmd);
-        }
-        let chains: Vec<(TrackId, Vec<(PluginId, bool)>)> = self
-            .edit()
-            .tracks
-            .iter()
-            .map(|t| (t.id, &t.channel))
-            .chain(
-                self.edit()
-                    .buses
+    /// The effects on a channel, in processing order.
+    pub fn effects(&self, id: &TrackId) -> Vec<Effect> {
+        self.edit()
+            .channel(self.channel_ref(*id))
+            .map(|c| {
+                c.plugins
                     .iter()
-                    .map(|b| (TrackId(b.id.0), &b.channel)),
-            )
-            .chain([(MASTER_TRACK_ID, &self.edit().master)])
-            .map(|(id, c)| (id, c.plugins.iter().map(|p| (p.id, p.bypassed)).collect()))
-            .collect();
-        for (track, plugins) in chains {
-            let editors = plugins
-                .into_iter()
-                .filter_map(|(id, bypassed)| {
-                    let mut editor = self.detached_effects.remove(&id)?;
-                    editor.enabled = !bypassed;
-                    Some(editor)
-                })
-                .collect();
-            self.effects.insert(track, editors);
-        }
+                    .filter_map(|plugin| {
+                        Some(Effect {
+                            kind: EffectKind::of(&plugin.kind)?,
+                            plugin: plugin.clone(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    /// Power button: bypass the effect or not, as an undo step.
+    pub fn set_effect_enabled(&mut self, id: &TrackId, plugin: PluginId, enabled: bool) {
+        self.perform(SetBypass::new(self.channel_ref(*id), plugin, !enabled));
+    }
+    fn plugin_position(&self, id: &TrackId, plugin: PluginId) -> Option<usize> {
+        self.edit()
+            .channel(self.channel_ref(*id))
+            .ok()?
+            .plugins
+            .iter()
+            .position(|p| p.id == plugin)
     }
 
     // Mixer
@@ -1114,7 +1073,6 @@ impl ToniqueProjectState {
         self.selected_tracks
             .retain(|id| *id == MASTER_TRACK_ID || self.session.edit().track(*id).is_ok());
         self.prune_clip_selection();
-        self.sync_effects();
     }
     /// Whether there is still actions to undo
     pub fn can_undo(&self) -> bool {
@@ -1168,7 +1126,6 @@ impl ToniqueProjectState {
                         }
                     }
                     self.remove_track(id);
-                    self.sync_effects();
                 }
             }
         }

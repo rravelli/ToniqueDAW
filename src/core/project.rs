@@ -10,7 +10,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::ui::effects::EffectId;
+use crate::core::effect::EffectKind;
 
 /// Extension of project files.
 pub const EXTENSION: &str = "tonique";
@@ -92,7 +92,7 @@ pub struct ClipFile {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EffectFile {
-    pub kind: EffectId,
+    pub kind: EffectKind,
     pub enabled: bool,
     /// Parameter values by name.
     pub params: BTreeMap<String, f32>,
@@ -227,7 +227,7 @@ mod tests {
                     pan: -0.25,
                     muted: true,
                     effects: vec![EffectFile {
-                        kind: EffectId::Equalizer,
+                        kind: EffectKind::Filter,
                         enabled: false,
                         params: BTreeMap::from([("cutoff".into(), 800.)]),
                     }],

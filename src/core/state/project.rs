@@ -19,6 +19,7 @@ use crate::{
     cache::AUDIO_ANALYSIS_CACHE,
     core::{
         clip::ClipCore,
+        effect::EffectKind,
         project::{
             ChannelFile, ClipFile, EffectFile, GroupFile, ProjectFile, TrackFile, VERSION,
             resolve_path, store_path,
@@ -45,8 +46,6 @@ impl ToniqueProjectState {
         self.edit_cursor = 0.;
         self.selected_tracks.clear();
         self.clip_selection = Default::default();
-        self.effects.clear();
-        self.detached_effects.clear();
         self.pending_actions.clear();
         self.batching = false;
         self.resized_clip = None;
@@ -94,7 +93,7 @@ impl ToniqueProjectState {
                     collapsed: view.collapsed,
                     soloed: group.soloed,
                     parent: index_of(group.output),
-                    channel: self.channel_file(id, &group.channel),
+                    channel: self.channel_file(&group.channel),
                 }
             })
             .collect();
@@ -114,7 +113,7 @@ impl ToniqueProjectState {
                     collapsed: view.collapsed,
                     soloed: track.soloed,
                     group: index_of(track.output),
-                    channel: self.channel_file(track.id, &track.channel),
+                    channel: self.channel_file(&track.channel),
                     clips: track
                         .clips
                         .iter()
@@ -134,13 +133,13 @@ impl ToniqueProjectState {
             bpm,
             loop_range: self.loop_range,
             looping: self.looping,
-            master: self.channel_file(MASTER_TRACK_ID, &edit.master),
+            master: self.channel_file(&edit.master),
             groups,
             tracks,
         }
     }
 
-    fn channel_file(&self, track: TrackId, channel: &Channel) -> ChannelFile {
+    fn channel_file(&self, channel: &Channel) -> ChannelFile {
         ChannelFile {
             volume: channel.volume.get(),
             pan: channel.pan.get(),
@@ -150,7 +149,7 @@ impl ToniqueProjectState {
                 .iter()
                 .filter_map(|plugin| {
                     Some(EffectFile {
-                        kind: self.effect(track, plugin.id)?.effect_id(),
+                        kind: EffectKind::of(&plugin.kind)?,
                         enabled: !plugin.bypassed,
                         params: plugin
                             .params
@@ -227,7 +226,6 @@ impl ToniqueProjectState {
         // Whatever the file said, keep groups together and never empty.
         self.normalize();
         self.remove_empty_groups();
-        self.sync_effects();
         self.session.clear_history();
         problems
     }
@@ -268,13 +266,7 @@ impl ToniqueProjectState {
         }
         for (index, effect) in channel.effects.iter().enumerate() {
             self.add_effect(&id, effect.kind, index);
-            let Some(plugin) = self
-                .edit()
-                .channel(self.channel_ref(id))
-                .ok()
-                .and_then(|c| c.plugins.get(index))
-                .cloned()
-            else {
+            let Some(plugin) = self.effects(&id).get(index).map(|e| e.plugin.clone()) else {
                 continue;
             };
             for (name, value) in &effect.params {
@@ -285,10 +277,6 @@ impl ToniqueProjectState {
             }
             if !effect.enabled {
                 self.perform(SetBypass::new(self.channel_ref(id), plugin.id, true));
-            }
-            self.sync_effects();
-            if let Some(editor) = self.effects.get_mut(&id).and_then(|e| e.get_mut(index)) {
-                editor.read_params();
             }
         }
     }

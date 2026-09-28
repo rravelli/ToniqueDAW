@@ -1,7 +1,6 @@
 use crate::{
     analysis::{AudioData, AudioInfo},
-    core::{clip::ClipCore, state::ToniqueProjectState},
-    ui::effects::EffectId,
+    core::{clip::ClipCore, effect::EffectKind, state::ToniqueProjectState},
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tonique_engine::{
@@ -218,29 +217,35 @@ fn renames_are_undoable() {
 }
 
 #[test]
-fn effect_editors_follow_the_plugin_chain() {
+fn effects_follow_the_plugin_chain() {
     let mut state = setup_state();
     let track = state.add_track();
-    state.add_effect(&track, EffectId::Equalizer, 0);
-    state.add_effect(&track, EffectId::Equalizer, 1);
-    assert_eq!(state.effects_mut(&track).unwrap().len(), 2);
+    state.add_effect(&track, EffectKind::Filter, 0);
+    state.add_effect(&track, EffectKind::Filter, 1);
+    assert_eq!(state.effects(&track).len(), 2);
+    // New effects start at their kind's values, not the engine's defaults.
+    let cutoff = state.effects(&track)[0]
+        .plugin
+        .param("cutoff")
+        .unwrap()
+        .get();
+    assert_eq!(cutoff, 1300.);
 
     state.remove_effects(&track, &[0]);
-    assert_eq!(state.effects_mut(&track).unwrap().len(), 1);
+    assert_eq!(state.effects(&track).len(), 1);
     state.undo();
-    assert_eq!(state.effects_mut(&track).unwrap().len(), 2);
+    assert_eq!(state.effects(&track).len(), 2);
 
     // Power button: bypass in the engine, undoable.
-    state.effects_mut(&track).unwrap()[0].toggle();
-    state.update();
-    assert!(!state.effects_mut(&track).unwrap()[0].enabled);
+    let plugin = state.effects(&track)[0].plugin.id;
+    state.set_effect_enabled(&track, plugin, false);
+    assert!(!state.effects(&track)[0].enabled());
     state.undo();
-    state.update();
-    assert!(state.effects_mut(&track).unwrap()[0].enabled);
+    assert!(state.effects(&track)[0].enabled());
 
     state.duplicate_track(&track);
     let copy = state.tracks().nth(1).unwrap().id;
-    assert_eq!(state.effects_mut(&copy).unwrap().len(), 2);
+    assert_eq!(state.effects(&copy).len(), 2);
 }
 
 #[test]
@@ -724,11 +729,10 @@ mod projects {
         view.height = 90.;
         view.collapsed = true;
         state.commit_track_mut(&track);
-        state.add_effect(&track, EffectId::Equalizer, 0);
+        state.add_effect(&track, EffectKind::Filter, 0);
         let plugin = state.edit().track(track).unwrap().channel.plugins[0].clone();
         plugin.param("cutoff").unwrap().set(800.);
-        state.effects_mut(&track).unwrap()[0].toggle();
-        state.sync_effects();
+        state.set_effect_enabled(&track, plugin.id, false);
 
         let saved = state.project(Some(&dir));
         let track_file = &saved.tracks[0];
@@ -1054,8 +1058,9 @@ mod groups {
     }
 
     #[test]
-    fn projects_with_old_collapse_keys_still_open() {
-        // Before `collapsed`: `folded` on groups, `closed` on tracks.
+    fn projects_with_old_keys_still_open() {
+        // Before `collapsed`: `folded` on groups, `closed` on tracks. Before
+        // `filter`: `equalizer`.
         let old = r##"{
             "version": 1, "bpm": 120.0, "loop_range": [0.0, 16.0], "looping": false,
             "master": {"volume": 1.0, "pan": 0.0, "muted": false},
@@ -1064,11 +1069,13 @@ mod groups {
                         "muted": false}],
             "tracks": [{"name": "a", "color": "#ffffff", "height": 60.0, "closed": true,
                         "soloed": false, "group": 0, "volume": 1.0, "pan": 0.0,
-                        "muted": false, "clips": []}]
+                        "muted": false, "clips": [],
+                        "effects": [{"kind": "equalizer", "enabled": true, "params": {}}]}]
         }"##;
         let file: crate::core::project::ProjectFile = serde_json::from_str(old).unwrap();
         assert!(file.groups[0].collapsed);
         assert!(file.tracks[0].collapsed);
+        assert_eq!(file.tracks[0].channel.effects[0].kind, EffectKind::Filter);
     }
 
     #[test]

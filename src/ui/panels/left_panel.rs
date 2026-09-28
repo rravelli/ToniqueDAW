@@ -1,8 +1,7 @@
 use crate::{
     analysis::AudioInfo,
-    core::state::ToniqueProjectState,
+    core::{effect::EffectKind, state::ToniqueProjectState},
     ui::{
-        effects::EffectId,
         theme::ThemeExt,
         view::filebrowser::FileBrowser,
         widget::{item_button::ItemButton, search_bar::SearchBar, tab_bar::TabBar},
@@ -22,7 +21,7 @@ pub enum LeftPanelTabs {
 #[derive(Clone)]
 pub enum DragPayload {
     File(AudioInfo),
-    Effect(EffectId),
+    Effect(EffectKind),
 }
 
 pub struct LeftPanel {
@@ -93,9 +92,9 @@ impl LeftPanel {
                     let res = ui.add(ItemButton::new(format!(
                         "{} {}",
                         egui_phosphor::fill::STAR_FOUR,
-                        "Filter"
+                        EffectKind::Filter.name()
                     )));
-                    res.dnd_set_drag_payload(DragPayload::Effect(EffectId::Equalizer));
+                    res.dnd_set_drag_payload(DragPayload::Effect(EffectKind::Filter));
                 }
             }
         });

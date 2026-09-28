@@ -406,7 +406,6 @@ impl ToniqueProjectState {
             s.normalize();
         });
         self.selected_tracks.retain(|t| *t != id);
-        self.sync_effects();
     }
 
     /// Delete group `id` with everything inside, as one undo step.
@@ -430,7 +429,6 @@ impl ToniqueProjectState {
         });
         self.selected_tracks
             .retain(|t| !tracks.contains(t) && !groups.contains(t));
-        self.sync_effects();
     }
 
     /// Delete a track (its group goes too if left empty) as one undo step.

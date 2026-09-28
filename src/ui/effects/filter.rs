@@ -2,42 +2,35 @@ use crate::{
     core::metrics::AudioMetrics,
     ui::{
         buttons::paint_circle_button,
-        effect::EffectEditor,
-        effects::EffectId,
+        effects::EffectEditor,
         theme::{Theme, ThemeExt},
     },
 };
 use egui::{Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use std::f32::consts::PI;
-use tonique_engine::{
-    edit::{Parameter, Plugin, PluginKind},
-    nodes::FilterMode,
-};
+use tonique_engine::edit::{Plugin, PluginId};
 
 const BOTTOM_HEIGHT: f32 = 50.;
 
-#[derive(Clone)]
-pub struct EqualizerEffect {
+/// Editor of [`EffectKind::Filter`](crate::core::effect::EffectKind::Filter):
+/// its response curve over the live spectrum, and cutoff and Q knobs.
+pub struct FilterEditor {
+    /// Salt for the knobs' ids.
     id: String,
+    /// The plugin's values, read every frame.
     q: f32,
     cutoff: f32,
-
-    cutoff_param: Option<Parameter>,
-    q_param: Option<Parameter>,
 
     min_freq: f32,
     max_freq: f32,
 }
 
-impl EqualizerEffect {
-    pub fn new() -> Self {
+impl FilterEditor {
+    pub fn new(plugin: PluginId) -> Self {
         Self {
-            id: uuid::Uuid::new_v4().into(),
+            id: format!("filter-{}", plugin.0),
             cutoff: 1300.,
             q: 0.5,
-            cutoff_param: None,
-            q_param: None,
-
             min_freq: 50.,
             max_freq: 20_000.,
         }
@@ -107,8 +100,15 @@ impl EqualizerEffect {
     }
 }
 
-impl EffectEditor for EqualizerEffect {
-    fn ui(&mut self, ui: &mut Ui, metrics: &mut AudioMetrics, enabled: bool) {
+impl EffectEditor for FilterEditor {
+    fn ui(&mut self, ui: &mut Ui, plugin: &Plugin, metrics: &mut AudioMetrics, enabled: bool) {
+        let (cutoff, q) = (plugin.param("cutoff"), plugin.param("q"));
+        if let Some(p) = cutoff {
+            self.cutoff = p.get();
+        }
+        if let Some(p) = q {
+            self.q = p.get();
+        }
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::all());
         let full_rect = response.rect;
 
@@ -213,7 +213,7 @@ impl EffectEditor for EqualizerEffect {
         );
 
         if q_res.dragged() || freq_res.dragged() {
-            for (param, value) in [(&self.q_param, self.q), (&self.cutoff_param, self.cutoff)] {
+            for (param, value) in [(q, self.q), (cutoff, self.cutoff)] {
                 if let Some(p) = param {
                     p.set(value);
                 }
@@ -225,37 +225,5 @@ impl EffectEditor for EqualizerEffect {
 
     fn width(&self) -> f32 {
         300.
-    }
-
-    fn plugin_kind(&self) -> PluginKind {
-        PluginKind::Filter(FilterMode::LowPass)
-    }
-
-    fn bind(&mut self, plugin: &Plugin) {
-        self.cutoff_param = plugin.param("cutoff").cloned();
-        self.q_param = plugin.param("q").cloned();
-        // New plugins start at the engine's defaults: apply the editor's values.
-        for (param, value) in [(&self.q_param, self.q), (&self.cutoff_param, self.cutoff)] {
-            if let Some(p) = param {
-                p.set(value);
-            }
-        }
-    }
-
-    fn id(&self) -> String {
-        self.id.clone()
-    }
-
-    fn effect_id(&self) -> EffectId {
-        EffectId::Equalizer
-    }
-
-    fn read_params(&mut self) {
-        if let Some(p) = &self.cutoff_param {
-            self.cutoff = p.get();
-        }
-        if let Some(p) = &self.q_param {
-            self.q = p.get();
-        }
     }
 }
