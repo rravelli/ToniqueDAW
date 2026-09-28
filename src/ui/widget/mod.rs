@@ -6,6 +6,7 @@ pub mod input;
 pub mod knob;
 pub mod list_row;
 pub mod meter;
+pub mod scroll_bar;
 pub mod search_bar;
 pub mod section;
 pub mod select;

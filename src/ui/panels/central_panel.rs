@@ -7,12 +7,12 @@ use crate::{
         commands::Commands,
         graph::GraphView,
         theme::{ThemeExt, with_alpha},
+        widget::scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
         workspace::{MainView, Workspace},
     },
 };
 use egui::{Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
-pub const SCROLLBAR_WIDTH: f32 = 5.;
 /// Empty bars after the end of the arrangement.
 const TIMELINE_SLACK_BARS: f32 = 16.;
 
@@ -162,8 +162,8 @@ impl CentralPanel {
         state.grid.offset.x = (x - viewport.width() / 2.).max(0.);
     }
 
-    /// Draw horizontal and vertical scrollbars. Returns whether the
-    /// horizontal one was dragged.
+    /// The timeline's scrollbars, when the content overflows. Returns
+    /// whether the horizontal one was dragged.
     fn scrollbars_ui(
         &self,
         ui: &mut Ui,
@@ -172,68 +172,35 @@ impl CentralPanel {
         offset: &mut Vec2,
     ) -> bool {
         let mut scrolled_x = false;
-        let theme = ui.app_theme();
-        let painter = ui.painter();
-        let handle_color = theme.text_disabled;
-
-        // === HORIZONTAL SCROLLBAR ===
         if content_size.x > viewport.max.x {
-            let track_rect = Rect::from_min_max(
+            let track = Rect::from_min_max(
                 pos2(viewport.left(), viewport.bottom() - SCROLLBAR_WIDTH),
                 pos2(viewport.right() - self.tracks.width, viewport.bottom()),
             );
-            let max_scroll = content_size.x - viewport.right();
-            // Thumb size and position
-            let visible_ratio_x = viewport.width() / content_size.x;
-            let thumb_width = (visible_ratio_x * track_rect.width()).max(16.0);
-            let thumb_x =
-                track_rect.left() + (offset.x / max_scroll) * (track_rect.width() - thumb_width);
-
-            let thumb_rect = Rect::from_min_max(
-                pos2(thumb_x, track_rect.top()),
-                pos2(thumb_x + thumb_width, track_rect.bottom()),
-            );
-
-            let resp = ui.interact(thumb_rect, ui.id().with("hscroll"), Sense::click_and_drag());
-            painter.rect_filled(track_rect, 2.0, theme.bg_deep);
-            painter.rect_filled(thumb_rect, 4.0, handle_color);
-
-            if resp.dragged() {
-                scrolled_x = true;
-                let drag_x = resp.drag_delta().x;
-                let ratio = max_scroll / (track_rect.width() - thumb_width);
-                offset.x = (offset.x + drag_x * ratio).clamp(0., max_scroll);
-            }
+            scrolled_x = ui
+                .add(ScrollBar::new(
+                    "hscroll",
+                    Axis::Horizontal,
+                    track,
+                    &mut offset.x,
+                    content_size.x - viewport.right(),
+                    viewport.width() / content_size.x,
+                ))
+                .dragged();
         }
-
-        // === VERTICAL SCROLLBAR ===
         if content_size.y > viewport.max.y {
-            let track_rect = Rect::from_min_max(
+            let track = Rect::from_min_max(
                 pos2(viewport.right() - SCROLLBAR_WIDTH, viewport.top()),
                 pos2(viewport.right(), viewport.bottom()),
             );
-            let max_scroll = content_size.y - viewport.bottom();
-            let visible_ratio_y = viewport.height() / (content_size.y - viewport.top());
-            let thumb_height = (visible_ratio_y * track_rect.height()).max(16.0);
-            let thumb_y = track_rect.top()
-                + (offset.y / (content_size.y - viewport.bottom()))
-                    * (track_rect.height() - thumb_height);
-
-            let thumb_rect = Rect::from_min_max(
-                pos2(track_rect.left(), thumb_y),
-                pos2(track_rect.right(), thumb_y + thumb_height),
-            );
-
-            let resp = ui.interact(thumb_rect, ui.id().with("vscroll"), Sense::click_and_drag());
-            painter.rect_filled(track_rect, 2.0, theme.bg_deep);
-            painter.rect_filled(thumb_rect, 4.0, handle_color);
-
-            if resp.dragged() {
-                let drag_y = resp.drag_delta().y;
-
-                let ratio = max_scroll / (track_rect.height() - thumb_height);
-                offset.y = (offset.y + drag_y * ratio).clamp(0., max_scroll);
-            }
+            ui.add(ScrollBar::new(
+                "vscroll",
+                Axis::Vertical,
+                track,
+                &mut offset.y,
+                content_size.y - viewport.bottom(),
+                viewport.height() / (content_size.y - viewport.top()),
+            ));
         }
         scrolled_x
     }

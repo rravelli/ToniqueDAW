@@ -16,8 +16,9 @@ use crate::{
         },
         dnd::DragPayload,
         font::PHOSPHOR_REGULAR,
-        panels::central_panel::SCROLLBAR_WIDTH,
-        widget::{context_menu::ContextMenuButton, flat_button::FlatButton},
+        widget::{
+            context_menu::ContextMenuButton, flat_button::FlatButton, scroll_bar::SCROLLBAR_WIDTH,
+        },
         workspace::Workspace,
     },
 };
