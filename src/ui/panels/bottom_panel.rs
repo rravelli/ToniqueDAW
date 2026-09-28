@@ -1,19 +1,19 @@
 use crate::{
     core::{metrics::AudioMetrics, state::ToniqueProjectState, track::TrackReferenceCore},
     ui::{panels::left_panel::DragPayload, theme::ThemeExt},
-    utils::parse_name,
+    utils::display_name,
 };
 use egui::{Frame, Key, Layout, Margin, Rangef, RichText, ScrollArea, Separator, Stroke, Ui};
 
 pub const BOTTOM_BAR_HEIGHT: f32 = 20.;
 
-pub struct UIBottomPanel {
+pub struct BottomPanel {
     selected: Vec<usize>,
     offset: f32,
     insert_index: Option<usize>,
 }
 
-impl UIBottomPanel {
+impl BottomPanel {
     pub fn new() -> Self {
         Self {
             selected: vec![],
@@ -143,7 +143,7 @@ impl UIBottomPanel {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(parse_name(&track.name, track.index))
+                        RichText::new(display_name(&track.name, track.index))
                             .size(10.)
                             .color(theme.text_on(track.color)),
                     );

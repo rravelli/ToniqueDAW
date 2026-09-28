@@ -3,7 +3,7 @@ use egui::{FontDefinitions, FontFamily};
 pub const PHOSPHOR_REGULAR: &str = "phosphor_regular";
 pub const PHOSPHOR_FILL: &str = "phosphor_fill";
 
-pub fn get_fonts() -> FontDefinitions {
+pub fn fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
 
     fonts.font_data.insert(

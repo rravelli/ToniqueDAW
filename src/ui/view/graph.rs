@@ -1,7 +1,7 @@
 use crate::{
     core::{graph_monitor::GraphMonitor, state::ToniqueProjectState},
     ui::theme::{Theme, ThemeExt},
-    utils::parse_name,
+    utils::display_name,
 };
 use egui::{
     Align2, Color32, CornerRadius, FontId, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind,
@@ -27,7 +27,7 @@ const METER_RANGE_DB: f32 = 60.;
 
 /// Live view of the engine's processing graph: every scheduled node, its
 /// connections, output level and processing time.
-pub struct UIGraphView {
+pub struct GraphView {
     /// Node positions (graph units) for the topology they were computed for.
     layout: Option<(Arc<GraphTopology>, Vec<Pos2>)>,
     pan: Vec2,
@@ -36,7 +36,7 @@ pub struct UIGraphView {
     auto_fit: bool,
 }
 
-impl UIGraphView {
+impl GraphView {
     pub fn new() -> Self {
         Self {
             layout: None,
@@ -462,7 +462,7 @@ fn track_names(state: &ToniqueProjectState) -> HashMap<u64, (String, String, Col
         .map(|t| {
             (
                 t.id.0,
-                (t.name.clone(), parse_name(&t.name, t.index), t.color),
+                (t.name.clone(), display_name(&t.name, t.index), t.color),
             )
         })
         .collect()
@@ -585,7 +585,7 @@ mod tests {
         let topology = state.graph.topology().cloned().expect("graph published");
         assert!(topology.meters().is_enabled());
 
-        let mut view = UIGraphView::new();
+        let mut view = GraphView::new();
         let ctx = egui::Context::default();
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.));
         let input = || egui::RawInput {

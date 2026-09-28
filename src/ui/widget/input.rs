@@ -52,7 +52,7 @@ impl NumberInput {
         self
     }
 
-    fn parse_to_int(&mut self) {
+    fn commit_buffer(&mut self) {
         let result = self.buffer.parse::<f32>();
         match result {
             Ok(number) => self.value = number.clamp(self.range.min, self.range.max),
@@ -60,7 +60,7 @@ impl NumberInput {
         }
     }
 
-    fn parse_to_string(&mut self, value: f32) -> String {
+    fn format_value(&self, value: f32) -> String {
         format!("{:.*}", self.decimals, value)
     }
 
@@ -71,7 +71,7 @@ impl NumberInput {
         // Paint widget
         painter.rect_filled(rect, 1.0, theme.bg_control);
 
-        let mut text = self.parse_to_string(self.value) + &self.suffix;
+        let mut text = self.format_value(self.value) + &self.suffix;
         // Text
         let text_edit_rect = Rect::from_min_max(
             rect.min,
@@ -98,7 +98,7 @@ impl NumberInput {
 
         if text_edit.lost_focus() {
             self.edit_mode = false;
-            self.parse_to_int();
+            self.commit_buffer();
         }
 
         let offset = BUTTONS_GAP / 2.;
@@ -136,7 +136,7 @@ impl NumberInput {
 
         if res.double_clicked() {
             self.edit_mode = true;
-            self.buffer = self.parse_to_string(self.value);
+            self.buffer = self.format_value(self.value);
             text_edit.request_focus();
         }
         if res.clicked() {

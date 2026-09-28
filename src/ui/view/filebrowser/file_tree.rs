@@ -25,7 +25,7 @@ impl FolderNode {
         self
     }
 
-    pub fn get_children(&mut self, filter: bool) -> Vec<FileNode> {
+    pub fn children(&mut self, filter: bool) -> Vec<FileNode> {
         if filter {
             return self.search_result.clone();
         }
@@ -68,7 +68,7 @@ impl FileTree {
         self.folders
             .insert(dir.clone(), FolderNode::new(&dir, 0).opened());
 
-        let children = self.get_children(&FileNode {
+        let children = self.children(&FileNode {
             path: dir,
             depth: 0,
             name_lower: String::new(),
@@ -79,7 +79,7 @@ impl FileTree {
     }
 
     pub fn rebuild(&mut self, root: PathBuf) {
-        let children = self.get_children(&FileNode {
+        let children = self.children(&FileNode {
             path: root,
             depth: 0,
             name_lower: String::new(),
@@ -88,7 +88,7 @@ impl FileTree {
         self.items = children;
     }
 
-    fn get_children(&mut self, dir: &FileNode) -> Vec<FileNode> {
+    fn children(&mut self, dir: &FileNode) -> Vec<FileNode> {
         let mut stack = Vec::<FileNode>::new();
         let mut children = Vec::new();
 
@@ -109,7 +109,7 @@ impl FileTree {
             if let Some(dir) = self.folders.get_mut(&file.path)
                 && dir.open
             {
-                let dir_children = dir.get_children(!self.query.is_empty());
+                let dir_children = dir.children(!self.query.is_empty());
                 stack.extend(dir_children);
             }
         }
@@ -143,7 +143,7 @@ impl FileTree {
             if let Some(folder) = self.folders.get_mut(&file.path) {
                 folder.open = true;
             }
-            let children = self.get_children(&file);
+            let children = self.children(&file);
             self.items.splice(index + 1..index + 1, children);
         }
     }
@@ -210,10 +210,10 @@ fn filter(
     include_all: bool,
 ) -> bool {
     let children = if let Some(folder) = folders.get_mut(&root) {
-        folder.get_children(false)
+        folder.children(false)
     } else {
         let mut node = FolderNode::new(&root, depth);
-        let c = node.get_children(false);
+        let c = node.children(false);
         folders.insert(root.clone(), node);
         c
     };

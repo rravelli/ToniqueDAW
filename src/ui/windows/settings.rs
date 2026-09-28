@@ -9,7 +9,7 @@ use crate::{
             input::NumberInput, section::SectionHeader, select::Select, slider::ValueSlider,
             square_button::SquareButton, tab_bar::TabBar,
         },
-        windows::{appearance::UIAppearanceTab, shortcuts::UIShortcutsTab},
+        windows::{appearance::AppearanceTab, shortcuts::ShortcutsTab},
     },
 };
 use egui::{FontFamily, FontId, Frame, Grid, Layout, Margin, Rangef, RichText, Ui, Vec2, vec2};
@@ -41,11 +41,11 @@ struct DeviceCapabilities {
 /// Preferences window. Interface, metronome and shortcut changes apply
 /// immediately; audio device and engine changes are collected in a draft
 /// and applied together, since they restart the audio.
-pub struct UISettingsWindow {
+pub struct SettingsWindow {
     pub open: bool,
     tab: SettingsTab,
-    shortcuts: UIShortcutsTab,
-    appearance: UIAppearanceTab,
+    shortcuts: ShortcutsTab,
+    appearance: AppearanceTab,
     draft: Settings,
     /// Probed when the window opens (probing hardware is slow).
     devices: Vec<DeviceInfo>,
@@ -53,13 +53,13 @@ pub struct UISettingsWindow {
     parallel_threshold: NumberInput,
 }
 
-impl UISettingsWindow {
+impl SettingsWindow {
     pub fn new(themes: ThemeLibrary, theme_warnings: Vec<String>) -> Self {
         Self {
-            appearance: UIAppearanceTab::new(themes, theme_warnings),
+            appearance: AppearanceTab::new(themes, theme_warnings),
             open: false,
             tab: SettingsTab::General,
-            shortcuts: UIShortcutsTab::new(),
+            shortcuts: ShortcutsTab::new(),
             draft: Settings::default(),
             devices: Vec::new(),
             capabilities: None,

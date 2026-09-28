@@ -28,7 +28,7 @@ use crate::{
         },
     },
     ui::{
-        effect::UIEffect,
+        effect::EffectSlot,
         effects::{EffectId, create_effect_from_id},
         theme::Theme,
     },
@@ -115,9 +115,9 @@ pub struct ToniqueProjectState {
     clip_selection: ClipSelection,
     clipboard: Clipboard,
     /// Effect editors per track, in plugin order.
-    effects: HashMap<TrackId, Vec<UIEffect>>,
+    effects: HashMap<TrackId, Vec<EffectSlot>>,
     /// Editors of plugins not currently in a chain (removed, or not synced yet).
-    detached_effects: HashMap<PluginId, UIEffect>,
+    detached_effects: HashMap<PluginId, EffectSlot>,
 
     pending_actions: Vec<ProjectStatePendingAction>,
     batching: bool,
@@ -485,7 +485,7 @@ impl ToniqueProjectState {
     // Tracks
     /// Add track at the last position. Shortcut for `add_track_at`
     pub fn add_track(&mut self) -> TrackId {
-        self.add_track_at(self.track_len())
+        self.add_track_at(self.track_count())
     }
     /// Add track at specific index
     pub fn add_track_at(&mut self, index: usize) -> TrackId {
@@ -529,7 +529,7 @@ impl ToniqueProjectState {
         let Ok(original) = self.edit().track(*id).cloned() else {
             return;
         };
-        let index = self.track_index(*id).unwrap_or(self.track_len());
+        let index = self.track_index(*id).unwrap_or(self.track_count());
         let copy = self.session.create(|e| original.duplicate(e));
         let copy_id = copy.id;
         if let Some(view) = self.views.get(id).cloned() {
@@ -786,7 +786,7 @@ impl ToniqueProjectState {
         let plugin = self
             .session
             .create(|e| Plugin::new(e, content.plugin_kind()));
-        let editor = UIEffect::new(content, *id, &plugin);
+        let editor = EffectSlot::new(content, *id, &plugin);
         self.detached_effects.insert(plugin.id, editor);
         self.perform(AddPlugin::at(self.channel_ref(*id), plugin, index));
         self.sync_effects();
@@ -809,10 +809,10 @@ impl ToniqueProjectState {
         });
         self.sync_effects();
     }
-    pub fn effects_mut(&mut self, id: &TrackId) -> Option<&mut [UIEffect]> {
+    pub fn effects_mut(&mut self, id: &TrackId) -> Option<&mut [EffectSlot]> {
         self.effects.get_mut(id).map(|e| e.as_mut_slice())
     }
-    fn effect(&self, track: TrackId, plugin: PluginId) -> Option<&UIEffect> {
+    fn effect(&self, track: TrackId, plugin: PluginId) -> Option<&EffectSlot> {
         self.effects
             .get(&track)
             .and_then(|e| e.iter().find(|e| e.plugin_id() == plugin))
@@ -964,7 +964,7 @@ impl ToniqueProjectState {
     }
     /// Get all tracks
     pub fn tracks(&self) -> impl Iterator<Item = TrackReferenceCore> + use<> {
-        let refs: Vec<_> = (0..self.track_len())
+        let refs: Vec<_> = (0..self.track_count())
             .filter_map(|i| self.track_from_index(i))
             .collect();
         refs.into_iter()
@@ -1014,7 +1014,7 @@ impl ToniqueProjectState {
             .map(|c| c.end(bpm))
             .fold(self.playhead.max(loop_end), f32::max)
     }
-    pub fn track_len(&self) -> usize {
+    pub fn track_count(&self) -> usize {
         self.edit().tracks.len()
     }
     fn track_index(&self, id: TrackId) -> Option<usize> {

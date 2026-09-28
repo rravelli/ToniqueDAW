@@ -45,7 +45,7 @@ struct Notice {
     lines: Vec<String>,
 }
 
-pub struct UIProject {
+pub struct ProjectManager {
     /// `None` until first saved or opened.
     path: Option<PathBuf>,
     /// The project as last saved or opened: anything different is unsaved.
@@ -58,7 +58,7 @@ pub struct UIProject {
     title: String,
 }
 
-impl UIProject {
+impl ProjectManager {
     pub fn new(state: &ToniqueProjectState) -> Self {
         Self {
             path: None,

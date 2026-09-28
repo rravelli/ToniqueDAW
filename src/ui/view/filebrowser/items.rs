@@ -26,7 +26,7 @@ use crate::{
 
 const PLAYABLE_FORMAT: &[&str] = &["mp3", "wav", "ogg"];
 
-pub struct UIItems {
+pub struct FileList {
     selected: Option<usize>,
     pub selected_audio: Option<AudioInfo>,
     files: Arc<Mutex<FileTree>>,
@@ -35,7 +35,7 @@ pub struct UIItems {
     query: String,
 }
 
-impl UIItems {
+impl FileList {
     pub fn new() -> Self {
         Self {
             selected: None,

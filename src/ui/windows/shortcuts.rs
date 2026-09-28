@@ -28,13 +28,13 @@ struct Recording {
 
 /// Settings tab listing every shortcut. Clicking a binding records the next
 /// key press in its place; changes apply immediately.
-pub struct UIShortcutsTab {
+pub struct ShortcutsTab {
     recording: Option<Recording>,
     /// Outcome of the last change, e.g. a shortcut moved from another action.
     message: Option<String>,
 }
 
-impl UIShortcutsTab {
+impl ShortcutsTab {
     pub fn new() -> Self {
         Self {
             recording: None,

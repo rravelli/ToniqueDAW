@@ -1,11 +1,11 @@
 use crate::{
     core::{clip::ClipCore, state::ToniqueProjectState, track::DEFAULT_TRACK_HEIGHT},
     ui::{
-        clip::UIClip,
+        clip::ClipView,
         theme::ThemeExt,
         track::HANDLE_HEIGHT,
-        utils::{find_track_at, get_track_y},
-        view::timeline::{UITimeline, scroll::autoscroll},
+        utils::{find_track_at, track_y},
+        view::timeline::{Timeline, scroll::autoscroll},
     },
 };
 use egui::{Pos2, Rect, Stroke, Ui, pos2, vec2};
@@ -30,7 +30,7 @@ impl DragState {
     }
 }
 
-impl UITimeline {
+impl Timeline {
     pub fn handle_dragged_clips(
         &mut self,
         ui: &mut Ui,
@@ -95,7 +95,7 @@ impl UITimeline {
 
             // Index of the track at mouse position
             let mouse_track_index = track
-                .map_or(state.track_len(), |t| t.index)
+                .map_or(state.track_count(), |t| t.index)
                 .max(-drag_state.min_track_delta as usize)
                 as i32;
 
@@ -168,7 +168,7 @@ impl UITimeline {
 
                     track_indexes.push(track_index);
                     // Calculate y pos
-                    let y = get_track_y(track_index, viewport, state);
+                    let y = track_y(track_index, viewport, state);
                     // Calculate width
                     let width = state.grid.duration_to_width(duration, state.bpm());
                     // Calculate x pos
@@ -190,7 +190,7 @@ impl UITimeline {
                     let pos = pos2(x, y - state.grid.offset.y);
                     let size = vec2(width, height);
                     // Render Clip
-                    UIClip::new().ui(
+                    ClipView::new().ui(
                         ui,
                         pos,
                         size,

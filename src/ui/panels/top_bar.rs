@@ -17,11 +17,11 @@ use crate::{
 };
 const BUTTON_SIZE: f32 = 22.;
 
-pub struct UITopBar {
+pub struct TopBar {
     bpm_input: NumberInput,
 }
 
-impl UITopBar {
+impl TopBar {
     pub fn new() -> Self {
         Self {
             bpm_input: NumberInput::new(Vec2::new(50., BUTTON_SIZE))

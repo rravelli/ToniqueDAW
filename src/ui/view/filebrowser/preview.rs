@@ -11,9 +11,9 @@ use crate::{
 };
 
 const PREVIEW_WINDOW_HEIGHT: f32 = 60.;
-pub struct UIPreview {}
+pub struct PreviewPanel {}
 
-impl UIPreview {
+impl PreviewPanel {
     pub fn new() -> Self {
         Self {}
     }

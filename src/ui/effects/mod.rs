@@ -1,4 +1,4 @@
-use crate::ui::{effect::UIEffectContent, effects::equalizer::EqualizerEffect};
+use crate::ui::{effect::EffectEditor, effects::equalizer::EqualizerEffect};
 
 pub mod equalizer;
 
@@ -10,7 +10,7 @@ pub enum EffectId {
 }
 
 // Associate effect id to the effect struct
-pub fn create_effect_from_id(effect_id: EffectId) -> Box<dyn UIEffectContent> {
+pub fn create_effect_from_id(effect_id: EffectId) -> Box<dyn EffectEditor> {
     match effect_id {
         EffectId::Equalizer => Box::new(EqualizerEffect::new()),
     }

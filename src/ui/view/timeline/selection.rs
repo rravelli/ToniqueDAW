@@ -2,8 +2,8 @@ use crate::{
     core::state::{SelectionBounds, ToniqueProjectState},
     ui::{
         theme::ThemeExt,
-        utils::{find_track_at, get_track_y},
-        view::timeline::UITimeline,
+        utils::{find_track_at, track_y},
+        view::timeline::Timeline,
     },
 };
 use egui::{Pos2, Rect, Response, Shape, Stroke, Ui};
@@ -14,7 +14,7 @@ pub struct Multiselect {
     start_track_index: usize,
 }
 
-impl UITimeline {
+impl Timeline {
     pub fn handle_multiselect(
         &mut self,
         ui: &mut Ui,
@@ -36,8 +36,8 @@ impl UITimeline {
                 .snap_at_grid_with_threshold(beat_pos, 1.)
                 .unwrap_or(beat_pos);
 
-            if state.track_len() > 0 {
-                let index = track.map_or(state.track_len() - 1, |t| t.index);
+            if state.track_count() > 0 {
+                let index = track.map_or(state.track_count() - 1, |t| t.index);
                 self.multiselect_start = Some(Multiselect {
                     start_pos: snapped,
                     start_track_index: index,
@@ -58,7 +58,7 @@ impl UITimeline {
                 .grid
                 .snap_at_grid_with_threshold(position, 1.0)
                 .unwrap_or(position);
-            let length = state.track_len();
+            let length = state.track_count();
             let track_index = current_track.map_or(length - 1, |t| t.index);
             state.select_in_bounds(SelectionBounds::between(
                 (start.start_track_index, start.start_pos),
@@ -80,7 +80,7 @@ impl UITimeline {
     ) {
         let min_point = Pos2::new(
             state.grid.beats_to_x(bounds.start_pos, viewport),
-            get_track_y(bounds.start_track_index, viewport, state) - state.grid.offset.y,
+            track_y(bounds.start_track_index, viewport, state) - state.grid.offset.y,
         );
 
         let height = state
@@ -89,7 +89,7 @@ impl UITimeline {
 
         let max_point = Pos2::new(
             state.grid.beats_to_x(bounds.end_pos, viewport),
-            get_track_y(bounds.end_track_index, viewport, state) + height - state.grid.offset.y,
+            track_y(bounds.end_track_index, viewport, state) + height - state.grid.offset.y,
         );
         let zone = Rect::from_min_max(min_point, max_point);
         let theme = ui.app_theme();

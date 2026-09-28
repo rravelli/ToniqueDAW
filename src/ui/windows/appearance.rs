@@ -32,7 +32,7 @@ struct Draft {
 
 /// Settings tab to choose a theme and edit custom ones. Edits show in the
 /// whole app as they're made and are saved to the theme's file.
-pub struct UIAppearanceTab {
+pub struct AppearanceTab {
     themes: ThemeLibrary,
     /// What went wrong loading the current theme.
     warnings: Vec<String>,
@@ -41,7 +41,7 @@ pub struct UIAppearanceTab {
     error: Option<String>,
 }
 
-impl UIAppearanceTab {
+impl AppearanceTab {
     pub fn new(themes: ThemeLibrary, warnings: Vec<String>) -> Self {
         Self {
             themes,

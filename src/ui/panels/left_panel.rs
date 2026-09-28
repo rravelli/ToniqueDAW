@@ -25,13 +25,13 @@ pub enum DragPayload {
     Effect(EffectId),
 }
 
-pub struct UILeftPanel {
+pub struct LeftPanel {
     pub file_browser: FileBrowser,
     tab: LeftPanelTabs,
     search: SearchBar,
 }
 
-impl UILeftPanel {
+impl LeftPanel {
     pub fn new() -> Self {
         Self {
             file_browser: FileBrowser::new(),
@@ -42,7 +42,7 @@ impl UILeftPanel {
 
     pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
         let mut open = state.left_panel_open;
-        egui::Panel::left("left-pannel")
+        egui::Panel::left("left-panel")
             .min_size(100.)
             .max_size(400.)
             .frame(

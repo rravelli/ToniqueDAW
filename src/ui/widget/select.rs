@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn picking_an_option_changes_the_value() {
         let ctx = Context::default();
-        ctx.set_fonts(crate::ui::font::get_fonts());
+        ctx.set_fonts(crate::ui::font::fonts());
         let mut value = 1;
         let frame = |events: Vec<Event>, value: &mut i32| {
             let input = RawInput {

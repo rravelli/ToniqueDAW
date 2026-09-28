@@ -3,8 +3,8 @@ use crate::{
     ui::{
         theme::{ThemeExt, with_alpha},
         view::{
-            graph::UIGraphView, navigation_bar::UINavigationBar, timeline::UITimeline,
-            tracks::UITracks,
+            graph::GraphView, navigation_bar::NavigationBar, timeline::Timeline,
+            tracks::TrackHeaders,
         },
     },
 };
@@ -14,24 +14,24 @@ pub const SCROLLBAR_WIDTH: f32 = 5.;
 /// Empty bars after the end of the arrangement.
 const TIMELINE_SLACK_BARS: f32 = 16.;
 
-pub struct UICentralPanel {
-    timeline: UITimeline,
-    navigation_bar: UINavigationBar,
-    tracks: UITracks,
-    graph: UIGraphView,
+pub struct CentralPanel {
+    timeline: Timeline,
+    navigation_bar: NavigationBar,
+    tracks: TrackHeaders,
+    graph: GraphView,
     /// Following the playhead is paused after scrolling by hand during
     /// playback, until playback starts again.
     follow_paused: bool,
     was_playing: bool,
 }
 
-impl UICentralPanel {
+impl CentralPanel {
     pub fn new() -> Self {
         Self {
-            timeline: UITimeline::new(),
-            navigation_bar: UINavigationBar::new(),
-            tracks: UITracks::new(),
-            graph: UIGraphView::new(),
+            timeline: Timeline::new(),
+            navigation_bar: NavigationBar::new(),
+            tracks: TrackHeaders::new(),
+            graph: GraphView::new(),
             follow_paused: false,
             was_playing: false,
         }
@@ -321,12 +321,12 @@ mod tests {
         state.track_mut(&inner).closed = true;
 
         let ctx = egui::Context::default();
-        ctx.set_fonts(crate::ui::font::get_fonts());
+        ctx.set_fonts(crate::ui::font::fonts());
         let input = || egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200., 800.))),
             ..Default::default()
         };
-        let mut panel = UICentralPanel::new();
+        let mut panel = CentralPanel::new();
         let mut shapes = 0;
         for _ in 0..2 {
             let mut output = ctx.run_ui(input(), |ui| panel.show(ui, &mut state));
@@ -356,8 +356,8 @@ mod tests {
         state.set_closed(&group, true);
 
         let ctx = egui::Context::default();
-        ctx.set_fonts(crate::ui::font::get_fonts());
-        let mut panel = UICentralPanel::new();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let mut panel = CentralPanel::new();
         let audio = AudioInfo {
             name: "a.wav".into(),
             duration: Some(std::time::Duration::from_secs(1)),

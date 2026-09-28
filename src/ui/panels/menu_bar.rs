@@ -10,7 +10,7 @@ use std::path::PathBuf;
 const ZOOM_STEP: f32 = 0.1;
 
 /// Application menus at the very top of the window.
-pub struct UIMenuBar;
+pub struct AppMenuBar;
 
 /// What the menu bar asks the app to do.
 #[derive(Default)]
@@ -19,7 +19,7 @@ pub struct MenuActions {
     pub project: Option<ProjectAction>,
 }
 
-impl UIMenuBar {
+impl AppMenuBar {
     pub fn new() -> Self {
         Self
     }

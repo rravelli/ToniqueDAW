@@ -10,7 +10,7 @@ use crate::{
 
 /// Top of the lane of track `track_index` (in the engine's order). A track
 /// inside a folded group is at its group's row.
-pub fn get_track_y(track_index: usize, viewport: Rect, state: &ToniqueProjectState) -> f32 {
+pub fn track_y(track_index: usize, viewport: Rect, state: &ToniqueProjectState) -> f32 {
     let mut y = viewport.top();
     let mut last = None;
     for row in state.rows() {
@@ -24,9 +24,9 @@ pub fn get_track_y(track_index: usize, viewport: Rect, state: &ToniqueProjectSta
         y += row.height + HANDLE_HEIGHT;
     }
     match last {
-        Some(top) if track_index < state.track_len() => top,
+        Some(top) if track_index < state.track_count() => top,
         _ => {
-            (track_index.saturating_sub(state.track_len())) as f32
+            (track_index.saturating_sub(state.track_count())) as f32
                 * (DEFAULT_TRACK_HEIGHT + HANDLE_HEIGHT)
                 + y
         }
@@ -57,7 +57,7 @@ pub fn find_track_at(
                 TrackKind::Audio => (Some(row), y),
                 TrackKind::Group => (
                     state.track_from_index(row.index),
-                    get_track_y(row.index, viewport, state),
+                    track_y(row.index, viewport, state),
                 ),
             };
         }

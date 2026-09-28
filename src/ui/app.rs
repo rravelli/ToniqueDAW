@@ -4,28 +4,28 @@ use crate::{
     core::state::{CentralView, PlaybackState, ToniqueProjectState},
     ui::{
         panels::{
-            bottom_panel::UIBottomPanel,
-            central_panel::UICentralPanel,
-            left_panel::UILeftPanel,
-            menu_bar::{UIMenuBar, set_ui_scale},
-            top_bar::UITopBar,
+            bottom_panel::BottomPanel,
+            central_panel::CentralPanel,
+            left_panel::LeftPanel,
+            menu_bar::{AppMenuBar, set_ui_scale},
+            top_bar::TopBar,
         },
-        project::{ProjectAction, UIProject},
+        project::{ProjectAction, ProjectManager},
         theme::{ThemeExt, ThemeLibrary},
-        windows::settings::UISettingsWindow,
+        windows::settings::SettingsWindow,
     },
 };
 use tonique_engine::engine::Engine;
 
 pub struct ToniqueApp {
     state: ToniqueProjectState,
-    menu_bar: UIMenuBar,
-    top_bar: UITopBar,
-    bottom_panel: UIBottomPanel,
-    left_panel: UILeftPanel,
-    central_panel: UICentralPanel,
-    setting_window: UISettingsWindow,
-    project: UIProject,
+    menu_bar: AppMenuBar,
+    top_bar: TopBar,
+    bottom_panel: BottomPanel,
+    left_panel: LeftPanel,
+    central_panel: CentralPanel,
+    setting_window: SettingsWindow,
+    project: ProjectManager,
 }
 
 impl ToniqueApp {
@@ -41,14 +41,14 @@ impl ToniqueApp {
         let mut state = ToniqueProjectState::new(engine);
         state.attach_audio(audio, settings);
         Self {
-            project: UIProject::new(&state),
+            project: ProjectManager::new(&state),
             state,
-            menu_bar: UIMenuBar::new(),
-            top_bar: UITopBar::new(),
-            bottom_panel: UIBottomPanel::new(),
-            left_panel: UILeftPanel::new(),
-            central_panel: UICentralPanel::new(),
-            setting_window: UISettingsWindow::new(themes, theme_warnings),
+            menu_bar: AppMenuBar::new(),
+            top_bar: TopBar::new(),
+            bottom_panel: BottomPanel::new(),
+            left_panel: LeftPanel::new(),
+            central_panel: CentralPanel::new(),
+            setting_window: SettingsWindow::new(themes, theme_warnings),
         }
     }
 }

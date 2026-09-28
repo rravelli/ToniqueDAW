@@ -98,7 +98,7 @@ impl ToniqueProjectState {
         self.begin_batch();
         for (offset, clip) in clipboard.clips {
             let index = top_track + offset;
-            while self.track_len() <= index {
+            while self.track_count() <= index {
                 self.add_track();
             }
             let track = self.edit().tracks[index].id;

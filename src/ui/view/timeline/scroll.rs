@@ -5,7 +5,7 @@ use egui::{Pos2, Rect, Ui, Vec2, vec2};
 
 use crate::{
     core::{state::ToniqueProjectState, track::DEFAULT_TRACK_HEIGHT},
-    ui::utils::get_track_y,
+    ui::utils::track_y,
 };
 
 /// How close to the left/right edges dragging starts scrolling, in points.
@@ -38,7 +38,7 @@ pub fn autoscroll(ui: &Ui, state: &mut ToniqueProjectState, viewport: Rect, poin
     }
     let dt = ui.input(|i| i.stable_dt).min(0.1);
     // Allow scrolling one track past the last, where drops create a track.
-    let tracks_height = get_track_y(state.track_len(), viewport, state) - viewport.top();
+    let tracks_height = track_y(state.track_count(), viewport, state) - viewport.top();
     let max_y = (tracks_height + DEFAULT_TRACK_HEIGHT - viewport.height())
         .max(state.grid.offset.y)
         .max(0.);

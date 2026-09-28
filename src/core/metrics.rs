@@ -40,7 +40,7 @@ impl AudioMetrics {
         }
     }
 
-    pub fn get_fft(&mut self) -> Vec<f32> {
+    pub fn spectrum(&mut self) -> Vec<f32> {
         let n = self.samples[0].len();
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(n);
@@ -68,11 +68,11 @@ impl AudioMetrics {
         spectrum
     }
 
-    pub fn get_rms(&self) -> [f32; 2] {
+    pub fn rms(&self) -> [f32; 2] {
         self.rms
     }
 
-    pub fn get_peak(&self) -> [f32; 2] {
+    pub fn peak(&self) -> [f32; 2] {
         self.peak
     }
 }

@@ -12,7 +12,7 @@ use crate::{
     ui::{
         font::PHOSPHOR_REGULAR,
         panels::{central_panel::SCROLLBAR_WIDTH, left_panel::DragPayload},
-        track::{COLOR_BAR_WIDTH, HANDLE_HEIGHT, HEADER_INSET, UITrack, color_bar_x},
+        track::{COLOR_BAR_WIDTH, HANDLE_HEIGHT, HEADER_INSET, TrackHeader, color_bar_x},
         widget::{context_menu::ContextMenuButton, square_button::SquareButton},
     },
 };
@@ -24,13 +24,13 @@ const DEFAULT_TRACK_WIDTH: f32 = 150.;
 /// the group rather than into it.
 const ABOVE_GROUP: f32 = 0.3;
 
-pub struct UITracks {
+pub struct TrackHeaders {
     pub width: f32,
     /// The row being dragged to a new place.
     dragging: Option<TrackId>,
 }
 
-impl UITracks {
+impl TrackHeaders {
     pub fn new() -> Self {
         Self {
             width: DEFAULT_TRACK_WIDTH,
@@ -84,7 +84,7 @@ impl UITracks {
             )),
             |ui| {
                 ui.horizontal(|ui| {
-                    UITrack::new().ui(ui, &master_track, state);
+                    TrackHeader::new().ui(ui, &master_track, state);
                 })
             },
         );
@@ -123,7 +123,7 @@ impl UITracks {
                     continue;
                 }
 
-                let response = UITrack::new().ui(ui, &track, state);
+                let response = TrackHeader::new().ui(ui, &track, state);
                 if response.drag_started() {
                     self.dragging = Some(track.id);
                 }

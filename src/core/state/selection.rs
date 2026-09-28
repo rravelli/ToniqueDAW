@@ -143,7 +143,7 @@ impl ToniqueProjectState {
         ) else {
             return;
         };
-        let last = self.track_len() as i32 - 1;
+        let last = self.track_count() as i32 - 1;
         let delta = delta.clamp(-top, last - bottom);
         if delta == 0 {
             return;

@@ -63,7 +63,7 @@ fn spans(state: &ToniqueProjectState, track: TrackId) -> Vec<(f32, f32)> {
 fn test_add_track() {
     let mut state = setup_state();
     let track = state.add_track();
-    assert_eq!(state.track_len(), 1);
+    assert_eq!(state.track_count(), 1);
     assert_eq!(state.tracks().next().unwrap().id, track);
 }
 
@@ -74,11 +74,11 @@ fn test_add_track_at() {
     assert_eq!(state.tracks().nth(0).unwrap().id, track1);
 
     let track2 = state.add_track_at(0);
-    assert_eq!(state.track_len(), 2);
+    assert_eq!(state.track_count(), 2);
     assert_eq!(state.tracks().nth(0).unwrap().id, track2);
 
     let track3 = state.add_track_at(2);
-    assert_eq!(state.track_len(), 3);
+    assert_eq!(state.track_count(), 3);
     assert_eq!(state.tracks().nth(2).unwrap().id, track3);
 }
 
@@ -87,16 +87,16 @@ fn test_delete_track() {
     let mut state = setup_state();
     let track1 = state.add_track();
     let track2 = state.add_track();
-    assert_eq!(state.track_len(), 2);
+    assert_eq!(state.track_count(), 2);
 
     state.delete_track(&track1);
     // Should be deleted after state update
-    assert_eq!(state.track_len(), 2);
+    assert_eq!(state.track_count(), 2);
     state.update();
-    assert_eq!(state.track_len(), 1);
+    assert_eq!(state.track_count(), 1);
     state.delete_track(&track2);
     state.update();
-    assert_eq!(state.track_len(), 0);
+    assert_eq!(state.track_count(), 0);
     // deleting a non existant track should no raise errors
     state.delete_track(&TrackId(12345));
     state.update();
@@ -157,9 +157,9 @@ fn a_batch_is_one_undo_step() {
     let track = state.add_track();
     add_clip(&mut state, track, 0., 1.);
     state.commit_batch();
-    assert_eq!(state.track_len(), 1);
+    assert_eq!(state.track_count(), 1);
     state.undo();
-    assert_eq!(state.track_len(), 0);
+    assert_eq!(state.track_count(), 0);
     assert!(!state.can_undo());
 }
 
@@ -283,7 +283,7 @@ fn clips_play_through_the_engine_once_loaded() {
     assert!(peak > 0.4, "clip never became audible (peak {peak})");
 
     state.update();
-    let [left, _] = state.metrics.tracks[&track].get_peak();
+    let [left, _] = state.metrics.tracks[&track].peak();
     assert!(left > 0.4, "track meter shows {left}");
     assert!(state.playhead() > 0.);
 }
@@ -486,7 +486,7 @@ fn paste_keeps_track_offsets_and_creates_missing_tracks() {
     state.select_track(&t1);
     state.set_edit_cursor(8.);
     state.paste();
-    assert_eq!(state.track_len(), 3);
+    assert_eq!(state.track_count(), 3);
     let t2 = state.tracks().nth(2).unwrap().id;
     assert_eq!(spans(&state, t1), vec![(2., 4.), (8., 10.)]);
     assert_eq!(spans(&state, t2), vec![(10., 12.)]);

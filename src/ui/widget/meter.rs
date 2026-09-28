@@ -62,8 +62,8 @@ impl Widget for LoudnessMeter {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let (res, painter) = ui.allocate_painter(self.size, Sense::click());
         let rect = res.rect;
-        let peak = self.metrics.get_peak();
-        let rms = self.metrics.get_rms();
+        let peak = self.metrics.peak();
+        let rms = self.metrics.rms();
 
         let theme = ui.app_theme();
         // Peak behind, RMS in front.

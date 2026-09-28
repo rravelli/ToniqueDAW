@@ -14,7 +14,7 @@ use crate::{
             square_button::SquareButton,
         },
     },
-    utils::parse_name,
+    utils::display_name,
 };
 use egui::{
     Align2, Color32, FontId, Frame, Label, Margin, Pos2, Rect, Response, RichText, Sense, Stroke,
@@ -48,7 +48,7 @@ pub fn color_bar_x(left: f32, depth: usize) -> f32 {
 pub const HEADER_INSET: f32 = STROKE_WIDTH + PADDING;
 
 #[derive(Debug, Clone)]
-pub struct UITrack {
+pub struct TrackHeader {
     gain: f32,
     old_volume: f32,
     edit: bool,
@@ -56,7 +56,7 @@ pub struct UITrack {
     _edit_lost_focus: bool,
 }
 
-impl UITrack {
+impl TrackHeader {
     pub fn new() -> Self {
         Self {
             _edit_lost_focus: false,
@@ -73,7 +73,7 @@ impl UITrack {
         track: &TrackReferenceCore,
         state: &mut ToniqueProjectState,
     ) -> Response {
-        // Create persisant id
+        // Create persistent id
         let id = ui.make_persistent_id(format!("ui_track_state_{:?}", track.id));
         // Get previous state
         if let Some(data) = ui.ctx().data(|r| r.get_temp::<Self>(id)) {
@@ -246,7 +246,7 @@ impl UITrack {
                 state.commit_track_mut(&track.id);
             }
         } else {
-            let formatted_name = parse_name(&track.name, track.index);
+            let formatted_name = display_name(&track.name, track.index);
             ui.add(
                 Label::new(
                     RichText::new(formatted_name)
@@ -268,7 +268,10 @@ impl UITrack {
         let is_group = track.kind == TrackKind::Group;
         Frame::new().show(ui, |ui| {
             ui.vertical(|ui| {
-                ui.add(ContextMenuLabel::new(parse_name(&track.name, track.index)));
+                ui.add(ContextMenuLabel::new(display_name(
+                    &track.name,
+                    track.index,
+                )));
                 if ui.add(ContextMenuButton::new(TEXT_T, "Rename")).clicked() {
                     self.edit = true;
                 };

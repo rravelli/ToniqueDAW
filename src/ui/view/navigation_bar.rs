@@ -27,11 +27,11 @@ enum LoopDrag {
     },
 }
 
-pub struct UINavigationBar {
+pub struct NavigationBar {
     loop_drag: Option<LoopDrag>,
 }
 
-impl UINavigationBar {
+impl NavigationBar {
     pub fn new() -> Self {
         Self { loop_drag: None }
     }

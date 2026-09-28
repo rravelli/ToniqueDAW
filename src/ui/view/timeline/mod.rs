@@ -7,7 +7,7 @@ use crate::{
         track::{DEFAULT_TRACK_HEIGHT, TRACK_CLOSED_HEIGHT, TrackKind, TrackReferenceCore},
     },
     ui::{
-        clip::UIClip,
+        clip::ClipView,
         panels::left_panel::DragPayload,
         theme::{ThemeExt, with_alpha},
         track::HANDLE_HEIGHT,
@@ -25,7 +25,7 @@ mod selection;
 /// Opacity of the clips in a group's preview, out of 255.
 const PREVIEW_ALPHA: u8 = 80;
 
-pub struct UITimeline {
+pub struct Timeline {
     drag_state: Option<DragState>,
     clicked_pos: Option<Pos2>,
     multiselect_start: Option<Multiselect>,
@@ -33,7 +33,7 @@ pub struct UITimeline {
     hover_unfolded: Vec<TrackId>,
 }
 
-impl UITimeline {
+impl Timeline {
     pub fn new() -> Self {
         Self {
             drag_state: None,
@@ -319,7 +319,7 @@ impl UITimeline {
         } else {
             track.color
         };
-        let response = UIClip::new().ui(
+        let response = ClipView::new().ui(
             ui,
             pos,
             size,
@@ -436,7 +436,7 @@ impl UITimeline {
             // Placeholder ID: the clip only gets a real one when dropped
             let clip = ClipCore::new(ClipId(0), audio_info, snapped_position);
             // render clip
-            UIClip::new().ui(
+            ClipView::new().ui(
                 ui,
                 pos,
                 size,

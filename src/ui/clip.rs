@@ -27,9 +27,9 @@ enum Edge {
 
 const LOADING_REPAINT: Duration = Duration::from_millis(100);
 #[derive(Clone)]
-pub struct UIClip {}
+pub struct ClipView {}
 
-impl UIClip {
+impl ClipView {
     pub fn new() -> Self {
         Self {}
     }
@@ -176,7 +176,7 @@ impl UIClip {
             ui.ctx().request_repaint_after(LOADING_REPAINT);
         }
 
-        response.context_menu(|ui| self.contex_menu(ui, clip, state));
+        response.context_menu(|ui| self.context_menu(ui, clip, state));
         // Update cursor icon
         if response.dragged() {
             ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
@@ -246,7 +246,7 @@ impl UIClip {
         response
     }
 
-    fn contex_menu(&self, ui: &mut Ui, clip: &ClipCore, state: &mut ToniqueProjectState) {
+    fn context_menu(&self, ui: &mut Ui, clip: &ClipCore, state: &mut ToniqueProjectState) {
         ui.vertical(|ui| {
             if ui
                 .add(ContextMenuButton::new(TRASH, "Delete").text_color(ui.app_theme().danger))

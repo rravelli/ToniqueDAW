@@ -2,7 +2,7 @@ use crate::{
     core::metrics::AudioMetrics,
     ui::{
         buttons::paint_circle_button,
-        effect::UIEffectContent,
+        effect::EffectEditor,
         effects::EffectId,
         theme::{Theme, ThemeExt},
     },
@@ -79,7 +79,7 @@ impl EqualizerEffect {
         metrics: &mut AudioMetrics,
         theme: &Theme,
     ) {
-        let spectrum = metrics.get_fft();
+        let spectrum = metrics.spectrum();
         let n = spectrum.len();
         let sample_rate = 44100.;
         let bin_freqs: Vec<f32> = (0..n).map(|i| i as f32 * sample_rate / n as f32).collect();
@@ -107,7 +107,7 @@ impl EqualizerEffect {
     }
 }
 
-impl UIEffectContent for EqualizerEffect {
+impl EffectEditor for EqualizerEffect {
     fn ui(&mut self, ui: &mut Ui, metrics: &mut AudioMetrics, enabled: bool) {
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::all());
         let full_rect = response.rect;

@@ -8,7 +8,7 @@ use egui::{
 use std::fmt::Debug;
 use tonique_engine::edit::{Plugin, PluginId, PluginKind, TrackId};
 
-pub trait UIEffectContent: UIEffectContentClone {
+pub trait EffectEditor: EffectEditorClone {
     // show ui and update effect
     fn ui(
         &mut self,
@@ -31,12 +31,12 @@ pub trait UIEffectContent: UIEffectContentClone {
     fn read_params(&mut self);
 }
 
-pub trait UIEffectContentClone {
-    fn clone_box(&self) -> Box<dyn UIEffectContent>;
+pub trait EffectEditorClone {
+    fn clone_box(&self) -> Box<dyn EffectEditor>;
 }
 
 #[derive(Clone)]
-pub struct UIEffect {
+pub struct EffectSlot {
     id: String,
     pub track_id: TrackId,
     plugin_id: PluginId,
@@ -44,27 +44,27 @@ pub struct UIEffect {
     /// Power button clicked since the last `take_toggled`.
     toggled: bool,
     pub name: String,
-    content: Box<dyn UIEffectContent>,
+    content: Box<dyn EffectEditor>,
 }
 
-impl<T> UIEffectContentClone for T
+impl<T> EffectEditorClone for T
 where
-    T: 'static + UIEffectContent + Clone,
+    T: 'static + EffectEditor + Clone,
 {
-    fn clone_box(&self) -> Box<dyn UIEffectContent> {
+    fn clone_box(&self) -> Box<dyn EffectEditor> {
         Box::new(self.clone())
     }
 }
 
-impl Clone for Box<dyn UIEffectContent> {
-    fn clone(&self) -> Box<dyn UIEffectContent> {
+impl Clone for Box<dyn EffectEditor> {
+    fn clone(&self) -> Box<dyn EffectEditor> {
         self.clone_box()
     }
 }
 
-impl Debug for UIEffect {
+impl Debug for EffectSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("UIEffect")
+        f.debug_struct("EffectSlot")
             .field("id", &self.id)
             .field("track_id", &self.track_id)
             .field("plugin_id", &self.plugin_id)
@@ -75,8 +75,8 @@ impl Debug for UIEffect {
     }
 }
 
-impl UIEffect {
-    pub fn new(mut content: Box<dyn UIEffectContent>, track_id: TrackId, plugin: &Plugin) -> Self {
+impl EffectSlot {
+    pub fn new(mut content: Box<dyn EffectEditor>, track_id: TrackId, plugin: &Plugin) -> Self {
         content.bind(plugin);
         Self {
             id: content.id(),
@@ -111,7 +111,7 @@ impl UIEffect {
         self.content.effect_id()
     }
 
-    /// See [`UIEffectContent::read_params`].
+    /// See [`EffectEditor::read_params`].
     pub fn read_params(&mut self) {
         self.content.read_params();
     }

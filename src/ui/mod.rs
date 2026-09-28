@@ -1,4 +1,4 @@
-use crate::ui::{app::ToniqueApp, font::get_fonts, window::get_native_options};
+use crate::ui::{app::ToniqueApp, font::fonts, window::native_options};
 use crate::{audio::host::AudioHost, config::settings::Settings};
 use tonique_engine::engine::Engine;
 pub mod app;
@@ -25,9 +25,9 @@ pub fn spawn_ui_thread(
 ) -> Result<(), eframe::Error> {
     eframe::run_native(
         "Tonique",
-        get_native_options(),
+        native_options(),
         Box::new(|cc| {
-            cc.egui_ctx.set_fonts(get_fonts());
+            cc.egui_ctx.set_fonts(fonts());
             cc.egui_ctx.set_zoom_factor(settings.ui_scale);
             Ok(Box::new(ToniqueApp::new(engine, audio, settings, cc)))
         }),

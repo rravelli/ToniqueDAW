@@ -3,10 +3,10 @@ use egui::{Event, Rect, Ui};
 use crate::{
     config::keymap::Action,
     core::state::ToniqueProjectState,
-    ui::view::timeline::{UITimeline, scroll::reveal},
+    ui::view::timeline::{Timeline, scroll::reveal},
 };
 
-impl UITimeline {
+impl Timeline {
     pub fn handle_key_press(
         &mut self,
         ui: &mut Ui,

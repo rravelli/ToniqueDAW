@@ -468,7 +468,7 @@ impl ToniqueProjectState {
                 let to = match anchor.and_then(|a| s.track_index(a)) {
                     Some(at) if from < at => at - 1,
                     Some(at) => at,
-                    None => s.track_len() - 1,
+                    None => s.track_count() - 1,
                 };
                 if from != to {
                     s.perform(MoveTrack::new(*track, to));

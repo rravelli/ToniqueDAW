@@ -4,7 +4,7 @@ use crate::{
     ui::{
         font::PHOSPHOR_FILL,
         theme::ThemeExt,
-        view::filebrowser::{items::UIItems, preview::UIPreview},
+        view::filebrowser::{items::FileList, preview::PreviewPanel},
         widget::{context_menu::ContextMenuButton, square_button::SquareButton},
     },
 };
@@ -24,15 +24,15 @@ const PREVIEW_WINDOW_HEIGHT: f32 = 60.;
 
 pub struct FileBrowser {
     root: Option<PathBuf>,
-    preview: UIPreview,
-    items: UIItems,
+    preview: PreviewPanel,
+    items: FileList,
     config: Config,
 }
 
 impl FileBrowser {
     pub fn new() -> Self {
         let config = Config::load();
-        let mut items = UIItems::new();
+        let mut items = FileList::new();
         let dirs = config.list_dirs();
         let root = if !dirs.is_empty() {
             items.init(dirs[0].clone());
@@ -43,7 +43,7 @@ impl FileBrowser {
 
         Self {
             root,
-            preview: UIPreview::new(),
+            preview: PreviewPanel::new(),
             items,
             config,
         }
