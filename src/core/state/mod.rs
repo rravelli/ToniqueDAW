@@ -545,6 +545,13 @@ impl ProjectState {
         }
         view.collapsed = collapsed;
     }
+    /// Arm a track for recording, or disarm it. Groups and the master
+    /// can't be armed.
+    pub fn set_armed(&mut self, id: &TrackId, armed: bool) {
+        if *id != MASTER_TRACK_ID && !self.is_group(*id) {
+            self.track_view_mut(id).armed = armed;
+        }
+    }
     // Clips
     fn clip_ops(&mut self, label: &'static str, f: impl FnOnce(&mut Self, &mut Vec<ClipOp>)) {
         let mut ops = Vec::new();
@@ -926,7 +933,7 @@ impl ProjectState {
             clips: Vec::new(),
             muted: master.muted,
             volume: master.volume.get(),
-            arm: false,
+            armed: false,
             name: view.name.clone(),
             height: view.height,
             collapsed: view.collapsed,
@@ -1008,7 +1015,7 @@ impl ProjectState {
                 .collect(),
             muted: track.channel.muted,
             volume: track.channel.volume.get(),
-            arm: view.arm,
+            armed: view.armed,
             name: track.name.clone(),
             height: view.height,
             collapsed: view.collapsed,

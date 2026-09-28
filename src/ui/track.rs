@@ -1,6 +1,6 @@
 use crate::{
     core::{
-        state::{MIN_EXPANDED_HEIGHT, ProjectState},
+        state::{MASTER_TRACK_ID, MIN_EXPANDED_HEIGHT, ProjectState},
         track::{TrackKind, TrackRow},
     },
     ui::{
@@ -52,7 +52,6 @@ pub struct TrackHeader {
     gain: f32,
     old_volume: f32,
     edit: bool,
-    arm: bool,
     focus_requested: bool,
 }
 
@@ -60,7 +59,6 @@ impl TrackHeader {
     pub fn new() -> Self {
         Self {
             focus_requested: false,
-            arm: false,
             edit: false,
             gain: 0.,
             old_volume: 1.0,
@@ -145,11 +143,11 @@ impl TrackHeader {
                         ui.horizontal(|ui| {
                             ui.set_height(BUTTON_SIZE);
 
-                            // let track_view_mut = state.track_view_mut(&track.id);
                             self.collapse_button(ui, track, state);
 
-                            // Groups have no arm button.
-                            let buttons = if is_group { 2. } else { 3. };
+                            // Groups and the master have no arm button.
+                            let armable = !is_group && track.id != MASTER_TRACK_ID;
+                            let buttons = if armable { 3. } else { 2. };
                             let text_width = ui.available_width()
                                 - 4. * PADDING
                                 - buttons * BUTTON_SIZE
@@ -164,7 +162,7 @@ impl TrackHeader {
                             // Track controls
                             let mute_res = self.mute_button(ui, is_solo, track);
                             let solo_res = self.solo_button(ui, is_solo, track);
-                            let arm_res = (!is_group).then(|| self.arm_button(ui));
+                            let arm_res = armable.then(|| self.arm_button(ui, track));
 
                             if mute_res.clicked() {
                                 state.set_mute(track.id.clone(), !track.muted);
@@ -174,7 +172,7 @@ impl TrackHeader {
                                     .toggle_solo(track.id.clone(), ui.input(|i| i.modifiers.shift));
                             }
                             if arm_res.is_some_and(|r| r.clicked()) {
-                                self.arm = !self.arm;
+                                state.set_armed(&track.id, !track.armed);
                             }
                         });
                         let track_view_mut = state.track_view_mut(&track.id);
@@ -329,11 +327,11 @@ impl TrackHeader {
         ui.add(toggle_button("S", solo.then_some(track.color), &theme))
     }
 
-    fn arm_button(&mut self, ui: &mut Ui) -> Response {
+    fn arm_button(&mut self, ui: &mut Ui, track: &TrackRow) -> Response {
         let theme = ui.app_theme();
         ui.add(toggle_button(
             MUSIC_NOTE_SIMPLE,
-            self.arm.then_some(theme.record),
+            track.armed.then_some(theme.record),
             &theme,
         ))
     }

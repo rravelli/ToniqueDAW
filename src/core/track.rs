@@ -28,7 +28,8 @@ pub struct TrackRow {
     pub clips: Vec<AudioClip>,
     pub muted: bool,
     pub volume: f32,
-    pub arm: bool,
+    /// Armed for recording.
+    pub armed: bool,
     pub name: String,
     pub height: f32,
     pub collapsed: bool,
@@ -60,7 +61,8 @@ pub struct TrackView {
     /// Height to go back to when opened.
     pub expanded_height: f32,
     pub color: Color32,
-    pub arm: bool,
+    /// Armed for recording.
+    pub armed: bool,
 }
 
 impl TrackView {
@@ -72,7 +74,7 @@ impl TrackView {
             // New tracks get a palette colour from `ProjectState`.
             color: Color32::GRAY,
             name: "# Audio Track".into(),
-            arm: false,
+            armed: false,
         }
     }
 }

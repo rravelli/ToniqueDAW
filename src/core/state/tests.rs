@@ -1,6 +1,10 @@
 use crate::{
     analysis::{AudioData, AudioInfo},
-    core::{clip::AudioClip, effect::EffectKind, state::ProjectState},
+    core::{
+        clip::AudioClip,
+        effect::EffectKind,
+        state::{MASTER_TRACK_ID, ProjectState},
+    },
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tonique_engine::{
@@ -209,6 +213,22 @@ fn renames_are_undoable() {
     state.undo();
     assert_eq!(state.tracks().next().unwrap().name, "# Audio Track");
     assert_eq!(state.track_view_mut(&track).name, "# Audio Track");
+}
+
+#[test]
+fn only_tracks_can_be_armed() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    state.set_armed(&track, true);
+    assert!(state.tracks().next().unwrap().armed);
+    state.set_armed(&track, false);
+    assert!(!state.tracks().next().unwrap().armed);
+
+    let group = state.group(&[track]).unwrap();
+    state.set_armed(&group, true);
+    assert!(!state.rows()[0].armed, "a group");
+    state.set_armed(&MASTER_TRACK_ID, true);
+    assert!(!state.master_track().armed);
 }
 
 #[test]
