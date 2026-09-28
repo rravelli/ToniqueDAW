@@ -12,7 +12,7 @@ use crate::{
         project::{EXTENSION, ProjectFile, project_name},
         state::ProjectState,
     },
-    ui::{theme::ThemeExt, widget::square_button::SquareButton},
+    ui::{theme::ThemeExt, widget::flat_button::FlatButton},
 };
 
 const BUTTON_HEIGHT: f32 = 22.;
@@ -304,8 +304,8 @@ fn project_dialog(dir: Option<&Path>) -> FileDialog {
     }
 }
 
-fn button(text: &str) -> SquareButton {
-    SquareButton::new(text)
+fn button(text: &str) -> FlatButton {
+    FlatButton::new(text)
         .size(vec2(0., BUTTON_HEIGHT))
         .padding(10.)
         .font(egui::FontId::proportional(12.))

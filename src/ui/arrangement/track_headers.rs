@@ -17,7 +17,7 @@ use crate::{
         dnd::DragPayload,
         font::PHOSPHOR_REGULAR,
         panels::central_panel::SCROLLBAR_WIDTH,
-        widget::{context_menu::ContextMenuButton, square_button::SquareButton},
+        widget::{context_menu::ContextMenuButton, flat_button::FlatButton},
         workspace::Workspace,
     },
 };
@@ -154,7 +154,7 @@ impl TrackHeaders {
 
             if ui
                 .add(
-                    SquareButton::ghost(format!("{}", PLUS))
+                    FlatButton::ghost(format!("{}", PLUS))
                         .font(FontId::new(
                             10.,
                             egui::FontFamily::Name(PHOSPHOR_REGULAR.into()),
@@ -278,7 +278,7 @@ fn paint_group_scopes(ui: &Ui, rows: &[Row], x: Rangef) {
             pos2(x, row.y.min + HEADER_INSET),
             pos2(x + COLOR_BAR_WIDTH, row.scope.max - HEADER_INSET),
         );
-        let color = if group.disabled() {
+        let color = if group.is_silenced() {
             theme.text_disabled
         } else {
             group.color

@@ -20,7 +20,7 @@ use crate::{
         browser::file_tree::{FileNode, FileTree},
         dnd::DragPayload,
         theme::ThemeExt,
-        widget::item_button::ItemButton,
+        widget::list_row::ListRow,
     },
 };
 
@@ -211,7 +211,7 @@ impl FileList {
             .to_string_lossy();
 
         let res = ui.add(
-            ItemButton::new(format!(
+            ListRow::new(format!(
                 "{}{} {}",
                 " ".repeat((file.depth - 1) * 2),
                 icon,

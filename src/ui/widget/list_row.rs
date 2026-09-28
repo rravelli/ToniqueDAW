@@ -2,12 +2,12 @@ use egui::{Sense, Vec2, Widget};
 
 use crate::ui::theme::{ThemeExt, with_alpha};
 
-pub struct ItemButton {
+pub struct ListRow {
     text: String,
     selected: bool,
 }
 
-impl ItemButton {
+impl ListRow {
     pub fn new(text: impl ToString) -> Self {
         Self {
             text: text.to_string(),
@@ -21,7 +21,7 @@ impl ItemButton {
     }
 }
 
-impl Widget for ItemButton {
+impl Widget for ListRow {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let (rect, response) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), 16.0),

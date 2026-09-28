@@ -36,7 +36,7 @@ impl NumberInput {
         }
     }
 
-    pub fn with_range(mut self, range: Rangef) -> Self {
+    pub fn range(mut self, range: Rangef) -> Self {
         self.range = range;
         self
     }

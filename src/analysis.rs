@@ -111,7 +111,7 @@ impl AudioInfo {
     }
 }
 
-pub fn get_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoError> {
+pub fn read_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoError> {
     let name = path
         .as_ref()
         .file_name()

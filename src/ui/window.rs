@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use eframe::NativeOptions;
 
-const APP_ICON: &'static [u8; 15773] = include_bytes!("../../images/logo.png");
+const APP_ICON: &[u8] = include_bytes!("../../images/logo.png");
 
 pub fn native_options() -> NativeOptions {
     let mut options = NativeOptions::default();

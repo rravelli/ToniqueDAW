@@ -4,7 +4,7 @@ use crate::{
         browser::FileBrowser,
         dnd::DragPayload,
         theme::ThemeExt,
-        widget::{item_button::ItemButton, search_bar::SearchBar, tab_bar::TabBar},
+        widget::{list_row::ListRow, search_bar::SearchBar, tab_bar::TabBar},
         workspace::Workspace,
     },
 };
@@ -14,14 +14,14 @@ use egui::{Frame, Margin, Ui};
 const HEADER_SPACING: f32 = 4.;
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum LeftPanelTabs {
+pub enum LeftPanelTab {
     Files,
     Effects,
 }
 
 pub struct LeftPanel {
     pub file_browser: FileBrowser,
-    tab: LeftPanelTabs,
+    tab: LeftPanelTab,
     search: SearchBar,
 }
 
@@ -29,7 +29,7 @@ impl LeftPanel {
     pub fn new() -> Self {
         Self {
             file_browser: FileBrowser::new(),
-            tab: LeftPanelTabs::Files,
+            tab: LeftPanelTab::Files,
             search: SearchBar::new("Search"),
         }
     }
@@ -68,8 +68,8 @@ impl LeftPanel {
                         TabBar::new(
                             &mut self.tab,
                             [
-                                (LeftPanelTabs::Files, "Files"),
-                                (LeftPanelTabs::Effects, "Effects"),
+                                (LeftPanelTab::Files, "Files"),
+                                (LeftPanelTab::Effects, "Effects"),
                             ],
                         )
                         .height(25.),
@@ -80,11 +80,11 @@ impl LeftPanel {
                 });
 
             match self.tab {
-                LeftPanelTabs::Files => {
+                LeftPanelTab::Files => {
                     self.file_browser.ui(ui, state);
                 }
-                LeftPanelTabs::Effects => {
-                    let res = ui.add(ItemButton::new(format!(
+                LeftPanelTab::Effects => {
+                    let res = ui.add(ListRow::new(format!(
                         "{} {}",
                         egui_phosphor::fill::STAR_FOUR,
                         EffectKind::Filter.name()

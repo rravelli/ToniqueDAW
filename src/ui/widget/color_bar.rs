@@ -1,24 +1,25 @@
 use egui::{Color32, Sense, Stroke, Vec2, Widget};
 
-pub struct Rectangle {
+/// A filled bar, e.g. a track's colour beside its header.
+pub struct ColorBar {
     size: Vec2,
-    bg_color: Color32,
+    color: Color32,
 }
 
-impl Rectangle {
+impl ColorBar {
     pub fn new(size: Vec2) -> Self {
         Self {
             size,
-            bg_color: Color32::TRANSPARENT,
+            color: Color32::TRANSPARENT,
         }
     }
-    pub fn fill(mut self, bg: Color32) -> Self {
-        self.bg_color = bg;
+    pub fn color(mut self, color: Color32) -> Self {
+        self.color = color;
         self
     }
 }
 
-impl Widget for Rectangle {
+impl Widget for ColorBar {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let (res, painter) = ui.allocate_painter(self.size, Sense::click());
         let rect = res.rect;
@@ -26,7 +27,7 @@ impl Widget for Rectangle {
         painter.rect(
             rect,
             0.,
-            self.bg_color,
+            self.color,
             Stroke::NONE,
             egui::StrokeKind::Outside,
         );

@@ -3,8 +3,8 @@
 
 pub mod clip;
 pub mod grid;
-pub mod navigation_bar;
 pub mod row_layout;
+pub mod ruler;
 pub mod timeline;
 pub mod track_header;
 pub mod track_headers;

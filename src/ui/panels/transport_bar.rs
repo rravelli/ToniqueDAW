@@ -13,21 +13,20 @@ use crate::{
         commands::Commands,
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::{ThemeExt, with_alpha},
-        widget::{input::NumberInput, square_button::SquareButton},
+        widget::{flat_button::FlatButton, input::NumberInput},
         workspace::{MainView, Workspace},
     },
 };
 const BUTTON_SIZE: f32 = 22.;
 
-pub struct TopBar {
+pub struct TransportBar {
     bpm_input: NumberInput,
 }
 
-impl TopBar {
+impl TransportBar {
     pub fn new() -> Self {
         Self {
-            bpm_input: NumberInput::new(Vec2::new(50., BUTTON_SIZE))
-                .with_range(Rangef::new(10., 1000.)),
+            bpm_input: NumberInput::new(Vec2::new(50., BUTTON_SIZE)).range(Rangef::new(10., 1000.)),
         }
     }
 
@@ -38,7 +37,7 @@ impl TopBar {
         workspace: &Workspace,
         commands: &mut Commands,
     ) {
-        egui::Panel::top("top-bar")
+        egui::Panel::top("transport-bar")
             .resizable(false)
             .frame(
                 Frame::new()
@@ -109,7 +108,7 @@ impl TopBar {
             Action::PlayStop,
         );
         ui.add(
-            SquareButton::new(if playback_state == PlaybackState::Playing {
+            FlatButton::new(if playback_state == PlaybackState::Playing {
                 egui_phosphor::fill::STOP
             } else {
                 egui_phosphor::fill::PLAY
@@ -126,7 +125,7 @@ impl TopBar {
 
     fn record_button_ui(&mut self, ui: &mut Ui) {
         ui.add(
-            SquareButton::new(RECORD)
+            FlatButton::new(RECORD)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
                     14.,
@@ -139,7 +138,7 @@ impl TopBar {
 
     fn sidebar_ui(&mut self, ui: &mut Ui, state: &ProjectState, workspace: &Workspace) -> Response {
         ui.add(
-            SquareButton::ghost(SIDEBAR_SIMPLE)
+            FlatButton::ghost(SIDEBAR_SIMPLE)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
                     15.,
@@ -162,7 +161,7 @@ impl TopBar {
     ) -> Response {
         let active = workspace.main_view == MainView::Graph;
         ui.add(
-            SquareButton::ghost(GRAPH)
+            FlatButton::ghost(GRAPH)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
                     15.,
@@ -183,7 +182,7 @@ impl TopBar {
     fn follow_ui(&mut self, ui: &mut Ui, state: &ProjectState) -> Response {
         let follow = state.follow_playhead();
         ui.add(
-            SquareButton::new(egui_phosphor::fill::CARET_LINE_RIGHT)
+            FlatButton::new(egui_phosphor::fill::CARET_LINE_RIGHT)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
                     14.,
@@ -209,7 +208,7 @@ impl TopBar {
     fn loop_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let looping = state.looping();
         let res = ui.add(
-            SquareButton::new(egui_phosphor::fill::REPEAT)
+            FlatButton::new(egui_phosphor::fill::REPEAT)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
                     14.,
@@ -236,7 +235,7 @@ impl TopBar {
             && matches!(state.playback_state(), PlaybackState::Playing)
             && state.playhead() % 1.0 < 0.5;
         let res = ui.add(
-            SquareButton::new(egui_phosphor::fill::METRONOME)
+            FlatButton::new(egui_phosphor::fill::METRONOME)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
                     15.,
@@ -302,7 +301,7 @@ impl TopBar {
 
     fn usage_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) -> Response {
         ui.add(
-            SquareButton::new(format!("{:.0}%", (state.metrics.latency * 100.).round()))
+            FlatButton::new(format!("{:.0}%", (state.metrics.latency * 100.).round()))
                 .square(BUTTON_SIZE)
                 .font(FontId::new(10., egui::FontFamily::Proportional))
                 .color(ui.app_theme().text_muted)
@@ -312,7 +311,7 @@ impl TopBar {
 
     fn fps_ui(&mut self, ui: &mut Ui) -> Response {
         ui.add(
-            SquareButton::new(format!(
+            FlatButton::new(format!(
                 "{:.0}",
                 1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
             ))
@@ -326,7 +325,7 @@ impl TopBar {
     fn undo_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) -> Response {
         ui.add_enabled(
             state.can_undo(),
-            SquareButton::ghost(egui_phosphor::fill::ARROW_U_UP_LEFT)
+            FlatButton::ghost(egui_phosphor::fill::ARROW_U_UP_LEFT)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
                     15.,
@@ -339,7 +338,7 @@ impl TopBar {
     fn redo_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) -> Response {
         ui.add_enabled(
             state.can_redo(),
-            SquareButton::ghost(egui_phosphor::fill::ARROW_U_UP_RIGHT)
+            FlatButton::ghost(egui_phosphor::fill::ARROW_U_UP_RIGHT)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
                     15.,

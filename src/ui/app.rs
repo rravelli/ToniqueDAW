@@ -9,7 +9,7 @@ use crate::{
             central_panel::CentralPanel,
             left_panel::LeftPanel,
             menu_bar::{AppMenuBar, set_ui_scale},
-            top_bar::TopBar,
+            transport_bar::TransportBar,
         },
         project::{ProjectAction, ProjectManager},
         settings::SettingsWindow,
@@ -24,7 +24,7 @@ pub struct ToniqueApp {
     workspace: Workspace,
     commands: Commands,
     menu_bar: AppMenuBar,
-    top_bar: TopBar,
+    transport_bar: TransportBar,
     bottom_panel: BottomPanel,
     left_panel: LeftPanel,
     central_panel: CentralPanel,
@@ -52,7 +52,7 @@ impl ToniqueApp {
             workspace: Workspace::default(),
             commands: Commands::default(),
             menu_bar: AppMenuBar::new(),
-            top_bar: TopBar::new(),
+            transport_bar: TransportBar::new(),
             bottom_panel: BottomPanel::new(),
             left_panel: LeftPanel::new(),
             central_panel: CentralPanel::new(),
@@ -82,7 +82,7 @@ impl eframe::App for ToniqueApp {
         let recent = self
             .menu_bar
             .show(ui, state, workspace, commands, self.project.recent());
-        self.top_bar.show(ui, state, workspace, commands);
+        self.transport_bar.show(ui, state, workspace, commands);
         self.bottom_panel.show(ui, state, workspace, commands);
         self.left_panel.show(ui, state, workspace);
         self.central_panel.show(ui, state, workspace, commands);

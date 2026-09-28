@@ -12,8 +12,8 @@ use crate::{
         panels::menu_bar::set_ui_scale,
         theme::{ThemeExt, ThemeLibrary},
         widget::{
-            input::NumberInput, section::SectionHeader, select::Select, slider::ValueSlider,
-            square_button::SquareButton, tab_bar::TabBar,
+            flat_button::FlatButton, input::NumberInput, section::SectionHeader, select::Select,
+            slider::ValueSlider, tab_bar::TabBar,
         },
     },
 };
@@ -71,7 +71,7 @@ impl SettingsWindow {
             devices: Vec::new(),
             capabilities: None,
             parallel_threshold: NumberInput::new(vec2(90., 20.))
-                .with_range(Rangef::new(1., 512.))
+                .range(Rangef::new(1., 512.))
                 .decimals(0)
                 .suffix(" nodes"),
         }
@@ -208,7 +208,7 @@ impl SettingsWindow {
                 ui.add_space(4.);
                 if ui
                     .add(
-                        SquareButton::new(ARROWS_CLOCKWISE)
+                        FlatButton::new(ARROWS_CLOCKWISE)
                             .square(BUTTON_HEIGHT - 2.)
                             .font(FontId::new(12., FontFamily::Name(PHOSPHOR_REGULAR.into())))
                             .border_radius(2.)
@@ -371,7 +371,7 @@ impl SettingsWindow {
         }
         ui.separator();
         ui.horizontal(|ui| {
-            let apply = SquareButton::new("Apply audio changes")
+            let apply = FlatButton::new("Apply audio changes")
                 .size(vec2(0., BUTTON_HEIGHT))
                 .padding(10.)
                 .font(FontId::proportional(12.))
@@ -446,8 +446,8 @@ fn status(ui: &mut Ui, text: String) {
     ui.label(RichText::new(text).small().color(color));
 }
 
-fn secondary_button(text: &str) -> SquareButton {
-    SquareButton::new(text)
+fn secondary_button(text: &str) -> FlatButton {
+    FlatButton::new(text)
         .size(Vec2::new(0., BUTTON_HEIGHT))
         .padding(10.)
         .font(FontId::proportional(12.))

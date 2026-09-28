@@ -8,13 +8,13 @@ use crate::{
 use egui::{Pos2, Rect, Response, Shape, Stroke, Ui};
 
 /// A rubber-band selection being drawn, from where it started.
-pub struct Multiselect {
+pub struct RubberBand {
     start_pos: f32,
     start_track_index: usize,
 }
 
 impl Timeline {
-    pub fn handle_multiselect(
+    pub fn rubber_band_ui(
         &mut self,
         ui: &mut Ui,
         state: &mut ProjectState,
@@ -22,11 +22,11 @@ impl Timeline {
         response: &Response,
     ) {
         if ui.input(|i| i.pointer.primary_down()) {
-            self.clicked_pos = response.interact_pointer_pos();
+            self.press_pos = response.interact_pointer_pos();
         }
 
         if response.drag_started()
-            && let Some(mouse_pos) = self.clicked_pos
+            && let Some(mouse_pos) = self.press_pos
         {
             let track = layout.track_at(mouse_pos.y).map(|(index, _)| index);
 
@@ -38,17 +38,17 @@ impl Timeline {
 
             if state.track_count() > 0 {
                 let index = track.unwrap_or(state.track_count() - 1);
-                self.multiselect_start = Some(Multiselect {
+                self.rubber_band = Some(RubberBand {
                     start_pos: snapped,
                     start_track_index: index,
                 });
             }
         }
         if !response.dragged() {
-            self.multiselect_start = None;
+            self.rubber_band = None;
         }
 
-        if let Some(start) = &self.multiselect_start
+        if let Some(start) = &self.rubber_band
             && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
         {
             let current_track = layout.track_at(mouse_pos.y).map(|(index, _)| index);

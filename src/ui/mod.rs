@@ -18,11 +18,7 @@ mod widget;
 mod window;
 mod workspace;
 
-pub fn spawn_ui_thread(
-    engine: Engine,
-    audio: AudioHost,
-    settings: Settings,
-) -> Result<(), eframe::Error> {
+pub fn run(engine: Engine, audio: AudioHost, settings: Settings) -> Result<(), eframe::Error> {
     eframe::run_native(
         "Tonique",
         native_options(),

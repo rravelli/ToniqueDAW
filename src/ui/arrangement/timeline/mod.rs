@@ -11,7 +11,7 @@ use crate::{
         arrangement::clip::ClipView,
         arrangement::{
             row_layout::RowLayout,
-            timeline::{drag::DragState, selection::Multiselect},
+            timeline::{drag::ClipDrag, selection::RubberBand},
             track_header::ROW_GAP,
         },
         commands::Commands,
@@ -31,9 +31,9 @@ mod selection;
 const PREVIEW_ALPHA: u8 = 80;
 
 pub struct Timeline {
-    drag_state: Option<DragState>,
-    clicked_pos: Option<Pos2>,
-    multiselect_start: Option<Multiselect>,
+    clip_drag: Option<ClipDrag>,
+    press_pos: Option<Pos2>,
+    rubber_band: Option<RubberBand>,
     /// Collapsed groups expanded by dragging over them, to collapse again once
     /// left.
     hover_expanded: Vec<TrackId>,
@@ -42,9 +42,9 @@ pub struct Timeline {
 impl Timeline {
     pub fn new() -> Self {
         Self {
-            drag_state: None,
-            clicked_pos: None,
-            multiselect_start: None,
+            clip_drag: None,
+            press_pos: None,
+            rubber_band: None,
             hover_expanded: Vec::new(),
         }
     }
@@ -84,7 +84,7 @@ impl Timeline {
         self.handle_dropped_audio(ui, viewport, state);
 
         // Draw multiselect zone
-        self.handle_multiselect(ui, state, layout, &timeline_res);
+        self.rubber_band_ui(ui, state, layout, &timeline_res);
 
         let hovered_files = ui.input(|i| i.raw.hovered_files.clone());
         if !hovered_files.is_empty() {
@@ -126,7 +126,7 @@ impl Timeline {
         layout: &RowLayout,
         viewport: Rect,
     ) -> bool {
-        let dragging = self.drag_state.is_some()
+        let dragging = self.clip_drag.is_some()
             || DragAndDrop::payload::<DragPayload>(ui.ctx())
                 .is_some_and(|p| matches!(*p, DragPayload::File(_)));
         let pointer = ui.input(|i| i.pointer.hover_pos());
@@ -178,7 +178,7 @@ impl Timeline {
         let mut dragged_track_index = None;
         let mut dragged_clip = None;
         let dragged_ids = self
-            .drag_state
+            .clip_drag
             .as_ref()
             .map_or(Vec::new(), |d| d.dragged_ids());
 
@@ -304,7 +304,7 @@ impl Timeline {
         let pos = pos2(x, top);
         let size = vec2(width, track.height);
         let theme = ui.app_theme();
-        let color = if track.disabled() {
+        let color = if track.is_silenced() {
             theme.bg_control_hover
         } else if dragged {
             theme.hover_overlay
@@ -476,7 +476,7 @@ fn paint_group_overview(ui: &Ui, state: &ProjectState, group: &TrackRow, lane: R
     for (k, track) in tracks.iter().enumerate() {
         let top = band.top() + k as f32 * strip;
         let rows = top..=top + strip;
-        let color = if track.disabled() {
+        let color = if track.is_silenced() {
             theme.text_disabled
         } else {
             track.color

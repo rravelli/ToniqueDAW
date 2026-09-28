@@ -1,6 +1,6 @@
 use egui::{FontId, Response, Ui, Widget, vec2};
 
-use crate::ui::widget::square_button::SquareButton;
+use crate::ui::widget::flat_button::FlatButton;
 
 const GAP: f32 = 2.;
 
@@ -40,7 +40,7 @@ impl<T: PartialEq + Copy> Widget for TabBar<'_, T> {
                 let width = (ui.available_width() - GAP * (count - 1.)) / count;
                 for (tab, name) in self.tabs {
                     let selected = *self.value == tab;
-                    let button = SquareButton::new(name)
+                    let button = FlatButton::new(name)
                         .size(vec2(width, self.height))
                         .font(FontId::proportional(12.))
                         .border_radius(2.)

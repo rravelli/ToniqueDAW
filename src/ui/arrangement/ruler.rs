@@ -6,11 +6,11 @@ use crate::{
     ui::arrangement::grid::PaintGrid,
     ui::{
         arrangement::track_headers::SPLITTER_WIDTH, theme::ThemeExt,
-        widget::square_button::SquareButton,
+        widget::flat_button::FlatButton,
     },
 };
 
-pub const NAVIGATION_BAR_HEIGHT: f32 = 30.;
+pub const RULER_HEIGHT: f32 = 30.;
 /// Height of the loop lane at the top of the ruler; the rest seeks.
 const LOOP_LANE_HEIGHT: f32 = 14.;
 /// How close to an edge of the loop brace grabs that edge, in points.
@@ -31,11 +31,11 @@ enum LoopDrag {
     },
 }
 
-pub struct NavigationBar {
+pub struct Ruler {
     loop_drag: Option<LoopDrag>,
 }
 
-impl NavigationBar {
+impl Ruler {
     pub fn new() -> Self {
         Self { loop_drag: None }
     }
@@ -43,41 +43,39 @@ impl NavigationBar {
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, track_width: f32) {
         ui.spacing_mut().interact_size.y = 0.;
         ui.horizontal(|ui| {
-            // Rectangle for zoom control
-            let nav_bar_rect = egui::Rect::from_min_size(
+            // ColorBar for zoom control
+            let ruler_rect = egui::Rect::from_min_size(
                 egui::pos2(ui.min_rect().left(), ui.min_rect().top()),
-                egui::vec2(ui.available_width() - track_width, NAVIGATION_BAR_HEIGHT),
+                egui::vec2(ui.available_width() - track_width, RULER_HEIGHT),
             );
             let (nav_bar_response, painter) = ui.allocate_painter(
-                vec2(ui.available_width() - track_width, NAVIGATION_BAR_HEIGHT),
+                vec2(ui.available_width() - track_width, RULER_HEIGHT),
                 Sense::click_and_drag(),
             );
 
             // Draw rectangle
-            painter.rect_filled(nav_bar_rect, 0.0, ui.app_theme().bg_raised);
+            painter.rect_filled(ruler_rect, 0.0, ui.app_theme().bg_raised);
             // Draw Labels
             state
                 .grid
-                .paint_labels(&painter, nav_bar_rect, state.bpm(), &ui.app_theme());
-            let loop_lane = Rect::from_min_size(
-                nav_bar_rect.min,
-                vec2(nav_bar_rect.width(), LOOP_LANE_HEIGHT),
-            );
+                .paint_labels(&painter, ruler_rect, state.bpm(), &ui.app_theme());
+            let loop_lane =
+                Rect::from_min_size(ruler_rect.min, vec2(ruler_rect.width(), LOOP_LANE_HEIGHT));
             let clicked_lane = self.loop_lane(ui, &painter, state, loop_lane);
             // Seek on click, scrub on drag
             if (nav_bar_response.clicked() || nav_bar_response.dragged() || clicked_lane)
                 && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
             {
-                state.seek(state.grid.x_to_beats(mouse_pos.x, nav_bar_rect));
+                state.seek(state.grid.x_to_beats(mouse_pos.x, ruler_rect));
             }
             // Zoom (the loop lane covers part of the bar, so don't rely on
             // the bar's own hover)
             if ui.input(|i| i.smooth_scroll_delta.y != 0.0)
                 && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
-                && nav_bar_rect.contains(mouse_pos)
+                && ruler_rect.contains(mouse_pos)
             {
                 let delta = ui.input(|i| i.smooth_scroll_delta.y);
-                state.grid.zoom_around(delta, mouse_pos.x, nav_bar_rect);
+                state.grid.zoom_around(delta, mouse_pos.x, ruler_rect);
             }
             ui.add_space(SPLITTER_WIDTH + 4.0);
             self.right_ui(ui, state);
@@ -206,18 +204,18 @@ impl NavigationBar {
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
             if ui
-                .add(SquareButton::new(ARROWS_OUT_LINE_VERTICAL).tooltip("Expand all"))
+                .add(FlatButton::new(ARROWS_OUT_LINE_VERTICAL).tooltip("Expand all"))
                 .clicked()
             {
                 state.set_all_collapsed(false);
             };
             if ui
-                .add(SquareButton::new(ARROWS_IN_LINE_VERTICAL).tooltip("Collapse all"))
+                .add(FlatButton::new(ARROWS_IN_LINE_VERTICAL).tooltip("Collapse all"))
                 .clicked()
             {
                 state.set_all_collapsed(true);
             };
-            ui.add_enabled(false, SquareButton::new(LINE_SEGMENTS).tooltip("Automate"));
+            ui.add_enabled(false, FlatButton::new(LINE_SEGMENTS).tooltip("Automate"));
         });
     }
 }

@@ -2,8 +2,7 @@ use crate::{
     core::state::{PlaybackState, ProjectState},
     ui::{
         arrangement::{
-            navigation_bar::NavigationBar, row_layout::RowLayout, timeline::Timeline,
-            track_headers::TrackHeaders,
+            row_layout::RowLayout, ruler::Ruler, timeline::Timeline, track_headers::TrackHeaders,
         },
         commands::Commands,
         graph::GraphView,
@@ -19,7 +18,7 @@ const TIMELINE_SLACK_BARS: f32 = 16.;
 
 pub struct CentralPanel {
     timeline: Timeline,
-    navigation_bar: NavigationBar,
+    ruler: Ruler,
     tracks: TrackHeaders,
     graph: GraphView,
     /// Following the playhead is paused after scrolling by hand during
@@ -32,7 +31,7 @@ impl CentralPanel {
     pub fn new() -> Self {
         Self {
             timeline: Timeline::new(),
-            navigation_bar: NavigationBar::new(),
+            ruler: Ruler::new(),
             tracks: TrackHeaders::new(),
             graph: GraphView::new(),
             follow_paused: false,
@@ -71,7 +70,7 @@ impl CentralPanel {
         }
         let available_rect = ui.available_rect_before_wrap();
         // Draw navigation bar on top
-        self.navigation_bar.ui(ui, state, self.tracks.width);
+        self.ruler.ui(ui, state, self.tracks.width);
 
         let (viewport, _) = ui.allocate_exact_size(ui.available_size(), Sense::all());
         ui.set_clip_rect(viewport);
@@ -374,7 +373,7 @@ mod tests {
     /// it again; dropping inside leaves it expanded.
     #[test]
     fn collapsed_groups_expand_while_dragging_over_them() {
-        use crate::ui::arrangement::navigation_bar::NAVIGATION_BAR_HEIGHT;
+        use crate::ui::arrangement::ruler::RULER_HEIGHT;
         use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
         use egui::{Event, PointerButton, Pos2};
 
@@ -422,7 +421,7 @@ mod tests {
                 .collapsed
         };
         // The group's row is the first lane, just below the ruler.
-        let over_group = Pos2::new(300., NAVIGATION_BAR_HEIGHT + 10.);
+        let over_group = Pos2::new(300., RULER_HEIGHT + 10.);
         let far_below = Pos2::new(300., 600.);
 
         frame(&mut state, Vec::new()); // lay out once

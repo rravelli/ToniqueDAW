@@ -7,11 +7,11 @@ use crate::{
         font::PHOSPHOR_FILL,
         theme::{Theme, ThemeExt, with_alpha},
         widget::{
+            color_bar::ColorBar,
             color_select::ColorSelect,
             context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
-            meter::LoudnessMeter as Meter,
-            rectangle::Rectangle,
-            square_button::SquareButton,
+            flat_button::FlatButton,
+            meter::LevelMeter,
         },
     },
     utils::display_name,
@@ -49,8 +49,8 @@ pub const HEADER_INSET: f32 = STROKE_WIDTH + PADDING;
 
 #[derive(Debug, Clone)]
 pub struct TrackHeader {
-    gain: f32,
-    old_volume: f32,
+    gain_db: f32,
+    committed_volume: f32,
     edit: bool,
     focus_requested: bool,
 }
@@ -60,8 +60,8 @@ impl TrackHeader {
         Self {
             focus_requested: false,
             edit: false,
-            gain: 0.,
-            old_volume: 1.0,
+            gain_db: 0.,
+            committed_volume: 1.0,
         }
     }
 
@@ -75,7 +75,7 @@ impl TrackHeader {
 
         let mut volume_changed = false;
         let is_group = track.kind == TrackKind::Group;
-        let muted = track.disabled();
+        let silenced = track.is_silenced();
         let is_solo = matches!(track.solo, crate::core::track::TrackSoloState::Solo);
 
         let theme = ui.app_theme();
@@ -104,13 +104,15 @@ impl TrackHeader {
                         ui.add_space(levels as f32 * INDENT);
                     }
 
-                    // Left Side: Rectangle
+                    // Left Side: ColorBar
                     ui.add(
-                        Rectangle::new(Vec2::new(COLOR_BAR_WIDTH, actual_height)).fill(if !muted {
-                            track.color
-                        } else {
-                            theme.text_disabled
-                        }),
+                        ColorBar::new(Vec2::new(COLOR_BAR_WIDTH, actual_height)).color(
+                            if !silenced {
+                                track.color
+                            } else {
+                                theme.text_disabled
+                            },
+                        ),
                     );
                     let response = ui.interact(
                         Rect::from_min_size(
@@ -178,9 +180,9 @@ impl TrackHeader {
                         let track_view_mut = state.track_view_mut(&track.id);
                         // Extra controls
                         if !track_view_mut.collapsed {
-                            let prev_gain = self.gain;
-                            self.gain_slider(ui, RangeInclusive::new(-40., 5.), track, state);
-                            volume_changed = prev_gain != self.gain;
+                            let prev_gain_db = self.gain_db;
+                            self.volume_slider(ui, RangeInclusive::new(-40., 5.), track, state);
+                            volume_changed = prev_gain_db != self.gain_db;
                         };
                     });
 
@@ -189,8 +191,11 @@ impl TrackHeader {
                         ui.vertical(|ui| {
                             ui.add_sized(
                                 Vec2::new(6.0, ui.available_height()),
-                                Meter::new(Vec2::new(METER_WIDTH, actual_height), metrics.clone())
-                                    .disabled(muted),
+                                LevelMeter::new(
+                                    Vec2::new(METER_WIDTH, actual_height),
+                                    metrics.clone(),
+                                )
+                                .disabled(silenced),
                             );
                         });
                     }
@@ -349,7 +354,7 @@ impl TrackHeader {
             egui_phosphor::fill::CARET_DOWN
         };
         let response = ui.add(
-            SquareButton::new(icon)
+            FlatButton::new(icon)
                 .family(egui::FontFamily::Name(PHOSPHOR_FILL.into()))
                 .square(BUTTON_SIZE),
         );
@@ -361,7 +366,7 @@ impl TrackHeader {
         response
     }
 
-    fn gain_slider(
+    fn volume_slider(
         &mut self,
         ui: &mut Ui,
         range: std::ops::RangeInclusive<f32>,
@@ -370,26 +375,26 @@ impl TrackHeader {
     ) -> Response {
         let desired_size = egui::vec2(2. * BUTTON_SIZE + 1., 20.);
         let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
-        self.gain = 20. * track.volume.log10();
+        self.gain_db = 20. * track.volume.log10();
 
         if response.dragged() {
             let delta = response.drag_delta().x;
-            self.gain += delta * (range.end() - range.start()) / rect.width();
-            self.gain = self.gain.clamp(*range.start(), *range.end());
-            state.set_volume(track.id.clone(), 10f32.powf(self.gain / 20.));
+            self.gain_db += delta * (range.end() - range.start()) / rect.width();
+            self.gain_db = self.gain_db.clamp(*range.start(), *range.end());
+            state.set_volume(track.id.clone(), 10f32.powf(self.gain_db / 20.));
             response.mark_changed();
         }
 
         if response.drag_stopped() {
-            let new_volume = 10f32.powf(self.gain / 20.);
-            state.commit_volume(track.id.clone(), self.old_volume, new_volume);
-            self.old_volume = new_volume;
+            let new_volume = 10f32.powf(self.gain_db / 20.);
+            state.commit_volume(track.id.clone(), self.committed_volume, new_volume);
+            self.committed_volume = new_volume;
         }
 
         if response.double_clicked() {
-            self.gain = 0.;
-            state.commit_volume(track.id.clone(), self.old_volume, 1.0);
-            self.old_volume = 1.0;
+            self.gain_db = 0.;
+            state.commit_volume(track.id.clone(), self.committed_volume, 1.0);
+            self.committed_volume = 1.0;
             response.mark_changed();
         }
 
@@ -398,7 +403,7 @@ impl TrackHeader {
         }
 
         // Compute fill ratio
-        let t = (self.gain - *range.start()) / (*range.end() - *range.start());
+        let t = (self.gain_db - *range.start()) / (*range.end() - *range.start());
 
         // Paint background bar
         let theme = ui.app_theme();
@@ -418,7 +423,7 @@ impl TrackHeader {
         painter.rect_filled(fill_rect, 2.0, fill_color);
 
         // Text value
-        let text = format!("{:.1}", self.gain);
+        let text = format!("{:.1}", self.gain_db);
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
@@ -446,8 +451,8 @@ impl TrackHeader {
 }
 
 /// Track header toggle: `fill` when on, the default control colour when off.
-fn toggle_button(text: &str, fill: Option<Color32>, theme: &Theme) -> SquareButton {
-    let button = SquareButton::new(text).square(BUTTON_SIZE);
+fn toggle_button(text: &str, fill: Option<Color32>, theme: &Theme) -> FlatButton {
+    let button = FlatButton::new(text).square(BUTTON_SIZE);
     match fill {
         Some(fill) => button.fill(fill).color(theme.text_on(fill)),
         None => button,

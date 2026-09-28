@@ -4,7 +4,7 @@ use crate::{
     ui::{
         font::PHOSPHOR_REGULAR,
         theme::ThemeExt,
-        widget::{section::SectionHeader, square_button::SquareButton},
+        widget::{flat_button::FlatButton, section::SectionHeader},
     },
 };
 use egui::{
@@ -100,7 +100,7 @@ impl ShortcutsTab {
         );
         ui.separator();
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            let reset_all = SquareButton::new("Reset all")
+            let reset_all = FlatButton::new("Reset all")
                 .size(vec2(0., 22.))
                 .padding(10.)
                 .font(FontId::proportional(12.))
@@ -250,16 +250,16 @@ fn recorder_id() -> Id {
     Id::new("settings-shortcut-recorder")
 }
 
-fn chip(text: impl ToString) -> SquareButton {
-    SquareButton::new(text)
+fn chip(text: impl ToString) -> FlatButton {
+    FlatButton::new(text)
         .size(vec2(0., CHIP_HEIGHT))
         .padding(8.)
         .font(FontId::proportional(12.))
         .border_radius(2.)
 }
 
-fn icon_button(icon: &str) -> SquareButton {
-    SquareButton::ghost(icon)
+fn icon_button(icon: &str) -> FlatButton {
+    FlatButton::ghost(icon)
         .square(CHIP_HEIGHT)
         .font(FontId::new(12., FontFamily::Name(PHOSPHOR_REGULAR.into())))
         .border_radius(2.)

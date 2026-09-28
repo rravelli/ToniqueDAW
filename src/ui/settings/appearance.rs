@@ -3,7 +3,7 @@ use crate::{
     ui::{
         font::PHOSPHOR_REGULAR,
         theme::{COLORS, Theme, ThemeExt, ThemeLibrary},
-        widget::{section::SectionHeader, select::Select, square_button::SquareButton},
+        widget::{flat_button::FlatButton, section::SectionHeader, select::Select},
     },
     utils::color::format_color,
 };
@@ -279,8 +279,8 @@ fn color_row(ui: &mut Ui, color: &mut Color32, base: Color32, issue: Option<&Str
     changed
 }
 
-fn icon_button(icon: &str) -> SquareButton {
-    SquareButton::new(icon)
+fn icon_button(icon: &str) -> FlatButton {
+    FlatButton::new(icon)
         .square(BUTTON_HEIGHT - 2.)
         .font(FontId::new(12., FontFamily::Name(PHOSPHOR_REGULAR.into())))
         .border_radius(2.)

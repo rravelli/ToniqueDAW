@@ -7,7 +7,7 @@ use crate::ui::theme::ThemeExt;
 /// Button with a solid fill. Colours default to the theme's control colours
 /// (or the accent when [`Self::selected`]); `fill`, `color` and
 /// `hover_color` override them.
-pub struct SquareButton {
+pub struct FlatButton {
     size: Vec2,
     ghost: bool,
     selected: bool,
@@ -24,7 +24,7 @@ pub struct SquareButton {
     tooltip_text: String,
 }
 
-impl SquareButton {
+impl FlatButton {
     pub fn new(text: impl ToString) -> Self {
         Self {
             size: vec2(15., 15.),
@@ -96,7 +96,7 @@ impl SquareButton {
     }
 }
 
-impl Widget for SquareButton {
+impl Widget for FlatButton {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         // Disabled through `ui.add_enabled` or a disabled parent
         let enabled = ui.is_enabled();

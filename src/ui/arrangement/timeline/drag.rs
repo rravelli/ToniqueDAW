@@ -13,22 +13,22 @@ use egui::{Rect, Stroke, Ui, pos2, vec2};
 use tonique_engine::edit::ClipId;
 
 #[derive(Clone)]
-pub struct DragState {
-    pub elements: Vec<ClipDragState>,
+pub struct ClipDrag {
+    pub clips: Vec<DraggedClip>,
     pub duplicate: bool,
     pub min_track_delta: i32,
 }
 #[derive(Clone)]
-pub struct ClipDragState {
+pub struct DraggedClip {
     pub clip: AudioClip,
     /// From the clip's start to the pointer, horizontally.
     pub grab_x: f32,
     pub track_index_delta: i32,
 }
 
-impl DragState {
+impl ClipDrag {
     pub fn dragged_ids(&self) -> Vec<ClipId> {
-        self.elements.iter().map(|e| e.clip.id).collect()
+        self.clips.iter().map(|e| e.clip.id).collect()
     }
 }
 
@@ -44,7 +44,7 @@ impl Timeline {
     ) {
         let mouse_pos = ui.ctx().input(|i| i.pointer.hover_pos());
         // Create dragging objects
-        if self.drag_state.is_none()
+        if self.clip_drag.is_none()
             && let Some(clip) = dragged_clip
             && let Some(mouse_pos) = mouse_pos
             && let Some(old_track) = dragged_track_index
@@ -52,7 +52,7 @@ impl Timeline {
             if !state.is_clip_selected(clip.id) {
                 state.select_clips(vec![clip.id]);
             }
-            let mut elements = Vec::new();
+            let mut clips = Vec::new();
             let mut new_selected_clips = Vec::new();
             let duplicate = ui.input(|i| i.modifiers.ctrl);
             let mut min_track_delta = 0;
@@ -71,7 +71,7 @@ impl Timeline {
                         let track_index_delta = track.index as i32 - old_track as i32;
                         min_track_delta = min_track_delta.min(track_index_delta);
                         let x = state.grid.beats_to_x(clip.position, viewport);
-                        elements.push(ClipDragState {
+                        clips.push(DraggedClip {
                             clip: new_clip,
                             grab_x: mouse_pos.x - x,
                             track_index_delta,
@@ -80,15 +80,15 @@ impl Timeline {
                 }
             }
             state.select_clips(new_selected_clips);
-            self.drag_state = Some(DragState {
-                elements,
+            self.clip_drag = Some(ClipDrag {
+                clips,
                 duplicate,
                 min_track_delta,
             });
         }
 
         // Render clips while dragging
-        if let Some(mut drag_state) = self.drag_state.take()
+        if let Some(mut clip_drag) = self.clip_drag.take()
             && let Some(mouse_pos) = mouse_pos
         {
             // Find track at mouse position
@@ -96,7 +96,7 @@ impl Timeline {
             let mouse_track_index = layout
                 .track_at(mouse_pos.y)
                 .map_or(state.track_count(), |(index, _)| index)
-                .max(-drag_state.min_track_delta as usize)
+                .max(-clip_drag.min_track_delta as usize)
                 as i32;
 
             // Snap the nearest clip edge: starts to the grid or to snap
@@ -105,9 +105,9 @@ impl Timeline {
             let mut beat_delta: f32 = f32::INFINITY;
             let mut snapped_to = None;
             if ui.input(|i| !i.modifiers.alt) {
-                let targets = state.snap_targets(&drag_state.dragged_ids());
+                let targets = state.snap_targets(&clip_drag.dragged_ids());
                 let bpm = state.bpm();
-                for element in drag_state.elements.iter() {
+                for element in clip_drag.clips.iter() {
                     let start = state
                         .grid
                         .x_to_beats(mouse_pos.x - element.grab_x, viewport);
@@ -136,8 +136,8 @@ impl Timeline {
                 beat_delta = 0.;
             }
             // Keep the group from starting before the first beat.
-            let first = drag_state
-                .elements
+            let first = clip_drag
+                .clips
                 .iter()
                 .map(|e| state.grid.x_to_beats(mouse_pos.x - e.grab_x, viewport))
                 .fold(f32::INFINITY, f32::min);
@@ -156,7 +156,7 @@ impl Timeline {
             }
 
             let mut track_indexes = Vec::new();
-            for element in drag_state.elements.iter_mut() {
+            for element in clip_drag.clips.iter_mut() {
                 if let Some(duration) = element.clip.duration() {
                     // Calculate track index
                     let track_index =
@@ -202,9 +202,9 @@ impl Timeline {
 
             // Update state on mouse released
             if !ui.input(|i| i.pointer.primary_down()) {
-                self.commit_drag(state, drag_state, track_indexes);
-            } else if !drag_state.duplicate || ui.input(|i| i.modifiers.ctrl) {
-                self.drag_state = Some(drag_state);
+                self.commit_drag(state, clip_drag, track_indexes);
+            } else if !clip_drag.duplicate || ui.input(|i| i.modifiers.ctrl) {
+                self.clip_drag = Some(clip_drag);
                 autoscroll(ui, state, layout, viewport, mouse_pos);
             }
         }
@@ -213,14 +213,14 @@ impl Timeline {
     fn commit_drag(
         &mut self,
         state: &mut ProjectState,
-        drag_state: DragState,
+        clip_drag: ClipDrag,
         track_indexes: Vec<usize>,
     ) {
-        let ids = drag_state.dragged_ids();
+        let ids = clip_drag.dragged_ids();
 
         let mut tracks: Vec<_> = state.tracks().map(|t| t.id).collect();
         state.begin_batch();
-        for (i, element) in drag_state.elements.iter().enumerate() {
+        for (i, element) in clip_drag.clips.iter().enumerate() {
             let track_index = track_indexes[i];
             // Create missing tracks
             while tracks.len() <= track_index {
@@ -230,13 +230,13 @@ impl Timeline {
             let clone = element.clip.clone();
 
             let track_id = tracks[track_index];
-            if drag_state.duplicate {
+            if clip_drag.duplicate {
                 state.add_clips(&track_id, vec![clone]);
             } else {
                 state.move_clip(&clone.id, &track_id, clone.position, &ids);
             }
         }
         state.commit_batch();
-        self.drag_state = None;
+        self.clip_drag = None;
     }
 }

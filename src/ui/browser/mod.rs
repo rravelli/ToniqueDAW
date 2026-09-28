@@ -5,7 +5,7 @@ use crate::{
         browser::{items::FileList, preview::PreviewPanel},
         font::PHOSPHOR_FILL,
         theme::ThemeExt,
-        widget::{context_menu::ContextMenuButton, square_button::SquareButton},
+        widget::{context_menu::ContextMenuButton, flat_button::FlatButton},
     },
 };
 use egui::{Button, FontId, RichText, ScrollArea, Ui, Widget};
@@ -120,14 +120,10 @@ impl FileBrowser {
 
     fn choose_dir_button(&mut self, ui: &mut Ui) {
         if ui
-            .add(
-                SquareButton::ghost(FOLDER_PLUS)
-                    .square(20.)
-                    .font(FontId::new(
-                        15.,
-                        egui::FontFamily::Name(PHOSPHOR_FILL.into()),
-                    )),
-            )
+            .add(FlatButton::ghost(FOLDER_PLUS).square(20.).font(FontId::new(
+                15.,
+                egui::FontFamily::Name(PHOSPHOR_FILL.into()),
+            )))
             .clicked()
         {
             let picked_dir = FileDialog::new().pick_folder();

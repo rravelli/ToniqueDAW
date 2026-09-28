@@ -6,7 +6,7 @@ use crate::{
     core::state::{PlaybackState, ProjectState},
     ui::{
         font::PHOSPHOR_FILL, theme::ThemeExt, waveform::paint_waveform,
-        widget::square_button::SquareButton,
+        widget::flat_button::FlatButton,
     },
 };
 
@@ -118,7 +118,7 @@ impl PreviewPanel {
     fn play_control_ui(&self, ui: &mut Ui, state: &mut ProjectState, audio: &AudioInfo) {
         if ui
             .add(
-                SquareButton::ghost(if state.preview_playback_state() == PlaybackState::Paused {
+                FlatButton::ghost(if state.preview_playback_state() == PlaybackState::Paused {
                     PLAY
                 } else {
                     STOP

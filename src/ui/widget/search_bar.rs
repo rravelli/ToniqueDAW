@@ -6,7 +6,7 @@ use egui::{
 };
 use egui_phosphor::regular::{MAGNIFYING_GLASS, X};
 
-use crate::ui::{font::PHOSPHOR_REGULAR, theme::ThemeExt, widget::square_button::SquareButton};
+use crate::ui::{font::PHOSPHOR_REGULAR, theme::ThemeExt, widget::flat_button::FlatButton};
 
 const HEIGHT: f32 = 22.;
 const PADDING_X: f32 = 6.;
@@ -80,7 +80,7 @@ impl SearchBar {
                     if !self.query.is_empty() {
                         let clear = ui
                             .add(
-                                SquareButton::ghost(X)
+                                FlatButton::ghost(X)
                                     .square(ICON_SIZE)
                                     .border_radius(ICON_SIZE / 2.)
                                     .color(theme.text_muted)

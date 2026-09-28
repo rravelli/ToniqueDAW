@@ -44,7 +44,7 @@ pub struct TrackRow {
 }
 
 impl TrackRow {
-    pub fn disabled(&self) -> bool {
+    pub fn is_silenced(&self) -> bool {
         self.muted && !matches!(self.solo, TrackSoloState::Solo)
             || matches!(self.solo, TrackSoloState::Soloing)
     }
