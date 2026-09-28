@@ -722,7 +722,7 @@ mod projects {
         view.name = "Drums".into();
         view.color = Color32::from_rgb(10, 20, 30);
         view.height = 90.;
-        view.closed = true;
+        view.collapsed = true;
         state.commit_track_mut(&track);
         state.add_effect(&track, EffectId::Equalizer, 0);
         let plugin = state.edit().track(track).unwrap().channel.plugins[0].clone();
@@ -754,7 +754,7 @@ mod projects {
             name: "Gone".into(),
             color: "#ffffff".into(),
             height: 60.,
-            closed: false,
+            collapsed: false,
             soloed: false,
             group: None,
             channel: project.master.clone(),
@@ -952,21 +952,21 @@ mod groups {
     }
 
     #[test]
-    fn folded_groups_hide_their_rows() {
+    fn collapsed_groups_hide_their_rows() {
         let mut state = setup_state();
         let [a, b, _] = ["a", "b", "c"].map(|n| track(&mut state, n));
         let inner = state.group(&[a]).unwrap();
         rename(&mut state, inner, "in");
         let outer = state.group(&[inner, b]).unwrap();
         rename(&mut state, outer, "out");
-        state.track_mut(&inner).closed = true;
+        state.track_mut(&inner).collapsed = true;
         assert_eq!(tree(&state), ["out", "  in", "  b", "c"]);
-        state.track_mut(&outer).closed = true;
+        state.track_mut(&outer).collapsed = true;
         assert_eq!(tree(&state), ["out", "c"]);
         assert!(state.is_hidden(a) && state.is_hidden(inner));
         assert!(!state.is_hidden(outer));
 
-        // A rubber band across the folded group doesn't pick what's hidden.
+        // A rubber band across the collapsed group doesn't pick what's hidden.
         let clip = add_clip(&mut state, b, 0., 1.);
         state.select_in_bounds(crate::core::state::SelectionBounds::between(
             (0, 0.),
@@ -1021,7 +1021,7 @@ mod groups {
         rename(&mut state, outer, "out");
         state.toggle_solo(inner, false);
         state.set_mute(outer, true);
-        state.track_mut(&inner).closed = true;
+        state.track_mut(&inner).collapsed = true;
         let _ = c;
 
         let saved = state.project(None);
@@ -1054,17 +1054,35 @@ mod groups {
     }
 
     #[test]
-    fn folding_keeps_the_open_height() {
+    fn projects_with_old_collapse_keys_still_open() {
+        // Before `collapsed`: `folded` on groups, `closed` on tracks.
+        let old = r##"{
+            "version": 1, "bpm": 120.0, "loop_range": [0.0, 16.0], "looping": false,
+            "master": {"volume": 1.0, "pan": 0.0, "muted": false},
+            "groups": [{"name": "g", "color": "#ffffff", "height": 60.0, "folded": true,
+                        "soloed": false, "parent": null, "volume": 1.0, "pan": 0.0,
+                        "muted": false}],
+            "tracks": [{"name": "a", "color": "#ffffff", "height": 60.0, "closed": true,
+                        "soloed": false, "group": 0, "volume": 1.0, "pan": 0.0,
+                        "muted": false, "clips": []}]
+        }"##;
+        let file: crate::core::project::ProjectFile = serde_json::from_str(old).unwrap();
+        assert!(file.groups[0].collapsed);
+        assert!(file.tracks[0].collapsed);
+    }
+
+    #[test]
+    fn collapsing_keeps_the_expanded_height() {
         let mut state = setup_state();
         let a = track(&mut state, "a");
         let g = state.group(&[a]).unwrap();
         state.track_mut(&g).height = 120.;
-        state.set_closed(&g, true);
+        state.set_collapsed(&g, true);
         assert_eq!(
             state.track_mut(&g).height,
-            crate::core::track::TRACK_CLOSED_HEIGHT
+            crate::core::track::TRACK_COLLAPSED_HEIGHT
         );
-        state.set_closed(&g, false);
+        state.set_collapsed(&g, false);
         assert_eq!(state.track_mut(&g).height, 120.);
     }
 

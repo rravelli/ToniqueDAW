@@ -12,12 +12,12 @@ use crate::{
     ui::{
         font::PHOSPHOR_REGULAR,
         panels::{central_panel::SCROLLBAR_WIDTH, left_panel::DragPayload},
-        track::{COLOR_BAR_WIDTH, HANDLE_HEIGHT, HEADER_INSET, TrackHeader, color_bar_x},
+        track::{COLOR_BAR_WIDTH, HEADER_INSET, ROW_GAP, TrackHeader, color_bar_x},
         widget::{context_menu::ContextMenuButton, square_button::SquareButton},
     },
 };
 
-pub const DRAGGER_WIDTH: f32 = 2.0;
+pub const SPLITTER_WIDTH: f32 = 2.0;
 const DEFAULT_TRACK_WIDTH: f32 = 150.;
 
 /// Share of a group header's height, from the top, where a drop goes above
@@ -43,7 +43,7 @@ impl TrackHeaders {
 
         let dragger_rect = Rect::from_min_size(
             pos2(left, viewport.top()),
-            vec2(DRAGGER_WIDTH, viewport.height()),
+            vec2(SPLITTER_WIDTH, viewport.height()),
         );
         let response = ui.allocate_rect(dragger_rect, Sense::drag());
 
@@ -65,7 +65,7 @@ impl TrackHeaders {
         ui.scope_builder(
             egui::UiBuilder::new()
                 .max_rect(Rect::from_min_max(
-                    pos2(left + DRAGGER_WIDTH, viewport.top() - state.grid.offset.y),
+                    pos2(left + SPLITTER_WIDTH, viewport.top() - state.grid.offset.y),
                     pos2(viewport.right() - SCROLLBAR_WIDTH, viewport.bottom()),
                 ))
                 .id_salt("track-area"),
@@ -77,7 +77,7 @@ impl TrackHeaders {
         ui.scope_builder(
             egui::UiBuilder::new().max_rect(Rect::from_min_max(
                 pos2(
-                    left + DRAGGER_WIDTH,
+                    left + SPLITTER_WIDTH,
                     viewport.bottom() - master_track.height,
                 ),
                 pos2(viewport.right() - SCROLLBAR_WIDTH, viewport.bottom()),
@@ -118,8 +118,8 @@ impl TrackHeaders {
 
                 // Skip if track is entirely outside the visible vertical range
                 if track_bottom < view_top || y > view_bottom {
-                    y += track.height + HANDLE_HEIGHT;
-                    ui.add_space(track.height + HANDLE_HEIGHT);
+                    y += track.height + ROW_GAP;
+                    ui.add_space(track.height + ROW_GAP);
                     continue;
                 }
 
@@ -146,7 +146,7 @@ impl TrackHeaders {
                     state.add_effect(&track.id, id, 0);
                 }
 
-                y += track.height + HANDLE_HEIGHT;
+                y += track.height + ROW_GAP;
             }
             paint_group_scopes(ui, &placed);
             self.drop_rows(ui, state, &placed);
@@ -177,7 +177,7 @@ impl TrackHeaders {
         );
 
         if res.clicked() {
-            state.deselect();
+            state.clear_track_selection();
         }
 
         res.context_menu(|ui| {
@@ -245,7 +245,7 @@ impl TrackHeaders {
 /// for dropping into a group, else a line at the rect's top.
 fn drop_target(placed: &[(TrackReferenceCore, Rect)], y: f32) -> Option<(RowTarget, Rect)> {
     for (i, (row, rect)) in placed.iter().enumerate() {
-        if y > rect.bottom() + HANDLE_HEIGHT {
+        if y > rect.bottom() + ROW_GAP {
             continue;
         }
         let share = (y - rect.top()) / rect.height().max(1.);
@@ -265,12 +265,12 @@ fn drop_target(placed: &[(TrackReferenceCore, Rect)], y: f32) -> Option<(RowTarg
     Some((RowTarget::End, last.translate(vec2(0., last.height()))))
 }
 
-/// Extend each open group's coloured bar down to its last row, so its
+/// Extend each expanded group's coloured bar down to its last row, so its
 /// scope shows.
 fn paint_group_scopes(ui: &Ui, placed: &[(TrackReferenceCore, Rect)]) {
     let theme = ui.app_theme();
     for (i, (group, rect)) in placed.iter().enumerate() {
-        if group.kind != TrackKind::Group || group.closed {
+        if group.kind != TrackKind::Group || group.collapsed {
             continue;
         }
         let Some((_, last)) = placed[i + 1..]

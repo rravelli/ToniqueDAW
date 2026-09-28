@@ -169,7 +169,7 @@ impl GridService {
         self.resolution = new_resolution;
     }
 
-    pub fn render_clip_grid(&self, painter: &Painter, viewport: Rect, rect: Rect, color: Color32) {
+    pub fn paint_clip_grid(&self, painter: &Painter, viewport: Rect, rect: Rect, color: Color32) {
         if self.resolution.divisions_per_beat(self.beats_per_bar)
             <= GridResolution::Bar.divisions_per_beat(self.beats_per_bar)
         {
@@ -204,7 +204,7 @@ impl GridService {
         }
     }
 
-    pub fn render_grid(&self, painter: &Painter, viewport: Rect, theme: &Theme) {
+    pub fn paint_grid(&self, painter: &Painter, viewport: Rect, theme: &Theme) {
         let divisions_per_beat = self.resolution.divisions_per_beat(self.beats_per_bar);
         let step = self.pixels_per_beat / divisions_per_beat; // pixel spacing between grid lines
 
@@ -243,7 +243,7 @@ impl GridService {
         }
     }
 
-    pub fn render_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
+    pub fn paint_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
         let divisions_per_beat = self.resolution.divisions_per_beat(self.beats_per_bar);
         let step = self.pixels_per_beat / divisions_per_beat; // pixel spacing between grid lines
 
@@ -303,10 +303,10 @@ impl GridService {
             x += step;
         }
 
-        self.render_time_labels(painter, rect, bpm, theme);
+        self.paint_time_labels(painter, rect, bpm, theme);
     }
 
-    fn render_time_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
+    fn paint_time_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
         let seconds_step = self.resolution.step_size_secs();
         let step = self.pixels_per_beat * bpm / 60. * seconds_step;
         let mut step_index = (self.offset.x / step).floor() as i32;

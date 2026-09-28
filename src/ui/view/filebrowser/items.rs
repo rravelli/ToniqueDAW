@@ -96,7 +96,7 @@ impl FileList {
                 .unwrap_or_default();
 
             for (index, file, open) in visible_rows {
-                if self.render_item(ui, index, &file, open, state) {
+                if self.item_ui(ui, index, &file, open, state) {
                     folder_toggles.push(index);
                 }
             }
@@ -173,7 +173,7 @@ impl FileList {
         }
     }
 
-    pub fn render_item(
+    pub fn item_ui(
         &mut self,
         ui: &mut Ui,
         index: usize,

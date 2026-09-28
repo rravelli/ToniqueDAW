@@ -3,7 +3,7 @@ use crate::{
     ui::{
         clip::ClipView,
         theme::ThemeExt,
-        track::HANDLE_HEIGHT,
+        track::ROW_GAP,
         utils::{find_track_at, track_y},
         view::timeline::{Timeline, scroll::autoscroll},
     },
@@ -76,7 +76,7 @@ impl Timeline {
                         });
                     }
                 }
-                y += track.height + HANDLE_HEIGHT;
+                y += track.height + ROW_GAP;
             }
             state.select_clips(new_selected_clips);
             self.drag_state = Some(DragState {
@@ -183,7 +183,7 @@ impl Timeline {
                     let mut color = ui.app_theme().text_muted;
                     let mut height = DEFAULT_TRACK_HEIGHT;
                     if let Some(t) = state.track_from_index(track_index) {
-                        show_waveform = !t.closed;
+                        show_waveform = !t.collapsed;
                         color = t.color;
                         height = t.height;
                     }

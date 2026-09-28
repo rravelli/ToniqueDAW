@@ -39,7 +39,9 @@ pub struct GroupFile {
     /// `#rrggbb`.
     pub color: String,
     pub height: f32,
-    pub folded: bool,
+    /// Older projects call it `folded`.
+    #[serde(alias = "folded")]
+    pub collapsed: bool,
     pub soloed: bool,
     /// Index in `groups` of the group holding it.
     pub parent: Option<usize>,
@@ -53,7 +55,9 @@ pub struct TrackFile {
     /// `#rrggbb`.
     pub color: String,
     pub height: f32,
-    pub closed: bool,
+    /// Older projects call it `closed`.
+    #[serde(alias = "closed")]
+    pub collapsed: bool,
     pub soloed: bool,
     /// Index in `groups` of the group holding it.
     #[serde(default)]
@@ -215,7 +219,7 @@ mod tests {
                 name: "Drums".into(),
                 color: "#e5736b".into(),
                 height: 60.,
-                closed: false,
+                collapsed: false,
                 soloed: true,
                 group: None,
                 channel: ChannelFile {

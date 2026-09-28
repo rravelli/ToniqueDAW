@@ -24,7 +24,7 @@ use crate::{
             sources::SourceRegistry,
         },
         track::{
-            MutableTrackCore, TRACK_CLOSED_HEIGHT, TrackKind, TrackReferenceCore, TrackSoloState,
+            MutableTrackCore, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackReferenceCore, TrackSoloState,
         },
     },
     ui::{
@@ -59,8 +59,8 @@ const DEFAULT_BPM: f64 = 120.;
 /// Length of the loop region in a new project.
 const DEFAULT_LOOP_BARS: f32 = 4.;
 const TRACK_NAME: &str = "# Audio Track";
-/// Smallest height of an open row (its controls must fit).
-pub const MIN_OPEN_HEIGHT: f32 = TRACK_CLOSED_HEIGHT + 25.;
+/// Smallest height of an expanded row (its controls must fit).
+pub const MIN_EXPANDED_HEIGHT: f32 = TRACK_COLLAPSED_HEIGHT + 25.;
 
 #[derive(Clone, Debug)]
 enum ProjectStatePendingAction {
@@ -552,27 +552,27 @@ impl ToniqueProjectState {
         self.pending_actions
             .push(ProjectStatePendingAction::DeleteTrack { id: *id });
     }
-    /// Close or open all tracks
-    pub fn set_all_close(&mut self, close: bool) {
+    /// Collapse or expand every row.
+    pub fn set_all_collapsed(&mut self, collapsed: bool) {
         let ids: Vec<TrackId> = self.views.keys().copied().collect();
         for id in ids {
-            self.set_closed(&id, close);
+            self.set_collapsed(&id, collapsed);
         }
     }
-    /// Close (collapse; fold, for a group) or open a row, going back to its
-    /// previous height when opened.
-    pub fn set_closed(&mut self, id: &TrackId, closed: bool) {
+    /// Collapse or expand a row, going back to its previous height when
+    /// expanded.
+    pub fn set_collapsed(&mut self, id: &TrackId, collapsed: bool) {
         let view = self.track_mut(id);
-        if view.closed == closed {
+        if view.collapsed == collapsed {
             return;
         }
-        if closed {
-            view.open_height = view.height;
-            view.height = TRACK_CLOSED_HEIGHT;
+        if collapsed {
+            view.expanded_height = view.height;
+            view.height = TRACK_COLLAPSED_HEIGHT;
         } else {
-            view.height = view.open_height.max(MIN_OPEN_HEIGHT);
+            view.height = view.expanded_height.max(MIN_EXPANDED_HEIGHT);
         }
-        view.closed = closed;
+        view.collapsed = collapsed;
     }
     // Clips
     fn clip_ops(&mut self, label: &'static str, f: impl FnOnce(&mut Self, &mut Vec<ClipOp>)) {
@@ -928,7 +928,7 @@ impl ToniqueProjectState {
     pub fn select_track(&mut self, id: &TrackId) {
         self.selected_tracks = vec![*id];
     }
-    pub fn deselect(&mut self) {
+    pub fn clear_track_selection(&mut self) {
         self.selected_tracks.clear();
     }
     pub fn selected_track(&self) -> Option<TrackReferenceCore> {
@@ -980,7 +980,7 @@ impl ToniqueProjectState {
             arm: false,
             name: view.name.clone(),
             height: view.height,
-            closed: view.closed,
+            collapsed: view.collapsed,
             color: view.color,
             selected: self.selected_tracks.contains(&MASTER_TRACK_ID),
             solo: TrackSoloState::NotSoloing,
@@ -1062,7 +1062,7 @@ impl ToniqueProjectState {
             arm: view.arm,
             name: track.name.clone(),
             height: view.height,
-            closed: view.closed,
+            collapsed: view.collapsed,
             color: view.color,
             selected: self.selected_tracks.contains(&track.id),
             solo: if !any_solo {

@@ -143,7 +143,7 @@ impl EffectSlot {
                         ui.set_height(ui.available_height());
                         ui.vertical(|ui| {
                             ui.set_width(self.content.width());
-                            let bar_response = self.top_bar(ui);
+                            let bar_response = self.header(ui);
                             self.content.ui(ui, metrics, self.enabled);
                             bar_response
                         })
@@ -155,7 +155,7 @@ impl EffectSlot {
         response
     }
 
-    fn top_bar(&mut self, ui: &mut Ui) -> Response {
+    fn header(&mut self, ui: &mut Ui) -> Response {
         let theme = ui.app_theme();
         let response = ui.interact(
             Rect::from_min_size(

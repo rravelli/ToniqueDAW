@@ -67,14 +67,14 @@ impl Timeline {
         }
 
         if let Some(bounds) = state.selection_bounds() {
-            self.render_zone(ui, state, bounds, response.rect);
+            self.paint_selection_zone(ui, state, bounds, response.rect);
         }
     }
 
-    fn render_zone(
-        &mut self,
-        ui: &mut Ui,
-        state: &mut ToniqueProjectState,
+    fn paint_selection_zone(
+        &self,
+        ui: &Ui,
+        state: &ToniqueProjectState,
         bounds: SelectionBounds,
         viewport: Rect,
     ) {

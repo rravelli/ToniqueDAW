@@ -5,7 +5,7 @@ use crate::{
 };
 use egui::{Frame, Key, Layout, Margin, Rangef, RichText, ScrollArea, Separator, Stroke, Ui};
 
-pub const BOTTOM_BAR_HEIGHT: f32 = 20.;
+pub const HEADER_HEIGHT: f32 = 20.;
 
 pub struct BottomPanel {
     selected: Vec<usize>,
@@ -25,7 +25,7 @@ impl BottomPanel {
     pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
         let mut open = state.bottom_panel_open;
         egui::Panel::bottom("bottom-panel")
-            .size_range(Rangef::new(50. + BOTTOM_BAR_HEIGHT, 400.))
+            .size_range(Rangef::new(50. + HEADER_HEIGHT, 400.))
             .resizable(true)
             .frame(Frame::new().inner_margin(Margin::ZERO))
             .show_collapsible(ui, &mut open, |ui| {
@@ -64,7 +64,7 @@ impl BottomPanel {
             state.add_effect(&track.id, effect_id, index);
         }
 
-        self.top_bar(ui, &track);
+        self.header(ui, &track);
 
         let effects_len = state.effects_mut(&track.id).map_or(0, |t| t.len());
         let inner = ScrollArea::horizontal().show(ui, |ui| {
@@ -128,7 +128,7 @@ impl BottomPanel {
         self.offset = inner.state.offset.x;
     }
 
-    fn top_bar(&mut self, ui: &mut Ui, track: &TrackReferenceCore) {
+    fn header(&mut self, ui: &mut Ui, track: &TrackReferenceCore) {
         let theme = ui.app_theme();
         Frame::new()
             .fill(track.color)

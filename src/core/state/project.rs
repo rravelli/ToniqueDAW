@@ -91,7 +91,7 @@ impl ToniqueProjectState {
                     name: group.name.clone(),
                     color: format_color(view.color),
                     height: view.height,
-                    folded: view.closed,
+                    collapsed: view.collapsed,
                     soloed: group.soloed,
                     parent: index_of(group.output),
                     channel: self.channel_file(id, &group.channel),
@@ -111,7 +111,7 @@ impl ToniqueProjectState {
                     name: track.name.clone(),
                     color: format_color(view.color),
                     height: view.height,
-                    closed: view.closed,
+                    collapsed: view.collapsed,
                     soloed: track.soloed,
                     group: index_of(track.output),
                     channel: self.channel_file(track.id, &track.channel),
@@ -187,7 +187,7 @@ impl ToniqueProjectState {
             let mut view = MutableTrackCore::new();
             view.name.clone_from(&group.name);
             view.height = group.height;
-            view.closed = group.folded;
+            view.collapsed = group.collapsed;
             if let Some(color) = parse_color(&group.color) {
                 view.color = color;
             }
@@ -207,7 +207,7 @@ impl ToniqueProjectState {
             let view = self.track_mut(&id);
             view.name.clone_from(&track.name);
             view.height = track.height;
-            view.closed = track.closed;
+            view.collapsed = track.collapsed;
             if let Some(color) = parse_color(&track.color) {
                 view.color = color;
             }

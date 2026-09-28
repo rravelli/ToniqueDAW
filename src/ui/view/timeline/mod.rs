@@ -4,13 +4,13 @@ use crate::{
     core::{
         clip::ClipCore,
         state::ToniqueProjectState,
-        track::{DEFAULT_TRACK_HEIGHT, TRACK_CLOSED_HEIGHT, TrackKind, TrackReferenceCore},
+        track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackReferenceCore},
     },
     ui::{
         clip::ClipView,
         panels::left_panel::DragPayload,
         theme::{ThemeExt, with_alpha},
-        track::HANDLE_HEIGHT,
+        track::ROW_GAP,
         utils::find_track_at,
         view::timeline::{drag::DragState, selection::Multiselect},
     },
@@ -29,8 +29,9 @@ pub struct Timeline {
     drag_state: Option<DragState>,
     clicked_pos: Option<Pos2>,
     multiselect_start: Option<Multiselect>,
-    /// Folded groups opened by dragging over them, to fold again once left.
-    hover_unfolded: Vec<TrackId>,
+    /// Collapsed groups expanded by dragging over them, to collapse again once
+    /// left.
+    hover_expanded: Vec<TrackId>,
 }
 
 impl Timeline {
@@ -39,7 +40,7 @@ impl Timeline {
             drag_state: None,
             clicked_pos: None,
             multiselect_start: None,
-            hover_unfolded: Vec::new(),
+            hover_expanded: Vec::new(),
         }
     }
 
@@ -60,14 +61,14 @@ impl Timeline {
 
         // Rendering
         // First render the grid
-        state.grid.render_grid(&painter, viewport, &ui.app_theme());
+        state.grid.paint_grid(&painter, viewport, &ui.app_theme());
         // Render all clips (except dragged clips)
-        self.render_clips(ui, state, viewport, offset);
+        self.clips_ui(ui, state, viewport, offset);
 
         let (audio, is_released) = self.dnd(&timeline_res);
 
         if let Some(audio) = audio {
-            self.render_preview_clip(ui, viewport, offset, audio, is_released, state);
+            self.preview_clip_ui(ui, viewport, offset, audio, is_released, state);
         }
 
         self.handle_dropped_audio(ui, viewport, state);
@@ -104,10 +105,10 @@ impl Timeline {
         }
     }
 
-    /// While audio or clips are dragged, open the folded group under the
-    /// pointer, and fold it again once the pointer leaves it. Dropping inside
-    /// leaves it open, to show where things landed.
-    fn unfold_on_hover(
+    /// While audio or clips are dragged, expand the collapsed group under the
+    /// pointer, and collapse it again once the pointer leaves it. Dropping inside
+    /// leaves it expanded, to show where things landed.
+    fn expand_on_hover(
         &mut self,
         ui: &Ui,
         state: &mut ToniqueProjectState,
@@ -126,7 +127,7 @@ impl Timeline {
             .iter()
             .map(|row| {
                 let span = (row, y, y + row.height);
-                y += row.height + HANDLE_HEIGHT;
+                y += row.height + ROW_GAP;
                 span
             })
             .collect();
@@ -139,36 +140,37 @@ impl Timeline {
                 .take_while(|(r, _, _)| r.depth > group.depth)
                 .last()
                 .map_or(bottom, |(_, _, b)| *b);
-            Some(top..=end + HANDLE_HEIGHT)
+            Some(top..=end + ROW_GAP)
         };
 
         if dragging && let Some(p) = pointer.filter(|p| viewport.contains(*p)) {
             for (row, top, bottom) in &spans {
-                if row.kind == TrackKind::Group && row.closed && (*top..=*bottom).contains(&p.y) {
-                    state.set_closed(&row.id, false);
-                    self.hover_unfolded.push(row.id);
+                if row.kind == TrackKind::Group && row.collapsed && (*top..=*bottom).contains(&p.y)
+                {
+                    state.set_collapsed(&row.id, false);
+                    self.hover_expanded.push(row.id);
                 }
             }
         }
-        self.hover_unfolded.retain(|group| {
+        self.hover_expanded.retain(|group| {
             let inside = pointer
                 .zip(scope(*group))
                 .is_some_and(|(p, span)| span.contains(&p.y));
             match (inside, dragging) {
                 // Still hovering it.
                 (true, true) => true,
-                // Dropped inside: stays open.
+                // Dropped inside: stays expanded.
                 (true, false) => false,
-                // Left it: fold again.
+                // Left it: collapse again.
                 (false, _) => {
-                    state.set_closed(group, true);
+                    state.set_collapsed(group, true);
                     false
                 }
             }
         });
     }
 
-    pub fn render_clips(
+    pub fn clips_ui(
         &mut self,
         ui: &mut Ui,
         state: &mut ToniqueProjectState,
@@ -176,7 +178,7 @@ impl Timeline {
         offset: Vec2,
     ) {
         let tracks = state.rows();
-        self.unfold_on_hover(ui, state, &tracks, viewport, offset);
+        self.expand_on_hover(ui, state, &tracks, viewport, offset);
         let mut y = viewport.top();
         let mut dragged_track_index = None;
         let mut dragged_clip = None;
@@ -192,7 +194,7 @@ impl Timeline {
 
             // Skip if track is entirely outside the visible vertical range
             if track_bottom < view_top || y > view_bottom {
-                y += track.height + HANDLE_HEIGHT;
+                y += track.height + ROW_GAP;
                 continue;
             }
 
@@ -230,7 +232,7 @@ impl Timeline {
                     clip.trim_end = *end;
                     clip.position = *pos;
                 }
-                let dragged = self.render_clip(
+                let dragged = self.clip_ui(
                     &track,
                     &clip,
                     ui,
@@ -250,7 +252,7 @@ impl Timeline {
 
             y += track.height;
             self.paint_track_separator(ui, viewport, offset, y);
-            y += HANDLE_HEIGHT;
+            y += ROW_GAP;
         }
 
         self.handle_dragged_clips(ui, dragged_track_index, viewport, dragged_clip, state);
@@ -285,7 +287,7 @@ impl Timeline {
         }
     }
 
-    fn render_clip(
+    fn clip_ui(
         &mut self,
         track: &TrackReferenceCore,
         clip: &ClipCore,
@@ -327,7 +329,7 @@ impl Timeline {
             !dragged && state.is_clip_selected(clip.id),
             &clip,
             state,
-            !track.closed,
+            !track.collapsed,
             color,
         );
         // Select clip
@@ -348,10 +350,10 @@ impl Timeline {
         let painter = ui.painter_at(viewport);
         painter.line(
             vec![
-                pos2(viewport.left(), y + HANDLE_HEIGHT / 2. - offset.y),
-                pos2(viewport.right(), y + HANDLE_HEIGHT / 2. - offset.y),
+                pos2(viewport.left(), y + ROW_GAP / 2. - offset.y),
+                pos2(viewport.right(), y + ROW_GAP / 2. - offset.y),
             ],
-            Stroke::new(HANDLE_HEIGHT, ui.app_theme().separator),
+            Stroke::new(ROW_GAP, ui.app_theme().separator),
         );
     }
 
@@ -401,7 +403,7 @@ impl Timeline {
         state.commit_batch();
     }
 
-    fn render_preview_clip(
+    fn preview_clip_ui(
         &mut self,
         ui: &mut Ui,
         viewport: egui::Rect,
@@ -425,7 +427,7 @@ impl Timeline {
             let (track, y) = find_track_at(state, viewport, mouse_y);
 
             let height = track.as_ref().map_or(DEFAULT_TRACK_HEIGHT, |t| t.height);
-            let show_waveform = track.as_ref().map_or(true, |t| !t.closed);
+            let show_waveform = track.as_ref().map_or(true, |t| !t.collapsed);
             let color = track
                 .as_ref()
                 .map_or(ui.app_theme().text_muted, |t| t.color);
@@ -462,7 +464,7 @@ impl Timeline {
     }
 }
 
-/// A group's content, in a band the height of a folded group at the top of
+/// A group's content, in a band the height of a collapsed group at the top of
 /// its lane: a strip per track inside it, in order, with that track's clips
 /// in its colour, faint so they don't pass for real clips.
 fn paint_group_overview(
@@ -482,7 +484,7 @@ fn paint_group_overview(
         lane.min,
         pos2(
             lane.right(),
-            (lane.top() + TRACK_CLOSED_HEIGHT).min(lane.bottom()),
+            (lane.top() + TRACK_COLLAPSED_HEIGHT).min(lane.bottom()),
         ),
     )
     .shrink2(vec2(0., 2.));

@@ -1,5 +1,5 @@
 use crate::{
-    core::{clip::ClipCore, state::ToniqueProjectState, track::TRACK_CLOSED_HEIGHT},
+    core::{clip::ClipCore, state::ToniqueProjectState, track::TRACK_COLLAPSED_HEIGHT},
     ui::{
         theme::{ThemeExt, with_alpha},
         waveform::paint_waveform,
@@ -17,8 +17,8 @@ const PADDING_TEXT: f32 = 4.;
 const BORDER_WIDTH: f32 = 2.;
 const HEADER_HEIGHT: f32 = 16.;
 /// Width of the trim handles inside each edge of a clip.
-const HANDLE_WIDTH: f32 = 7.;
-const MIN_HANDLE_WIDTH: f32 = 2.;
+const TRIM_HANDLE_WIDTH: f32 = 7.;
+const MIN_TRIM_HANDLE_WIDTH: f32 = 2.;
 #[derive(Clone, Copy)]
 enum Edge {
     Start,
@@ -82,7 +82,7 @@ impl ClipView {
             );
             state
                 .grid
-                .render_clip_grid(&painter, viewport, rect, with_alpha(ink, 25));
+                .paint_clip_grid(&painter, viewport, rect, with_alpha(ink, 25));
         }
         // Header area
         let hitbox = Rect::from_min_size(
@@ -92,7 +92,7 @@ impl ClipView {
                 if show_waveform {
                     HEADER_HEIGHT
                 } else {
-                    TRACK_CLOSED_HEIGHT
+                    TRACK_COLLAPSED_HEIGHT
                 } - 2. * BORDER_WIDTH,
             ),
         )
@@ -107,7 +107,7 @@ impl ClipView {
         // Trim handles just inside each edge, registered after the header so
         // they win where they overlap it. Narrow clips get narrower handles,
         // leaving the middle to grab the clip.
-        let handle_width = (size.x / 4.).clamp(MIN_HANDLE_WIDTH, HANDLE_WIDTH);
+        let handle_width = (size.x / 4.).clamp(MIN_TRIM_HANDLE_WIDTH, TRIM_HANDLE_WIDTH);
         let left_resize = self.trim_handle(
             ui,
             state,

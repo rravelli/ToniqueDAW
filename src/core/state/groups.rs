@@ -80,11 +80,11 @@ impl ToniqueProjectState {
             .collect()
     }
 
-    /// Whether `id` is inside a folded group.
+    /// Whether `id` is inside a collapsed group.
     pub fn is_hidden(&self, id: TrackId) -> bool {
         self.ancestors(id)
             .iter()
-            .any(|g| self.views.get(g).is_some_and(|v| v.closed))
+            .any(|g| self.views.get(g).is_some_and(|v| v.collapsed))
     }
 
     /// The tracks inside `id` however deep, in order; a track is its own.
@@ -134,34 +134,38 @@ impl ToniqueProjectState {
     }
 
     /// Every row in display order with its depth, including those inside
-    /// folded groups.
+    /// collapsed groups.
     fn layout(&self) -> Vec<(Node, usize)> {
         let edit = self.edit();
         let mut rows = Vec::new();
-        let mut open: Vec<BusId> = Vec::new();
+        let mut enclosing: Vec<BusId> = Vec::new();
         for track in &edit.tracks {
             let mut path = edit.buses_along(track.output);
             path.reverse(); // outermost first
-            let shared = open.iter().zip(&path).take_while(|(a, b)| a == b).count();
-            open.truncate(shared);
+            let shared = enclosing
+                .iter()
+                .zip(&path)
+                .take_while(|(a, b)| a == b)
+                .count();
+            enclosing.truncate(shared);
             for bus in &path[shared..] {
-                rows.push((Node::Group(*bus), open.len()));
-                open.push(*bus);
+                rows.push((Node::Group(*bus), enclosing.len()));
+                enclosing.push(*bus);
             }
-            rows.push((Node::Track(track.id), open.len()));
+            rows.push((Node::Track(track.id), enclosing.len()));
         }
         rows
     }
 
     /// The rows of the track list in display order: tracks and groups,
-    /// without what's inside folded groups.
+    /// without what's inside collapsed groups.
     pub fn rows(&self) -> Vec<TrackReferenceCore> {
         let mut rows = Vec::new();
-        // Depth of the folded group hiding the rows below it.
+        // Depth of the collapsed group hiding the rows below it.
         let mut hiding: Option<usize> = None;
         for (node, depth) in self.layout() {
-            if let Some(folded) = hiding {
-                if depth > folded {
+            if let Some(collapsed_depth) = hiding {
+                if depth > collapsed_depth {
                     continue;
                 }
                 hiding = None;
@@ -171,7 +175,7 @@ impl ToniqueProjectState {
                 Node::Group(bus) => self.group_ref(bus, depth),
             };
             if let Some(row) = row {
-                if row.kind == TrackKind::Group && row.closed {
+                if row.kind == TrackKind::Group && row.collapsed {
                     hiding = Some(depth);
                 }
                 rows.push(row);
@@ -180,7 +184,7 @@ impl ToniqueProjectState {
         rows
     }
 
-    /// Every group, folded ones and their subgroups included.
+    /// Every group, collapsed ones and their subgroups included.
     pub fn groups(&self) -> Vec<TrackReferenceCore> {
         self.edit()
             .buses
@@ -219,7 +223,7 @@ impl ToniqueProjectState {
             arm: false,
             name: group.name.clone(),
             height: view.height,
-            closed: view.closed,
+            collapsed: view.collapsed,
             color: view.color,
             selected: self.selected_tracks.contains(&id),
             solo: if group.soloed {

@@ -18,7 +18,7 @@ pub enum TrackKind {
 }
 
 pub const DEFAULT_TRACK_HEIGHT: f32 = 60.;
-pub const TRACK_CLOSED_HEIGHT: f32 = 22.;
+pub const TRACK_COLLAPSED_HEIGHT: f32 = 22.;
 
 /// Read-only snapshot of a track for the UI, built from the engine's edit.
 #[derive(Debug, Clone)]
@@ -30,7 +30,7 @@ pub struct TrackReferenceCore {
     pub arm: bool,
     pub name: String,
     pub height: f32,
-    pub closed: bool,
+    pub collapsed: bool,
     pub color: Color32,
     pub selected: bool,
     pub solo: TrackSoloState,
@@ -54,10 +54,10 @@ impl TrackReferenceCore {
 pub struct MutableTrackCore {
     pub name: String,
     pub height: f32,
-    /// Collapsed; for a group, folded (what's inside is hidden).
-    pub closed: bool,
+    /// Shown as a thin row; for a group, what's inside is hidden too.
+    pub collapsed: bool,
     /// Height to go back to when opened.
-    pub open_height: f32,
+    pub expanded_height: f32,
     pub color: Color32,
     pub arm: bool,
 }
@@ -65,9 +65,9 @@ pub struct MutableTrackCore {
 impl MutableTrackCore {
     pub fn new() -> Self {
         Self {
-            closed: false,
+            collapsed: false,
             height: DEFAULT_TRACK_HEIGHT,
-            open_height: DEFAULT_TRACK_HEIGHT,
+            expanded_height: DEFAULT_TRACK_HEIGHT,
             // New tracks get a palette colour from `ToniqueProjectState`.
             color: Color32::GRAY,
             name: "# Audio Track".into(),

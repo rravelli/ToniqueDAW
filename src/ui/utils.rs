@@ -5,11 +5,11 @@ use crate::{
         state::ToniqueProjectState,
         track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackReferenceCore},
     },
-    ui::track::HANDLE_HEIGHT,
+    ui::track::ROW_GAP,
 };
 
 /// Top of the lane of track `track_index` (in the engine's order). A track
-/// inside a folded group is at its group's row.
+/// inside a collapsed group is at its group's row.
 pub fn track_y(track_index: usize, viewport: Rect, state: &ToniqueProjectState) -> f32 {
     let mut y = viewport.top();
     let mut last = None;
@@ -21,20 +21,20 @@ pub fn track_y(track_index: usize, viewport: Rect, state: &ToniqueProjectState) 
         if row.kind == TrackKind::Audio && row.index == track_index {
             return y;
         }
-        y += row.height + HANDLE_HEIGHT;
+        y += row.height + ROW_GAP;
     }
     match last {
         Some(top) if track_index < state.track_count() => top,
         _ => {
             (track_index.saturating_sub(state.track_count())) as f32
-                * (DEFAULT_TRACK_HEIGHT + HANDLE_HEIGHT)
+                * (DEFAULT_TRACK_HEIGHT + ROW_GAP)
                 + y
         }
     }
 }
 
 /// The track under `y_pos` and the top of its row. Over a group's row, the
-/// group's first track and its own row (the group's, when folded): clips
+/// group's first track and its own row (the group's, when collapsed): clips
 /// always land, and are previewed, on tracks.
 pub fn find_track_at(
     state: &mut ToniqueProjectState,
@@ -51,7 +51,7 @@ pub fn find_track_at(
 
     for row in state.rows() {
         if y - state.grid.offset.y <= y_pos
-            && y_pos <= y + row.height + HANDLE_HEIGHT - state.grid.offset.y
+            && y_pos <= y + row.height + ROW_GAP - state.grid.offset.y
         {
             return match row.kind {
                 TrackKind::Audio => (Some(row), y),
@@ -61,7 +61,7 @@ pub fn find_track_at(
                 ),
             };
         }
-        y += row.height + HANDLE_HEIGHT;
+        y += row.height + ROW_GAP;
     }
     (None, y)
 }

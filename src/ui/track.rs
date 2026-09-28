@@ -1,6 +1,6 @@
 use crate::{
     core::{
-        state::{MIN_OPEN_HEIGHT, ToniqueProjectState},
+        state::{MIN_EXPANDED_HEIGHT, ToniqueProjectState},
         track::{TrackKind, TrackReferenceCore},
     },
     ui::{
@@ -30,7 +30,7 @@ const STROKE_WIDTH: f32 = 0.5;
 const PADDING: f32 = 2.;
 const BUTTON_SIZE: f32 = 15.;
 const METER_WIDTH: f32 = 8.;
-pub const HANDLE_HEIGHT: f32 = 3.0;
+pub const ROW_GAP: f32 = 3.0;
 /// Indentation per level of groups, up to [`MAX_INDENT_LEVELS`] (deeper
 /// rows line up with the deepest shown level).
 const INDENT: f32 = 8.;
@@ -53,13 +53,13 @@ pub struct TrackHeader {
     old_volume: f32,
     edit: bool,
     arm: bool,
-    _edit_lost_focus: bool,
+    focus_requested: bool,
 }
 
 impl TrackHeader {
     pub fn new() -> Self {
         Self {
-            _edit_lost_focus: false,
+            focus_requested: false,
             arm: false,
             edit: false,
             gain: 0.,
@@ -151,7 +151,7 @@ impl TrackHeader {
                             ui.set_height(BUTTON_SIZE);
 
                             // let track_mut = state.track_mut(&track.id);
-                            self.open_button(ui, track, state);
+                            self.collapse_button(ui, track, state);
 
                             // Groups have no arm button.
                             let buttons = if is_group { 2. } else { 3. };
@@ -184,7 +184,7 @@ impl TrackHeader {
                         });
                         let track_mut = state.track_mut(&track.id);
                         // Extra controls
-                        if !track_mut.closed {
+                        if !track_mut.collapsed {
                             let prev_gain = self.gain;
                             self.gain_slider(ui, RangeInclusive::new(-40., 5.), track, state);
                             volume_changed = prev_gain != self.gain;
@@ -211,7 +211,7 @@ impl TrackHeader {
             })
             .inner;
         // Drag area
-        self.dragger(ui, track, state);
+        self.resize_handle(ui, track, state);
 
         // Save temporary state
         ui.data_mut(|w| w.insert_temp(id, self.clone()));
@@ -233,13 +233,13 @@ impl TrackHeader {
                     .text_color(ui.app_theme().text)
                     .margin(Margin::ZERO),
             );
-            if !text_edit.has_focus() && !self._edit_lost_focus {
+            if !text_edit.has_focus() && !self.focus_requested {
                 text_edit.request_focus();
-                self._edit_lost_focus = true
+                self.focus_requested = true
             }
             if text_edit.lost_focus() {
                 self.edit = false;
-                self._edit_lost_focus = false;
+                self.focus_requested = false;
                 if track_mut.name.is_empty() {
                     track_mut.name = "Audio Track".to_string();
                 }
@@ -353,14 +353,14 @@ impl TrackHeader {
         ))
     }
 
-    fn open_button(
+    fn collapse_button(
         &mut self,
         ui: &mut Ui,
         track: &TrackReferenceCore,
         state: &mut ToniqueProjectState,
     ) -> Response {
         let track_mut = state.track_mut(&track.id);
-        let icon = if track_mut.closed {
+        let icon = if track_mut.collapsed {
             egui_phosphor::fill::CARET_RIGHT
         } else {
             egui_phosphor::fill::CARET_DOWN
@@ -370,9 +370,9 @@ impl TrackHeader {
                 .family(egui::FontFamily::Name(PHOSPHOR_FILL.into()))
                 .square(BUTTON_SIZE),
         );
-        let closed = track_mut.closed;
+        let collapsed = track_mut.collapsed;
         if response.clicked() {
-            state.set_closed(&track.id, !closed);
+            state.set_collapsed(&track.id, !collapsed);
         }
 
         response
@@ -447,24 +447,22 @@ impl TrackHeader {
         response
     }
 
-    fn dragger(
+    fn resize_handle(
         &mut self,
         ui: &mut Ui,
         track: &TrackReferenceCore,
         state: &mut ToniqueProjectState,
     ) {
         let track_mut = state.track_mut(&track.id);
-        let (_, mut response) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), HANDLE_HEIGHT),
-            Sense::drag(),
-        );
+        let (_, mut response) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_GAP), Sense::drag());
 
-        if !track_mut.closed {
+        if !track_mut.collapsed {
             response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
         }
-        if response.dragged() && !track_mut.closed {
+        if response.dragged() && !track_mut.collapsed {
             track_mut.height += response.drag_delta().y;
-            track_mut.height = track_mut.height.clamp(MIN_OPEN_HEIGHT, 400.);
+            track_mut.height = track_mut.height.clamp(MIN_EXPANDED_HEIGHT, 400.);
         }
     }
 }

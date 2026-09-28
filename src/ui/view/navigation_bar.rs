@@ -3,7 +3,7 @@ use egui_phosphor::fill::{ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL, LIN
 
 use crate::{
     core::state::ToniqueProjectState,
-    ui::{theme::ThemeExt, view::tracks::DRAGGER_WIDTH, widget::square_button::SquareButton},
+    ui::{theme::ThemeExt, view::tracks::SPLITTER_WIDTH, widget::square_button::SquareButton},
 };
 
 pub const NAVIGATION_BAR_HEIGHT: f32 = 30.;
@@ -54,7 +54,7 @@ impl NavigationBar {
             // Draw Labels
             state
                 .grid
-                .render_labels(&painter, nav_bar_rect, state.bpm(), &ui.app_theme());
+                .paint_labels(&painter, nav_bar_rect, state.bpm(), &ui.app_theme());
             let loop_lane = Rect::from_min_size(
                 nav_bar_rect.min,
                 vec2(nav_bar_rect.width(), LOOP_LANE_HEIGHT),
@@ -75,7 +75,7 @@ impl NavigationBar {
                 let delta = ui.input(|i| i.smooth_scroll_delta.y);
                 state.grid.zoom_around(delta, mouse_pos.x, nav_bar_rect);
             }
-            ui.add_space(DRAGGER_WIDTH + 4.0);
+            ui.add_space(SPLITTER_WIDTH + 4.0);
             self.right_ui(ui, state);
         });
     }
@@ -202,16 +202,16 @@ impl NavigationBar {
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
             if ui
-                .add(SquareButton::new(ARROWS_OUT_LINE_VERTICAL).tooltip("Open All"))
+                .add(SquareButton::new(ARROWS_OUT_LINE_VERTICAL).tooltip("Expand all"))
                 .clicked()
             {
-                state.set_all_close(false);
+                state.set_all_collapsed(false);
             };
             if ui
-                .add(SquareButton::new(ARROWS_IN_LINE_VERTICAL).tooltip("Close All"))
+                .add(SquareButton::new(ARROWS_IN_LINE_VERTICAL).tooltip("Collapse all"))
                 .clicked()
             {
-                state.set_all_close(true);
+                state.set_all_collapsed(true);
             };
             ui.add_enabled(false, SquareButton::new(LINE_SEGMENTS).tooltip("Automate"));
         });

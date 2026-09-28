@@ -96,9 +96,9 @@ impl CentralPanel {
                 state.grid.offset.y = state.grid.offset.y.clamp(0., max_y);
             }
         }
-        scrolled_x |= self.draw_scrollbars(ui, viewport, content_size, &mut state.grid.offset);
+        scrolled_x |= self.scrollbars_ui(ui, viewport, content_size, &mut state.grid.offset);
         self.follow_playhead(ui, state, timeline_viewport, scrolled_x);
-        self.draw_cursors(
+        self.cursors_ui(
             ui,
             state,
             Rect::from_min_size(
@@ -143,7 +143,7 @@ impl CentralPanel {
 
     /// Draw horizontal and vertical scrollbars. Returns whether the
     /// horizontal one was dragged.
-    fn draw_scrollbars(
+    fn scrollbars_ui(
         &self,
         ui: &mut Ui,
         viewport: Rect,
@@ -220,7 +220,7 @@ impl CentralPanel {
     /// Loop bounds (while looping), edit cursor (only while it differs from
     /// the playhead) and playhead
     /// with its draggable handle.
-    fn draw_cursors(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {
+    fn cursors_ui(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {
         ui.set_clip_rect(rect);
         let theme = ui.app_theme();
         let painter = ui.painter();
@@ -307,7 +307,7 @@ mod tests {
     use super::*;
     use tonique_engine::engine::{Engine, EngineConfig};
 
-    /// The track list and timeline draw nested and folded groups without
+    /// The track list and timeline draw nested and collapsed groups without
     /// trouble, headless.
     #[test]
     fn draws_groups_headless() {
@@ -317,8 +317,8 @@ mod tests {
         let inner = state.group(&tracks[..2]).unwrap();
         let outer = state.group(&[inner, tracks[2]]).unwrap();
         state.group(&[tracks[4]]).unwrap();
-        state.track_mut(&outer).closed = false;
-        state.track_mut(&inner).closed = true;
+        state.track_mut(&outer).collapsed = false;
+        state.track_mut(&inner).collapsed = true;
 
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::ui::font::fonts());
@@ -337,14 +337,14 @@ mod tests {
         assert_eq!(
             state.rows().len(),
             6,
-            "outer, inner (folded), t3, t4, group, t5"
+            "outer, inner (collapsed), t3, t4, group, t5"
         );
     }
 
-    /// Dragging a file over a folded group opens it; leaving folds it
-    /// again; dropping inside leaves it open.
+    /// Dragging a file over a collapsed group expands it; leaving collapses
+    /// it again; dropping inside leaves it expanded.
     #[test]
-    fn folded_groups_open_while_dragging_over_them() {
+    fn collapsed_groups_expand_while_dragging_over_them() {
         use crate::ui::view::navigation_bar::NAVIGATION_BAR_HEIGHT;
         use crate::{analysis::AudioInfo, ui::panels::left_panel::DragPayload};
         use egui::{Event, PointerButton, Pos2};
@@ -353,7 +353,7 @@ mod tests {
         let mut state = ToniqueProjectState::new(engine);
         let tracks: Vec<_> = (0..3).map(|_| state.add_track()).collect();
         let group = state.group(&tracks[..2]).unwrap();
-        state.set_closed(&group, true);
+        state.set_collapsed(&group, true);
 
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::ui::font::fonts());
@@ -377,8 +377,13 @@ mod tests {
             let mut output = ctx.run_ui(input, |ui| panel.show(ui, state));
             output.textures_delta.clear();
         };
-        let closed = |state: &ToniqueProjectState| {
-            state.rows().iter().find(|r| r.id == group).unwrap().closed
+        let collapsed = |state: &ToniqueProjectState| {
+            state
+                .rows()
+                .iter()
+                .find(|r| r.id == group)
+                .unwrap()
+                .collapsed
         };
         // The group's row is the first lane, just below the ruler.
         let over_group = Pos2::new(300., NAVIGATION_BAR_HEIGHT + 10.);
@@ -387,13 +392,13 @@ mod tests {
         frame(&mut state, Vec::new()); // lay out once
         egui::DragAndDrop::set_payload(&ctx, DragPayload::File(audio.clone()));
         frame(&mut state, vec![Event::PointerMoved(over_group)]);
-        assert!(!closed(&state), "opens while dragged over");
+        assert!(!collapsed(&state), "expands while dragged over");
 
         frame(&mut state, vec![Event::PointerMoved(far_below)]);
-        assert!(closed(&state), "folds again once left");
+        assert!(collapsed(&state), "collapses again once left");
 
         frame(&mut state, vec![Event::PointerMoved(over_group)]);
-        assert!(!closed(&state));
+        assert!(!collapsed(&state));
         // Drop inside.
         let release = Event::PointerButton {
             pos: over_group,
@@ -404,6 +409,6 @@ mod tests {
         frame(&mut state, vec![release]);
         frame(&mut state, vec![Event::PointerMoved(over_group)]);
         frame(&mut state, vec![Event::PointerMoved(far_below)]);
-        assert!(!closed(&state), "stays open after a drop inside");
+        assert!(!collapsed(&state), "stays expanded after a drop inside");
     }
 }
