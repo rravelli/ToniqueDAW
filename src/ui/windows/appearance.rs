@@ -2,9 +2,10 @@ use crate::{
     core::state::ToniqueProjectState,
     ui::{
         font::PHOSPHOR_REGULAR,
-        theme::{COLORS, Theme, ThemeExt, ThemeLibrary, format_color},
+        theme::{COLORS, Theme, ThemeExt, ThemeLibrary},
         widget::{section::SectionHeader, select::Select, square_button::SquareButton},
     },
+    utils::color::format_color,
 };
 use egui::{
     Color32, FontFamily, FontId, Grid, RichText, ScrollArea, TextEdit, Ui,

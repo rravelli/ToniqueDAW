@@ -26,7 +26,7 @@ use crate::{
         },
         track::MutableTrackCore,
     },
-    ui::theme::{format_color, parse_color},
+    utils::color::{format_color, parse_color},
 };
 
 impl ToniqueProjectState {
