@@ -5,7 +5,7 @@ use egui::{Pos2, Rect, Ui, Vec2, vec2};
 
 use crate::{
     core::{state::ProjectState, track::DEFAULT_TRACK_HEIGHT},
-    ui::utils::track_y,
+    ui::view::row_layout::RowLayout,
 };
 
 /// How close to the left/right edges dragging starts scrolling, in points.
@@ -24,7 +24,13 @@ const REVEAL_MARGIN: f32 = 40.;
 /// Scroll while a drag holds the pointer near or past an edge of
 /// `viewport`. Keeps repainting while it scrolls, as the pointer may be
 /// still.
-pub fn autoscroll(ui: &Ui, state: &mut ProjectState, viewport: Rect, pointer: Pos2) {
+pub fn autoscroll(
+    ui: &Ui,
+    state: &mut ProjectState,
+    layout: &RowLayout,
+    viewport: Rect,
+    pointer: Pos2,
+) {
     let velocity = vec2(
         edge_speed(pointer.x, (viewport.left(), viewport.right()), EDGE_X),
         edge_speed(
@@ -38,7 +44,7 @@ pub fn autoscroll(ui: &Ui, state: &mut ProjectState, viewport: Rect, pointer: Po
     }
     let dt = ui.input(|i| i.stable_dt).min(0.1);
     // Allow scrolling one track past the last, where drops create a track.
-    let tracks_height = track_y(state.track_count(), viewport, state) - viewport.top();
+    let tracks_height = layout.height();
     let max_y = (tracks_height + DEFAULT_TRACK_HEIGHT - viewport.height())
         .max(state.grid.offset.y)
         .max(0.);

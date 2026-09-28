@@ -3,8 +3,8 @@ use crate::{
     ui::{
         theme::{ThemeExt, with_alpha},
         view::{
-            graph::GraphView, navigation_bar::NavigationBar, timeline::Timeline,
-            tracks::TrackHeaders,
+            graph::GraphView, navigation_bar::NavigationBar, row_layout::RowLayout,
+            timeline::Timeline, tracks::TrackHeaders,
         },
         workspace::{MainView, Workspace},
     },
@@ -66,11 +66,12 @@ impl CentralPanel {
             viewport.min,
             pos2(viewport.max.x - self.tracks.width, viewport.max.y),
         );
+        let mut layout = RowLayout::new(state, viewport.top(), state.grid.offset.y);
         // Draw timeline
         self.timeline
-            .ui(ui, state, workspace, timeline_viewport, state.grid.offset);
+            .ui(ui, state, workspace, &mut layout, timeline_viewport);
         // Draw tracks
-        self.tracks.ui(ui, state, workspace, viewport);
+        self.tracks.ui(ui, state, workspace, &layout, viewport);
 
         // The timeline spans the content plus some room to add more, and
         // never shrinks under the part being looked at.

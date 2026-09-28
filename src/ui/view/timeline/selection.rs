@@ -2,8 +2,7 @@ use crate::{
     core::state::{ProjectState, SelectionBounds},
     ui::{
         theme::ThemeExt,
-        utils::{find_track_at, track_y},
-        view::timeline::Timeline,
+        view::{row_layout::RowLayout, timeline::Timeline},
     },
 };
 use egui::{Pos2, Rect, Response, Shape, Stroke, Ui};
@@ -19,6 +18,7 @@ impl Timeline {
         &mut self,
         ui: &mut Ui,
         state: &mut ProjectState,
+        layout: &RowLayout,
         response: &Response,
     ) {
         if ui.input(|i| i.pointer.primary_down()) {
@@ -28,7 +28,7 @@ impl Timeline {
         if response.drag_started()
             && let Some(mouse_pos) = self.clicked_pos
         {
-            let (track, _) = find_track_at(state, response.rect, mouse_pos.y);
+            let track = layout.track_at(mouse_pos.y).map(|(index, _)| index);
 
             let beat_pos = state.grid.x_to_beats(mouse_pos.x, response.rect);
             let snapped = state
@@ -37,7 +37,7 @@ impl Timeline {
                 .unwrap_or(beat_pos);
 
             if state.track_count() > 0 {
-                let index = track.map_or(state.track_count() - 1, |t| t.index);
+                let index = track.unwrap_or(state.track_count() - 1);
                 self.multiselect_start = Some(Multiselect {
                     start_pos: snapped,
                     start_track_index: index,
@@ -51,7 +51,7 @@ impl Timeline {
         if let Some(start) = &self.multiselect_start
             && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
         {
-            let (current_track, _) = find_track_at(state, response.rect, mouse_pos.y);
+            let current_track = layout.track_at(mouse_pos.y).map(|(index, _)| index);
 
             let position = state.grid.x_to_beats(mouse_pos.x, response.rect);
             let current_pos = state
@@ -59,7 +59,7 @@ impl Timeline {
                 .snap_at_grid_with_threshold(position, 1.0)
                 .unwrap_or(position);
             let length = state.track_count();
-            let track_index = current_track.map_or(length - 1, |t| t.index);
+            let track_index = current_track.unwrap_or(length - 1);
             state.select_in_bounds(SelectionBounds::between(
                 (start.start_track_index, start.start_pos),
                 (track_index, current_pos),
@@ -67,7 +67,7 @@ impl Timeline {
         }
 
         if let Some(bounds) = state.selection_bounds() {
-            self.paint_selection_zone(ui, state, bounds, response.rect);
+            self.paint_selection_zone(ui, state, layout, bounds, response.rect);
         }
     }
 
@@ -75,22 +75,20 @@ impl Timeline {
         &self,
         ui: &Ui,
         state: &ProjectState,
+        layout: &RowLayout,
         bounds: SelectionBounds,
         viewport: Rect,
     ) {
         let min_point = Pos2::new(
             state.grid.beats_to_x(bounds.start_pos, viewport),
-            track_y(bounds.start_track_index, viewport, state) - state.grid.offset.y,
+            layout.track_top(bounds.start_track_index),
         );
-
-        let height = state
-            .track_from_index(bounds.end_track_index)
-            .map_or(0., |t| t.height);
-
-        let max_point = Pos2::new(
-            state.grid.beats_to_x(bounds.end_pos, viewport),
-            track_y(bounds.end_track_index, viewport, state) + height - state.grid.offset.y,
-        );
+        // Down to the bottom of the row showing the last track (its
+        // collapsed group's, if hidden).
+        let bottom = layout
+            .track_row(bounds.end_track_index)
+            .map_or(layout.track_top(bounds.end_track_index), |r| r.y.max);
+        let max_point = Pos2::new(state.grid.beats_to_x(bounds.end_pos, viewport), bottom);
         let zone = Rect::from_min_max(min_point, max_point);
         let theme = ui.app_theme();
         let painter = ui.painter();

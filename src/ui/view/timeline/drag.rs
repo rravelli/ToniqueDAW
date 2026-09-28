@@ -3,12 +3,13 @@ use crate::{
     ui::{
         clip::ClipView,
         theme::ThemeExt,
-        track::ROW_GAP,
-        utils::{find_track_at, track_y},
-        view::timeline::{Timeline, scroll::autoscroll},
+        view::{
+            row_layout::RowLayout,
+            timeline::{Timeline, scroll::autoscroll},
+        },
     },
 };
-use egui::{Pos2, Rect, Stroke, Ui, pos2, vec2};
+use egui::{Rect, Stroke, Ui, pos2, vec2};
 use tonique_engine::edit::ClipId;
 
 #[derive(Clone)]
@@ -20,7 +21,8 @@ pub struct DragState {
 #[derive(Clone)]
 pub struct ClipDragState {
     pub clip: AudioClip,
-    pub mouse_delta: Pos2,
+    /// From the clip's start to the pointer, horizontally.
+    pub grab_x: f32,
     pub track_index_delta: i32,
 }
 
@@ -34,6 +36,7 @@ impl Timeline {
     pub fn handle_dragged_clips(
         &mut self,
         ui: &mut Ui,
+        layout: &RowLayout,
         dragged_track_index: Option<usize>,
         viewport: Rect,
         dragged_clip: Option<AudioClip>,
@@ -52,7 +55,6 @@ impl Timeline {
             let mut elements = Vec::new();
             let mut new_selected_clips = Vec::new();
             let duplicate = ui.input(|i| i.modifiers.ctrl);
-            let mut y = viewport.top();
             let mut min_track_delta = 0;
             let tracks: Vec<_> = state.tracks().collect();
             for track in tracks {
@@ -71,12 +73,11 @@ impl Timeline {
                         let x = state.grid.beats_to_x(clip.position, viewport);
                         elements.push(ClipDragState {
                             clip: new_clip,
-                            mouse_delta: pos2(mouse_pos.x - x, mouse_pos.y - y),
+                            grab_x: mouse_pos.x - x,
                             track_index_delta,
                         });
                     }
                 }
-                y += track.height + ROW_GAP;
             }
             state.select_clips(new_selected_clips);
             self.drag_state = Some(DragState {
@@ -91,11 +92,10 @@ impl Timeline {
             && let Some(mouse_pos) = mouse_pos
         {
             // Find track at mouse position
-            let (track, _) = find_track_at(state, viewport, mouse_pos.y);
-
             // Index of the track at mouse position
-            let mouse_track_index = track
-                .map_or(state.track_count(), |t| t.index)
+            let mouse_track_index = layout
+                .track_at(mouse_pos.y)
+                .map_or(state.track_count(), |(index, _)| index)
                 .max(-drag_state.min_track_delta as usize)
                 as i32;
 
@@ -110,7 +110,7 @@ impl Timeline {
                 for element in drag_state.elements.iter() {
                     let start = state
                         .grid
-                        .x_to_beats(mouse_pos.x - element.mouse_delta.x, viewport);
+                        .x_to_beats(mouse_pos.x - element.grab_x, viewport);
                     let end = start + element.clip.end(bpm) - element.clip.position;
                     let candidates = [
                         state
@@ -139,11 +139,7 @@ impl Timeline {
             let first = drag_state
                 .elements
                 .iter()
-                .map(|e| {
-                    state
-                        .grid
-                        .x_to_beats(mouse_pos.x - e.mouse_delta.x, viewport)
-                })
+                .map(|e| state.grid.x_to_beats(mouse_pos.x - e.grab_x, viewport))
                 .fold(f32::INFINITY, f32::min);
             if -first > beat_delta {
                 beat_delta = -first;
@@ -168,13 +164,13 @@ impl Timeline {
 
                     track_indexes.push(track_index);
                     // Calculate y pos
-                    let y = track_y(track_index, viewport, state);
+                    let y = layout.track_top(track_index);
                     // Calculate width
                     let width = state.grid.duration_to_width(duration, state.bpm());
                     // Calculate x pos
                     let new_position = state
                         .grid
-                        .x_to_beats(mouse_pos.x - element.mouse_delta.x, viewport)
+                        .x_to_beats(mouse_pos.x - element.grab_x, viewport)
                         + beat_delta;
                     element.clip.position = new_position;
                     let x = state.grid.beats_to_x(new_position, viewport);
@@ -187,7 +183,7 @@ impl Timeline {
                         color = t.color;
                         height = t.height;
                     }
-                    let pos = pos2(x, y - state.grid.offset.y);
+                    let pos = pos2(x, y);
                     let size = vec2(width, height);
                     // Render Clip
                     ClipView::new().ui(
@@ -209,7 +205,7 @@ impl Timeline {
                 self.commit_drag(state, drag_state, track_indexes);
             } else if !drag_state.duplicate || ui.input(|i| i.modifiers.ctrl) {
                 self.drag_state = Some(drag_state);
-                autoscroll(ui, state, viewport, mouse_pos);
+                autoscroll(ui, state, layout, viewport, mouse_pos);
             }
         }
     }

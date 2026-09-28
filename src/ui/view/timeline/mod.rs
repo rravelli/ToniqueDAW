@@ -12,12 +12,14 @@ use crate::{
         panels::left_panel::DragPayload,
         theme::{ThemeExt, with_alpha},
         track::ROW_GAP,
-        utils::find_track_at,
-        view::timeline::{drag::DragState, selection::Multiselect},
+        view::{
+            row_layout::RowLayout,
+            timeline::{drag::DragState, selection::Multiselect},
+        },
         workspace::Workspace,
     },
 };
-use egui::{DragAndDrop, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{DragAndDrop, Pos2, Rangef, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use tonique_engine::edit::{ClipId, TrackId};
 mod drag;
 mod keys;
@@ -51,8 +53,8 @@ impl Timeline {
         ui: &mut Ui,
         state: &mut ProjectState,
         workspace: &mut Workspace,
+        layout: &mut RowLayout,
         viewport: Rect,
-        offset: Vec2,
     ) {
         // First handle key presses
         self.handle_key_press(ui, state, viewport);
@@ -66,18 +68,21 @@ impl Timeline {
         // First render the grid
         state.grid.paint_grid(&painter, viewport, &ui.app_theme());
         // Render all clips (except dragged clips)
-        self.clips_ui(ui, state, workspace, viewport, offset);
+        if self.expand_on_hover(ui, state, layout, viewport) {
+            layout.rebuild(state);
+        }
+        self.clips_ui(ui, state, workspace, layout, viewport);
 
         let (audio, is_released) = self.dnd(&timeline_res);
 
         if let Some(audio) = audio {
-            self.preview_clip_ui(ui, viewport, offset, audio, is_released, state);
+            self.preview_clip_ui(ui, viewport, layout, audio, is_released, state);
         }
 
         self.handle_dropped_audio(ui, viewport, state);
 
         // Draw multiselect zone
-        self.handle_multiselect(ui, state, &timeline_res);
+        self.handle_multiselect(ui, state, layout, &timeline_res);
 
         let hovered_files = ui.input(|i| i.raw.hovered_files.clone());
         if !hovered_files.is_empty() {
@@ -109,56 +114,41 @@ impl Timeline {
     }
 
     /// While audio or clips are dragged, expand the collapsed group under the
-    /// pointer, and collapse it again once the pointer leaves it. Dropping inside
-    /// leaves it expanded, to show where things landed.
+    /// pointer, and collapse it again once the pointer leaves it. Dropping
+    /// inside leaves it expanded, to show where things landed. Returns
+    /// whether any row changed.
     fn expand_on_hover(
         &mut self,
         ui: &Ui,
         state: &mut ProjectState,
-        rows: &[TrackRow],
+        layout: &RowLayout,
         viewport: Rect,
-        offset: Vec2,
-    ) {
+    ) -> bool {
         let dragging = self.drag_state.is_some()
             || DragAndDrop::payload::<DragPayload>(ui.ctx())
                 .is_some_and(|p| matches!(*p, DragPayload::File(_)));
         let pointer = ui.input(|i| i.pointer.hover_pos());
-
-        // Each row's vertical span on screen.
-        let mut y = viewport.top() - offset.y;
-        let spans: Vec<(&TrackRow, f32, f32)> = rows
-            .iter()
-            .map(|row| {
-                let span = (row, y, y + row.height);
-                y += row.height + ROW_GAP;
-                span
-            })
-            .collect();
-        // A group's span runs to the end of its last row.
-        let scope = |id: TrackId| {
-            let i = spans.iter().position(|(r, _, _)| r.id == id)?;
-            let (group, top, bottom) = spans[i];
-            let end = spans[i + 1..]
-                .iter()
-                .take_while(|(r, _, _)| r.depth > group.depth)
-                .last()
-                .map_or(bottom, |(_, _, b)| *b);
-            Some(top..=end + ROW_GAP)
-        };
+        let mut changed = false;
 
         if dragging && let Some(p) = pointer.filter(|p| viewport.contains(*p)) {
-            for (row, top, bottom) in &spans {
-                if row.kind == TrackKind::Group && row.collapsed && (*top..=*bottom).contains(&p.y)
-                {
-                    state.set_collapsed(&row.id, false);
-                    self.hover_expanded.push(row.id);
+            for row in layout.rows() {
+                let track = &row.track;
+                if track.kind == TrackKind::Group && track.collapsed && row.y.contains(p.y) {
+                    state.set_collapsed(&track.id, false);
+                    self.hover_expanded.push(track.id);
+                    changed = true;
                 }
             }
         }
+        // A group's span runs to the end of its last row.
+        let scope = |id: TrackId| {
+            let row = layout.rows().iter().find(|r| r.track.id == id)?;
+            Some(Rangef::new(row.scope.min, row.scope.max + ROW_GAP))
+        };
         self.hover_expanded.retain(|group| {
             let inside = pointer
                 .zip(scope(*group))
-                .is_some_and(|(p, span)| span.contains(&p.y));
+                .is_some_and(|(p, span)| span.contains(p.y));
             match (inside, dragging) {
                 // Still hovering it.
                 (true, true) => true,
@@ -167,10 +157,12 @@ impl Timeline {
                 // Left it: collapse again.
                 (false, _) => {
                     state.set_collapsed(group, true);
+                    changed = true;
                     false
                 }
             }
         });
+        changed
     }
 
     pub fn clips_ui(
@@ -178,12 +170,9 @@ impl Timeline {
         ui: &mut Ui,
         state: &mut ProjectState,
         workspace: &mut Workspace,
+        layout: &RowLayout,
         viewport: Rect,
-        offset: Vec2,
     ) {
-        let tracks = state.rows();
-        self.expand_on_hover(ui, state, &tracks, viewport, offset);
-        let mut y = viewport.top();
         let mut dragged_track_index = None;
         let mut dragged_clip = None;
         let dragged_ids = self
@@ -191,21 +180,14 @@ impl Timeline {
             .as_ref()
             .map_or(Vec::new(), |d| d.dragged_ids());
 
-        for track in tracks {
-            let track_bottom = y + track.height;
-            let view_top = viewport.top() + offset.y;
-            let view_bottom = view_top + viewport.height();
-
+        for row in layout.rows() {
+            let track = &row.track;
             // Skip if track is entirely outside the visible vertical range
-            if track_bottom < view_top || y > view_bottom {
-                y += track.height + ROW_GAP;
+            if row.y.max < viewport.top() || row.y.min > viewport.bottom() {
                 continue;
             }
 
-            let track_rect = Rect::from_min_max(
-                pos2(viewport.left(), y - offset.y),
-                pos2(viewport.right(), y + track.height - offset.y),
-            );
+            let track_rect = Rect::from_x_y_ranges(viewport.x_range(), row.y);
 
             if ui.input(|i| {
                 i.pointer.primary_pressed()
@@ -223,7 +205,7 @@ impl Timeline {
 
             // A group's lane: an overview of everything inside.
             let clips = if track.kind == TrackKind::Group {
-                paint_group_overview(ui, state, &track, track_rect);
+                paint_group_overview(ui, state, track, track_rect);
                 Vec::new()
             } else {
                 track.clips.clone()
@@ -237,13 +219,12 @@ impl Timeline {
                     clip.position = *pos;
                 }
                 let dragged = self.clip_ui(
-                    &track,
+                    track,
                     &clip,
                     ui,
                     state,
                     viewport,
-                    offset,
-                    y,
+                    row.y.min,
                     dragged_ids.contains(&clip.id),
                 );
                 if dragged_clip.is_none() && dragged {
@@ -252,14 +233,18 @@ impl Timeline {
                 }
             }
 
-            self.handle_track_hover(ui, state, workspace, &track, track_rect);
-
-            y += track.height;
-            self.paint_track_separator(ui, viewport, offset, y);
-            y += ROW_GAP;
+            self.handle_track_hover(ui, state, workspace, track, track_rect);
+            self.paint_track_separator(ui, viewport, row.y.max);
         }
 
-        self.handle_dragged_clips(ui, dragged_track_index, viewport, dragged_clip, state);
+        self.handle_dragged_clips(
+            ui,
+            layout,
+            dragged_track_index,
+            viewport,
+            dragged_clip,
+            state,
+        );
     }
 
     fn handle_track_hover(
@@ -299,8 +284,7 @@ impl Timeline {
         ui: &mut Ui,
         state: &mut ProjectState,
         viewport: Rect,
-        offset: Vec2,
-        y: f32,
+        top: f32,
         dragged: bool,
     ) -> bool {
         let x = state.grid.beats_to_x(clip.position, viewport);
@@ -308,7 +292,6 @@ impl Timeline {
             .grid
             .duration_to_width(clip.duration().unwrap(), state.bpm());
 
-        let top = y - offset.y;
         if x + width < viewport.left()
             || x > viewport.right()
             || top + track.height < viewport.top()
@@ -351,12 +334,13 @@ impl Timeline {
         response.dragged()
     }
 
-    fn paint_track_separator(&self, ui: &mut Ui, viewport: Rect, offset: Vec2, y: f32) {
+    /// The gap below a row ending at `bottom`.
+    fn paint_track_separator(&self, ui: &mut Ui, viewport: Rect, bottom: f32) {
         let painter = ui.painter_at(viewport);
         painter.line(
             vec![
-                pos2(viewport.left(), y + ROW_GAP / 2. - offset.y),
-                pos2(viewport.right(), y + ROW_GAP / 2. - offset.y),
+                pos2(viewport.left(), bottom + ROW_GAP / 2.),
+                pos2(viewport.right(), bottom + ROW_GAP / 2.),
             ],
             Stroke::new(ROW_GAP, ui.app_theme().separator),
         );
@@ -407,7 +391,7 @@ impl Timeline {
         &mut self,
         ui: &mut Ui,
         viewport: egui::Rect,
-        offset: Vec2,
+        layout: &RowLayout,
         audio_info: AudioInfo,
         is_released: bool,
         state: &mut ProjectState,
@@ -424,7 +408,10 @@ impl Timeline {
             let mouse_y = mouse_pos.y;
 
             // Find corresponding track
-            let (track, y) = find_track_at(state, viewport, mouse_y);
+            let (track, y) = match layout.track_at(mouse_y) {
+                Some((index, top)) => (state.track_from_index(index), top),
+                None => (None, layout.track_top(state.track_count())),
+            };
 
             let height = track.as_ref().map_or(DEFAULT_TRACK_HEIGHT, |t| t.height);
             let show_waveform = track.as_ref().map_or(true, |t| !t.collapsed);
@@ -433,7 +420,7 @@ impl Timeline {
                 .map_or(ui.app_theme().text_muted, |t| t.color);
             let width = state.grid.duration_to_width(duration, state.bpm());
 
-            let pos = pos2(x, y - offset.y);
+            let pos = pos2(x, y);
             let size = Vec2::new(width, height);
             // Placeholder ID: the clip only gets a real one when dropped
             let clip = AudioClip::new(ClipId(0), audio_info, snapped_position);

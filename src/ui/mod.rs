@@ -11,7 +11,6 @@ pub mod panels;
 pub mod project;
 pub mod theme;
 mod track;
-mod utils;
 mod view;
 mod waveform;
 mod widget;
