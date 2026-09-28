@@ -1,11 +1,12 @@
 use crate::{
-    core::state::{CentralView, PlaybackState, ToniqueProjectState},
+    core::state::{PlaybackState, ToniqueProjectState},
     ui::{
         theme::{ThemeExt, with_alpha},
         view::{
             graph::GraphView, navigation_bar::NavigationBar, timeline::Timeline,
             tracks::TrackHeaders,
         },
+        workspace::{MainView, Workspace},
     },
 };
 use egui::{Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
@@ -37,7 +38,12 @@ impl CentralPanel {
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ToniqueProjectState,
+        workspace: &mut Workspace,
+    ) {
         egui::CentralPanel::default()
             .frame(
                 Frame::central_panel(ui.style())
@@ -45,12 +51,12 @@ impl CentralPanel {
                     .fill(ui.app_theme().bg_base),
             )
             .show(ui, |ui| {
-                self.ui(ui, state);
+                self.ui(ui, state, workspace);
             });
     }
 
-    fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
-        if state.central_view == CentralView::Graph {
+    fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState, workspace: &mut Workspace) {
+        if workspace.main_view == MainView::Graph {
             self.graph.ui(ui, state);
             return;
         }
@@ -67,9 +73,9 @@ impl CentralPanel {
         );
         // Draw timeline
         self.timeline
-            .ui(ui, state, timeline_viewport, state.grid.offset);
+            .ui(ui, state, workspace, timeline_viewport, state.grid.offset);
         // Draw tracks
-        self.tracks.ui(ui, state, viewport);
+        self.tracks.ui(ui, state, workspace, viewport);
 
         // The timeline spans the content plus some room to add more, and
         // never shrinks under the part being looked at.
@@ -329,7 +335,9 @@ mod tests {
         let mut panel = CentralPanel::new();
         let mut shapes = 0;
         for _ in 0..2 {
-            let mut output = ctx.run_ui(input(), |ui| panel.show(ui, &mut state));
+            let mut output = ctx.run_ui(input(), |ui| {
+                panel.show(ui, &mut state, &mut Workspace::default())
+            });
             output.textures_delta.clear();
             shapes = output.shapes.len();
         }
@@ -374,7 +382,8 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let mut output = ctx.run_ui(input, |ui| panel.show(ui, state));
+            let mut output =
+                ctx.run_ui(input, |ui| panel.show(ui, state, &mut Workspace::default()));
             output.textures_delta.clear();
         };
         let collapsed = |state: &ToniqueProjectState| {

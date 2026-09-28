@@ -1,8 +1,12 @@
 use crate::{
     config::{keymap::Action, settings::UI_SCALE_RANGE},
     core::project::project_name,
-    core::state::{CentralView, ToniqueProjectState},
-    ui::{project::ProjectAction, theme::ThemeExt},
+    core::state::ToniqueProjectState,
+    ui::{
+        project::ProjectAction,
+        theme::ThemeExt,
+        workspace::{MainView, Workspace},
+    },
 };
 use egui::{Button, Context, Frame, Margin, MenuBar, Ui};
 use std::path::PathBuf;
@@ -29,6 +33,7 @@ impl AppMenuBar {
         &mut self,
         ui: &mut Ui,
         state: &mut ToniqueProjectState,
+        workspace: &mut Workspace,
         recent: &[PathBuf],
     ) -> MenuActions {
         let mut actions = MenuActions::default();
@@ -44,7 +49,7 @@ impl AppMenuBar {
                     ui.spacing_mut().item_spacing.x = 8.;
                     actions.project = self.file_menu(ui, state, recent);
                     self.edit_menu(ui, state);
-                    self.view_menu(ui, state);
+                    self.view_menu(ui, state, workspace);
                     let tooltip = state.settings().keymap.with_shortcut(
                         ui.ctx(),
                         "Settings",
@@ -122,18 +127,18 @@ impl AppMenuBar {
         });
     }
 
-    fn view_menu(&self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn view_menu(&self, ui: &mut Ui, state: &mut ToniqueProjectState, workspace: &mut Workspace) {
         ui.menu_button("View", |ui| {
             let keymap = state.settings().keymap.clone();
             let label = |text, action| keymap.with_shortcut(ui.ctx(), text, action);
             let graph = label("Audio graph", Action::ToggleGraphView);
             let browser = label("Browser", Action::ToggleBrowser);
             let effects = label("Effects panel", Action::ToggleEffectsPanel);
-            ui.radio_value(&mut state.central_view, CentralView::Timeline, "Timeline");
-            ui.radio_value(&mut state.central_view, CentralView::Graph, graph);
+            ui.radio_value(&mut workspace.main_view, MainView::Timeline, "Timeline");
+            ui.radio_value(&mut workspace.main_view, MainView::Graph, graph);
             ui.separator();
-            ui.checkbox(&mut state.left_panel_open, browser);
-            ui.checkbox(&mut state.bottom_panel_open, effects);
+            ui.checkbox(&mut workspace.left_panel_open, browser);
+            ui.checkbox(&mut workspace.bottom_panel_open, effects);
             ui.separator();
             let scale = state.settings().ui_scale;
             if ui

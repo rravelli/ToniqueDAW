@@ -14,6 +14,7 @@ use crate::{
         panels::{central_panel::SCROLLBAR_WIDTH, left_panel::DragPayload},
         track::{COLOR_BAR_WIDTH, HEADER_INSET, ROW_GAP, TrackHeader, color_bar_x},
         widget::{context_menu::ContextMenuButton, square_button::SquareButton},
+        workspace::Workspace,
     },
 };
 
@@ -38,7 +39,13 @@ impl TrackHeaders {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState, viewport: Rect) {
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ToniqueProjectState,
+        workspace: &mut Workspace,
+        viewport: Rect,
+    ) {
         let left = viewport.max.x - self.width;
 
         let dragger_rect = Rect::from_min_size(
@@ -70,7 +77,7 @@ impl TrackHeaders {
                 ))
                 .id_salt("track-area"),
             |ui| {
-                self.track_panel(ui, state, viewport);
+                self.track_panel(ui, state, workspace, viewport);
             },
         );
         let master_track = state.master_track();
@@ -94,6 +101,7 @@ impl TrackHeaders {
         &mut self,
         ui: &mut egui::Ui,
         state: &mut ToniqueProjectState,
+        workspace: &mut Workspace,
         viewport: Rect,
     ) {
         ui.vertical(|ui| {
@@ -134,9 +142,9 @@ impl TrackHeaders {
                 // Open bottom panel
                 if response.double_clicked() {
                     if track.selected {
-                        state.bottom_panel_open = !state.bottom_panel_open;
+                        workspace.bottom_panel_open = !workspace.bottom_panel_open;
                     } else {
-                        state.bottom_panel_open = true;
+                        workspace.bottom_panel_open = true;
                     }
                 }
                 // Insert effects

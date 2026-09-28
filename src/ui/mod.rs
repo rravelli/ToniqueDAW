@@ -17,6 +17,7 @@ mod waveform;
 mod widget;
 mod window;
 pub mod windows;
+pub mod workspace;
 
 pub fn spawn_ui_thread(
     engine: Engine,

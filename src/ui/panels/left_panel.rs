@@ -5,6 +5,7 @@ use crate::{
         theme::ThemeExt,
         view::filebrowser::FileBrowser,
         widget::{item_button::ItemButton, search_bar::SearchBar, tab_bar::TabBar},
+        workspace::Workspace,
     },
 };
 use egui::{Frame, Margin, Ui};
@@ -39,8 +40,13 @@ impl LeftPanel {
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
-        let mut open = state.left_panel_open;
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ToniqueProjectState,
+        workspace: &mut Workspace,
+    ) {
+        let mut open = workspace.left_panel_open;
         egui::Panel::left("left-panel")
             .min_size(100.)
             .max_size(400.)
@@ -59,7 +65,7 @@ impl LeftPanel {
             .show_collapsible(ui, &mut open, |ui| {
                 self.ui(ui, state);
             });
-        state.left_panel_open = open;
+        workspace.left_panel_open = open;
     }
 
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {

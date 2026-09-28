@@ -574,13 +574,14 @@ mod tests {
 
     #[test]
     fn draws_the_live_graph_headless() {
-        use crate::core::state::{CentralView, ToniqueProjectState};
+        use crate::{core::state::ToniqueProjectState, ui::theme::Theme};
 
         let (engine, _p) = Engine::new(EngineConfig::default());
         let mut state = ToniqueProjectState::new(engine);
+        state.set_track_palette(&Theme::dark().palette);
         state.add_track();
         state.add_track();
-        state.central_view = CentralView::Graph;
+        state.set_monitor_graph(true);
         state.update(); // enables metering, picks up the topology
         let topology = state.graph.topology().cloned().expect("graph published");
         assert!(topology.meters().is_enabled());
@@ -626,7 +627,7 @@ mod tests {
         }
 
         // Leaving the view stops measuring.
-        state.central_view = CentralView::Timeline;
+        state.set_monitor_graph(false);
         state.update();
         assert!(!topology.meters().is_enabled());
     }

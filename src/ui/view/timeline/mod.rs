@@ -14,6 +14,7 @@ use crate::{
         track::ROW_GAP,
         utils::find_track_at,
         view::timeline::{drag::DragState, selection::Multiselect},
+        workspace::Workspace,
     },
 };
 use egui::{DragAndDrop, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
@@ -49,6 +50,7 @@ impl Timeline {
         &mut self,
         ui: &mut Ui,
         state: &mut ToniqueProjectState,
+        workspace: &mut Workspace,
         viewport: Rect,
         offset: Vec2,
     ) {
@@ -64,7 +66,7 @@ impl Timeline {
         // First render the grid
         state.grid.paint_grid(&painter, viewport, &ui.app_theme());
         // Render all clips (except dragged clips)
-        self.clips_ui(ui, state, viewport, offset);
+        self.clips_ui(ui, state, workspace, viewport, offset);
 
         let (audio, is_released) = self.dnd(&timeline_res);
 
@@ -175,6 +177,7 @@ impl Timeline {
         &mut self,
         ui: &mut Ui,
         state: &mut ToniqueProjectState,
+        workspace: &mut Workspace,
         viewport: Rect,
         offset: Vec2,
     ) {
@@ -249,7 +252,7 @@ impl Timeline {
                 }
             }
 
-            self.handle_track_hover(ui, state, &track, track_rect);
+            self.handle_track_hover(ui, state, workspace, &track, track_rect);
 
             y += track.height;
             self.paint_track_separator(ui, viewport, offset, y);
@@ -263,6 +266,7 @@ impl Timeline {
         &mut self,
         ui: &mut Ui,
         state: &mut ToniqueProjectState,
+        workspace: &mut Workspace,
         track: &TrackReferenceCore,
         track_rect: Rect,
     ) {
@@ -283,7 +287,7 @@ impl Timeline {
         {
             state.add_effect(&track.id, id, 0);
             state.select_track(&track.id);
-            state.bottom_panel_open = true;
+            workspace.bottom_panel_open = true;
             DragAndDrop::take_payload::<DragPayload>(ui.ctx());
         }
     }

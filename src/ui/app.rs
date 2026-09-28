@@ -1,7 +1,7 @@
 use crate::{
     audio::host::AudioHost,
     config::{keymap::Action, settings::Settings},
-    core::state::{CentralView, PlaybackState, ToniqueProjectState},
+    core::state::{PlaybackState, ToniqueProjectState},
     ui::{
         panels::{
             bottom_panel::BottomPanel,
@@ -13,12 +13,14 @@ use crate::{
         project::{ProjectAction, ProjectManager},
         theme::{ThemeExt, ThemeLibrary},
         windows::settings::SettingsWindow,
+        workspace::{MainView, Workspace},
     },
 };
 use tonique_engine::engine::Engine;
 
 pub struct ToniqueApp {
     state: ToniqueProjectState,
+    workspace: Workspace,
     menu_bar: AppMenuBar,
     top_bar: TopBar,
     bottom_panel: BottomPanel,
@@ -37,12 +39,15 @@ impl ToniqueApp {
     ) -> Self {
         let themes = ThemeLibrary::load();
         let (theme, theme_warnings) = themes.resolve(&settings.theme);
+        let palette = theme.palette.clone();
         theme.install(&cc.egui_ctx);
         let mut state = ToniqueProjectState::new(engine);
+        state.set_track_palette(&palette);
         state.attach_audio(audio, settings);
         Self {
             project: ProjectManager::new(&state),
             state,
+            workspace: Workspace::default(),
             menu_bar: AppMenuBar::new(),
             top_bar: TopBar::new(),
             bottom_panel: BottomPanel::new(),
@@ -56,6 +61,8 @@ impl ToniqueApp {
 impl eframe::App for ToniqueApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Update state
+        self.state
+            .set_monitor_graph(self.workspace.main_view == MainView::Graph);
         self.state.update();
         // Keep the saved scale in sync with egui's zoom shortcuts (Ctrl +/-/0)
         if (ctx.zoom_factor() - self.state.settings().ui_scale).abs() > f32::EPSILON {
@@ -67,13 +74,17 @@ impl eframe::App for ToniqueApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_shortcuts(ui);
         self.state.set_track_palette(&ui.app_theme().palette);
-        let actions = self
-            .menu_bar
-            .show(ui, &mut self.state, self.project.recent());
-        self.top_bar.show(ui, &mut self.state);
-        self.bottom_panel.show(ui, &mut self.state);
-        self.left_panel.show(ui, &mut self.state);
-        self.central_panel.show(ui, &mut self.state);
+        let actions = self.menu_bar.show(
+            ui,
+            &mut self.state,
+            &mut self.workspace,
+            self.project.recent(),
+        );
+        let workspace = &mut self.workspace;
+        self.top_bar.show(ui, &mut self.state, workspace);
+        self.bottom_panel.show(ui, &mut self.state, workspace);
+        self.left_panel.show(ui, &mut self.state, workspace);
+        self.central_panel.show(ui, &mut self.state, workspace);
 
         if actions.open_settings {
             self.setting_window.open(&self.state);
@@ -96,6 +107,7 @@ impl ToniqueApp {
         }
         let actions = ui.input(|i| self.state.settings().keymap.triggered(i));
         let state = &mut self.state;
+        let workspace = &mut self.workspace;
         for action in actions.into_iter().filter(|a| !a.is_timeline()) {
             match action {
                 Action::PlayStop => {
@@ -122,14 +134,11 @@ impl ToniqueApp {
                     let selected = state.selected_tracks().clone();
                     state.group(&selected);
                 }
-                Action::ToggleBrowser => state.left_panel_open = !state.left_panel_open,
-                Action::ToggleEffectsPanel => state.bottom_panel_open = !state.bottom_panel_open,
-                Action::ToggleGraphView => {
-                    state.central_view = match state.central_view {
-                        CentralView::Graph => CentralView::Timeline,
-                        _ => CentralView::Graph,
-                    }
+                Action::ToggleBrowser => workspace.left_panel_open = !workspace.left_panel_open,
+                Action::ToggleEffectsPanel => {
+                    workspace.bottom_panel_open = !workspace.bottom_panel_open
                 }
+                Action::ToggleGraphView => workspace.toggle_graph(),
                 Action::OpenSettings => self.setting_window.toggle(state),
                 Action::NewProject => self.project.request(ProjectAction::New, state),
                 Action::OpenProject => self.project.request(ProjectAction::Open, state),

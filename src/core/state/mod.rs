@@ -28,7 +28,6 @@ use crate::{
             MutableTrackCore, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackReferenceCore, TrackSoloState,
         },
     },
-    ui::theme::Theme,
 };
 use egui::Color32;
 use std::{collections::HashMap, mem::take, path::PathBuf};
@@ -64,14 +63,6 @@ enum ProjectStatePendingAction {
     DeleteTrack { id: TrackId },
 }
 
-/// What the central panel shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CentralView {
-    Timeline,
-    /// The engine's processing graph, live.
-    Graph,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlaybackState {
     Paused,
@@ -104,7 +95,8 @@ pub struct ToniqueProjectState {
     pub metrics: GlobalMetrics,
     /// Live graph data for the graph view (measured only while it's shown).
     pub graph: GraphMonitor,
-    pub central_view: CentralView,
+    /// Whether the graph monitor measures: only while the graph is shown.
+    monitor_graph: bool,
 
     /// UI-only track fields; kept for deleted tracks so undo restores them.
     views: HashMap<TrackId, MutableTrackCore>,
@@ -124,11 +116,9 @@ pub struct ToniqueProjectState {
     loop_bpm: f32,
 
     pub resized_clip: Option<(ClipId, f32, f32, f32)>,
-    /// Colours given to new tracks: the installed theme's palette.
+    /// Colours given to new tracks: the UI sets its theme's palette (grey
+    /// until then).
     track_palette: Vec<Color32>,
-    // Panels
-    pub left_panel_open: bool,
-    pub bottom_panel_open: bool,
 }
 
 impl ToniqueProjectState {
@@ -152,7 +142,7 @@ impl ToniqueProjectState {
             preview_position: 0,
             metrics: GlobalMetrics::new(),
             graph: GraphMonitor::new(),
-            central_view: CentralView::Timeline,
+            monitor_graph: false,
             views: HashMap::from([(MASTER_TRACK_ID, master)]),
             selected_tracks: Vec::new(),
             clip_selection: ClipSelection::default(),
@@ -167,9 +157,7 @@ impl ToniqueProjectState {
             ),
             looping: false,
             loop_bpm: DEFAULT_BPM as f32,
-            track_palette: Theme::dark().palette,
-            left_panel_open: true,
-            bottom_panel_open: false,
+            track_palette: Vec::new(),
             metronome: false,
         }
     }
@@ -197,8 +185,12 @@ impl ToniqueProjectState {
             self.preview_playback_state = PlaybackState::Paused;
         }
         self.update_metrics();
-        let show_graph = self.central_view == CentralView::Graph;
-        self.graph.update(self.session.engine_mut(), show_graph);
+        self.graph
+            .update(self.session.engine_mut(), self.monitor_graph);
+    }
+    /// Measure the engine's graph (for the graph view) from the next update.
+    pub fn set_monitor_graph(&mut self, on: bool) {
+        self.monitor_graph = on;
     }
 
     // Settings and audio output

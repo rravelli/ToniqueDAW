@@ -8,11 +8,12 @@ use egui_phosphor::{
 
 use crate::{
     config::keymap::Action,
-    core::state::{CentralView, MASTER_TRACK_ID, PlaybackState, ToniqueProjectState},
+    core::state::{MASTER_TRACK_ID, PlaybackState, ToniqueProjectState},
     ui::{
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::{ThemeExt, with_alpha},
         widget::{input::NumberInput, square_button::SquareButton},
+        workspace::{MainView, Workspace},
     },
 };
 const BUTTON_SIZE: f32 = 22.;
@@ -29,7 +30,12 @@ impl TopBar {
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ToniqueProjectState,
+        workspace: &mut Workspace,
+    ) {
         egui::Panel::top("top-bar")
             .resizable(false)
             .frame(
@@ -38,15 +44,15 @@ impl TopBar {
                     .inner_margin(Margin::same(4)),
             )
             .show(ui, |ui| {
-                self.ui(ui, state);
+                self.ui(ui, state, workspace);
             });
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState, workspace: &mut Workspace) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
-            self.sidebar_ui(ui, state);
-            self.graph_view_ui(ui, state);
+            self.sidebar_ui(ui, state, workspace);
+            self.graph_view_ui(ui, state, workspace);
             self.metronome_ui(ui, state);
             if self.play_button_ui(ui, state).clicked() {
                 if state.playback_state() == PlaybackState::Playing {
@@ -119,31 +125,41 @@ impl TopBar {
         );
     }
 
-    fn sidebar_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
+    fn sidebar_ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &ToniqueProjectState,
+        workspace: &mut Workspace,
+    ) -> Response {
         let res = ui.add(
             SquareButton::ghost(SIDEBAR_SIMPLE)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
                     15.,
-                    if state.left_panel_open {
+                    if workspace.left_panel_open {
                         egui::FontFamily::Name(PHOSPHOR_FILL.into())
                     } else {
                         egui::FontFamily::Name(PHOSPHOR_REGULAR.into())
                     },
                 ))
-                .selected(state.left_panel_open)
+                .selected(workspace.left_panel_open)
                 .tooltip(tooltip(ui, state, "Browser", Action::ToggleBrowser)),
         );
 
         if res.clicked() {
-            state.left_panel_open = !state.left_panel_open;
+            workspace.left_panel_open = !workspace.left_panel_open;
         };
 
         res
     }
 
-    fn graph_view_ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) -> Response {
-        let active = state.central_view == CentralView::Graph;
+    fn graph_view_ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &ToniqueProjectState,
+        workspace: &mut Workspace,
+    ) -> Response {
+        let active = workspace.main_view == MainView::Graph;
         let res = ui.add(
             SquareButton::ghost(GRAPH)
                 .square(BUTTON_SIZE)
@@ -163,11 +179,7 @@ impl TopBar {
         );
 
         if res.clicked() {
-            state.central_view = if active {
-                CentralView::Timeline
-            } else {
-                CentralView::Graph
-            };
+            workspace.toggle_graph();
         };
 
         res

@@ -1,6 +1,8 @@
 use crate::{
     core::{metrics::AudioMetrics, state::ToniqueProjectState, track::TrackReferenceCore},
-    ui::{effects::EffectRack, panels::left_panel::DragPayload, theme::ThemeExt},
+    ui::{
+        effects::EffectRack, panels::left_panel::DragPayload, theme::ThemeExt, workspace::Workspace,
+    },
     utils::display_name,
 };
 use egui::{Frame, Key, Layout, Margin, Rangef, RichText, ScrollArea, Separator, Stroke, Ui};
@@ -24,8 +26,13 @@ impl BottomPanel {
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
-        let mut open = state.bottom_panel_open;
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ToniqueProjectState,
+        workspace: &mut Workspace,
+    ) {
+        let mut open = workspace.bottom_panel_open;
         egui::Panel::bottom("bottom-panel")
             .size_range(Rangef::new(50. + HEADER_HEIGHT, 400.))
             .resizable(true)
@@ -37,7 +44,7 @@ impl BottomPanel {
                     self.ui(ui, selected, state);
                 }
             });
-        state.bottom_panel_open = open;
+        workspace.bottom_panel_open = open;
     }
 
     pub fn ui(&mut self, ui: &mut Ui, track: TrackReferenceCore, state: &mut ToniqueProjectState) {
@@ -183,7 +190,10 @@ mod tests {
             .clone();
         cutoff.set(440.);
         state.select_track(&track);
-        state.bottom_panel_open = true;
+        let mut workspace = Workspace {
+            bottom_panel_open: true,
+            ..Default::default()
+        };
 
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::ui::font::fonts());
@@ -194,7 +204,7 @@ mod tests {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200., 800.))),
                 ..Default::default()
             };
-            let mut output = ctx.run_ui(input, |ui| panel.show(ui, &mut state));
+            let mut output = ctx.run_ui(input, |ui| panel.show(ui, &mut state, &mut workspace));
             output.textures_delta.clear();
             shapes = output.shapes.len();
         }
