@@ -27,26 +27,30 @@ enum Edge {
 }
 
 const LOADING_REPAINT: Duration = Duration::from_millis(100);
-#[derive(Clone)]
-pub struct ClipView {}
+/// A clip on the timeline: a header to grab it by, trim handles at its
+/// edges, and its waveform. Shows it, and applies trims to `state`.
+pub struct ClipView<'a> {
+    pub clip: &'a AudioClip,
+    /// Where the whole clip is on screen; drawn clipped to `viewport`.
+    pub rect: Rect,
+    pub viewport: Rect,
+    /// Its track's.
+    pub color: Color32,
+    pub selected: bool,
+    /// False in a collapsed row: only the header shows.
+    pub show_waveform: bool,
+}
 
-impl ClipView {
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    pub fn ui(
-        &mut self,
-        ui: &mut Ui,
-        pos: Pos2,
-        size: Vec2,
-        viewport: Rect,
-        selected: bool,
-        clip: &AudioClip,
-        state: &mut ProjectState,
-        show_waveform: bool,
-        color: Color32,
-    ) -> Response {
+impl ClipView<'_> {
+    pub fn ui(&self, ui: &mut Ui, state: &mut ProjectState) -> Response {
+        let (clip, viewport, color, selected, show_waveform) = (
+            self.clip,
+            self.viewport,
+            self.color,
+            self.selected,
+            self.show_waveform,
+        );
+        let (pos, size) = (self.rect.min, self.rect.size());
         let sample_rect = Rect::from_min_max(viewport.clamp(pos), viewport.clamp(pos + size));
         // let response = ui.allocate_rect(sample_rect, Sense::all());
         let painter = ui.painter_at(sample_rect);
@@ -209,7 +213,7 @@ impl ClipView {
     /// the grid, other clips' edges, the loop and the edit cursor (Alt
     /// disables snapping).
     fn trim_handle(
-        &mut self,
+        &self,
         ui: &mut Ui,
         state: &ProjectState,
         rect: Rect,

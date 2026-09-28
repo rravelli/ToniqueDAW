@@ -186,7 +186,7 @@ impl BottomPanel {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(display_name(&track.name, track.index))
+                        RichText::new(display_name(&track.name, track.first_track_index))
                             .size(10.)
                             .color(theme.text_on(track.color)),
                     );

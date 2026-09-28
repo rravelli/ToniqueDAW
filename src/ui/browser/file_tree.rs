@@ -25,11 +25,8 @@ impl FolderNode {
         self
     }
 
-    pub fn children(&mut self, filter: bool) -> Vec<FileNode> {
-        if filter {
-            return self.search_result.clone();
-        }
-
+    /// What's inside, read from disk the first time.
+    pub fn children(&mut self) -> Vec<FileNode> {
         if let Some(children) = self.children.clone() {
             return children;
         } else {
@@ -68,7 +65,7 @@ impl FileTree {
         self.folders
             .insert(dir.clone(), FolderNode::new(&dir, 0).opened());
 
-        let children = self.children(&FileNode {
+        let children = self.visible_under(&FileNode {
             path: dir,
             depth: 0,
             name_lower: String::new(),
@@ -79,7 +76,7 @@ impl FileTree {
     }
 
     pub fn rebuild(&mut self, root: PathBuf) {
-        let children = self.children(&FileNode {
+        let children = self.visible_under(&FileNode {
             path: root,
             depth: 0,
             name_lower: String::new(),
@@ -88,7 +85,9 @@ impl FileTree {
         self.items = children;
     }
 
-    fn children(&mut self, dir: &FileNode) -> Vec<FileNode> {
+    /// Everything shown under `dir`: its children, and theirs in open
+    /// folders.
+    fn visible_under(&mut self, dir: &FileNode) -> Vec<FileNode> {
         let mut stack = Vec::<FileNode>::new();
         let mut children = Vec::new();
 
@@ -109,7 +108,11 @@ impl FileTree {
             if let Some(dir) = self.folders.get_mut(&file.path)
                 && dir.open
             {
-                let dir_children = dir.children(!self.query.is_empty());
+                let dir_children = if self.query.is_empty() {
+                    dir.children()
+                } else {
+                    dir.search_result.clone()
+                };
                 stack.extend(dir_children);
             }
         }
@@ -143,7 +146,7 @@ impl FileTree {
             if let Some(folder) = self.folders.get_mut(&file.path) {
                 folder.open = true;
             }
-            let children = self.children(&file);
+            let children = self.visible_under(&file);
             self.items.splice(index + 1..index + 1, children);
         }
     }
@@ -210,10 +213,10 @@ fn filter(
     include_all: bool,
 ) -> bool {
     let children = if let Some(folder) = folders.get_mut(&root) {
-        folder.children(false)
+        folder.children()
     } else {
         let mut node = FolderNode::new(&root, depth);
-        let c = node.children(false);
+        let c = node.children();
         folders.insert(root.clone(), node);
         c
     };

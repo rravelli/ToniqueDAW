@@ -68,7 +68,7 @@ impl RowLayout {
         let mut track_rows = Vec::with_capacity(state.track_count());
         let mut r = 0;
         for track in 0..state.track_count() {
-            while r + 1 < rows.len() && rows[r + 1].track.index <= track {
+            while r + 1 < rows.len() && rows[r + 1].track.first_track_index <= track {
                 r += 1;
             }
             track_rows.push(r);
@@ -128,7 +128,7 @@ impl RowLayout {
                 .iter()
                 .find(|r| r.y.min <= y && y <= r.y.max + ROW_GAP)?
                 .track
-                .index
+                .first_track_index
         };
         Some((index, self.track_top(index)))
     }

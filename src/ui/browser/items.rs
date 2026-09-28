@@ -108,7 +108,7 @@ impl FileList {
             }
         }
 
-        self.update(ui, state);
+        self.handle_arrow_keys(ui, state);
     }
 
     pub fn result_ui(&self, ui: &mut Ui, len: usize, is_loading: bool) {
@@ -140,7 +140,8 @@ impl FileList {
         ui.add_space(5.0);
     }
 
-    pub fn update(&mut self, ui: &mut Ui, state: &mut ProjectState) {
+    /// Up and down move the selection, previewing the file selected.
+    pub fn handle_arrow_keys(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         if let Some(index) = self.selected.as_mut() {
             let mut updated = false;
             if ui.input(|i| i.key_pressed(Key::ArrowUp)) && *index > 0 {

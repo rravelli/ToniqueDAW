@@ -36,8 +36,9 @@ pub struct TrackRow {
     pub color: Color32,
     pub selected: bool,
     pub solo: TrackSoloState,
-    /// Position in the engine's track list; for a group, its first track's.
-    pub index: usize,
+    /// Position in the engine's track list of its first track: the track
+    /// itself, or a group's first.
+    pub first_track_index: usize,
     pub kind: TrackKind,
     /// Groups it's nested in.
     pub depth: usize,

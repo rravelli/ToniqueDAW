@@ -239,7 +239,7 @@ impl TrackHeader {
                 state.commit_track_view(&track.id);
             }
         } else {
-            let formatted_name = display_name(&track.name, track.index);
+            let formatted_name = display_name(&track.name, track.first_track_index);
             ui.add(
                 Label::new(
                     RichText::new(formatted_name)
@@ -258,7 +258,7 @@ impl TrackHeader {
             ui.vertical(|ui| {
                 ui.add(ContextMenuLabel::new(display_name(
                     &track.name,
-                    track.index,
+                    track.first_track_index,
                 )));
                 if ui.add(ContextMenuButton::new(TEXT_T, "Rename")).clicked() {
                     self.edit = true;
@@ -267,7 +267,7 @@ impl TrackHeader {
                     .add(ContextMenuButton::new(PLUS, "Add Audio Track"))
                     .clicked()
                 {
-                    state.add_track_at(track.index);
+                    state.add_track_at(track.first_track_index);
                 }
                 // The whole selection when this row is part of it.
                 let selection = state.selected_tracks().clone();

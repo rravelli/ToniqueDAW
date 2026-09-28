@@ -462,7 +462,11 @@ fn track_names(state: &ProjectState) -> HashMap<u64, (String, String, Color32)> 
         .map(|t| {
             (
                 t.id.0,
-                (t.name.clone(), display_name(&t.name, t.index), t.color),
+                (
+                    t.name.clone(),
+                    display_name(&t.name, t.first_track_index),
+                    t.color,
+                ),
             )
         })
         .collect()
@@ -622,7 +626,7 @@ mod tests {
                 .filter(|n| n.owner == Some(track.id.0) && n.name == "VolumePanNode")
                 .map(|n| title(n, &owners))
                 .collect();
-            let expected = format!("{} Audio Track · fader", track.index + 1);
+            let expected = format!("{} Audio Track · fader", track.first_track_index + 1);
             assert_eq!(faders, [(expected, Some(track.color))]);
         }
 

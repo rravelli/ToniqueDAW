@@ -75,10 +75,8 @@ impl Timeline {
         }
         self.clips_ui(ui, state, workspace, layout, viewport);
 
-        let (audio, is_released) = self.dnd(&timeline_res);
-
-        if let Some(audio) = audio {
-            self.preview_clip_ui(ui, viewport, layout, audio, is_released, state);
+        if let Some(drag) = dragged_audio(&timeline_res) {
+            self.preview_clip_ui(ui, viewport, layout, drag, state);
         }
 
         self.handle_dropped_audio(ui, viewport, state);
@@ -231,7 +229,7 @@ impl Timeline {
                 );
                 if dragged_clip.is_none() && dragged {
                     dragged_clip = Some(clip.clone());
-                    dragged_track_index = Some(track.index)
+                    dragged_track_index = Some(track.first_track_index)
                 }
             }
 
@@ -311,17 +309,15 @@ impl Timeline {
         } else {
             track.color
         };
-        let response = ClipView::new().ui(
-            ui,
-            pos,
-            size,
+        let response = ClipView {
+            clip,
+            rect: Rect::from_min_size(pos, size),
             viewport,
-            !dragged && state.is_clip_selected(clip.id),
-            &clip,
-            state,
-            !track.collapsed,
             color,
-        );
+            selected: !dragged && state.is_clip_selected(clip.id),
+            show_waveform: !track.collapsed,
+        }
+        .ui(ui, state);
         // Select clip
         // Shift-click adds or removes the clip; a plain click selects it alone.
         if response.clicked() {
@@ -346,24 +342,6 @@ impl Timeline {
             ],
             Stroke::new(ROW_GAP, ui.app_theme().separator),
         );
-    }
-
-    pub fn dnd(&mut self, response: &Response) -> (Option<AudioInfo>, bool) {
-        let mut dragged_audio = None;
-        let mut is_released = false;
-        if let Some(payload) = response.dnd_hover_payload::<DragPayload>()
-            && let DragPayload::File(audio) = payload.as_ref()
-        {
-            dragged_audio = Some(audio.clone());
-            if let Some(payload) = response.dnd_release_payload::<DragPayload>()
-                && let DragPayload::File(audio) = payload.as_ref()
-            {
-                dragged_audio = Some(audio.clone());
-                is_released = true;
-            }
-        }
-
-        (dragged_audio, is_released)
     }
 
     fn handle_dropped_audio(&mut self, ui: &mut Ui, viewport: Rect, state: &mut ProjectState) {
@@ -394,10 +372,11 @@ impl Timeline {
         ui: &mut Ui,
         viewport: egui::Rect,
         layout: &RowLayout,
-        audio_info: AudioInfo,
-        is_released: bool,
+        drag: AudioDrag,
         state: &mut ProjectState,
     ) {
+        let dropped = matches!(drag, AudioDrag::Dropped(_));
+        let (AudioDrag::Over(audio_info) | AudioDrag::Dropped(audio_info)) = drag;
         // Render preview clip
         if let Some(duration) = audio_info.duration
             && let Some(mouse_pos) = ui.ctx().input(|i| i.pointer.hover_pos())
@@ -427,19 +406,17 @@ impl Timeline {
             // Placeholder ID: the clip only gets a real one when dropped
             let clip = AudioClip::new(ClipId(0), audio_info, snapped_position);
             // render clip
-            ClipView::new().ui(
-                ui,
-                pos,
-                size,
+            ClipView {
+                clip: &clip,
+                rect: Rect::from_min_size(pos, size),
                 viewport,
-                false,
-                &clip,
-                state,
-                show_waveform,
                 color,
-            );
+                selected: false,
+                show_waveform,
+            }
+            .ui(ui, state);
 
-            if is_released {
+            if dropped {
                 state.begin_batch();
                 let id = match track {
                     Some(t) => t.id,
@@ -488,4 +465,26 @@ fn paint_group_overview(ui: &Ui, state: &ProjectState, group: &TrackRow, lane: R
             painter.rect_filled(Rect::from_x_y_ranges(x, rows.clone()), 1., color);
         }
     }
+}
+
+/// Audio from the browser over the timeline.
+enum AudioDrag {
+    /// Still dragged: preview where it would go.
+    Over(AudioInfo),
+    /// Just dropped: place it.
+    Dropped(AudioInfo),
+}
+
+fn dragged_audio(response: &Response) -> Option<AudioDrag> {
+    if let Some(payload) = response.dnd_release_payload::<DragPayload>()
+        && let DragPayload::File(audio) = payload.as_ref()
+    {
+        return Some(AudioDrag::Dropped(audio.clone()));
+    }
+    if let Some(payload) = response.dnd_hover_payload::<DragPayload>()
+        && let DragPayload::File(audio) = payload.as_ref()
+    {
+        return Some(AudioDrag::Over(audio.clone()));
+    }
+    None
 }

@@ -2,7 +2,10 @@ use crate::{
     config::Config,
     core::state::{PlaybackState, ProjectState},
     ui::{
-        browser::{items::FileList, preview::PreviewPanel},
+        browser::{
+            items::FileList,
+            preview::{PREVIEW_HEIGHT, preview_ui},
+        },
         font::PHOSPHOR_FILL,
         theme::ThemeExt,
         widget::{context_menu::ContextMenuButton, flat_button::FlatButton},
@@ -20,11 +23,8 @@ mod file_tree;
 mod items;
 mod preview;
 
-const PREVIEW_WINDOW_HEIGHT: f32 = 60.;
-
 pub struct FileBrowser {
     root: Option<PathBuf>,
-    preview: PreviewPanel,
     items: FileList,
     config: Config,
 }
@@ -43,7 +43,6 @@ impl FileBrowser {
 
         Self {
             root,
-            preview: PreviewPanel::new(),
             items,
             config,
         }
@@ -91,7 +90,7 @@ impl FileBrowser {
         }
 
         let height = if self.items.selected_audio.is_some() {
-            ui.available_height() - PREVIEW_WINDOW_HEIGHT
+            ui.available_height() - PREVIEW_HEIGHT
         } else {
             ui.available_height()
         };
@@ -102,7 +101,7 @@ impl FileBrowser {
         });
 
         if let Some(audio) = &self.items.selected_audio {
-            self.preview.ui(ui, state, audio);
+            preview_ui(ui, state, audio);
         }
 
         if state.preview_playback_state() == PlaybackState::Playing

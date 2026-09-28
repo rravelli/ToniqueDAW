@@ -68,7 +68,7 @@ impl Timeline {
                         };
                         // Update selected clips
                         new_selected_clips.push(new_clip.clone().id);
-                        let track_index_delta = track.index as i32 - old_track as i32;
+                        let track_index_delta = track.first_track_index as i32 - old_track as i32;
                         min_track_delta = min_track_delta.min(track_index_delta);
                         let x = state.grid.beats_to_x(clip.position, viewport);
                         clips.push(DraggedClip {
@@ -107,11 +107,11 @@ impl Timeline {
             if ui.input(|i| !i.modifiers.alt) {
                 let targets = state.snap_targets(&clip_drag.dragged_ids());
                 let bpm = state.bpm();
-                for element in clip_drag.clips.iter() {
+                for dragged in clip_drag.clips.iter() {
                     let start = state
                         .grid
-                        .x_to_beats(mouse_pos.x - element.grab_x, viewport);
-                    let end = start + element.clip.end(bpm) - element.clip.position;
+                        .x_to_beats(mouse_pos.x - dragged.grab_x, viewport);
+                    let end = start + dragged.clip.end(bpm) - dragged.clip.position;
                     let candidates = [
                         state
                             .grid
@@ -156,11 +156,11 @@ impl Timeline {
             }
 
             let mut track_indexes = Vec::new();
-            for element in clip_drag.clips.iter_mut() {
-                if let Some(duration) = element.clip.duration() {
+            for dragged in clip_drag.clips.iter_mut() {
+                if let Some(duration) = dragged.clip.duration() {
                     // Calculate track index
                     let track_index =
-                        (mouse_track_index + element.track_index_delta).max(0) as usize;
+                        (mouse_track_index + dragged.track_index_delta).max(0) as usize;
 
                     track_indexes.push(track_index);
                     // Calculate y pos
@@ -170,9 +170,9 @@ impl Timeline {
                     // Calculate x pos
                     let new_position = state
                         .grid
-                        .x_to_beats(mouse_pos.x - element.grab_x, viewport)
+                        .x_to_beats(mouse_pos.x - dragged.grab_x, viewport)
                         + beat_delta;
-                    element.clip.position = new_position;
+                    dragged.clip.position = new_position;
                     let x = state.grid.beats_to_x(new_position, viewport);
 
                     let mut show_waveform = true;
@@ -186,17 +186,15 @@ impl Timeline {
                     let pos = pos2(x, y);
                     let size = vec2(width, height);
                     // Render Clip
-                    ClipView::new().ui(
-                        ui,
-                        pos,
-                        size,
+                    ClipView {
+                        clip: &dragged.clip,
+                        rect: Rect::from_min_size(pos, size),
                         viewport,
-                        true,
-                        &element.clip,
-                        state,
-                        show_waveform,
                         color,
-                    );
+                        selected: true,
+                        show_waveform,
+                    }
+                    .ui(ui, state);
                 }
             }
 
@@ -220,14 +218,14 @@ impl Timeline {
 
         let mut tracks: Vec<_> = state.tracks().map(|t| t.id).collect();
         state.begin_batch();
-        for (i, element) in clip_drag.clips.iter().enumerate() {
+        for (i, dragged) in clip_drag.clips.iter().enumerate() {
             let track_index = track_indexes[i];
             // Create missing tracks
             while tracks.len() <= track_index {
                 tracks.push(state.add_track());
             }
 
-            let clone = element.clip.clone();
+            let clone = dragged.clip.clone();
 
             let track_id = tracks[track_index];
             if clip_drag.duplicate {

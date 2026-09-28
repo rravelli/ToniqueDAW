@@ -227,7 +227,7 @@ impl ProjectState {
             } else {
                 TrackSoloState::NotSoloing
             },
-            index: tracks
+            first_track_index: tracks
                 .first()
                 .and_then(|t| self.track_index(*t))
                 .unwrap_or(0),

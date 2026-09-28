@@ -940,7 +940,7 @@ impl ProjectState {
             color: view.color,
             selected: self.selected_tracks.contains(&MASTER_TRACK_ID),
             solo: TrackSoloState::NotSoloing,
-            index: 0,
+            first_track_index: 0,
             kind: TrackKind::Audio,
             depth: 0,
         }
@@ -1031,7 +1031,7 @@ impl ProjectState {
             } else {
                 TrackSoloState::NotSoloing
             },
-            index,
+            first_track_index: index,
             kind: TrackKind::Audio,
             depth: self.edit().buses_along(track.output).len(),
         })
