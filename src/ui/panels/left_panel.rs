@@ -2,6 +2,7 @@ use crate::{
     core::{effect::EffectKind, state::ProjectState},
     ui::{
         browser::FileBrowser,
+        commands::Commands,
         dnd::DragPayload,
         theme::ThemeExt,
         widget::{list_row::ListRow, search_bar::SearchBar, tab_bar::TabBar},
@@ -21,6 +22,8 @@ pub enum LeftPanelTab {
 
 pub struct LeftPanel {
     pub file_browser: FileBrowser,
+    /// The last click was in the panel: the browser has the keyboard.
+    focused: bool,
     tab: LeftPanelTab,
     search: SearchBar,
 }
@@ -29,12 +32,19 @@ impl LeftPanel {
     pub fn new() -> Self {
         Self {
             file_browser: FileBrowser::new(),
+            focused: false,
             tab: LeftPanelTab::Files,
             search: SearchBar::new("Search"),
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        commands: &mut Commands,
+    ) {
         let mut open = workspace.left_panel_open;
         egui::Panel::left("left-panel")
             .min_size(100.)
@@ -52,12 +62,26 @@ impl LeftPanel {
             )
             .default_size(220.)
             .show_collapsible(ui, &mut open, |ui| {
-                self.ui(ui, state);
+                let panel = ui.max_rect();
+                if let Some(pos) = ui
+                    .input(|i| {
+                        i.pointer
+                            .primary_pressed()
+                            .then(|| i.pointer.interact_pos())
+                    })
+                    .flatten()
+                {
+                    self.focused = panel.contains(pos);
+                }
+                self.ui(ui, state, commands);
             });
         workspace.left_panel_open = open;
+        if !open {
+            self.focused = false;
+        }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, commands: &mut Commands) {
         ui.vertical(|ui| {
             ui.set_width(ui.available_width());
             Frame::new()
@@ -81,7 +105,7 @@ impl LeftPanel {
 
             match self.tab {
                 LeftPanelTab::Files => {
-                    self.file_browser.ui(ui, state);
+                    self.file_browser.ui(ui, state, commands, self.focused);
                 }
                 LeftPanelTab::Effects => {
                     let res = ui.add(ListRow::new(format!(

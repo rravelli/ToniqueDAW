@@ -15,6 +15,7 @@ use egui::{
 use crate::{
     analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,
+    config::keymap::Action,
     core::state::ProjectState,
     ui::{
         browser::file_tree::{FileNode, FileTree},
@@ -27,6 +28,8 @@ use crate::{
 const PLAYABLE_FORMAT: &[&str] = &["mp3", "wav", "ogg"];
 
 pub struct FileList {
+    /// The browser has the keyboard: Enter opens the selected item.
+    focused: bool,
     selected: Option<usize>,
     pub selected_audio: Option<AudioInfo>,
     files: Arc<Mutex<FileTree>>,
@@ -38,6 +41,7 @@ pub struct FileList {
 impl FileList {
     pub fn new() -> Self {
         Self {
+            focused: false,
             selected: None,
             selected_audio: None,
             files: Arc::new(Mutex::new(FileTree::new())),
@@ -59,7 +63,10 @@ impl FileList {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
+    /// `focused`: the browser has the keyboard; `moves` are the selection
+    /// moves asked for this frame (up or down a row).
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, focused: bool, moves: &[Action]) {
+        self.focused = focused;
         let is_loading = self.loading.lock().is_ok_and(|l| *l);
         let item_count = if !is_loading {
             self.files.lock().map_or(0, |files| files.items.len())
@@ -108,7 +115,9 @@ impl FileList {
             }
         }
 
-        self.handle_arrow_keys(ui, state);
+        for action in moves {
+            self.move_selection(state, *action == Action::MoveTrackUp);
+        }
     }
 
     pub fn result_ui(&self, ui: &mut Ui, len: usize, is_loading: bool) {
@@ -140,16 +149,14 @@ impl FileList {
         ui.add_space(5.0);
     }
 
-    /// Up and down move the selection, previewing the file selected.
-    pub fn handle_arrow_keys(&mut self, ui: &mut Ui, state: &mut ProjectState) {
+    /// Move the selection a row up or down, previewing the file selected.
+    fn move_selection(&mut self, state: &mut ProjectState, up: bool) {
         if let Some(index) = self.selected.as_mut() {
             let mut updated = false;
-            if ui.input(|i| i.key_pressed(Key::ArrowUp)) && *index > 0 {
+            if up && *index > 0 {
                 *index -= 1;
                 updated = true;
-            } else if ui.input(|i| i.key_pressed(Key::ArrowDown))
-                && *index < self.files.lock().map_or(0, |f| f.items.len() - 1)
-            {
+            } else if !up && *index < self.files.lock().map_or(0, |f| f.items.len() - 1) {
                 *index += 1;
                 updated = true;
             }
@@ -221,7 +228,8 @@ impl FileList {
             .selected(selected),
         );
 
-        let pressed = res.clicked() || (selected && ui.input(|i| i.key_pressed(Key::Enter)));
+        let pressed =
+            res.clicked() || (selected && self.focused && ui.input(|i| i.key_pressed(Key::Enter)));
 
         if pressed {
             self.selected = Some(index);

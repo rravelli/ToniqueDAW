@@ -1,11 +1,12 @@
 use crate::{
-    config::Config,
+    config::{Config, keymap::Action},
     core::state::{PlaybackState, ProjectState},
     ui::{
         browser::{
             items::FileList,
             preview::{PREVIEW_HEIGHT, preview_ui},
         },
+        commands::Commands,
         font::PHOSPHOR_FILL,
         theme::ThemeExt,
         widget::{context_menu::ContextMenuButton, flat_button::FlatButton},
@@ -48,7 +49,16 @@ impl FileBrowser {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
+    /// `focused`: the browser has the keyboard, and takes the selection
+    /// moves (up and down) from `commands`.
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        commands: &mut Commands,
+        focused: bool,
+    ) {
+        let moves = take_moves(commands, focused);
         ui.spacing_mut().scroll.bar_width = 5.0;
         ScrollArea::horizontal().show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -97,7 +107,7 @@ impl FileBrowser {
         ui.vertical(|ui| {
             ui.set_height(height);
 
-            self.items.ui(ui, state);
+            self.items.ui(ui, state, focused, &moves);
         });
 
         if let Some(audio) = &self.items.selected_audio {
@@ -142,5 +152,41 @@ impl FileBrowser {
         } else {
             self.items.search(query, root);
         }
+    }
+}
+
+/// The selection moves (up and down, bound to the arrow keys by default)
+/// the browser takes while it has the keyboard; otherwise they're left for
+/// the timeline, where they move clips between tracks.
+fn take_moves(commands: &mut Commands, focused: bool) -> Vec<Action> {
+    if !focused {
+        return Vec::new();
+    }
+    commands.take(|a| matches!(a, Action::MoveTrackUp | Action::MoveTrackDown))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moves_go_to_the_browser_only_while_focused() {
+        let queue = || {
+            let mut commands = Commands::default();
+            for action in [Action::MoveTrackDown, Action::Undo, Action::MoveTrackUp] {
+                commands.push(action);
+            }
+            commands
+        };
+        let mut commands = queue();
+        assert!(take_moves(&mut commands, false).is_empty());
+        assert_eq!(commands.take_all().len(), 3);
+
+        let mut commands = queue();
+        assert_eq!(
+            take_moves(&mut commands, true),
+            [Action::MoveTrackDown, Action::MoveTrackUp]
+        );
+        assert_eq!(commands.take_all(), [Action::Undo]);
     }
 }

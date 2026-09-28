@@ -84,7 +84,7 @@ impl eframe::App for ToniqueApp {
             .show(ui, state, workspace, commands, self.project.recent());
         self.transport_bar.show(ui, state, workspace, commands);
         self.bottom_panel.show(ui, state, workspace, commands);
-        self.left_panel.show(ui, state, workspace);
+        self.left_panel.show(ui, state, workspace, commands);
         self.central_panel.show(ui, state, workspace, commands);
 
         if let Some(action) = recent {
