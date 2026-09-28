@@ -1,3 +1,9 @@
+//! The settings window: interface, audio and engine settings, with the
+//! appearance and shortcuts tabs.
+
+mod appearance;
+mod shortcuts;
+
 use crate::{
     config::settings::{Settings, UI_SCALE_RANGE},
     core::state::ProjectState,
@@ -9,11 +15,12 @@ use crate::{
             input::NumberInput, section::SectionHeader, select::Select, slider::ValueSlider,
             square_button::SquareButton, tab_bar::TabBar,
         },
-        windows::{appearance::AppearanceTab, shortcuts::ShortcutsTab},
     },
 };
+use appearance::AppearanceTab;
 use egui::{FontFamily, FontId, Frame, Grid, Layout, Margin, Rangef, RichText, Ui, Vec2, vec2};
 use egui_phosphor::regular::ARROWS_CLOCKWISE;
+use shortcuts::ShortcutsTab;
 use tonique_engine::device::{DeviceInfo, DeviceOptions, OutputDevice, output_devices};
 
 const BUFFER_SIZES: [u32; 8] = [32, 64, 128, 256, 512, 1024, 2048, 4096];

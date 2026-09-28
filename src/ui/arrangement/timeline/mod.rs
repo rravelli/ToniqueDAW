@@ -6,17 +6,17 @@ use crate::{
         state::ProjectState,
         track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow},
     },
-    ui::grid::PaintGrid,
+    ui::arrangement::grid::PaintGrid,
     ui::{
-        clip::ClipView,
-        commands::Commands,
-        panels::left_panel::DragPayload,
-        theme::{ThemeExt, with_alpha},
-        track::ROW_GAP,
-        view::{
+        arrangement::clip::ClipView,
+        arrangement::{
             row_layout::RowLayout,
             timeline::{drag::DragState, selection::Multiselect},
+            track_header::ROW_GAP,
         },
+        commands::Commands,
+        dnd::DragPayload,
+        theme::{ThemeExt, with_alpha},
         workspace::Workspace,
     },
 };

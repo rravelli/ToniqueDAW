@@ -1,6 +1,6 @@
 use crate::{
     core::{clip::AudioClip, state::ProjectState, track::TRACK_COLLAPSED_HEIGHT},
-    ui::grid::PaintGrid,
+    ui::arrangement::grid::PaintGrid,
     ui::{
         theme::{ThemeExt, with_alpha},
         waveform::paint_waveform,

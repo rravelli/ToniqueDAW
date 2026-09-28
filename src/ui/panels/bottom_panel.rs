@@ -2,7 +2,7 @@ use crate::{
     config::keymap::Action,
     core::{metrics::AudioMetrics, state::ProjectState, track::TrackRow},
     ui::{
-        commands::Commands, effects::EffectRack, panels::left_panel::DragPayload, theme::ThemeExt,
+        commands::Commands, dnd::DragPayload, effects::EffectRack, theme::ThemeExt,
         workspace::Workspace,
     },
     utils::display_name,

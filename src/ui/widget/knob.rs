@@ -1,7 +1,9 @@
+//! A knob: drag up or down to change a value, on a linear or log scale.
+
 use crate::ui::theme::ThemeExt;
 use egui::{Align2, FontId, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
 
-pub fn paint_circle_button(
+pub fn paint_knob(
     ui: &mut Ui,
     painter: &Painter,
     center: Pos2,

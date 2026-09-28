@@ -17,9 +17,9 @@ use crate::{
     cache::AUDIO_ANALYSIS_CACHE,
     core::state::ProjectState,
     ui::{
-        panels::left_panel::DragPayload,
+        browser::file_tree::{FileNode, FileTree},
+        dnd::DragPayload,
         theme::ThemeExt,
-        view::filebrowser::file_tree::{FileNode, FileTree},
         widget::item_button::ItemButton,
     },
 };

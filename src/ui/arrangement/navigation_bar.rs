@@ -3,8 +3,11 @@ use egui_phosphor::fill::{ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL, LIN
 
 use crate::{
     core::state::ProjectState,
-    ui::grid::PaintGrid,
-    ui::{theme::ThemeExt, view::tracks::SPLITTER_WIDTH, widget::square_button::SquareButton},
+    ui::arrangement::grid::PaintGrid,
+    ui::{
+        arrangement::track_headers::SPLITTER_WIDTH, theme::ThemeExt,
+        widget::square_button::SquareButton,
+    },
 };
 
 pub const NAVIGATION_BAR_HEIGHT: f32 = 30.;

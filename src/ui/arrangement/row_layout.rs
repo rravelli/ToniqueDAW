@@ -8,7 +8,7 @@ use crate::{
         state::ProjectState,
         track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackRow},
     },
-    ui::track::ROW_GAP,
+    ui::arrangement::track_header::ROW_GAP,
 };
 
 /// A row of the track list: a track, or a group's header.

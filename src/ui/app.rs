@@ -12,8 +12,8 @@ use crate::{
             top_bar::TopBar,
         },
         project::{ProjectAction, ProjectManager},
+        settings::SettingsWindow,
         theme::{ThemeExt, ThemeLibrary},
-        windows::settings::SettingsWindow,
         workspace::{MainView, Workspace},
     },
 };

@@ -1,8 +1,8 @@
 use crate::{
     core::state::{ProjectState, SelectionBounds},
     ui::{
+        arrangement::{row_layout::RowLayout, timeline::Timeline},
         theme::ThemeExt,
-        view::{row_layout::RowLayout, timeline::Timeline},
     },
 };
 use egui::{Pos2, Rect, Response, Shape, Stroke, Ui};

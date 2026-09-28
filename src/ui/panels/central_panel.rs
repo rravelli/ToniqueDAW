@@ -1,12 +1,13 @@
 use crate::{
     core::state::{PlaybackState, ProjectState},
     ui::{
-        commands::Commands,
-        theme::{ThemeExt, with_alpha},
-        view::{
-            graph::GraphView, navigation_bar::NavigationBar, row_layout::RowLayout,
-            timeline::Timeline, tracks::TrackHeaders,
+        arrangement::{
+            navigation_bar::NavigationBar, row_layout::RowLayout, timeline::Timeline,
+            track_headers::TrackHeaders,
         },
+        commands::Commands,
+        graph::GraphView,
+        theme::{ThemeExt, with_alpha},
         workspace::{MainView, Workspace},
     },
 };
@@ -373,8 +374,8 @@ mod tests {
     /// it again; dropping inside leaves it expanded.
     #[test]
     fn collapsed_groups_expand_while_dragging_over_them() {
-        use crate::ui::view::navigation_bar::NAVIGATION_BAR_HEIGHT;
-        use crate::{analysis::AudioInfo, ui::panels::left_panel::DragPayload};
+        use crate::ui::arrangement::navigation_bar::NAVIGATION_BAR_HEIGHT;
+        use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
         use egui::{Event, PointerButton, Pos2};
 
         let (engine, _processor) = Engine::new(EngineConfig::default());

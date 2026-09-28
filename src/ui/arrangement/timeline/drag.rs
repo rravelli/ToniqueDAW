@@ -1,12 +1,12 @@
 use crate::{
     core::{clip::AudioClip, state::ProjectState, track::DEFAULT_TRACK_HEIGHT},
     ui::{
-        clip::ClipView,
-        theme::ThemeExt,
-        view::{
+        arrangement::clip::ClipView,
+        arrangement::{
             row_layout::RowLayout,
             timeline::{Timeline, scroll::autoscroll},
         },
+        theme::ThemeExt,
     },
 };
 use egui::{Rect, Stroke, Ui, pos2, vec2};

@@ -4,8 +4,8 @@ use crate::{
     config::keymap::Action,
     core::state::ProjectState,
     ui::{
+        arrangement::timeline::{Timeline, scroll::reveal},
         commands::Commands,
-        view::timeline::{Timeline, scroll::reveal},
     },
 };
 

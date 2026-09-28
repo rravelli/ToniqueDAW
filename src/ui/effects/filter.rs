@@ -1,9 +1,9 @@
 use crate::{
     core::metrics::AudioMetrics,
     ui::{
-        buttons::paint_circle_button,
         effects::EffectEditor,
         theme::{Theme, ThemeExt},
+        widget::knob::paint_knob,
     },
 };
 use egui::{Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
@@ -184,7 +184,7 @@ impl EffectEditor for FilterEditor {
 
         let label = Self::format_freq(self.cutoff);
 
-        let freq_res = paint_circle_button(
+        let freq_res = paint_knob(
             ui,
             &painter,
             Pos2::new(rect.left() + 20., rect.bottom() + BOTTOM_HEIGHT / 2.),
@@ -199,7 +199,7 @@ impl EffectEditor for FilterEditor {
 
         let label = format!("{:.1}", self.q.clone());
 
-        let q_res = paint_circle_button(
+        let q_res = paint_knob(
             ui,
             &painter,
             Pos2::new(rect.left() + 50., rect.bottom() + BOTTOM_HEIGHT / 2.),

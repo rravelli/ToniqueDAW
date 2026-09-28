@@ -2,9 +2,9 @@ use crate::{
     config::Config,
     core::state::{PlaybackState, ProjectState},
     ui::{
+        browser::{items::FileList, preview::PreviewPanel},
         font::PHOSPHOR_FILL,
         theme::ThemeExt,
-        view::filebrowser::{items::FileList, preview::PreviewPanel},
         widget::{context_menu::ContextMenuButton, square_button::SquareButton},
     },
 };

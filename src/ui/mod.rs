@@ -1,23 +1,22 @@
 use crate::ui::{app::ToniqueApp, font::fonts, window::native_options};
 use crate::{audio::host::AudioHost, config::settings::Settings};
 use tonique_engine::engine::Engine;
-pub mod app;
-mod buttons;
-mod clip;
+mod app;
+mod arrangement;
+mod browser;
 mod commands;
-pub mod effects;
-pub mod font;
-pub mod grid;
-pub mod panels;
-pub mod project;
-pub mod theme;
-mod track;
-mod view;
+mod dnd;
+mod effects;
+mod font;
+mod graph;
+mod panels;
+mod project;
+mod settings;
+mod theme;
 mod waveform;
 mod widget;
 mod window;
-pub mod windows;
-pub mod workspace;
+mod workspace;
 
 pub fn spawn_ui_thread(
     engine: Engine,

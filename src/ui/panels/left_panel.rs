@@ -1,9 +1,9 @@
 use crate::{
-    analysis::AudioInfo,
     core::{effect::EffectKind, state::ProjectState},
     ui::{
+        browser::FileBrowser,
+        dnd::DragPayload,
         theme::ThemeExt,
-        view::filebrowser::FileBrowser,
         widget::{item_button::ItemButton, search_bar::SearchBar, tab_bar::TabBar},
         workspace::Workspace,
     },
@@ -17,12 +17,6 @@ const HEADER_SPACING: f32 = 4.;
 pub enum LeftPanelTabs {
     Files,
     Effects,
-}
-
-#[derive(Clone)]
-pub enum DragPayload {
-    File(AudioInfo),
-    Effect(EffectKind),
 }
 
 pub struct LeftPanel {

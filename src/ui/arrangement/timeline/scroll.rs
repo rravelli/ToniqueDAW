@@ -5,7 +5,7 @@ use egui::{Pos2, Rect, Ui, Vec2, vec2};
 
 use crate::{
     core::{state::ProjectState, track::DEFAULT_TRACK_HEIGHT},
-    ui::view::row_layout::RowLayout,
+    ui::arrangement::row_layout::RowLayout,
 };
 
 /// How close to the left/right edges dragging starts scrolling, in points.

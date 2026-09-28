@@ -10,10 +10,13 @@ use crate::{
     },
     ui::theme::ThemeExt,
     ui::{
+        arrangement::row_layout::{Row, RowLayout},
+        arrangement::track_header::{
+            COLOR_BAR_WIDTH, HEADER_INSET, ROW_GAP, TrackHeader, color_bar_x,
+        },
+        dnd::DragPayload,
         font::PHOSPHOR_REGULAR,
-        panels::{central_panel::SCROLLBAR_WIDTH, left_panel::DragPayload},
-        track::{COLOR_BAR_WIDTH, HEADER_INSET, ROW_GAP, TrackHeader, color_bar_x},
-        view::row_layout::{Row, RowLayout},
+        panels::central_panel::SCROLLBAR_WIDTH,
         widget::{context_menu::ContextMenuButton, square_button::SquareButton},
         workspace::Workspace,
     },
