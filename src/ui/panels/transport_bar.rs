@@ -10,6 +10,7 @@ use crate::{
     config::keymap::Action,
     core::state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
     ui::{
+        RECORDING,
         commands::Commands,
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::{ThemeExt, with_alpha},
@@ -70,7 +71,9 @@ impl TransportBar {
             if self.play_button_ui(ui, state).clicked() {
                 commands.push(Action::PlayStop);
             }
-            self.record_button_ui(ui);
+            if RECORDING {
+                self.record_button_ui(ui);
+            }
             self.loop_ui(ui, state);
             if self.follow_ui(ui, state).clicked() {
                 commands.push(Action::ToggleFollowPlayhead);

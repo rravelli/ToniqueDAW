@@ -18,6 +18,9 @@ mod widget;
 mod window;
 mod workspace;
 
+/// Recording isn't implemented yet: hides the record and arm buttons.
+const RECORDING: bool = false;
+
 pub fn run(engine: Engine, audio: AudioHost, settings: Settings) -> Result<(), eframe::Error> {
     eframe::run_native(
         "Tonique",
