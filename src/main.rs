@@ -1,10 +1,8 @@
 use crate::{
-    audio::{host::start_audio, midi::spawn_midi_thread},
+    audio::host::start_audio,
     config::settings::Settings,
     ui::run,
 };
-
-use rtrb::RingBuffer;
 
 mod analysis;
 mod audio;
@@ -16,9 +14,6 @@ mod ui;
 pub mod utils;
 mod waveform;
 fn main() {
-    // Midi thread that collects midi inputs (not routed to the engine yet)
-    let (midi_tx, _midi_rx) = RingBuffer::<Vec<u8>>::new(256);
-    spawn_midi_thread(midi_tx);
     // Audio output: the engine on the chosen device, or the default one if
     // that fails (e.g. the device was unplugged)
     let mut settings = Settings::load();
