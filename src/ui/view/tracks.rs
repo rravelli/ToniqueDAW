@@ -1,15 +1,18 @@
-use egui::{FontId, Rect, Sense, Ui, pos2, vec2};
+use egui::{FontId, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use egui_phosphor::fill::PLUS;
+use tonique_engine::edit::TrackId;
 
 use crate::{
     config::keymap::Action,
-    core::state::ToniqueProjectState,
+    core::{
+        state::{RowTarget, ToniqueProjectState},
+        track::{TrackKind, TrackReferenceCore},
+    },
     ui::theme::ThemeExt,
     ui::{
         font::PHOSPHOR_REGULAR,
         panels::{central_panel::SCROLLBAR_WIDTH, left_panel::DragPayload},
-        track::{HANDLE_HEIGHT, UITrack},
-        utils::find_track_at,
+        track::{COLOR_BAR_WIDTH, HANDLE_HEIGHT, HEADER_INSET, UITrack, color_bar_x},
         widget::{context_menu::ContextMenuButton, square_button::SquareButton},
     },
 };
@@ -17,14 +20,21 @@ use crate::{
 pub const DRAGGER_WIDTH: f32 = 2.0;
 const DEFAULT_TRACK_WIDTH: f32 = 150.;
 
+/// Share of a group header's height, from the top, where a drop goes above
+/// the group rather than into it.
+const ABOVE_GROUP: f32 = 0.3;
+
 pub struct UITracks {
     pub width: f32,
+    /// The row being dragged to a new place.
+    dragging: Option<TrackId>,
 }
 
 impl UITracks {
     pub fn new() -> Self {
         Self {
             width: DEFAULT_TRACK_WIDTH,
+            dragging: None,
         }
     }
 
@@ -89,13 +99,22 @@ impl UITracks {
         ui.vertical(|ui| {
             ui.set_width(ui.available_width());
 
-            let tracks: Vec<_> = state.tracks().collect();
+            let rows = state.rows();
             let mut y = viewport.top();
-            let mut dragged_track = None;
-            for track in tracks {
+            let (left, width) = (ui.max_rect().left(), ui.available_width());
+            // Where each row is on screen, for dropping.
+            let mut placed = Vec::with_capacity(rows.len());
+            for track in rows {
                 let track_bottom = y + track.height;
                 let view_top = viewport.top() + state.grid.offset.y;
                 let view_bottom = view_top + viewport.height();
+                placed.push((
+                    track.clone(),
+                    Rect::from_min_size(
+                        pos2(left, y - state.grid.offset.y),
+                        vec2(width, track.height),
+                    ),
+                ));
 
                 // Skip if track is entirely outside the visible vertical range
                 if track_bottom < view_top || y > view_bottom {
@@ -105,8 +124,10 @@ impl UITracks {
                 }
 
                 let response = UITrack::new().ui(ui, &track, state);
+                if response.drag_started() {
+                    self.dragging = Some(track.id);
+                }
                 if response.dragged() {
-                    dragged_track = Some(track.clone());
                     ui.painter()
                         .rect_filled(response.rect, 1.0, ui.app_theme().hover_overlay);
                 }
@@ -127,12 +148,8 @@ impl UITracks {
 
                 y += track.height + HANDLE_HEIGHT;
             }
-            if let Some(track) = dragged_track
-                && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
-            {
-                let (t, _) = find_track_at(state, viewport, pos.y);
-                state.move_track(&track.id, t.map_or(state.track_len() - 1, |t| t.index));
-            }
+            paint_group_scopes(ui, &placed);
+            self.drop_rows(ui, state, &placed);
 
             if ui
                 .add(
@@ -168,6 +185,51 @@ impl UITracks {
         });
     }
 
+    /// While a row is dragged, show where it would land; move it there on
+    /// release.
+    fn drop_rows(
+        &mut self,
+        ui: &Ui,
+        state: &mut ToniqueProjectState,
+        placed: &[(TrackReferenceCore, Rect)],
+    ) {
+        let Some(dragged) = self.dragging else {
+            return;
+        };
+        let target = ui
+            .input(|i| i.pointer.interact_pos())
+            .and_then(|pointer| drop_target(placed, pointer.y))
+            .filter(|(target, _)| match target {
+                RowTarget::Before(row) | RowTarget::Into(row) => {
+                    *row != dragged && !state.ancestors(*row).contains(&dragged)
+                }
+                RowTarget::End => true,
+            });
+        if let Some((target, marker)) = target {
+            let accent = ui.app_theme().accent;
+            match target {
+                RowTarget::Into(_) => {
+                    ui.painter().rect_stroke(
+                        marker,
+                        2.,
+                        Stroke::new(2., accent),
+                        StrokeKind::Inside,
+                    );
+                }
+                _ => {
+                    ui.painter()
+                        .hline(marker.x_range(), marker.top(), Stroke::new(2., accent));
+                }
+            }
+        }
+        if ui.input(|i| i.pointer.any_released()) {
+            self.dragging = None;
+            if let Some((target, _)) = target {
+                state.move_row(dragged, target);
+            }
+        }
+    }
+
     fn context_menu_ui(&self, ui: &mut Ui, state: &mut ToniqueProjectState) {
         if ui
             .add(ContextMenuButton::new(PLUS, "Add audio track"))
@@ -176,5 +238,58 @@ impl UITracks {
             state.add_track();
             ui.close();
         }
+    }
+}
+
+/// Where a row dropped at `y` lands, and where to mark it: the row's rect
+/// for dropping into a group, else a line at the rect's top.
+fn drop_target(placed: &[(TrackReferenceCore, Rect)], y: f32) -> Option<(RowTarget, Rect)> {
+    for (i, (row, rect)) in placed.iter().enumerate() {
+        if y > rect.bottom() + HANDLE_HEIGHT {
+            continue;
+        }
+        let share = (y - rect.top()) / rect.height().max(1.);
+        let target = if row.kind == TrackKind::Group && share > ABOVE_GROUP {
+            (RowTarget::Into(row.id), *rect)
+        } else if row.kind == TrackKind::Group || share < 0.5 {
+            (RowTarget::Before(row.id), *rect)
+        } else {
+            match placed.get(i + 1) {
+                Some((next, next_rect)) => (RowTarget::Before(next.id), *next_rect),
+                None => (RowTarget::End, rect.translate(vec2(0., rect.height()))),
+            }
+        };
+        return Some(target);
+    }
+    let (_, last) = placed.last()?;
+    Some((RowTarget::End, last.translate(vec2(0., last.height()))))
+}
+
+/// Extend each open group's coloured bar down to its last row, so its
+/// scope shows.
+fn paint_group_scopes(ui: &Ui, placed: &[(TrackReferenceCore, Rect)]) {
+    let theme = ui.app_theme();
+    for (i, (group, rect)) in placed.iter().enumerate() {
+        if group.kind != TrackKind::Group || group.closed {
+            continue;
+        }
+        let Some((_, last)) = placed[i + 1..]
+            .iter()
+            .take_while(|(row, _)| row.depth > group.depth)
+            .last()
+        else {
+            continue;
+        };
+        let x = color_bar_x(rect.left(), group.depth);
+        let bar = Rect::from_min_max(
+            pos2(x, rect.top() + HEADER_INSET),
+            pos2(x + COLOR_BAR_WIDTH, last.bottom() - HEADER_INSET),
+        );
+        let color = if group.disabled() {
+            theme.text_disabled
+        } else {
+            group.color
+        };
+        ui.painter().rect_filled(bar, 0., color);
     }
 }

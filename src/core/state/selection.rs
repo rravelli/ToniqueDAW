@@ -73,7 +73,7 @@ impl ToniqueProjectState {
         let clips = self
             .tracks()
             .enumerate()
-            .filter(|(i, _)| tracks.contains(i))
+            .filter(|(i, t)| tracks.contains(i) && !self.is_hidden(t.id))
             .flat_map(|(_, t)| t.clips)
             .filter(|c| c.end(bpm) >= bounds.start_pos && c.position < bounds.end_pos)
             .map(|c| c.id)

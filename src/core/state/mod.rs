@@ -1,5 +1,6 @@
 mod clip_ops;
 mod clipboard;
+mod groups;
 mod project;
 mod selection;
 mod sources;
@@ -23,8 +24,7 @@ use crate::{
             sources::SourceRegistry,
         },
         track::{
-            DEFAULT_TRACK_HEIGHT, MutableTrackCore, TRACK_CLOSED_HEIGHT, TrackReferenceCore,
-            TrackSoloState,
+            MutableTrackCore, TRACK_CLOSED_HEIGHT, TrackKind, TrackReferenceCore, TrackSoloState,
         },
     },
     ui::{
@@ -36,15 +36,15 @@ use crate::{
 use egui::Color32;
 use std::{collections::HashMap, mem::take, path::PathBuf};
 
+pub use groups::RowTarget;
 pub use selection::SelectionBounds;
 use tonique_engine::{
     edit::{
-        ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, EditSession, Plugin, PluginId,
-        Track, TrackId,
+        BusId, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, EditSession, Output, Plugin,
+        PluginId, Track, TrackId,
         commands::{
-            AddClip, AddPlugin, AddTrack, EditCommand, MoveClip, MoveTrack, RemoveClip,
-            RemovePlugin, RemoveTrack, RenameTrack, ResizeClip, SetBypass, SetMute, SetParam,
-            SetSolo, SetTempoMap,
+            AddClip, AddPlugin, AddTrack, EditCommand, MoveClip, RemoveClip, RemovePlugin,
+            RenameBus, RenameTrack, ResizeClip, SetBypass, SetMute, SetParam, SetSolo, SetTempoMap,
         },
     },
     engine::Engine,
@@ -59,6 +59,8 @@ const DEFAULT_BPM: f64 = 120.;
 /// Length of the loop region in a new project.
 const DEFAULT_LOOP_BARS: f32 = 4.;
 const TRACK_NAME: &str = "# Audio Track";
+/// Smallest height of an open row (its controls must fit).
+pub const MIN_OPEN_HEIGHT: f32 = TRACK_CLOSED_HEIGHT + 25.;
 
 #[derive(Clone, Debug)]
 enum ProjectStatePendingAction {
@@ -304,9 +306,13 @@ impl ToniqueProjectState {
         self.session.commit_transaction();
     }
 
-    fn channel_ref(id: TrackId) -> ChannelRef {
+    /// The channel of a track, a group (addressed by its bus's ID) or the
+    /// master.
+    fn channel_ref(&self, id: TrackId) -> ChannelRef {
         if id == MASTER_TRACK_ID {
             ChannelRef::Master
+        } else if self.is_group(id) {
+            ChannelRef::Bus(BusId(id.0))
         } else {
             ChannelRef::Track(id)
         }
@@ -483,7 +489,11 @@ impl ToniqueProjectState {
     }
     /// Add track at specific index
     pub fn add_track_at(&mut self, index: usize) -> TrackId {
-        let track = self.session.create(|e| Track::new(e, TRACK_NAME));
+        let mut track = self.session.create(|e| Track::new(e, TRACK_NAME));
+        // Inside the group its neighbours share, so no group is split.
+        if let Some(group) = self.insertion_parent(index) {
+            track.output = Output::Bus(BusId(group.0));
+        }
         let id = track.id;
         let mut view = MutableTrackCore::new();
         view.color = self.next_track_color();
@@ -537,13 +547,6 @@ impl ToniqueProjectState {
         self.sync_effects();
         self.select_track(&copy_id);
     }
-    /// Move track to position `new_index`
-    pub fn move_track(&mut self, id: &TrackId, new_index: usize) {
-        // Called every frame while dragging: only real moves are undo steps.
-        if self.track_index(*id).is_some_and(|i| i != new_index) {
-            self.perform(MoveTrack::new(*id, new_index));
-        }
-    }
     /// Delete a track
     pub fn delete_track(&mut self, id: &TrackId) {
         self.pending_actions
@@ -551,15 +554,25 @@ impl ToniqueProjectState {
     }
     /// Close or open all tracks
     pub fn set_all_close(&mut self, close: bool) {
-        let height = if close {
-            TRACK_CLOSED_HEIGHT
-        } else {
-            DEFAULT_TRACK_HEIGHT
-        };
-        for view in self.views.values_mut() {
-            view.closed = close;
-            view.height = height;
+        let ids: Vec<TrackId> = self.views.keys().copied().collect();
+        for id in ids {
+            self.set_closed(&id, close);
         }
+    }
+    /// Close (collapse; fold, for a group) or open a row, going back to its
+    /// previous height when opened.
+    pub fn set_closed(&mut self, id: &TrackId, closed: bool) {
+        let view = self.track_mut(id);
+        if view.closed == closed {
+            return;
+        }
+        if closed {
+            view.open_height = view.height;
+            view.height = TRACK_CLOSED_HEIGHT;
+        } else {
+            view.height = view.open_height.max(MIN_OPEN_HEIGHT);
+        }
+        view.closed = closed;
     }
     // Clips
     fn clip_ops(&mut self, label: &'static str, f: impl FnOnce(&mut Self, &mut Vec<ClipOp>)) {
@@ -775,7 +788,7 @@ impl ToniqueProjectState {
             .create(|e| Plugin::new(e, content.plugin_kind()));
         let editor = UIEffect::new(content, *id, &plugin);
         self.detached_effects.insert(plugin.id, editor);
-        self.perform(AddPlugin::at(Self::channel_ref(*id), plugin, index));
+        self.perform(AddPlugin::at(self.channel_ref(*id), plugin, index));
         self.sync_effects();
     }
     pub fn remove_effects(&mut self, id: &TrackId, indexes: &[usize]) {
@@ -791,7 +804,7 @@ impl ToniqueProjectState {
             .unwrap_or_default();
         self.transaction("Remove effects", |s| {
             for plugin in plugins {
-                s.perform(RemovePlugin::new(Self::channel_ref(*id), plugin));
+                s.perform(RemovePlugin::new(s.channel_ref(*id), plugin));
             }
         });
         self.sync_effects();
@@ -809,20 +822,17 @@ impl ToniqueProjectState {
     /// Push power-button clicks to the engine, then match effect editors to
     /// the engine's plugin chains (which undo/redo may have changed).
     fn sync_effects(&mut self) {
-        let mut bypass = Vec::new();
+        let mut toggled = Vec::new();
         for (track, editors) in self.effects.drain() {
             for mut editor in editors {
                 if editor.take_toggled() {
-                    bypass.push(SetBypass::new(
-                        Self::channel_ref(track),
-                        editor.plugin_id(),
-                        !editor.enabled,
-                    ));
+                    toggled.push((track, editor.plugin_id(), !editor.enabled));
                 }
                 self.detached_effects.insert(editor.plugin_id(), editor);
             }
         }
-        for cmd in bypass {
+        for (track, plugin, bypassed) in toggled {
+            let cmd = SetBypass::new(self.channel_ref(track), plugin, bypassed);
             self.perform(cmd);
         }
         let chains: Vec<(TrackId, Vec<(PluginId, bool)>)> = self
@@ -830,6 +840,12 @@ impl ToniqueProjectState {
             .tracks
             .iter()
             .map(|t| (t.id, &t.channel))
+            .chain(
+                self.edit()
+                    .buses
+                    .iter()
+                    .map(|b| (TrackId(b.id.0), &b.channel)),
+            )
             .chain([(MASTER_TRACK_ID, &self.edit().master)])
             .map(|(id, c)| (id, c.plugins.iter().map(|p| (p.id, p.bypassed)).collect()))
             .collect();
@@ -849,13 +865,13 @@ impl ToniqueProjectState {
     // Mixer
     /// Set individual track volume. Changes are not saved in undo stack.
     pub fn set_volume(&mut self, id: TrackId, volume: f32) {
-        if let Ok(c) = self.edit().channel(Self::channel_ref(id)) {
+        if let Ok(c) = self.edit().channel(self.channel_ref(id)) {
             c.volume.set(volume);
         }
     }
     /// Set track volume and save in undo stack given `old_volume`.
     pub fn commit_volume(&mut self, id: TrackId, old_volume: f32, new_volume: f32) {
-        let Ok(c) = self.edit().channel(Self::channel_ref(id)) else {
+        let Ok(c) = self.edit().channel(self.channel_ref(id)) else {
             return;
         };
         // `SetParam` records the current value for undo: restore it first.
@@ -865,34 +881,47 @@ impl ToniqueProjectState {
     }
     /// Mute or unmute this track
     pub fn set_mute(&mut self, id: TrackId, mute: bool) {
-        self.perform(SetMute::new(Self::channel_ref(id), mute));
+        self.perform(SetMute::new(self.channel_ref(id), mute));
     }
     /// Toggle the solo button.
+    /// Toggle the solo button of a track or a group. Without the modifier,
+    /// every other solo is cleared.
     pub fn toggle_solo(&mut self, id: TrackId, modifier_pressed: bool) {
-        let Ok(track) = self.edit().track(id) else {
-            return;
-        };
-        let soloed = track.soloed;
-        let changes: Vec<_> = self
-            .edit()
+        let edit = self.edit();
+        let soloed: Vec<(TrackId, bool)> = edit
             .tracks
             .iter()
-            .filter_map(|t| {
-                let solo = if t.id == id {
-                    !soloed
-                } else if modifier_pressed {
-                    t.soloed
+            .map(|t| (t.id, t.soloed))
+            .chain(edit.buses.iter().map(|b| (TrackId(b.id.0), b.soloed)))
+            .collect();
+        let Some(current) = soloed.iter().find(|(t, _)| *t == id).map(|(_, s)| *s) else {
+            return;
+        };
+        let changes: Vec<(TrackId, bool)> = soloed
+            .into_iter()
+            .filter_map(|(t, was)| {
+                let solo = if t == id {
+                    !current
                 } else {
-                    false
+                    modifier_pressed && was
                 };
-                (solo != t.soloed).then_some((t.id, solo))
+                (solo != was).then_some((t, solo))
             })
             .collect();
         self.transaction("Solo", |s| {
-            for (track, solo) in changes {
-                s.perform(SetSolo::new(track, solo));
+            for (target, solo) in changes {
+                if s.is_group(target) {
+                    s.perform(SetSolo::bus(BusId(target.0), solo));
+                } else {
+                    s.perform(SetSolo::new(target, solo));
+                }
             }
         });
+    }
+    /// Whether any track or group is soloed.
+    fn any_solo(&self) -> bool {
+        let edit = self.edit();
+        edit.tracks.iter().any(|t| t.soloed) || edit.buses.iter().any(|b| b.soloed)
     }
     // Selection and views
     /// Set track selected
@@ -907,7 +936,31 @@ impl ToniqueProjectState {
         if id == MASTER_TRACK_ID {
             return Some(self.master_track());
         }
+        if self.is_group(id) {
+            return self.group_row(id);
+        }
         self.track_index(id).and_then(|i| self.track_from_index(i))
+    }
+    /// Add the row to the selection, or take it out.
+    pub fn toggle_track_selected(&mut self, id: TrackId) {
+        if let Some(i) = self.selected_tracks.iter().position(|t| *t == id) {
+            self.selected_tracks.remove(i);
+        } else {
+            self.selected_tracks.push(id);
+        }
+    }
+    /// Select the rows from the last selected one to `id`, in display order.
+    pub fn select_rows_to(&mut self, id: TrackId) {
+        let rows: Vec<TrackId> = self.rows().iter().map(|r| r.id).collect();
+        let anchor = self
+            .selected_tracks
+            .last()
+            .and_then(|a| rows.iter().position(|r| r == a));
+        let Some((from, to)) = anchor.zip(rows.iter().position(|r| *r == id)) else {
+            return self.select_track(&id);
+        };
+        let range = if from <= to { from..=to } else { to..=from };
+        self.selected_tracks = rows[range].to_vec();
     }
     /// Get all tracks
     pub fn tracks(&self) -> impl Iterator<Item = TrackReferenceCore> + use<> {
@@ -932,6 +985,8 @@ impl ToniqueProjectState {
             selected: self.selected_tracks.contains(&MASTER_TRACK_ID),
             solo: TrackSoloState::NotSoloing,
             index: 0,
+            kind: TrackKind::Audio,
+            depth: 0,
         }
     }
     pub fn selected_tracks(&self) -> &Vec<TrackId> {
@@ -975,16 +1030,20 @@ impl ToniqueProjectState {
         let Some(view) = self.views.get(id) else {
             return;
         };
+        let name = view.name.clone();
         if let Ok(track) = self.edit().track(*id)
-            && track.name != view.name
+            && track.name != name
         {
-            let name = view.name.clone();
             self.perform(RenameTrack::new(*id, name));
+        } else if let Ok(group) = self.edit().bus(BusId(id.0))
+            && group.name != name
+        {
+            self.perform(RenameBus::new(BusId(id.0), name));
         }
     }
     pub fn track_from_index(&self, index: usize) -> Option<TrackReferenceCore> {
         let track = self.edit().tracks.get(index)?;
-        let any_solo = self.edit().tracks.iter().any(|t| t.soloed);
+        let any_solo = self.any_solo();
         let view = self
             .views
             .get(&track.id)
@@ -1010,10 +1069,15 @@ impl ToniqueProjectState {
                 TrackSoloState::NotSoloing
             } else if track.soloed {
                 TrackSoloState::Solo
-            } else {
+            } else if !track.channel.muted && !track.channel.audible() {
+                // Silenced by another solo (a soloed group lets it through).
                 TrackSoloState::Soloing
+            } else {
+                TrackSoloState::NotSoloing
             },
             index,
+            kind: TrackKind::Audio,
+            depth: self.edit().buses_along(track.output).len(),
         })
     }
 
@@ -1067,12 +1131,17 @@ impl ToniqueProjectState {
         self.metrics
             .tracks
             .insert(MASTER_TRACK_ID, self.metrics.master.clone());
-        for track in &edit.tracks {
+        let channels = edit
+            .tracks
+            .iter()
+            .map(|t| (t.id, &t.channel))
+            .chain(edit.buses.iter().map(|b| (TrackId(b.id.0), &b.channel)));
+        for (id, channel) in channels {
             self.metrics
                 .tracks
-                .entry(track.id)
+                .entry(id)
                 .or_insert_with(AudioMetrics::new)
-                .update(track.channel.meter());
+                .update(channel.meter());
         }
         self.metrics.latency = self.session.engine().cpu_load();
     }
@@ -1082,6 +1151,11 @@ impl ToniqueProjectState {
         for pending in take(&mut self.pending_actions) {
             match pending {
                 ProjectStatePendingAction::DeleteTrack { id } => {
+                    // A group goes with everything inside.
+                    if self.is_group(id) {
+                        self.delete_group(id);
+                        continue;
+                    }
                     let Some(pos) = self.track_index(id) else {
                         continue;
                     };
@@ -1093,7 +1167,7 @@ impl ToniqueProjectState {
                             self.selected_tracks.push(prev.id);
                         }
                     }
-                    self.perform(RemoveTrack::new(id));
+                    self.remove_track(id);
                     self.sync_effects();
                 }
             }

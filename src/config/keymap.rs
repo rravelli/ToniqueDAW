@@ -26,6 +26,7 @@ pub enum Action {
     Delete,
     SplitAtCursor,
     AddTrack,
+    GroupTracks,
     NudgeLeft,
     NudgeRight,
     MoveTrackUp,
@@ -39,7 +40,7 @@ pub enum Action {
 
 impl Action {
     /// In the order shown in the settings.
-    pub const ALL: [Action; 23] = [
+    pub const ALL: [Action; 24] = [
         Action::NewProject,
         Action::OpenProject,
         Action::SaveProject,
@@ -55,6 +56,7 @@ impl Action {
         Action::Delete,
         Action::SplitAtCursor,
         Action::AddTrack,
+        Action::GroupTracks,
         Action::NudgeLeft,
         Action::NudgeRight,
         Action::MoveTrackUp,
@@ -79,6 +81,7 @@ impl Action {
             Action::Delete => "delete",
             Action::SplitAtCursor => "split_at_cursor",
             Action::AddTrack => "add_track",
+            Action::GroupTracks => "group_tracks",
             Action::NudgeLeft => "nudge_left",
             Action::NudgeRight => "nudge_right",
             Action::MoveTrackUp => "move_track_up",
@@ -111,6 +114,7 @@ impl Action {
             Action::Delete => "Delete",
             Action::SplitAtCursor => "Split clips at cursor",
             Action::AddTrack => "Add audio track",
+            Action::GroupTracks => "Group selected tracks",
             Action::NudgeLeft => "Nudge selection or cursor left",
             Action::NudgeRight => "Nudge selection or cursor right",
             Action::MoveTrackUp => "Move selection to track above",
@@ -189,6 +193,7 @@ impl Action {
             Action::Delete => vec![none(Key::Delete), none(Key::Backspace)],
             Action::SplitAtCursor => vec![cmd(Key::K)],
             Action::AddTrack => vec![cmd(Key::T)],
+            Action::GroupTracks => vec![cmd(Key::G)],
             Action::NudgeLeft => vec![none(Key::ArrowLeft)],
             Action::NudgeRight => vec![none(Key::ArrowRight)],
             Action::MoveTrackUp => vec![none(Key::ArrowUp)],
@@ -199,7 +204,7 @@ impl Action {
             Action::SaveProject => vec![cmd(Key::S)],
             Action::SaveProjectAs => vec![cmd_shift(Key::S)],
             Action::ToggleEffectsPanel => vec![cmd(Key::J)],
-            Action::ToggleGraphView => vec![cmd(Key::G)],
+            Action::ToggleGraphView => vec![cmd_shift(Key::G)],
             Action::OpenSettings => vec![cmd(Key::Comma)],
         }
     }

@@ -9,6 +9,14 @@ pub enum TrackSoloState {
     Solo,
 }
 
+/// What a row of the track list is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackKind {
+    Audio,
+    /// A bus holding tracks and groups.
+    Group,
+}
+
 pub const DEFAULT_TRACK_HEIGHT: f32 = 60.;
 pub const TRACK_CLOSED_HEIGHT: f32 = 22.;
 
@@ -26,7 +34,11 @@ pub struct TrackReferenceCore {
     pub color: Color32,
     pub selected: bool,
     pub solo: TrackSoloState,
+    /// Position in the engine's track list; for a group, its first track's.
     pub index: usize,
+    pub kind: TrackKind,
+    /// Groups it's nested in.
+    pub depth: usize,
 }
 
 impl TrackReferenceCore {
@@ -42,7 +54,10 @@ impl TrackReferenceCore {
 pub struct MutableTrackCore {
     pub name: String,
     pub height: f32,
+    /// Collapsed; for a group, folded (what's inside is hidden).
     pub closed: bool,
+    /// Height to go back to when opened.
+    pub open_height: f32,
     pub color: Color32,
     pub arm: bool,
 }
@@ -52,6 +67,7 @@ impl MutableTrackCore {
         Self {
             closed: false,
             height: DEFAULT_TRACK_HEIGHT,
+            open_height: DEFAULT_TRACK_HEIGHT,
             // New tracks get a palette colour from `ToniqueProjectState`.
             color: Color32::GRAY,
             name: "# Audio Track".into(),

@@ -15,7 +15,8 @@ use crate::ui::effects::EffectId;
 /// Extension of project files.
 pub const EXTENSION: &str = "tonique";
 /// Format version written; files from newer versions are refused.
-pub const VERSION: u32 = 1;
+/// 2 added groups.
+pub const VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
@@ -25,7 +26,25 @@ pub struct ProjectFile {
     pub loop_range: (f32, f32),
     pub looping: bool,
     pub master: ChannelFile,
+    /// Parents before their subgroups.
+    #[serde(default)]
+    pub groups: Vec<GroupFile>,
+    /// In display order.
     pub tracks: Vec<TrackFile>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GroupFile {
+    pub name: String,
+    /// `#rrggbb`.
+    pub color: String,
+    pub height: f32,
+    pub folded: bool,
+    pub soloed: bool,
+    /// Index in `groups` of the group holding it.
+    pub parent: Option<usize>,
+    #[serde(flatten)]
+    pub channel: ChannelFile,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -36,6 +55,9 @@ pub struct TrackFile {
     pub height: f32,
     pub closed: bool,
     pub soloed: bool,
+    /// Index in `groups` of the group holding it.
+    #[serde(default)]
+    pub group: Option<usize>,
     #[serde(flatten)]
     pub channel: ChannelFile,
     pub clips: Vec<ClipFile>,
@@ -188,12 +210,14 @@ mod tests {
                 muted: false,
                 effects: Vec::new(),
             },
+            groups: Vec::new(),
             tracks: vec![TrackFile {
                 name: "Drums".into(),
                 color: "#e5736b".into(),
                 height: 60.,
                 closed: false,
                 soloed: true,
+                group: None,
                 channel: ChannelFile {
                     volume: 0.5,
                     pan: -0.25,

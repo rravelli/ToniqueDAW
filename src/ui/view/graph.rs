@@ -458,6 +458,7 @@ fn node_tooltip(
 fn track_names(state: &ToniqueProjectState) -> HashMap<u64, (String, String, Color32)> {
     state
         .tracks()
+        .chain(state.groups())
         .map(|t| {
             (
                 t.id.0,

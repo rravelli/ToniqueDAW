@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tonique_engine::automation::{BeatPoint, CurveShape};
 use tonique_engine::edit::commands::*;
-use tonique_engine::edit::{Bus, ChannelRef, Clip, ClipContent, Edit, EditSession, Note, Output, Plugin, PluginKind, Send, Track};
+use tonique_engine::edit::{Bus, BusId, ChannelRef, Clip, ClipContent, Edit, EditError, EditSession, Note, Output, Plugin, PluginKind, Send, Track, TrackId};
 use tonique_engine::engine::{AudioProcessor, Engine, EngineConfig, render_offline};
 use tonique_engine::nodes::{Envelope, FilterMode};
 use tonique_engine::sample::SampleBuffer;
@@ -536,4 +536,89 @@ fn reset_replaces_the_edit_and_forgets_history() {
     assert_eq!(session.edit().tempo.bpm_at(BeatPos(0.0)), 90.0);
     assert!(!session.undo_manager().can_undo());
     assert!(!session.undo().unwrap());
+}
+
+/// A synth track routed through `inner` bus, itself routed into `outer`.
+fn nested_groups() -> (Edit, TrackId, TrackId, BusId, BusId) {
+    let mut edit = Edit::new(120.0);
+    let mut grouped = synth_track(&mut edit, vec![note(0.0, 1.0, 60)], 1.0);
+    let outside = synth_track(&mut edit, vec![note(0.0, 1.0, 67)], 1.0);
+    let outer = Bus::new(&mut edit, "outer");
+    let mut inner = Bus::new(&mut edit, "inner");
+    inner.output = Output::Bus(outer.id);
+    grouped.output = Output::Bus(inner.id);
+    let ids = (grouped.id, outside.id, inner.id, outer.id);
+    edit.tracks.extend([grouped, outside]);
+    edit.buses.extend([outer, inner]);
+    (edit, ids.0, ids.1, ids.2, ids.3)
+}
+
+#[test]
+fn audio_flows_through_nested_buses() {
+    let (mut edit, _, outside, _, _) = nested_groups();
+    edit.tracks.retain(|t| t.id != outside);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    assert!(peak(&render_offline(&mut p, 12000, 2)) > 0.05, "nothing reached the output");
+}
+
+#[test]
+fn soloing_a_bus_solos_everything_inside() {
+    let (edit, grouped, outside, inner, outer) = nested_groups();
+    let (e, _p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    let audible = |s: &EditSession, id| s.edit().track(id).unwrap().channel.audible();
+
+    s.perform(SetSolo::bus(outer, true)).unwrap();
+    assert!(audible(&s, grouped), "inside the soloed bus, two levels down");
+    assert!(!audible(&s, outside));
+    s.undo().unwrap();
+    assert!(audible(&s, outside));
+
+    // Soloing a track inside a group keeps its path audible.
+    s.perform(SetSolo::new(grouped, true)).unwrap();
+    assert!(audible(&s, grouped));
+    assert!(!audible(&s, outside));
+    assert!(s.perform(SetSolo::bus(inner, true)).is_ok());
+}
+
+#[test]
+fn buses_cannot_feed_into_themselves() {
+    let (edit, _, _, inner, outer) = nested_groups();
+    let (e, _p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    // `inner` already feeds `outer`: the other way round would loop.
+    assert!(matches!(
+        s.perform(SetBusOutput::new(outer, Output::Bus(inner))),
+        Err(EditError::RoutingCycle(_))
+    ));
+    assert!(matches!(
+        s.perform(SetBusOutput::new(outer, Output::Bus(outer))),
+        Err(EditError::RoutingCycle(_))
+    ));
+    s.perform(SetBusOutput::new(inner, Output::Master)).unwrap();
+    s.perform(SetBusOutput::new(outer, Output::Bus(inner))).unwrap();
+    s.undo().unwrap();
+    s.undo().unwrap();
+    assert_eq!(s.edit().bus(inner).unwrap().output, Output::Bus(outer));
+}
+
+#[test]
+fn buses_are_removed_once_unused_and_renamed() {
+    let (edit, grouped, _, inner, outer) = nested_groups();
+    let (e, _p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    assert!(s.perform(RemoveBus::new(inner)).is_err(), "a track still routes into it");
+
+    s.perform(SetOutput::new(grouped, Output::Master)).unwrap();
+    s.perform(RemoveBus::new(inner)).unwrap();
+    assert!(s.edit().bus(inner).is_err());
+    s.perform(RenameBus::new(outer, "Drums")).unwrap();
+    assert_eq!(s.edit().bus(outer).unwrap().name, "Drums");
+
+    s.undo().unwrap();
+    s.undo().unwrap();
+    assert_eq!(s.edit().bus(outer).unwrap().name, "outer");
+    assert_eq!(s.edit().bus(inner).unwrap().output, Output::Bus(outer));
 }

@@ -4,7 +4,7 @@ use crate::{
     core::{
         clip::ClipCore,
         state::ToniqueProjectState,
-        track::{DEFAULT_TRACK_HEIGHT, TrackReferenceCore},
+        track::{DEFAULT_TRACK_HEIGHT, TRACK_CLOSED_HEIGHT, TrackKind, TrackReferenceCore},
     },
     ui::{
         clip::UIClip,
@@ -16,16 +16,21 @@ use crate::{
     },
 };
 use egui::{DragAndDrop, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
-use tonique_engine::edit::ClipId;
+use tonique_engine::edit::{ClipId, TrackId};
 mod drag;
 mod keys;
 mod scroll;
 mod selection;
 
+/// Opacity of the clips in a group's preview, out of 255.
+const PREVIEW_ALPHA: u8 = 80;
+
 pub struct UITimeline {
     drag_state: Option<DragState>,
     clicked_pos: Option<Pos2>,
     multiselect_start: Option<Multiselect>,
+    /// Folded groups opened by dragging over them, to fold again once left.
+    hover_unfolded: Vec<TrackId>,
 }
 
 impl UITimeline {
@@ -34,6 +39,7 @@ impl UITimeline {
             drag_state: None,
             clicked_pos: None,
             multiselect_start: None,
+            hover_unfolded: Vec::new(),
         }
     }
 
@@ -98,6 +104,70 @@ impl UITimeline {
         }
     }
 
+    /// While audio or clips are dragged, open the folded group under the
+    /// pointer, and fold it again once the pointer leaves it. Dropping inside
+    /// leaves it open, to show where things landed.
+    fn unfold_on_hover(
+        &mut self,
+        ui: &Ui,
+        state: &mut ToniqueProjectState,
+        rows: &[TrackReferenceCore],
+        viewport: Rect,
+        offset: Vec2,
+    ) {
+        let dragging = self.drag_state.is_some()
+            || DragAndDrop::payload::<DragPayload>(ui.ctx())
+                .is_some_and(|p| matches!(*p, DragPayload::File(_)));
+        let pointer = ui.input(|i| i.pointer.hover_pos());
+
+        // Each row's vertical span on screen.
+        let mut y = viewport.top() - offset.y;
+        let spans: Vec<(&TrackReferenceCore, f32, f32)> = rows
+            .iter()
+            .map(|row| {
+                let span = (row, y, y + row.height);
+                y += row.height + HANDLE_HEIGHT;
+                span
+            })
+            .collect();
+        // A group's span runs to the end of its last row.
+        let scope = |id: TrackId| {
+            let i = spans.iter().position(|(r, _, _)| r.id == id)?;
+            let (group, top, bottom) = spans[i];
+            let end = spans[i + 1..]
+                .iter()
+                .take_while(|(r, _, _)| r.depth > group.depth)
+                .last()
+                .map_or(bottom, |(_, _, b)| *b);
+            Some(top..=end + HANDLE_HEIGHT)
+        };
+
+        if dragging && let Some(p) = pointer.filter(|p| viewport.contains(*p)) {
+            for (row, top, bottom) in &spans {
+                if row.kind == TrackKind::Group && row.closed && (*top..=*bottom).contains(&p.y) {
+                    state.set_closed(&row.id, false);
+                    self.hover_unfolded.push(row.id);
+                }
+            }
+        }
+        self.hover_unfolded.retain(|group| {
+            let inside = pointer
+                .zip(scope(*group))
+                .is_some_and(|(p, span)| span.contains(&p.y));
+            match (inside, dragging) {
+                // Still hovering it.
+                (true, true) => true,
+                // Dropped inside: stays open.
+                (true, false) => false,
+                // Left it: fold again.
+                (false, _) => {
+                    state.set_closed(group, true);
+                    false
+                }
+            }
+        });
+    }
+
     pub fn render_clips(
         &mut self,
         ui: &mut Ui,
@@ -105,8 +175,9 @@ impl UITimeline {
         viewport: Rect,
         offset: Vec2,
     ) {
+        let tracks = state.rows();
+        self.unfold_on_hover(ui, state, &tracks, viewport, offset);
         let mut y = viewport.top();
-        let tracks: Vec<_> = state.tracks().collect();
         let mut dragged_track_index = None;
         let mut dragged_clip = None;
         let dragged_ids = self
@@ -144,7 +215,14 @@ impl UITimeline {
                     .rect_filled(track_rect, 1.0, track.color.gamma_multiply_u8(10));
             }
 
-            for mut clip in track.clips.clone() {
+            // A group's lane: an overview of everything inside.
+            let clips = if track.kind == TrackKind::Group {
+                paint_group_overview(ui, state, &track, track_rect);
+                Vec::new()
+            } else {
+                track.clips.clone()
+            };
+            for mut clip in clips {
                 if let Some((id, start, end, pos)) = &state.resized_clip
                     && clip.id == *id
                 {
@@ -381,5 +459,47 @@ impl UITimeline {
                 state.commit_batch();
             }
         };
+    }
+}
+
+/// A group's content, in a band the height of a folded group at the top of
+/// its lane: a strip per track inside it, in order, with that track's clips
+/// in its colour, faint so they don't pass for real clips.
+fn paint_group_overview(
+    ui: &Ui,
+    state: &ToniqueProjectState,
+    group: &TrackReferenceCore,
+    lane: Rect,
+) {
+    let tracks = state.group_tracks(group.id);
+    if tracks.is_empty() {
+        return;
+    }
+    let theme = ui.app_theme();
+    let painter = ui.painter_at(lane);
+    let bpm = state.bpm();
+    let band = Rect::from_min_max(
+        lane.min,
+        pos2(
+            lane.right(),
+            (lane.top() + TRACK_CLOSED_HEIGHT).min(lane.bottom()),
+        ),
+    )
+    .shrink2(vec2(0., 2.));
+    let strip = band.height() / tracks.len() as f32;
+    for (k, track) in tracks.iter().enumerate() {
+        let top = band.top() + k as f32 * strip;
+        let rows = top..=top + strip;
+        let color = if track.disabled() {
+            theme.text_disabled
+        } else {
+            track.color
+        };
+        let color = with_alpha(color, PREVIEW_ALPHA);
+        for clip in &track.clips {
+            let x = state.grid.beats_to_x(clip.position, lane)
+                ..=state.grid.beats_to_x(clip.end(bpm), lane);
+            painter.rect_filled(Rect::from_x_y_ranges(x, rows.clone()), 1., color);
+        }
     }
 }
