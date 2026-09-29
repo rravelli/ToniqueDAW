@@ -291,7 +291,7 @@ impl Timeline {
         let x = state.grid.beats_to_x(clip.position, viewport);
         let width = state
             .grid
-            .duration_to_width(clip.duration().unwrap(), state.bpm());
+            .duration_to_width(clip.duration().unwrap_or_default(), state.bpm());
 
         if x + width < viewport.left()
             || x > viewport.right()

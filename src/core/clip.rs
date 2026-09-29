@@ -77,7 +77,7 @@ impl AudioClip {
 
     /// Length of the whole source file, in beats.
     fn source_beats(&self, bpm: f32) -> f64 {
-        self.audio.duration.unwrap().as_secs_f64() * bpm as f64 / 60.
+        self.audio.duration.map_or(0., |d| d.as_secs_f64()) * bpm as f64 / 60.
     }
 }
 

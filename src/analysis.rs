@@ -115,7 +115,7 @@ pub fn read_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoEr
     let name = path
         .as_ref()
         .file_name()
-        .unwrap()
+        .unwrap_or(path.as_ref().as_os_str())
         .to_string_lossy()
         .to_string();
 

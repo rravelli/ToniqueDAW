@@ -17,6 +17,11 @@ use crate::{
 pub const PREVIEW_HEIGHT: f32 = 60.;
 
 pub fn preview_ui(ui: &mut Ui, state: &mut ProjectState, selected_audio: &AudioInfo) {
+    // Some files don't say how long they are: known once decoded.
+    let length = match selected_audio.total_frames() {
+        Some(frames) => format!("{:.3}s", frames / selected_audio.sample_rate as f64),
+        None => "unknown".into(),
+    };
     Frame::new()
         .stroke(Stroke::new(4.0, ui.app_theme().bg_control))
         .show(ui, |ui| {
@@ -36,15 +41,9 @@ pub fn preview_ui(ui: &mut Ui, state: &mut ProjectState, selected_audio: &AudioI
                 .wrap_mode(egui::TextWrapMode::Truncate),
             );
             ui.add(
-                Label::new(
-                    RichText::new(format!(
-                        "Length: {:.3}s",
-                        selected_audio.duration.unwrap().as_secs_f32()
-                    ))
-                    .size(9.),
-                )
-                .selectable(false)
-                .wrap_mode(egui::TextWrapMode::Truncate),
+                Label::new(RichText::new(format!("Length: {length}")).size(9.))
+                    .selectable(false)
+                    .wrap_mode(egui::TextWrapMode::Truncate),
             );
             ui.add(
                 Label::new(
@@ -66,12 +65,13 @@ fn waveform_ui(ui: &mut Ui, audio: &AudioInfo, state: &mut ProjectState, width: 
     let rect = response.rect;
     let theme = ui.app_theme();
 
+    let frames = audio.total_frames();
     if response.clicked()
         && let Some(mouse_pos) = response.interact_pointer_pos()
+        && let Some(frames) = frames
     {
         state.seek_preview(
-            ((mouse_pos.x - rect.left()) / rect.width() * audio.num_samples.unwrap() as f32).round()
-                as usize,
+            ((mouse_pos.x - rect.left()) / rect.width() * frames as f32).round() as usize,
         );
     }
     let mut shapes = vec![];
@@ -88,7 +88,7 @@ fn waveform_ui(ui: &mut Ui, audio: &AudioInfo, state: &mut ProjectState, width: 
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(100));
     }
-    if let Some(frames) = audio.total_frames() {
+    if let Some(frames) = frames {
         paint_waveform(
             &painter,
             rect,
@@ -100,16 +100,17 @@ fn waveform_ui(ui: &mut Ui, audio: &AudioInfo, state: &mut ProjectState, width: 
         );
     }
 
-    let x = response.rect.left()
-        + state.preview_position() as f32 / audio.num_samples.unwrap() as f32
-            * response.rect.width();
-    shapes.push(Shape::line_segment(
-        [
-            Pos2::new(x, response.rect.top()),
-            Pos2::new(x, response.rect.bottom()),
-        ],
-        Stroke::new(1.0, theme.playhead),
-    ));
+    if let Some(frames) = frames {
+        let x = response.rect.left()
+            + state.preview_position() as f32 / frames as f32 * response.rect.width();
+        shapes.push(Shape::line_segment(
+            [
+                Pos2::new(x, response.rect.top()),
+                Pos2::new(x, response.rect.bottom()),
+            ],
+            Stroke::new(1.0, theme.playhead),
+        ));
+    }
     painter.add(shapes);
 }
 
