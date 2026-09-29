@@ -17,6 +17,7 @@ use crate::{
         workspace::{MainView, Workspace},
     },
 };
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use tonique_engine::engine::Engine;
 
 pub struct ToniqueApp {
@@ -63,6 +64,33 @@ impl ToniqueApp {
 
 impl eframe::App for ToniqueApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.guard(|app| app.update_state(ctx));
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.guard(|app| app.show(ui));
+    }
+}
+
+impl ToniqueApp {
+    /// Run `f`; if it panics, save the project to a new file before
+    /// crashing, so unsaved work isn't lost.
+    fn guard(&mut self, f: impl FnOnce(&mut Self)) {
+        let Err(panic) = catch_unwind(AssertUnwindSafe(|| f(self))) else {
+            return;
+        };
+        match catch_unwind(AssertUnwindSafe(|| self.project.save_recovery(&self.state))) {
+            Ok(Some(path)) => eprintln!(
+                "Tonique crashed; unsaved work was saved to {}",
+                path.display()
+            ),
+            Ok(None) => {}
+            Err(_) => eprintln!("Tonique crashed; unsaved work couldn't be saved"),
+        }
+        resume_unwind(panic);
+    }
+
+    fn update_state(&mut self, ctx: &egui::Context) {
         // Update state
         self.state
             .set_monitor_graph(self.workspace.main_view == MainView::Graph);
@@ -74,7 +102,7 @@ impl eframe::App for ToniqueApp {
         ctx.request_repaint();
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn show(&mut self, ui: &mut egui::Ui) {
         self.shortcuts(ui);
         self.state.set_track_palette(&ui.app_theme().palette);
         let (state, workspace, commands) =
@@ -96,9 +124,7 @@ impl eframe::App for ToniqueApp {
         self.setting_window.show(ui, &mut self.state);
         self.project.ui(ui, &mut self.state);
     }
-}
 
-impl ToniqueApp {
     /// Queue this frame's shortcuts.
     fn shortcuts(&mut self, ui: &egui::Ui) {
         // Keys typed into a widget (or recorded as a shortcut) aren't commands.
