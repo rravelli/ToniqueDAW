@@ -40,8 +40,9 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - uses: Swatinem/rust-cache@v2
-      - name: Clippy (engine)
-        run: cargo clippy -p tonique-engine --all-targets --all-features -- -D warnings
+      # Also enforces the workspace lints (no `unwrap()` outside tests).
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
     name: Test & Coverage

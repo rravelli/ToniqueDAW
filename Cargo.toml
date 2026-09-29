@@ -8,6 +8,14 @@ publish = false
 [workspace]
 members = ["crates/tonique-engine"]
 
+# `expect("why it can't fail")` documents an invariant; a bare `unwrap()`
+# outside tests is usually a crash waiting for the wrong input.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+
+[lints]
+workspace = true
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]

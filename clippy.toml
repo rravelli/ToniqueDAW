@@ -9,3 +9,6 @@ disallowed-methods = [
     { path = "egui::Color32::from_black_alpha", reason = "use a colour from `ui.app_theme()`" },
     { path = "egui::Color32::from_white_alpha", reason = "use a colour from `ui.app_theme()`" },
 ]
+
+# `unwrap_used` is denied (see Cargo.toml) outside tests only.
+allow-unwrap-in-tests = true

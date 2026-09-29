@@ -20,7 +20,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let (engine, mut processor) = Engine::new(config);
     let mut session = EditSession::new(demo_edit(config.sample_rate), engine)?;
-    let stats = session.last_compile_stats().unwrap();
+    let stats = session
+        .last_compile_stats()
+        .expect("the session compiled the edit");
     println!(
         "graph: {} described, {} scheduled, {} deduplicated, {} latency delays, {} buffers",
         stats.described,
