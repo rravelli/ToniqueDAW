@@ -5,15 +5,13 @@ use egui::{
 use crate::ui::theme::ThemeExt;
 
 /// Button with a solid fill. Colours default to the theme's control colours
-/// (or the accent when [`Self::selected`]); `fill`, `color` and
-/// `hover_color` override them.
+/// (or the accent when [`Self::selected`]); `fill` and `color` override them.
 pub struct FlatButton {
     size: Vec2,
     ghost: bool,
     selected: bool,
     fill: Option<Color32>,
     border_radius: f32,
-    hover_color: Option<Color32>,
     /// Horizontal padding around the text when the width fits the text.
     padding: Option<f32>,
     // Text
@@ -36,7 +34,6 @@ impl FlatButton {
             text_color: None,
             tooltip_text: "".to_string(),
             border_radius: 1.0,
-            hover_color: None,
             padding: None,
         }
     }
@@ -84,10 +81,6 @@ impl FlatButton {
         self.border_radius = border_radius;
         self
     }
-    pub fn hover_color(mut self, color: Color32) -> Self {
-        self.hover_color = Some(color);
-        self
-    }
     /// Size the width to the text plus `padding` on each side (the height
     /// stays as set).
     pub fn padding(mut self, padding: f32) -> Self {
@@ -109,11 +102,10 @@ impl Widget for FlatButton {
         };
         let fill = self.fill.unwrap_or(fill);
         let text_color = self.text_color.unwrap_or(text_color);
-        let hover = match (self.hover_color, self.fill) {
-            (Some(hover), _) => hover,
+        let hover = match self.fill {
             // A custom fill lightens (or darkens) like the others.
-            (None, Some(fill)) if !self.ghost => fill.blend(theme.hover_overlay),
-            (None, _) => hover,
+            Some(fill) if !self.ghost => fill.blend(theme.hover_overlay),
+            _ => hover,
         };
 
         let mut size = self.size;

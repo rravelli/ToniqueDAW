@@ -73,11 +73,11 @@ fn test_add_track() {
 fn test_add_track_at() {
     let mut state = setup_state();
     let track1 = state.add_track_at(0);
-    assert_eq!(state.tracks().nth(0).unwrap().id, track1);
+    assert_eq!(state.tracks().next().unwrap().id, track1);
 
     let track2 = state.add_track_at(0);
     assert_eq!(state.track_count(), 2);
-    assert_eq!(state.tracks().nth(0).unwrap().id, track2);
+    assert_eq!(state.tracks().next().unwrap().id, track2);
 
     let track3 = state.add_track_at(2);
     assert_eq!(state.track_count(), 3);
@@ -858,7 +858,10 @@ mod projects {
         state.toggle_solo(track, false);
         let view = state.track_view_mut(&track);
         view.name = "Drums".into();
-        view.color = Color32::from_rgb(10, 20, 30);
+        #[allow(clippy::disallowed_methods)]
+        {
+            view.color = Color32::from_rgb(10, 20, 30);
+        }
         view.height = 90.;
         view.collapsed = true;
         state.commit_track_view(&track);

@@ -41,13 +41,9 @@ impl AudioClip {
     }
 
     pub fn duration(&self) -> Option<Duration> {
-        if let Some(duration) = self.audio.duration {
-            Some(Duration::from_secs_f32(
-                duration.as_secs_f32() * (self.trim_end - self.trim_start),
-            ))
-        } else {
-            None
-        }
+        self.audio.duration.map(|duration| {
+            Duration::from_secs_f32(duration.as_secs_f32() * (self.trim_end - self.trim_start))
+        })
     }
     /// Move the clip's start to `beats`, keeping its end: no earlier than
     /// the start of the file or the first beat, no later than the end.

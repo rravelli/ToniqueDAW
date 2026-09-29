@@ -29,9 +29,9 @@ impl AudioMetrics {
     /// Keeps the previous levels if no audio was processed since the last call.
     pub fn update(&mut self, meter: &ChannelMeter) {
         if let Some(levels) = meter.take_levels() {
-            for ch in 0..2 {
-                self.peak[ch] = levels[ch].peak;
-                self.rms[ch] = self.alpha * levels[ch].rms + (1. - self.alpha) * self.rms[ch];
+            for (ch, level) in levels.iter().enumerate() {
+                self.peak[ch] = level.peak;
+                self.rms[ch] = self.alpha * level.rms + (1. - self.alpha) * self.rms[ch];
             }
         }
         for ch in 0..2 {

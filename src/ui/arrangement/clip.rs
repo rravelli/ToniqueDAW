@@ -137,7 +137,7 @@ impl ClipView<'_> {
         painter.text(
             Pos2::new(pos.x + PADDING_TEXT, pos.y + 2.),
             Align2::LEFT_TOP,
-            format!("{}", clip.audio.name.clone()),
+            clip.audio.name.clone().to_string(),
             FontId::new(10., FontFamily::Monospace),
             ink,
         );
@@ -257,7 +257,7 @@ impl ClipView<'_> {
                 .add(ContextMenuButton::new(TRASH, "Delete").text_color(ui.app_theme().danger))
                 .clicked()
             {
-                state.delete_clips(&vec![clip.id.clone()]);
+                state.delete_clips(&[clip.id]);
             };
         });
     }

@@ -54,9 +54,8 @@ impl NumberInput {
 
     fn commit_buffer(&mut self) {
         let result = self.buffer.parse::<f32>();
-        match result {
-            Ok(number) => self.value = number.clamp(self.range.min, self.range.max),
-            Err(_) => {}
+        if let Ok(number) = result {
+            self.value = number.clamp(self.range.min, self.range.max)
         }
     }
 
@@ -154,7 +153,7 @@ impl NumberInput {
         // Make sure the input has the correct size
         ui.allocate_rect(rect, Sense::empty());
 
-        return res;
+        res
     }
 
     fn make_button(

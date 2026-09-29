@@ -38,9 +38,9 @@ impl FilterEditor {
 
     fn format_freq(f: f32) -> String {
         if f < 1000. {
-            return format!("{:.0}Hz", f);
+            format!("{:.0}Hz", f)
         } else {
-            return format!("{:.0}kHz", f / 1000.);
+            format!("{:.0}kHz", f / 1000.)
         }
     }
 
@@ -189,7 +189,7 @@ impl EffectEditor for FilterEditor {
             &painter,
             Pos2::new(rect.left() + 20., rect.bottom() + BOTTOM_HEIGHT / 2.),
             &mut self.cutoff,
-            self.id.clone().into(),
+            self.id.clone(),
             "Freq".into(),
             label.into(),
             self.min_freq,
@@ -204,7 +204,7 @@ impl EffectEditor for FilterEditor {
             &painter,
             Pos2::new(rect.left() + 50., rect.bottom() + BOTTOM_HEIGHT / 2.),
             &mut self.q,
-            self.id.clone().into(),
+            self.id.clone(),
             "Q".into(),
             Some(label),
             0.5,

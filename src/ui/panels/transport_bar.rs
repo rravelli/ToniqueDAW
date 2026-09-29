@@ -234,7 +234,8 @@ impl TransportBar {
         let click = state.metronome()
             && matches!(state.playback_state(), PlaybackState::Playing)
             && state.playhead().0 % 1.0 < 0.5;
-        let res = ui.add(
+
+        ui.add(
             FlatButton::new(egui_phosphor::fill::METRONOME)
                 .square(BUTTON_SIZE)
                 .font(FontId::new(
@@ -253,9 +254,7 @@ impl TransportBar {
                     (true, true) => with_alpha(theme.text_on_accent, 110),
                 })
                 .tooltip(tooltip(ui, state, "Metronome", Action::ToggleMetronome)),
-        );
-
-        res
+        )
     }
 
     fn waveform_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {

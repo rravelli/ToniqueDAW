@@ -277,6 +277,7 @@ impl Timeline {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn clip_ui(
         &mut self,
         track: &TrackRow,
@@ -398,7 +399,7 @@ impl Timeline {
             };
 
             let height = track.as_ref().map_or(DEFAULT_TRACK_HEIGHT, |t| t.height);
-            let show_waveform = track.as_ref().map_or(true, |t| !t.collapsed);
+            let show_waveform = track.as_ref().is_none_or(|t| !t.collapsed);
             let color = track
                 .as_ref()
                 .map_or(ui.app_theme().text_muted, |t| t.color);

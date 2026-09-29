@@ -242,12 +242,11 @@ impl FileList {
 
         let toggle_folder = is_dir && pressed;
 
-        if res.dragged() {
-            if is_audio
-                && let Some(audio_info) = AUDIO_ANALYSIS_CACHE.get_or_analyze(file.path.clone())
-            {
-                res.dnd_set_drag_payload(DragPayload::File(audio_info));
-            }
+        if res.dragged()
+            && is_audio
+            && let Some(audio_info) = AUDIO_ANALYSIS_CACHE.get_or_analyze(file.path.clone())
+        {
+            res.dnd_set_drag_payload(DragPayload::File(audio_info));
         }
 
         if selected {
@@ -300,10 +299,10 @@ impl FileList {
                     files.rebuild(root);
                 }
             };
-            if generation_clone.load(Ordering::Relaxed) == generation {
-                if let Ok(mut loading) = loading_clone.lock() {
-                    *loading = false;
-                }
+            if generation_clone.load(Ordering::Relaxed) == generation
+                && let Ok(mut loading) = loading_clone.lock()
+            {
+                *loading = false;
             }
         });
         self.selected = None;

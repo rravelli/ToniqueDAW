@@ -155,7 +155,7 @@ impl TrackHeaders {
 
             if ui
                 .add(
-                    FlatButton::ghost(format!("{}", PLUS))
+                    FlatButton::ghost(PLUS.to_string())
                         .font(FontId::new(
                             10.,
                             egui::FontFamily::Name(PHOSPHOR_REGULAR.into()),

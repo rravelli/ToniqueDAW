@@ -3,6 +3,7 @@
 use crate::ui::theme::ThemeExt;
 use egui::{Align2, FontId, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
 
+#[allow(clippy::too_many_arguments)]
 pub fn paint_knob(
     ui: &mut Ui,
     painter: &Painter,

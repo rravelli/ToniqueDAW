@@ -15,22 +15,22 @@ use crate::waveform::{load_audio, load_cached_peaks};
 
 #[derive(Debug)]
 pub enum AudioInfoError {
-    Io(std::io::Error),
-    Symphonia(symphonia::core::errors::Error),
+    Io,
+    Symphonia,
     MissingSampleRate,
     MissingChannels,
     NoDefaultTrack,
 }
 
 impl From<std::io::Error> for AudioInfoError {
-    fn from(e: std::io::Error) -> Self {
-        AudioInfoError::Io(e)
+    fn from(_: std::io::Error) -> Self {
+        AudioInfoError::Io
     }
 }
 
 impl From<symphonia::core::errors::Error> for AudioInfoError {
-    fn from(e: symphonia::core::errors::Error) -> Self {
-        AudioInfoError::Symphonia(e)
+    fn from(_: symphonia::core::errors::Error) -> Self {
+        AudioInfoError::Symphonia
     }
 }
 

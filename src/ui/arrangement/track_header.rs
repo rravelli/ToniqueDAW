@@ -167,11 +167,10 @@ impl TrackHeader {
                             let arm_res = armable.then(|| self.arm_button(ui, track));
 
                             if mute_res.clicked() {
-                                state.set_mute(track.id.clone(), !track.muted);
+                                state.set_mute(track.id, !track.muted);
                             }
                             if solo_res.clicked() {
-                                state
-                                    .toggle_solo(track.id.clone(), ui.input(|i| i.modifiers.shift));
+                                state.toggle_solo(track.id, ui.input(|i| i.modifiers.shift));
                             }
                             if arm_res.is_some_and(|r| r.clicked()) {
                                 state.set_armed(&track.id, !track.armed);
@@ -381,19 +380,19 @@ impl TrackHeader {
             let delta = response.drag_delta().x;
             self.gain_db += delta * (range.end() - range.start()) / rect.width();
             self.gain_db = self.gain_db.clamp(*range.start(), *range.end());
-            state.set_volume(track.id.clone(), 10f32.powf(self.gain_db / 20.));
+            state.set_volume(track.id, 10f32.powf(self.gain_db / 20.));
             response.mark_changed();
         }
 
         if response.drag_stopped() {
             let new_volume = 10f32.powf(self.gain_db / 20.);
-            state.commit_volume(track.id.clone(), self.committed_volume, new_volume);
+            state.commit_volume(track.id, self.committed_volume, new_volume);
             self.committed_volume = new_volume;
         }
 
         if response.double_clicked() {
             self.gain_db = 0.;
-            state.commit_volume(track.id.clone(), self.committed_volume, 1.0);
+            state.commit_volume(track.id, self.committed_volume, 1.0);
             self.committed_volume = 1.0;
             response.mark_changed();
         }

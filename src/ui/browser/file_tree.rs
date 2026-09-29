@@ -1,4 +1,9 @@
-use std::{collections::HashMap, ffi::OsStr, fs::read_dir, path::PathBuf};
+use std::{
+    collections::HashMap,
+    ffi::OsStr,
+    fs::read_dir,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone)]
 pub struct FolderNode {
@@ -10,10 +15,10 @@ pub struct FolderNode {
 }
 
 impl FolderNode {
-    pub fn new(path: &PathBuf, depth: usize) -> Self {
+    pub fn new(path: &Path, depth: usize) -> Self {
         Self {
             open: false,
-            path: path.clone(),
+            path: path.to_path_buf(),
             children: None,
             search_result: Vec::new(),
             depth,
@@ -28,7 +33,7 @@ impl FolderNode {
     /// What's inside, read from disk the first time.
     pub fn children(&mut self) -> Vec<FileNode> {
         if let Some(children) = self.children.clone() {
-            return children;
+            children
         } else {
             let children = read_entries(self.path.clone(), self.depth + 1);
             self.children = Some(children.clone());
@@ -156,7 +161,7 @@ impl FileTree {
     }
 }
 
-pub fn is_audio_file(path: &PathBuf) -> bool {
+pub fn is_audio_file(path: &Path) -> bool {
     path.extension()
         .and_then(OsStr::to_str)
         .map(|ext| {
