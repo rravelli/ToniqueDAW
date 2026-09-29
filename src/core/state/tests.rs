@@ -1,9 +1,10 @@
 use crate::{
     analysis::{AudioData, AudioInfo},
+    config::settings::Settings,
     core::{
         clip::AudioClip,
         effect::EffectKind,
-        state::{MASTER_TRACK_ID, ProjectState},
+        state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
     },
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -1239,4 +1240,17 @@ mod groups {
         assert_eq!(state.parent(after), None, "between the group and c");
         assert_tree_order(&state);
     }
+}
+
+/// Without an output device the project still opens, stopped, and says why
+/// while it keeps trying to open one.
+#[test]
+fn starts_without_audio_and_waits_for_a_device() {
+    let mut state = setup_state();
+    state.play();
+    state.attach_audio(Err("no device".into()), Settings::default());
+    assert!(state.audio().is_none());
+    assert!(state.audio_lost());
+    assert_eq!(state.audio_error.as_deref(), Some("no device"));
+    assert_eq!(state.playback_state(), PlaybackState::Paused);
 }

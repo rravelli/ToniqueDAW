@@ -35,7 +35,7 @@ pub struct ToniqueApp {
 impl ToniqueApp {
     pub fn new(
         engine: Engine,
-        audio: AudioHost,
+        audio: Result<AudioHost, String>,
         settings: Settings,
         cc: &eframe::CreationContext<'_>,
     ) -> Self {

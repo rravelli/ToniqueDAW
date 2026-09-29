@@ -363,9 +363,13 @@ impl SettingsWindow {
         let pending = state.settings().audio_differs(&self.draft);
         if let Some(error) = &state.audio_error {
             ui.label(
-                RichText::new(format!("Couldn't apply audio settings: {error}"))
-                    .color(ui.app_theme().danger)
-                    .small(),
+                RichText::new(if state.audio_lost() {
+                    format!("No audio output ({error}), retrying…")
+                } else {
+                    format!("Couldn't apply audio settings: {error}")
+                })
+                .color(ui.app_theme().danger)
+                .small(),
             );
             ui.add_space(4.);
         }

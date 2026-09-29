@@ -28,7 +28,12 @@ use crate::{
     },
 };
 use egui::Color32;
-use std::{collections::HashMap, mem::take, path::PathBuf};
+use std::{
+    collections::HashMap,
+    mem::take,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 pub use groups::RowTarget;
 pub use selection::SelectionBounds;
@@ -53,6 +58,8 @@ const DEFAULT_BPM: f64 = 120.;
 /// Length of the loop region in a new project.
 const DEFAULT_LOOP_BARS: f64 = 4.;
 const TRACK_NAME: &str = "# Audio Track";
+/// How often to try opening an output again while there's none.
+const AUDIO_RETRY: Duration = Duration::from_secs(2);
 /// Smallest height of an expanded row (its controls must fit).
 pub const MIN_EXPANDED_HEIGHT: f32 = TRACK_COLLAPSED_HEIGHT + 25.;
 
@@ -79,6 +86,8 @@ pub struct ProjectState {
     settings: Settings,
     /// Why the last audio restart failed, if it did.
     pub audio_error: Option<String>,
+    /// When to try opening the output again, while there's none.
+    reconnect_at: Option<Instant>,
 
     /// Where the transport is, in beats (follows the engine while playing).
     playhead: BeatPos,
@@ -134,6 +143,7 @@ impl ProjectState {
             audio: None,
             settings: Settings::default(),
             audio_error: None,
+            reconnect_at: None,
             edit_cursor: BeatPos::ZERO,
             playback_state: PlaybackState::Paused,
             follow_playhead: false,
@@ -164,6 +174,7 @@ impl ProjectState {
     /// Update each frame the state
     pub fn update(&mut self) {
         self.handle_pending_actions();
+        self.watch_audio();
         for (id, data) in self.sources.poll_loaded() {
             let result = self.session.set_source(id, data);
             report(result);
@@ -193,11 +204,43 @@ impl ProjectState {
     }
 
     // Settings and audio output
-    /// Take over the running audio output and the settings it was opened with.
-    pub fn attach_audio(&mut self, audio: AudioHost, settings: Settings) {
-        self.audio = Some(audio);
+    /// Take over the running audio output and the settings it was opened
+    /// with. Without one (no device worked), keep trying to open it.
+    pub fn attach_audio(&mut self, audio: Result<AudioHost, String>, settings: Settings) {
+        match audio {
+            Ok(audio) => self.audio = Some(audio),
+            Err(e) => self.lose_audio(e),
+        }
         self.settings = settings;
         self.apply_metronome_level();
+    }
+    /// Whether there's no audio output: it was lost and is being reopened.
+    pub fn audio_lost(&self) -> bool {
+        self.reconnect_at.is_some()
+    }
+    /// Notice a lost output (e.g. an unplugged device) and reopen one
+    /// every few seconds, falling back to the default device.
+    fn watch_audio(&mut self) {
+        if self.audio.as_ref().is_some_and(AudioHost::is_lost) {
+            self.lose_audio("the audio device was disconnected".into());
+        }
+        if self.reconnect_at.is_some_and(|at| Instant::now() >= at) {
+            match self.restart_audio() {
+                Ok(()) => {
+                    self.reconnect_at = None;
+                    self.audio_error = None;
+                }
+                Err(e) => self.lose_audio(e),
+            }
+        }
+    }
+    fn lose_audio(&mut self, error: String) {
+        if self.playback_state == PlaybackState::Playing {
+            self.stop();
+        }
+        self.audio = None;
+        self.audio_error = Some(error);
+        self.reconnect_at = Some(Instant::now() + AUDIO_RETRY);
     }
     pub fn audio(&self) -> Option<&AudioHost> {
         self.audio.as_ref()
@@ -219,7 +262,8 @@ impl ProjectState {
     pub fn apply_settings(&mut self, settings: Settings) {
         let previous = std::mem::replace(&mut self.settings, settings);
         self.apply_metronome_level();
-        if self.audio.is_some() && previous.audio_differs(&self.settings) {
+        let has_output = self.audio.is_some() || self.audio_lost();
+        if has_output && previous.audio_differs(&self.settings) {
             self.audio_error = None;
             if let Err(e) = self.restart_audio() {
                 self.audio_error = Some(e);
@@ -228,11 +272,15 @@ impl ProjectState {
                 self.settings.ui_scale = attempted.ui_scale;
                 self.settings.metronome_level = attempted.metronome_level;
                 if let Err(e) = self.restart_audio() {
-                    self.audio_error = Some(format!(
+                    let error = format!(
                         "{}; restoring the previous device failed too: {e}",
                         self.audio_error.take().unwrap_or_default()
-                    ));
+                    );
+                    self.lose_audio(error);
                 }
+            }
+            if self.audio.is_some() {
+                self.reconnect_at = None;
             }
         }
         self.settings.save();
