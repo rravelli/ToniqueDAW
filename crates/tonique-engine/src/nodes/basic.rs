@@ -22,7 +22,9 @@ impl SumNode {
 
 impl Node for SumNode {
     fn properties(&self) -> NodeProperties {
-        NodeProperties::audio(self.channels).with_midi().with_content(ContentId::of(&("sum", self.channels)))
+        NodeProperties::audio(self.channels)
+            .with_midi()
+            .with_content(ContentId::of(&("sum", self.channels)))
     }
 
     fn process(&mut self, ctx: &mut ProcessContext) {
@@ -62,7 +64,10 @@ impl DelayNode {
 
     /// A delay that reports its length as latency, like a lookahead plugin.
     pub fn reporting(delay: usize, channels: usize) -> Self {
-        Self { report_latency: true, ..Self::new(delay, channels, false) }
+        Self {
+            report_latency: true,
+            ..Self::new(delay, channels, false)
+        }
     }
 }
 
@@ -78,7 +83,11 @@ impl Node for DelayNode {
 
     fn prepare(&mut self, _sample_rate: f64, _max_block: usize) {
         self.ring = AudioBuffer::new(self.channels, self.delay.max(1));
-        self.midi = VecDeque::with_capacity(if self.has_midi { MAX_MIDI_EVENTS_PER_BLOCK * 4 } else { 0 });
+        self.midi = VecDeque::with_capacity(if self.has_midi {
+            MAX_MIDI_EVENTS_PER_BLOCK * 4
+        } else {
+            0
+        });
     }
 
     fn process(&mut self, ctx: &mut ProcessContext) {
@@ -101,7 +110,10 @@ impl Node for DelayNode {
                 for e in ctx.midi_input(i) {
                     // Bounded queue: drop rather than grow on the RT thread.
                     if self.midi.len() < self.midi.capacity() {
-                        self.midi.push_back((self.clock + e.offset as u64 + self.delay as u64, e.message));
+                        self.midi.push_back((
+                            self.clock + e.offset as u64 + self.delay as u64,
+                            e.message,
+                        ));
                     }
                 }
             }
@@ -112,7 +124,8 @@ impl Node for DelayNode {
             while i < self.midi.len() {
                 let (due, msg) = self.midi[i];
                 if due < end {
-                    ctx.midi_out.push((due.saturating_sub(self.clock)) as u32, msg);
+                    ctx.midi_out
+                        .push((due.saturating_sub(self.clock)) as u32, msg);
                     self.midi.remove(i);
                 } else {
                     i += 1;
@@ -180,7 +193,10 @@ impl Node for VolumePanNode {
     }
 
     fn prepare(&mut self, sample_rate: f64, _max_block: usize) {
-        for (s, p) in [(&mut self.vol_s, &self.volume), (&mut self.pan_s, &self.pan)] {
+        for (s, p) in [
+            (&mut self.vol_s, &self.volume),
+            (&mut self.pan_s, &self.pan),
+        ] {
             s.set_sample_rate(sample_rate);
             s.snap(p);
         }
@@ -203,7 +219,10 @@ impl Node for VolumePanNode {
             let v = self.vol_s.next() * self.gain_s.next();
             let angle = (self.pan_s.next().clamp(-1.0, 1.0) + 1.0) * 0.25 * std::f32::consts::PI;
             // Equal-power law, normalised so centre is unity gain.
-            let (gl, gr) = (angle.cos() * std::f32::consts::SQRT_2, angle.sin() * std::f32::consts::SQRT_2);
+            let (gl, gr) = (
+                angle.cos() * std::f32::consts::SQRT_2,
+                angle.sin() * std::f32::consts::SQRT_2,
+            );
             *l *= v * gl;
             *r *= v * gr;
         }
@@ -259,7 +278,11 @@ impl OscillatorNode {
     }
 
     pub fn sine(freq: f32, gain: f32) -> Self {
-        Self::new(Waveform::Sine, Arc::new(AtomicParam::new(freq)), Arc::new(AtomicParam::new(gain)))
+        Self::new(
+            Waveform::Sine,
+            Arc::new(AtomicParam::new(freq)),
+            Arc::new(AtomicParam::new(gain)),
+        )
     }
 }
 
@@ -270,7 +293,10 @@ impl Node for OscillatorNode {
 
     fn prepare(&mut self, sample_rate: f64, _max_block: usize) {
         self.sample_rate = sample_rate as f32;
-        for (s, p) in [(&mut self.freq_s, &self.freq), (&mut self.gain_s, &self.gain)] {
+        for (s, p) in [
+            (&mut self.freq_s, &self.freq),
+            (&mut self.gain_s, &self.gain),
+        ] {
             s.set_sample_rate(sample_rate);
             s.snap(p);
         }
@@ -306,7 +332,14 @@ mod tests {
         }
         fn process(&mut self, ctx: &mut ProcessContext) {
             if !std::mem::replace(&mut self.sent, true) {
-                ctx.midi_out.push(5, MidiMessage::NoteOn { channel: 0, note: 60, velocity: 100 });
+                ctx.midi_out.push(
+                    5,
+                    MidiMessage::NoteOn {
+                        channel: 0,
+                        note: 60,
+                        velocity: 100,
+                    },
+                );
             }
         }
     }
@@ -332,8 +365,21 @@ mod tests {
         let del = d.add(DelayNode::new(10, 0, true), &[src]);
         let cap = d.add(Capture(log.clone(), 0), &[del]);
         d.set_output(cap);
-        let mut g = compile(d, &CompileOptions { sample_rate: 48000.0, max_block: 8 }).unwrap();
-        let info = BlockInfo { block_len: 8, sample_rate: 48000.0, timeline_pos: 0, playing: true, jumped: false };
+        let mut g = compile(
+            d,
+            &CompileOptions {
+                sample_rate: 48000.0,
+                max_block: 8,
+            },
+        )
+        .unwrap();
+        let info = BlockInfo {
+            block_len: 8,
+            sample_rate: 48000.0,
+            timeline_pos: 0,
+            playing: true,
+            jumped: false,
+        };
         for _ in 0..4 {
             g.process_sequential(&info);
         }
@@ -347,11 +393,31 @@ mod tests {
         let vol = Arc::new(AtomicParam::new(1.0));
         let pan = Arc::new(AtomicParam::new(0.0));
         let mut d = GraphDescription::new();
-        let osc = d.add(OscillatorNode::new(Waveform::Saw, Arc::new(AtomicParam::new(0.0)), Arc::new(AtomicParam::new(1.0))), &[]);
+        let osc = d.add(
+            OscillatorNode::new(
+                Waveform::Saw,
+                Arc::new(AtomicParam::new(0.0)),
+                Arc::new(AtomicParam::new(1.0)),
+            ),
+            &[],
+        );
         let vp = d.add(VolumePanNode::new(vol, pan.clone()), &[osc]);
         d.set_output(vp);
-        let mut g = compile(d, &CompileOptions { sample_rate: 48000.0, max_block: 4 }).unwrap();
-        let info = BlockInfo { block_len: 4, sample_rate: 48000.0, timeline_pos: 0, playing: true, jumped: false };
+        let mut g = compile(
+            d,
+            &CompileOptions {
+                sample_rate: 48000.0,
+                max_block: 4,
+            },
+        )
+        .unwrap();
+        let info = BlockInfo {
+            block_len: 4,
+            sample_rate: 48000.0,
+            timeline_pos: 0,
+            playing: true,
+            jumped: false,
+        };
         g.process_sequential(&info);
         // saw at 0 Hz, phase 0 -> constant -1
         assert!((g.output(4).channel(0)[3] + 1.0).abs() < 1e-6);

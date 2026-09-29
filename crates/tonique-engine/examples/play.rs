@@ -6,20 +6,28 @@ mod demo;
 use std::time::Duration;
 
 use demo::demo_edit;
+use tonique_engine::device::OutputDevice;
 use tonique_engine::edit::commands::{SetMute, SetParam};
 use tonique_engine::edit::{ChannelRef, EditSession};
 use tonique_engine::engine::{Engine, EngineConfig};
-use tonique_engine::device::OutputDevice;
 use tonique_engine::time::BeatPos;
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let device = OutputDevice::default_output()?;
-    let config = EngineConfig { sample_rate: device.sample_rate(), max_block: 256, worker_threads: 2, ..Default::default() };
+    let config = EngineConfig {
+        sample_rate: device.sample_rate(),
+        max_block: 256,
+        worker_threads: 2,
+        ..Default::default()
+    };
     let (engine, processor) = Engine::new(config);
-    let mut session = EditSession::new(demo_edit(config.sample_rate), engine).map_err(|e| e.to_string())?;
+    let mut session =
+        EditSession::new(demo_edit(config.sample_rate), engine).map_err(|e| e.to_string())?;
     let _stream = device.start(processor)?;
 
-    session.set_loop(Some((BeatPos(0.0), BeatPos(16.0)))).map_err(|e| e.to_string())?;
+    session
+        .set_loop(Some((BeatPos(0.0), BeatPos(16.0))))
+        .map_err(|e| e.to_string())?;
     session.play().map_err(|e| e.to_string())?;
     let bass = session.edit().tracks[1].id;
     let arp_vol = session.edit().tracks[0].channel.volume.id;
@@ -34,7 +42,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             _ => Ok(()),
         }
         .map_err(|e| e.to_string())?;
-        println!("beat {:6.2}  cpu {:4.1}%", session.position().0, session.engine().cpu_load() * 100.0);
+        println!(
+            "beat {:6.2}  cpu {:4.1}%",
+            session.position().0,
+            session.engine().cpu_load() * 100.0
+        );
     }
     Ok(())
 }

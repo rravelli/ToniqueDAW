@@ -22,12 +22,23 @@ pub struct DeviceInfo {
 /// Output devices of the default host. Can be slow (it probes hardware):
 /// don't call it every frame.
 pub fn output_devices() -> Vec<DeviceInfo> {
-    let Ok(devices) = cpal::default_host().output_devices() else { return Vec::new() };
-    devices.filter_map(|d| Some(DeviceInfo { id: d.id().ok()?.to_string(), name: device_name(&d) })).collect()
+    let Ok(devices) = cpal::default_host().output_devices() else {
+        return Vec::new();
+    };
+    devices
+        .filter_map(|d| {
+            Some(DeviceInfo {
+                id: d.id().ok()?.to_string(),
+                name: device_name(&d),
+            })
+        })
+        .collect()
 }
 
 fn device_name(device: &cpal::Device) -> String {
-    device.description().map_or_else(|_| "Unknown device".into(), |d| d.name().to_string())
+    device
+        .description()
+        .map_or_else(|_| "Unknown device".into(), |d| d.name().to_string())
 }
 
 /// Which device to open and how. `None` fields use the device's defaults;
@@ -57,16 +68,25 @@ impl OutputDevice {
     pub fn open(options: &DeviceOptions) -> Result<Self, DeviceError> {
         let host = cpal::default_host();
         let wanted = options.device_id.as_ref().and_then(|id| {
-            host.output_devices().ok()?.find(|d| d.id().is_ok_and(|d| d.to_string() == *id))
+            host.output_devices()
+                .ok()?
+                .find(|d| d.id().is_ok_and(|d| d.to_string() == *id))
         });
-        let device = wanted.or_else(|| host.default_output_device()).ok_or("no output device available")?;
+        let device = wanted
+            .or_else(|| host.default_output_device())
+            .ok_or("no output device available")?;
         let mut config = device.default_output_config()?.config();
         let mut out = Self { device, config };
-        if let Some(rate) = options.sample_rate.filter(|r| out.supported_sample_rates().contains(r)) {
+        if let Some(rate) = options
+            .sample_rate
+            .filter(|r| out.supported_sample_rates().contains(r))
+        {
             config.sample_rate = rate;
         }
         if let Some(frames) = options.buffer_frames
-            && out.buffer_size_range().is_none_or(|(min, max)| (min..=max).contains(&frames))
+            && out
+                .buffer_size_range()
+                .is_none_or(|(min, max)| (min..=max).contains(&frames))
         {
             config.buffer_size = cpal::BufferSize::Fixed(frames);
         }
@@ -80,14 +100,19 @@ impl OutputDevice {
 
     /// Sample rates the device supports with its channel count, lowest first.
     pub fn supported_sample_rates(&self) -> Vec<u32> {
-        let Ok(configs) = self.device.supported_output_configs() else { return Vec::new() };
+        let Ok(configs) = self.device.supported_output_configs() else {
+            return Vec::new();
+        };
         let mut rates: Vec<u32> = configs
             .filter(|c| c.channels() == self.config.channels)
             .flat_map(|c| {
                 let (min, max) = (c.min_sample_rate(), c.max_sample_rate());
                 // A fixed rate is listed as is; ranges (ALSA's can be
                 // 1 Hz..384 kHz) offer the usual rates within them.
-                COMMON_RATES.into_iter().filter(move |r| (min..=max).contains(r)).chain((min == max).then_some(min))
+                COMMON_RATES
+                    .into_iter()
+                    .filter(move |r| (min..=max).contains(r))
+                    .chain((min == max).then_some(min))
             })
             .collect();
         rates.sort_unstable();
@@ -98,10 +123,12 @@ impl OutputDevice {
     /// Smallest and largest callback size the device accepts, if it says.
     pub fn buffer_size_range(&self) -> Option<(u32, u32)> {
         let configs = self.device.supported_output_configs().ok()?;
-        configs.filter(|c| c.channels() == self.config.channels).find_map(|c| match *c.buffer_size() {
-            cpal::SupportedBufferSize::Range { min, max } => Some((min, max)),
-            cpal::SupportedBufferSize::Unknown => None,
-        })
+        configs
+            .filter(|c| c.channels() == self.config.channels)
+            .find_map(|c| match *c.buffer_size() {
+                cpal::SupportedBufferSize::Range { min, max } => Some((min, max)),
+                cpal::SupportedBufferSize::Unknown => None,
+            })
     }
 
     /// Frames per callback, if fixed (otherwise the device decides).

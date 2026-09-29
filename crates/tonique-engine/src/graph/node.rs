@@ -57,11 +57,20 @@ pub struct NodeProperties {
 
 impl NodeProperties {
     pub fn audio(channels: usize) -> Self {
-        Self { channels, has_midi: false, latency_samples: 0, content_id: None, identity: None }
+        Self {
+            channels,
+            has_midi: false,
+            latency_samples: 0,
+            content_id: None,
+            identity: None,
+        }
     }
 
     pub fn midi() -> Self {
-        Self { has_midi: true, ..Self::audio(0) }
+        Self {
+            has_midi: true,
+            ..Self::audio(0)
+        }
     }
 
     pub fn with_midi(mut self) -> Self {
@@ -155,7 +164,11 @@ impl<'a> ProcessContext<'a> {
     pub fn midi_input(&self, i: usize) -> &'a MidiEventList {
         let io = self.io[self.input_indices[i] as usize];
         // SAFETY: as for `input`; MIDI lists are per node and never shared for writing.
-        if io.midi.is_null() { &EMPTY_MIDI } else { unsafe { &*io.midi } }
+        if io.midi.is_null() {
+            &EMPTY_MIDI
+        } else {
+            unsafe { &*io.midi }
+        }
     }
 
     pub fn inputs(&self) -> impl Iterator<Item = AudioBlock<'a>> + '_ {

@@ -17,7 +17,10 @@ pub struct CompileOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CompileError {
     NoOutput,
-    InvalidNodeRef { node: usize, reference: usize },
+    InvalidNodeRef {
+        node: usize,
+        reference: usize,
+    },
     /// Names of the nodes that sit on (or behind) a cycle.
     Cycle(Vec<&'static str>),
     DuplicateIdentity(NodeIdentity),
@@ -27,7 +30,9 @@ impl fmt::Display for CompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoOutput => write!(f, "graph has no output node"),
-            Self::InvalidNodeRef { node, reference } => write!(f, "node {node} references missing node {reference}"),
+            Self::InvalidNodeRef { node, reference } => {
+                write!(f, "node {node} references missing node {reference}")
+            }
             Self::Cycle(names) => write!(f, "graph contains a cycle through: {}", names.join(", ")),
             Self::DuplicateIdentity(id) => write!(f, "two nodes share identity {id:?}"),
         }
@@ -60,14 +65,20 @@ struct WorkNode {
 
 /// Compile a description into an executable graph. Runs entirely off the RT
 /// thread; all allocation (buffers, delay lines, node `prepare`) happens here.
-pub fn compile(desc: GraphDescription, opts: &CompileOptions) -> Result<CompiledGraph, CompileError> {
+pub fn compile(
+    desc: GraphDescription,
+    opts: &CompileOptions,
+) -> Result<CompiledGraph, CompileError> {
     let output = desc.output.ok_or(CompileError::NoOutput)?.0;
     let described = desc.nodes.len();
     let mut work: Vec<Option<WorkNode>> = Vec::with_capacity(described);
     for (i, spec) in desc.nodes.into_iter().enumerate() {
         for r in spec.inputs.iter().chain(&spec.after) {
             if r.0 >= described {
-                return Err(CompileError::InvalidNodeRef { node: i, reference: r.0 });
+                return Err(CompileError::InvalidNodeRef {
+                    node: i,
+                    reference: r.0,
+                });
             }
         }
         let props = spec.node.properties();
@@ -94,7 +105,13 @@ pub fn compile(desc: GraphDescription, opts: &CompileOptions) -> Result<Compiled
             continue;
         }
         let w = work[n].as_ref().unwrap();
-        stack.extend(w.inputs.iter().chain(&w.after).copied().filter(|&p| !reachable[p]));
+        stack.extend(
+            w.inputs
+                .iter()
+                .chain(&w.after)
+                .copied()
+                .filter(|&p| !reachable[p]),
+        );
     }
     let pruned = reachable.iter().filter(|r| !**r).count();
     for (i, r) in reachable.iter().enumerate() {
@@ -124,7 +141,14 @@ pub fn compile(desc: GraphDescription, opts: &CompileOptions) -> Result<Compiled
             let ins: Option<Vec<u64>> = w.inputs.iter().map(|&p| final_content[p]).collect();
             let afters: Option<Vec<u64>> = w.after.iter().map(|&p| final_content[p]).collect();
             let p = &w.props;
-            Some(super::hash_of(&(own.0, ins?, afters?, p.channels, p.has_midi, p.latency_samples)))
+            Some(super::hash_of(&(
+                own.0,
+                ins?,
+                afters?,
+                p.channels,
+                p.has_midi,
+                p.latency_samples,
+            )))
         });
         final_content[i] = key;
         if let Some(key) = key {
@@ -161,7 +185,15 @@ pub fn compile(desc: GraphDescription, opts: &CompileOptions) -> Result<Compiled
                 let node = DelayNode::new(diff, src.channels, src.has_midi);
                 let props = node.properties();
                 let label = Some(format!("latency comp. +{diff}"));
-                work.push(Some(WorkNode { name: node.name(), label, owner, node: Box::new(node), props, inputs: vec![p], after: vec![] }));
+                work.push(Some(WorkNode {
+                    name: node.name(),
+                    label,
+                    owner,
+                    node: Box::new(node),
+                    props,
+                    inputs: vec![p],
+                    after: vec![],
+                }));
                 latency.push(max_in);
                 final_order.push(work.len() - 1);
                 delays_inserted += 1;
@@ -193,8 +225,11 @@ pub fn compile(desc: GraphDescription, opts: &CompileOptions) -> Result<Compiled
     let total_latency: Vec<usize> = final_order.iter().map(|&i| latency[i]).collect();
 
     // Identities must be unique so state migration is unambiguous.
-    let mut identity_index: Vec<(NodeIdentity, u32)> =
-        nodes.iter().enumerate().filter_map(|(k, w)| w.props.identity.map(|id| (id, k as u32))).collect();
+    let mut identity_index: Vec<(NodeIdentity, u32)> = nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(k, w)| w.props.identity.map(|id| (id, k as u32)))
+        .collect();
     identity_index.sort_unstable();
     if let Some(w) = identity_index.windows(2).find(|w| w[0].0 == w[1].0) {
         return Err(CompileError::DuplicateIdentity(w[0].0));
@@ -218,7 +253,8 @@ pub fn compile(desc: GraphDescription, opts: &CompileOptions) -> Result<Compiled
     }
 
     // 7. Static buffer plan.
-    let (slot_of, slot_count, slot_channels) = allocate_buffers(&nodes, &preds, &dependents, output_idx);
+    let (slot_of, slot_count, slot_channels) =
+        allocate_buffers(&nodes, &preds, &dependents, output_idx);
 
     let stats = CompileStats {
         described,
@@ -288,7 +324,9 @@ fn topological_sort(work: &[Option<WorkNode>]) -> Result<Vec<usize>, CompileErro
             succ[p].push(i);
         }
     }
-    let mut queue: VecDeque<usize> = (0..len).filter(|&i| work[i].is_some() && indegree[i] == 0).collect();
+    let mut queue: VecDeque<usize> = (0..len)
+        .filter(|&i| work[i].is_some() && indegree[i] == 0)
+        .collect();
     let mut order = Vec::with_capacity(len);
     while let Some(i) = queue.pop_front() {
         order.push(i);
@@ -301,7 +339,10 @@ fn topological_sort(work: &[Option<WorkNode>]) -> Result<Vec<usize>, CompileErro
     }
     let live = work.iter().filter(|w| w.is_some()).count();
     if order.len() != live {
-        let stuck = (0..len).filter(|&i| work[i].is_some() && indegree[i] > 0).map(|i| work[i].as_ref().unwrap().name).collect();
+        let stuck = (0..len)
+            .filter(|&i| work[i].is_some() && indegree[i] > 0)
+            .map(|i| work[i].as_ref().unwrap().name)
+            .collect();
         return Err(CompileError::Cycle(stuck));
     }
     Ok(order)
@@ -350,7 +391,9 @@ fn allocate_buffers(
         max_channels = max_channels.max(nodes[i].props.channels);
         let reusable = (0..occupant.len()).find(|&s| {
             let o = occupant[s];
-            o != output && !dependents[o].is_empty() && dependents[o].iter().all(|&c| is_ancestor(c, i))
+            o != output
+                && !dependents[o].is_empty()
+                && dependents[o].iter().all(|&c| is_ancestor(c, i))
         });
         let slot = reusable.unwrap_or_else(|| {
             occupant.push(i);
@@ -378,7 +421,11 @@ mod tests {
     impl Node for Dc {
         fn properties(&self) -> NodeProperties {
             let p = NodeProperties::audio(1).with_latency(self.latency);
-            if self.dedup { p.with_content(super::super::ContentId::of(&self.value.to_bits())) } else { p }
+            if self.dedup {
+                p.with_content(super::super::ContentId::of(&self.value.to_bits()))
+            } else {
+                p
+            }
         }
         fn process(&mut self, ctx: &mut ProcessContext) {
             ctx.audio_out.channel_mut(0).fill(self.value);
@@ -386,10 +433,17 @@ mod tests {
     }
 
     fn dc(v: f32) -> Dc {
-        Dc { value: v, latency: 0, dedup: false }
+        Dc {
+            value: v,
+            latency: 0,
+            dedup: false,
+        }
     }
 
-    const OPTS: CompileOptions = CompileOptions { sample_rate: 48000.0, max_block: 64 };
+    const OPTS: CompileOptions = CompileOptions {
+        sample_rate: 48000.0,
+        max_block: 64,
+    };
 
     fn render(g: &mut CompiledGraph, len: usize) -> Vec<f32> {
         g.process_sequential(&crate::graph::BlockInfo {
@@ -427,16 +481,43 @@ mod tests {
         let mut d = GraphDescription::new();
         let a = d.add(SumNode::new(1), &[NodeId(7)]);
         d.set_output(a);
-        assert!(matches!(compile(d, &OPTS), Err(CompileError::InvalidNodeRef { .. })));
-        assert_eq!(compile(GraphDescription::new(), &OPTS).err(), Some(CompileError::NoOutput));
+        assert!(matches!(
+            compile(d, &OPTS),
+            Err(CompileError::InvalidNodeRef { .. })
+        ));
+        assert_eq!(
+            compile(GraphDescription::new(), &OPTS).err(),
+            Some(CompileError::NoOutput)
+        );
     }
 
     #[test]
     fn dedups_identical_subgraphs_only() {
         let mut d = GraphDescription::new();
-        let a = d.add(Dc { value: 1.0, latency: 0, dedup: true }, &[]);
-        let b = d.add(Dc { value: 1.0, latency: 0, dedup: true }, &[]);
-        let c = d.add(Dc { value: 2.0, latency: 0, dedup: true }, &[]);
+        let a = d.add(
+            Dc {
+                value: 1.0,
+                latency: 0,
+                dedup: true,
+            },
+            &[],
+        );
+        let b = d.add(
+            Dc {
+                value: 1.0,
+                latency: 0,
+                dedup: true,
+            },
+            &[],
+        );
+        let c = d.add(
+            Dc {
+                value: 2.0,
+                latency: 0,
+                dedup: true,
+            },
+            &[],
+        );
         let s = d.add(SumNode::new(1), &[a, b, c]);
         d.set_output(s);
         let mut g = compile(d, &OPTS).unwrap();
@@ -449,7 +530,14 @@ mod tests {
     #[test]
     fn inserts_latency_compensation() {
         let mut d = GraphDescription::new();
-        let src = d.add(Dc { value: 1.0, latency: 0, dedup: false }, &[]);
+        let src = d.add(
+            Dc {
+                value: 1.0,
+                latency: 0,
+                dedup: false,
+            },
+            &[],
+        );
         let lat = d.add(DelayNode::reporting(3, 1), &[src]);
         let dry = d.add(SumNode::new(1), &[src]);
         let s = d.add(SumNode::new(1), &[lat, dry]);
@@ -488,6 +576,9 @@ mod tests {
         let g = compile(d, &OPTS).unwrap();
         let slots = g.slot_assignment();
         // `e` has no ordering relation with b or c, so it can't take a's slot.
-        assert_ne!(slots[g.index_of_name_nth("Dc", 1)], slots[g.index_of_name_nth("Dc", 0)]);
+        assert_ne!(
+            slots[g.index_of_name_nth("Dc", 1)],
+            slots[g.index_of_name_nth("Dc", 0)]
+        );
     }
 }

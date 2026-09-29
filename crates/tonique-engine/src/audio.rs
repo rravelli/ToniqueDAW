@@ -12,7 +12,11 @@ pub struct AudioBuffer {
 
 impl AudioBuffer {
     pub fn new(channels: usize, capacity: usize) -> Self {
-        Self { data: vec![0.0; channels * capacity], channels, capacity }
+        Self {
+            data: vec![0.0; channels * capacity],
+            channels,
+            capacity,
+        }
     }
 
     pub fn channels(&self) -> usize {
@@ -37,12 +41,22 @@ impl AudioBuffer {
 
     pub fn block(&self, len: usize) -> AudioBlock<'_> {
         assert!(len <= self.capacity);
-        AudioBlock { data: &self.data, channels: self.channels, stride: self.capacity, len }
+        AudioBlock {
+            data: &self.data,
+            channels: self.channels,
+            stride: self.capacity,
+            len,
+        }
     }
 
     pub fn block_mut(&mut self, len: usize) -> AudioBlockMut<'_> {
         assert!(len <= self.capacity);
-        AudioBlockMut { data: &mut self.data, channels: self.channels, stride: self.capacity, len }
+        AudioBlockMut {
+            data: &mut self.data,
+            channels: self.channels,
+            stride: self.capacity,
+            len,
+        }
     }
 
     pub(crate) fn as_mut_ptr(&mut self) -> *mut f32 {
@@ -60,14 +74,33 @@ pub struct AudioBlock<'a> {
 }
 
 impl<'a> AudioBlock<'a> {
-    pub const EMPTY: AudioBlock<'static> = AudioBlock { data: &[], channels: 0, stride: 0, len: 0 };
+    pub const EMPTY: AudioBlock<'static> = AudioBlock {
+        data: &[],
+        channels: 0,
+        stride: 0,
+        len: 0,
+    };
 
     /// # Safety
     /// `ptr` must point to `channels * stride` valid floats that are not
     /// written for the lifetime `'a`, and `len <= stride`.
-    pub(crate) unsafe fn from_raw(ptr: *const f32, channels: usize, stride: usize, len: usize) -> Self {
-        let data = if channels == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(ptr, channels * stride) } };
-        Self { data, channels, stride, len }
+    pub(crate) unsafe fn from_raw(
+        ptr: *const f32,
+        channels: usize,
+        stride: usize,
+        len: usize,
+    ) -> Self {
+        let data = if channels == 0 {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(ptr, channels * stride) }
+        };
+        Self {
+            data,
+            channels,
+            stride,
+            len,
+        }
     }
 
     pub fn channels(&self) -> usize {
@@ -88,7 +121,9 @@ impl<'a> AudioBlock<'a> {
 
     /// Peak absolute sample value across all channels.
     pub fn peak(&self) -> f32 {
-        (0..self.channels).flat_map(|c| self.channel(c).iter()).fold(0.0f32, |m, s| m.max(s.abs()))
+        (0..self.channels)
+            .flat_map(|c| self.channel(c).iter())
+            .fold(0.0f32, |m, s| m.max(s.abs()))
     }
 }
 
@@ -105,9 +140,23 @@ impl<'a> AudioBlockMut<'a> {
     /// # Safety
     /// `ptr` must point to `channels * stride` valid floats with no other
     /// live reference for the lifetime `'a`, and `len <= stride`.
-    pub(crate) unsafe fn from_raw(ptr: *mut f32, channels: usize, stride: usize, len: usize) -> Self {
-        let data = if channels == 0 { &mut [][..] } else { unsafe { std::slice::from_raw_parts_mut(ptr, channels * stride) } };
-        Self { data, channels, stride, len }
+    pub(crate) unsafe fn from_raw(
+        ptr: *mut f32,
+        channels: usize,
+        stride: usize,
+        len: usize,
+    ) -> Self {
+        let data = if channels == 0 {
+            &mut [][..]
+        } else {
+            unsafe { std::slice::from_raw_parts_mut(ptr, channels * stride) }
+        };
+        Self {
+            data,
+            channels,
+            stride,
+            len,
+        }
     }
 
     pub fn channels(&self) -> usize {
@@ -134,11 +183,19 @@ impl<'a> AudioBlockMut<'a> {
     pub fn channel_pair_mut(&mut self, a: usize, b: usize) -> (&mut [f32], &mut [f32]) {
         assert!(a < b && b < self.channels);
         let (lo, hi) = self.data.split_at_mut(b * self.stride);
-        (&mut lo[a * self.stride..a * self.stride + self.len], &mut hi[..self.len])
+        (
+            &mut lo[a * self.stride..a * self.stride + self.len],
+            &mut hi[..self.len],
+        )
     }
 
     pub fn as_block(&self) -> AudioBlock<'_> {
-        AudioBlock { data: self.data, channels: self.channels, stride: self.stride, len: self.len }
+        AudioBlock {
+            data: self.data,
+            channels: self.channels,
+            stride: self.stride,
+            len: self.len,
+        }
     }
 
     pub fn clear(&mut self) {

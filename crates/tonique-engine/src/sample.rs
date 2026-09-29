@@ -21,12 +21,20 @@ impl SampleBuffer {
     pub fn new(channels: Vec<Vec<f32>>, sample_rate: f64) -> Self {
         assert!(!channels.is_empty());
         let len = channels[0].len();
-        assert!(channels.iter().all(|c| c.len() == len), "channels must have equal length");
-        Self { channels, sample_rate }
+        assert!(
+            channels.iter().all(|c| c.len() == len),
+            "channels must have equal length"
+        );
+        Self {
+            channels,
+            sample_rate,
+        }
     }
 
     pub fn from_interleaved(data: &[f32], num_channels: usize, sample_rate: f64) -> Self {
-        let channels = (0..num_channels).map(|c| data.iter().skip(c).step_by(num_channels).copied().collect()).collect();
+        let channels = (0..num_channels)
+            .map(|c| data.iter().skip(c).step_by(num_channels).copied().collect())
+            .collect();
         Self::new(channels, sample_rate)
     }
 
@@ -57,8 +65,14 @@ impl SampleBuffer {
         }
         // Channels are independent: convert them in parallel.
         let channels = std::thread::scope(|scope| {
-            let jobs: Vec<_> = self.channels.iter().map(|c| scope.spawn(move || resample_offline(c, self.sample_rate, target_rate))).collect();
-            jobs.into_iter().map(|j| j.join().expect("resampling thread panicked")).collect()
+            let jobs: Vec<_> = self
+                .channels
+                .iter()
+                .map(|c| scope.spawn(move || resample_offline(c, self.sample_rate, target_rate)))
+                .collect();
+            jobs.into_iter()
+                .map(|j| j.join().expect("resampling thread panicked"))
+                .collect()
         });
         Self::new(channels, target_rate)
     }
@@ -71,7 +85,10 @@ impl SampleBuffer {
             hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<_, _>>()?,
             hound::SampleFormat::Int => {
                 let scale = 1.0 / (1u64 << (spec.bits_per_sample - 1)) as f32;
-                reader.samples::<i32>().map(|s| s.map(|v| v as f32 * scale)).collect::<Result<_, _>>()?
+                reader
+                    .samples::<i32>()
+                    .map(|s| s.map(|v| v as f32 * scale))
+                    .collect::<Result<_, _>>()?
             }
         };
         let buf = Self::from_interleaved(&data, spec.channels as usize, spec.sample_rate as f64);
@@ -86,20 +103,31 @@ pub struct WavWriter {
 }
 
 impl WavWriter {
-    pub fn create(path: impl AsRef<Path>, channels: usize, sample_rate: f64) -> Result<Self, hound::Error> {
+    pub fn create(
+        path: impl AsRef<Path>,
+        channels: usize,
+        sample_rate: f64,
+    ) -> Result<Self, hound::Error> {
         let spec = hound::WavSpec {
             channels: channels as u16,
             sample_rate: sample_rate.round() as u32,
             bits_per_sample: 32,
             sample_format: hound::SampleFormat::Float,
         };
-        Ok(Self { inner: hound::WavWriter::create(path, spec)?, channels })
+        Ok(Self {
+            inner: hound::WavWriter::create(path, spec)?,
+            channels,
+        })
     }
 
     pub fn write_block(&mut self, block: &AudioBlock) -> Result<(), hound::Error> {
         for i in 0..block.len() {
             for ch in 0..self.channels {
-                let s = if block.channels() == 0 { 0.0 } else { block.channel(ch.min(block.channels() - 1))[i] };
+                let s = if block.channels() == 0 {
+                    0.0
+                } else {
+                    block.channel(ch.min(block.channels() - 1))[i]
+                };
                 self.inner.write_sample(s)?;
             }
         }

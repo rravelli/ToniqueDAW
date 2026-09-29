@@ -8,7 +8,10 @@ pub enum CurveShape {
     Step,
     Linear,
     /// 1-D cubic Bézier through (0, c1, c2, 1), mapped onto the segment.
-    Bezier { c1: f32, c2: f32 },
+    Bezier {
+        c1: f32,
+        c2: f32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -44,7 +47,11 @@ impl AutomationCurve {
         Self::new(
             points
                 .iter()
-                .map(|p| CurvePoint { time: tempo.beats_to_samples(p.beat, sample_rate), value: p.value, shape: p.shape })
+                .map(|p| CurvePoint {
+                    time: tempo.beats_to_samples(p.beat, sample_rate),
+                    value: p.value,
+                    shape: p.shape,
+                })
                 .collect(),
         )
     }
@@ -115,7 +122,11 @@ mod tests {
         let mut t = TempoMap::new(120.0);
         t.set_tempo(BeatPos(2.0), 60.0);
         let c = AutomationCurve::from_beats(
-            &[BeatPoint { beat: BeatPos(3.0), value: 1.0, shape: CurveShape::Linear }],
+            &[BeatPoint {
+                beat: BeatPos(3.0),
+                value: 1.0,
+                shape: CurveShape::Linear,
+            }],
             &t,
             1000.0,
         );

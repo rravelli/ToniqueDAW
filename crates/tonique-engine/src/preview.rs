@@ -53,9 +53,16 @@ pub(crate) struct PreviewShared {
 
 enum FeederMsg {
     /// Start a new source from `from`.
-    Play { source: Box<dyn PreviewSource>, from: usize, ring: rtrb::Producer<PreviewFrame> },
+    Play {
+        source: Box<dyn PreviewSource>,
+        from: usize,
+        ring: rtrb::Producer<PreviewFrame>,
+    },
     /// Continue the current source from `from`.
-    Seek { from: usize, ring: rtrb::Producer<PreviewFrame> },
+    Seek {
+        from: usize,
+        ring: rtrb::Producer<PreviewFrame>,
+    },
     Shutdown,
 }
 
@@ -76,7 +83,15 @@ pub(crate) struct PreviewControl {
 
 impl PreviewControl {
     pub fn new(engine_rate: f64) -> Self {
-        Self { shared: Arc::default(), engine_rate, feeder: None, generation: 0, playing: None, start: 0, ratio: 1.0 }
+        Self {
+            shared: Arc::default(),
+            engine_rate,
+            feeder: None,
+            generation: 0,
+            playing: None,
+            start: 0,
+            ratio: 1.0,
+        }
     }
 
     pub fn shared(&self) -> Arc<PreviewShared> {
@@ -131,7 +146,8 @@ impl PreviewControl {
     /// Whether audio is playing, or about to: a play/seek counts from the
     /// moment it's requested, until its audio has all been played.
     pub fn is_playing(&self) -> bool {
-        self.playing.is_some_and(|g| self.shared.finished.load(Ordering::Relaxed) != g)
+        self.playing
+            .is_some_and(|g| self.shared.finished.load(Ordering::Relaxed) != g)
     }
 
     /// Position in source frames, while playing.
@@ -160,14 +176,25 @@ fn run_feeder(rx: Receiver<FeederMsg>, engine_rate: f64) {
     let mut source: Option<Box<dyn PreviewSource>> = None;
     let mut ring: Option<rtrb::Producer<PreviewFrame>> = None;
     let mut resamplers = [HermiteResampler::new(1.0), HermiteResampler::new(1.0)];
-    let (mut input, mut output) = ([vec![0.0; CHUNK], vec![0.0; CHUNK]], [Vec::new(), Vec::new()]);
+    let (mut input, mut output) = (
+        [vec![0.0; CHUNK], vec![0.0; CHUNK]],
+        [Vec::new(), Vec::new()],
+    );
 
     loop {
         // Block while idle; otherwise just check for news between chunks.
         let idle = ring.as_ref().is_none_or(|r| r.is_abandoned());
-        let msg = if idle { rx.recv().map_err(|_| RecvTimeoutError::Disconnected) } else { rx.recv_timeout(Duration::ZERO) };
+        let msg = if idle {
+            rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
+        } else {
+            rx.recv_timeout(Duration::ZERO)
+        };
         match msg {
-            Ok(FeederMsg::Play { source: s, from, ring: r }) => {
+            Ok(FeederMsg::Play {
+                source: s,
+                from,
+                ring: r,
+            }) => {
                 source = Some(s);
                 ring = Some(r);
                 resamplers = restart(&mut source, from, engine_rate);
@@ -181,7 +208,9 @@ fn run_feeder(rx: Receiver<FeederMsg>, engine_rate: f64) {
             Ok(FeederMsg::Shutdown) | Err(RecvTimeoutError::Disconnected) => return,
             Err(RecvTimeoutError::Timeout) => {}
         }
-        let (Some(src), Some(r)) = (source.as_mut(), ring.as_mut()) else { continue };
+        let (Some(src), Some(r)) = (source.as_mut(), ring.as_mut()) else {
+            continue;
+        };
         // Room for a whole resampled chunk (upsampling makes it longer).
         let ratio = src.sample_rate() / engine_rate;
         let out_max = (CHUNK as f64 / ratio).ceil() as usize + 4;
@@ -213,7 +242,11 @@ fn run_feeder(rx: Receiver<FeederMsg>, engine_rate: f64) {
     }
 }
 
-fn restart(source: &mut Option<Box<dyn PreviewSource>>, from: usize, engine_rate: f64) -> [HermiteResampler; 2] {
+fn restart(
+    source: &mut Option<Box<dyn PreviewSource>>,
+    from: usize,
+    engine_rate: f64,
+) -> [HermiteResampler; 2] {
     let ratio = source.as_mut().map_or(1.0, |s| {
         s.seek(from);
         s.sample_rate() / engine_rate

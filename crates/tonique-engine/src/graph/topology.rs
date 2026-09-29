@@ -1,8 +1,8 @@
 //! A read-only picture of a compiled graph for inspection and display,
 //! plus optional live per-node measurements taken by the RT thread.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
 use super::compile::CompileStats;
@@ -44,7 +44,12 @@ pub struct GraphTopology {
 impl GraphTopology {
     pub(crate) fn new(nodes: Vec<TopologyNode>, output: usize, stats: CompileStats) -> Self {
         let meters = Arc::new(NodeMeters::new(nodes.len()));
-        Self { nodes, output, stats, meters }
+        Self {
+            nodes,
+            output,
+            stats,
+            meters,
+        }
     }
 
     /// Live measurements, recorded only while enabled (see
@@ -77,7 +82,9 @@ pub struct NodeMeters {
 
 impl std::fmt::Debug for NodeMeters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NodeMeters").field("enabled", &self.is_enabled()).finish_non_exhaustive()
+        f.debug_struct("NodeMeters")
+            .field("enabled", &self.is_enabled())
+            .finish_non_exhaustive()
     }
 }
 

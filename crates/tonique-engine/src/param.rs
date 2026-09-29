@@ -21,12 +21,17 @@ fn pack(value: f32, ramp_ms: f32) -> u64 {
 }
 
 fn unpack(bits: u64) -> (f32, f32) {
-    (f32::from_bits((bits >> 32) as u32), f32::from_bits(bits as u32))
+    (
+        f32::from_bits((bits >> 32) as u32),
+        f32::from_bits(bits as u32),
+    )
 }
 
 impl AtomicParam {
     pub fn new(value: f32) -> Self {
-        Self { packed: AtomicU64::new(pack(value, 0.0)) }
+        Self {
+            packed: AtomicU64::new(pack(value, 0.0)),
+        }
     }
 
     /// Callable from any thread (UI, automation, MIDI learn). The RT side
@@ -61,7 +66,14 @@ pub struct Smoother {
 
 impl Smoother {
     pub fn new(initial: f32) -> Self {
-        Self { current: initial, step: 0.0, remaining: 0, target: initial, seen: u64::MAX, sample_rate: 48000.0 }
+        Self {
+            current: initial,
+            step: 0.0,
+            remaining: 0,
+            target: initial,
+            seen: u64::MAX,
+            sample_rate: 48000.0,
+        }
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f64) {
@@ -97,7 +109,11 @@ impl Smoother {
         if self.remaining > 0 {
             self.remaining -= 1;
             // Land exactly on the target to avoid float drift.
-            self.current = if self.remaining == 0 { self.target } else { self.current + self.step };
+            self.current = if self.remaining == 0 {
+                self.target
+            } else {
+                self.current + self.step
+            };
         }
         self.current
     }

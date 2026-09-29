@@ -2,7 +2,10 @@
 //! itself and reports its [`Effects`]: whether the graph must be rebuilt,
 //! or only an automation curve swapped, or nothing (atomic param changes).
 
-use super::{Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, Effects, Output, Plugin, PluginId, Send, Track, TrackId};
+use super::{
+    Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, Effects, Output, Plugin,
+    PluginId, Send, Track, TrackId,
+};
 use crate::automation::BeatPoint;
 use crate::param::ParamId;
 use crate::time::{BeatPos, TempoMap};
@@ -23,11 +26,18 @@ pub struct AddTrack {
 
 impl AddTrack {
     pub fn new(track: Track) -> Self {
-        Self { id: track.id, track: Some(track), index: None }
+        Self {
+            id: track.id,
+            track: Some(track),
+            index: None,
+        }
     }
 
     pub fn at(track: Track, index: usize) -> Self {
-        Self { index: Some(index), ..Self::new(track) }
+        Self {
+            index: Some(index),
+            ..Self::new(track)
+        }
     }
 }
 
@@ -37,14 +47,21 @@ impl EditCommand for AddTrack {
     }
     fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         let t = self.track.take().ok_or(TAKEN)?;
-        let i = self.index.unwrap_or(edit.tracks.len()).min(edit.tracks.len());
+        let i = self
+            .index
+            .unwrap_or(edit.tracks.len())
+            .min(edit.tracks.len());
         edit.tracks.insert(i, t);
         self.index = Some(i);
         edit.refresh_mute_gains();
         Ok(Effects::rebuild())
     }
     fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
-        let i = edit.tracks.iter().position(|t| t.id == self.id).ok_or(EditError::TrackNotFound(self.id))?;
+        let i = edit
+            .tracks
+            .iter()
+            .position(|t| t.id == self.id)
+            .ok_or(EditError::TrackNotFound(self.id))?;
         self.track = Some(edit.tracks.remove(i));
         edit.refresh_mute_gains();
         Ok(Effects::rebuild())
@@ -67,7 +84,11 @@ impl EditCommand for RemoveTrack {
         "Remove track"
     }
     fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
-        let i = edit.tracks.iter().position(|t| t.id == self.id).ok_or(EditError::TrackNotFound(self.id))?;
+        let i = edit
+            .tracks
+            .iter()
+            .position(|t| t.id == self.id)
+            .ok_or(EditError::TrackNotFound(self.id))?;
         self.removed = Some((i, edit.tracks.remove(i)));
         edit.refresh_mute_gains();
         Ok(Effects::rebuild())
@@ -88,7 +109,11 @@ pub struct AddClip {
 
 impl AddClip {
     pub fn new(track: TrackId, clip: Clip) -> Self {
-        Self { track, id: clip.id, clip: Some(clip) }
+        Self {
+            track,
+            id: clip.id,
+            clip: Some(clip),
+        }
     }
 }
 
@@ -103,7 +128,11 @@ impl EditCommand for AddClip {
     }
     fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         let t = edit.track_mut(self.track)?;
-        let i = t.clips.iter().position(|c| c.id == self.id).ok_or(EditError::ClipNotFound(self.id))?;
+        let i = t
+            .clips
+            .iter()
+            .position(|c| c.id == self.id)
+            .ok_or(EditError::ClipNotFound(self.id))?;
         self.clip = Some(t.clips.remove(i));
         Ok(Effects::rebuild())
     }
@@ -117,7 +146,11 @@ pub struct RemoveClip {
 
 impl RemoveClip {
     pub fn new(track: TrackId, id: ClipId) -> Self {
-        Self { track, id, removed: None }
+        Self {
+            track,
+            id,
+            removed: None,
+        }
     }
 }
 
@@ -127,7 +160,11 @@ impl EditCommand for RemoveClip {
     }
     fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         let t = edit.track_mut(self.track)?;
-        let i = t.clips.iter().position(|c| c.id == self.id).ok_or(EditError::ClipNotFound(self.id))?;
+        let i = t
+            .clips
+            .iter()
+            .position(|c| c.id == self.id)
+            .ok_or(EditError::ClipNotFound(self.id))?;
         self.removed = Some((i, t.clips.remove(i)));
         Ok(Effects::rebuild())
     }
@@ -148,18 +185,32 @@ pub struct MoveClip {
 
 impl MoveClip {
     pub fn new(track: TrackId, id: ClipId, to: BeatPos) -> Self {
-        Self { track, id, to, to_track: track }
+        Self {
+            track,
+            id,
+            to,
+            to_track: track,
+        }
     }
 
     /// Move the clip to `to` on another track.
     pub fn to_track(track: TrackId, id: ClipId, to_track: TrackId, to: BeatPos) -> Self {
-        Self { track, id, to, to_track }
+        Self {
+            track,
+            id,
+            to,
+            to_track,
+        }
     }
 
     fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         edit.track(self.to_track)?;
         let t = edit.track_mut(self.track)?;
-        let i = t.clips.iter().position(|c| c.id == self.id).ok_or(EditError::ClipNotFound(self.id))?;
+        let i = t
+            .clips
+            .iter()
+            .position(|c| c.id == self.id)
+            .ok_or(EditError::ClipNotFound(self.id))?;
         if self.to_track == self.track {
             std::mem::swap(&mut t.clips[i].start, &mut self.to);
         } else {
@@ -196,8 +247,20 @@ pub struct ResizeClip {
 
 impl ResizeClip {
     /// `source_offset_s` is ignored for MIDI clips.
-    pub fn new(track: TrackId, id: ClipId, start: BeatPos, length: f64, source_offset_s: f64) -> Self {
-        Self { track, id, start, length, source_offset_s }
+    pub fn new(
+        track: TrackId,
+        id: ClipId,
+        start: BeatPos,
+        length: f64,
+        source_offset_s: f64,
+    ) -> Self {
+        Self {
+            track,
+            id,
+            start,
+            length,
+            source_offset_s,
+        }
     }
 
     fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
@@ -205,10 +268,17 @@ impl ResizeClip {
             return Err(EditError::Invalid("clip length must be positive"));
         }
         let t = edit.track_mut(self.track)?;
-        let c = t.clips.iter_mut().find(|c| c.id == self.id).ok_or(EditError::ClipNotFound(self.id))?;
+        let c = t
+            .clips
+            .iter_mut()
+            .find(|c| c.id == self.id)
+            .ok_or(EditError::ClipNotFound(self.id))?;
         std::mem::swap(&mut c.start, &mut self.start);
         std::mem::swap(&mut c.length, &mut self.length);
-        if let ClipContent::Audio { source_offset_s, .. } = &mut c.content {
+        if let ClipContent::Audio {
+            source_offset_s, ..
+        } = &mut c.content
+        {
             std::mem::swap(source_offset_s, &mut self.source_offset_s);
         }
         Ok(Effects::rebuild())
@@ -239,7 +309,11 @@ impl MoveTrack {
     }
 
     fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
-        let from = edit.tracks.iter().position(|t| t.id == self.id).ok_or(EditError::TrackNotFound(self.id))?;
+        let from = edit
+            .tracks
+            .iter()
+            .position(|t| t.id == self.id)
+            .ok_or(EditError::TrackNotFound(self.id))?;
         let t = edit.tracks.remove(from);
         let to = self.index.min(edit.tracks.len());
         edit.tracks.insert(to, t);
@@ -267,7 +341,10 @@ pub struct RenameTrack {
 
 impl RenameTrack {
     pub fn new(id: TrackId, name: impl Into<String>) -> Self {
-        Self { id, name: name.into() }
+        Self {
+            id,
+            name: name.into(),
+        }
     }
 
     fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
@@ -297,11 +374,19 @@ pub struct AddPlugin {
 
 impl AddPlugin {
     pub fn new(target: ChannelRef, plugin: Plugin) -> Self {
-        Self { target, id: plugin.id, index: None, plugin: Some(plugin) }
+        Self {
+            target,
+            id: plugin.id,
+            index: None,
+            plugin: Some(plugin),
+        }
     }
 
     pub fn at(target: ChannelRef, plugin: Plugin, index: usize) -> Self {
-        Self { index: Some(index), ..Self::new(target, plugin) }
+        Self {
+            index: Some(index),
+            ..Self::new(target, plugin)
+        }
     }
 }
 
@@ -319,7 +404,11 @@ impl EditCommand for AddPlugin {
     }
     fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         let ch = edit.channel_mut(self.target)?;
-        let i = ch.plugins.iter().position(|p| p.id == self.id).ok_or(EditError::PluginNotFound(self.id))?;
+        let i = ch
+            .plugins
+            .iter()
+            .position(|p| p.id == self.id)
+            .ok_or(EditError::PluginNotFound(self.id))?;
         self.plugin = Some(ch.plugins.remove(i));
         Ok(Effects::rebuild())
     }
@@ -333,7 +422,11 @@ pub struct RemovePlugin {
 
 impl RemovePlugin {
     pub fn new(target: ChannelRef, id: PluginId) -> Self {
-        Self { target, id, removed: None }
+        Self {
+            target,
+            id,
+            removed: None,
+        }
     }
 }
 
@@ -343,7 +436,11 @@ impl EditCommand for RemovePlugin {
     }
     fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         let ch = edit.channel_mut(self.target)?;
-        let i = ch.plugins.iter().position(|p| p.id == self.id).ok_or(EditError::PluginNotFound(self.id))?;
+        let i = ch
+            .plugins
+            .iter()
+            .position(|p| p.id == self.id)
+            .ok_or(EditError::PluginNotFound(self.id))?;
         self.removed = Some((i, ch.plugins.remove(i)));
         Ok(Effects::rebuild())
     }
@@ -363,12 +460,20 @@ pub struct SetBypass {
 
 impl SetBypass {
     pub fn new(target: ChannelRef, id: PluginId, bypassed: bool) -> Self {
-        Self { target, id, bypassed }
+        Self {
+            target,
+            id,
+            bypassed,
+        }
     }
 
     fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         let ch = edit.channel_mut(self.target)?;
-        let p = ch.plugins.iter_mut().find(|p| p.id == self.id).ok_or(EditError::PluginNotFound(self.id))?;
+        let p = ch
+            .plugins
+            .iter_mut()
+            .find(|p| p.id == self.id)
+            .ok_or(EditError::PluginNotFound(self.id))?;
         std::mem::swap(&mut p.bypassed, &mut self.bypassed);
         Ok(Effects::rebuild())
     }
@@ -454,12 +559,18 @@ pub struct SetSolo {
 
 impl SetSolo {
     pub fn new(track: TrackId, soloed: bool) -> Self {
-        Self { target: ChannelRef::Track(track), soloed }
+        Self {
+            target: ChannelRef::Track(track),
+            soloed,
+        }
     }
 
     /// Solo a bus, and so everything routed into it.
     pub fn bus(bus: BusId, soloed: bool) -> Self {
-        Self { target: ChannelRef::Bus(bus), soloed }
+        Self {
+            target: ChannelRef::Bus(bus),
+            soloed,
+        }
     }
 
     fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
@@ -503,7 +614,11 @@ impl SetAutomation {
         let p = edit.param_mut(self.id)?;
         std::mem::swap(&mut p.automation, &mut self.points);
         // `self.points` now holds the previous lane.
-        Ok(if p.automation.is_empty() != self.points.is_empty() { Effects::rebuild() } else { Effects::curve(self.id) })
+        Ok(if p.automation.is_empty() != self.points.is_empty() {
+            Effects::rebuild()
+        } else {
+            Effects::curve(self.id)
+        })
     }
 }
 
@@ -554,7 +669,10 @@ pub struct AddBus {
 
 impl AddBus {
     pub fn new(bus: Bus) -> Self {
-        Self { id: bus.id, bus: Some(bus) }
+        Self {
+            id: bus.id,
+            bus: Some(bus),
+        }
     }
 }
 
@@ -567,7 +685,11 @@ impl EditCommand for AddBus {
         Ok(Effects::rebuild())
     }
     fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
-        let i = edit.buses.iter().position(|b| b.id == self.id).ok_or(EditError::BusNotFound(self.id))?;
+        let i = edit
+            .buses
+            .iter()
+            .position(|b| b.id == self.id)
+            .ok_or(EditError::BusNotFound(self.id))?;
         self.bus = Some(edit.buses.remove(i));
         Ok(Effects::rebuild())
     }
@@ -612,7 +734,11 @@ pub struct AddSend {
 
 impl AddSend {
     pub fn new(track: TrackId, send: Send) -> Self {
-        Self { track, param: send.level.id, send: Some(send) }
+        Self {
+            track,
+            param: send.level.id,
+            send: Some(send),
+        }
     }
 }
 
@@ -628,7 +754,11 @@ impl EditCommand for AddSend {
     }
     fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         let t = edit.track_mut(self.track)?;
-        let i = t.sends.iter().position(|s| s.level.id == self.param).ok_or(EditError::ParamNotFound(self.param))?;
+        let i = t
+            .sends
+            .iter()
+            .position(|s| s.level.id == self.param)
+            .ok_or(EditError::ParamNotFound(self.param))?;
         self.send = Some(t.sends.remove(i));
         Ok(Effects::rebuild())
     }
@@ -690,12 +820,19 @@ impl EditCommand for RemoveBus {
     }
     fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         let target = Output::Bus(self.id);
-        let in_use = edit.tracks.iter().any(|t| t.output == target || t.sends.iter().any(|s| s.bus == self.id))
+        let in_use = edit
+            .tracks
+            .iter()
+            .any(|t| t.output == target || t.sends.iter().any(|s| s.bus == self.id))
             || edit.buses.iter().any(|b| b.output == target);
         if in_use {
             return Err(EditError::Invalid("bus still has inputs"));
         }
-        let i = edit.buses.iter().position(|b| b.id == self.id).ok_or(EditError::BusNotFound(self.id))?;
+        let i = edit
+            .buses
+            .iter()
+            .position(|b| b.id == self.id)
+            .ok_or(EditError::BusNotFound(self.id))?;
         self.removed = Some((i, edit.buses.remove(i)));
         edit.refresh_mute_gains();
         Ok(Effects::rebuild())
@@ -715,7 +852,10 @@ pub struct RenameBus {
 
 impl RenameBus {
     pub fn new(id: BusId, name: impl Into<String>) -> Self {
-        Self { id, name: name.into() }
+        Self {
+            id,
+            name: name.into(),
+        }
     }
 
     fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {

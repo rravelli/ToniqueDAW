@@ -34,7 +34,13 @@ impl GraphDescription {
     }
 
     pub fn add_boxed(&mut self, node: Box<dyn Node>, inputs: &[NodeId]) -> NodeId {
-        self.nodes.push(NodeSpec { node, inputs: inputs.to_vec(), after: Vec::new(), label: None, owner: None });
+        self.nodes.push(NodeSpec {
+            node,
+            inputs: inputs.to_vec(),
+            after: Vec::new(),
+            label: None,
+            owner: None,
+        });
         NodeId(self.nodes.len() - 1)
     }
 

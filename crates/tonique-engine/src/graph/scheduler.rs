@@ -58,7 +58,11 @@ impl WorkerPool {
             })
             .collect();
         let threads = handles.iter().map(|h| h.thread().clone()).collect();
-        Self { shared, threads, handles }
+        Self {
+            shared,
+            threads,
+            handles,
+        }
     }
 
     pub fn helpers(&self) -> usize {
@@ -164,7 +168,9 @@ fn worker_main(shared: &Shared) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{CompileOptions, GraphDescription, Node, NodeProperties, ProcessContext, compile};
+    use crate::graph::{
+        CompileOptions, GraphDescription, Node, NodeProperties, ProcessContext, compile,
+    };
     use crate::nodes::SumNode;
 
     struct Ramp(f32);
@@ -193,12 +199,25 @@ mod tests {
         }
         let out = d.add(SumNode::new(2), &tops);
         d.set_output(out);
-        compile(d, &CompileOptions { sample_rate: 48000.0, max_block: 128 }).unwrap()
+        compile(
+            d,
+            &CompileOptions {
+                sample_rate: 48000.0,
+                max_block: 128,
+            },
+        )
+        .unwrap()
     }
 
     #[test]
     fn parallel_matches_sequential() {
-        let info = BlockInfo { block_len: 128, sample_rate: 48000.0, timeline_pos: 0, playing: true, jumped: false };
+        let info = BlockInfo {
+            block_len: 128,
+            sample_rate: 48000.0,
+            timeline_pos: 0,
+            playing: true,
+            jumped: false,
+        };
         let mut seq = wide_graph();
         seq.process_sequential(&info);
         let expected = seq.output(128).channel(1).to_vec();

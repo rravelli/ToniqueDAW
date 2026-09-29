@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use tonique_engine::automation::{BeatPoint, CurveShape};
 use tonique_engine::edit::commands::*;
-use tonique_engine::edit::{Bus, ChannelRef, Clip, Edit, EditSession, Note, Plugin, PluginKind, Send, Track};
+use tonique_engine::edit::{
+    Bus, ChannelRef, Clip, Edit, EditSession, Note, Plugin, PluginKind, Send, Track,
+};
 use tonique_engine::engine::{Engine, EngineConfig};
 use tonique_engine::nodes::{Envelope, FilterMode};
 use tonique_engine::rt::{self, CheckingAllocator};
@@ -20,21 +22,36 @@ static ALLOC: CheckingAllocator<System> = CheckingAllocator(System);
 
 fn busy_edit() -> Edit {
     let mut edit = Edit::new(140.0);
-    let sample = Arc::new(SampleBuffer::new(vec![(0..48000).map(|i| (i as f32 * 0.01).sin()).collect(); 2], 48000.0));
+    let sample = Arc::new(SampleBuffer::new(
+        vec![(0..48000).map(|i| (i as f32 * 0.01).sin()).collect(); 2],
+        48000.0,
+    ));
     let bus = Bus::new(&mut edit, "fx");
     for i in 0..12u8 {
         let mut t = Track::new(&mut edit, format!("t{i}"));
         if i % 2 == 0 {
             let synth = Plugin::new(&mut edit, PluginKind::Synth(Envelope::default()));
             t.channel.plugins.push(synth);
-            let notes = (0..16).map(|n| Note { start: n as f64 * 0.25, length: 0.2, pitch: 40 + i + n as u8, velocity: 90 }).collect();
+            let notes = (0..16)
+                .map(|n| Note {
+                    start: n as f64 * 0.25,
+                    length: 0.2,
+                    pitch: 40 + i + n as u8,
+                    velocity: 90,
+                })
+                .collect();
             let clip = Clip::midi(&mut edit, BeatPos(0.0), 4.0, notes);
             t.clips.push(clip);
         } else {
             let source = edit.add_source(sample.clone());
             let clip = Clip::audio(&mut edit, BeatPos(i as f64 * 0.1), 4.0, source);
             t.clips.push(clip);
-            let lat = Plugin::new(&mut edit, PluginKind::Latency { samples: 64 * i as usize });
+            let lat = Plugin::new(
+                &mut edit,
+                PluginKind::Latency {
+                    samples: 64 * i as usize,
+                },
+            );
             t.channel.plugins.push(lat);
         }
         let filter = Plugin::new(&mut edit, PluginKind::Filter(FilterMode::HighPass));
@@ -42,9 +59,21 @@ fn busy_edit() -> Edit {
         let send = Send::new(&mut edit, bus.id, 0.2);
         t.sends.push(send);
         t.channel.volume.automation = vec![
-            BeatPoint { beat: BeatPos(0.0), value: 0.2, shape: CurveShape::Linear },
-            BeatPoint { beat: BeatPos(2.0), value: 1.0, shape: CurveShape::Bezier { c1: 0.2, c2: 0.9 } },
-            BeatPoint { beat: BeatPos(4.0), value: 0.5, shape: CurveShape::Step },
+            BeatPoint {
+                beat: BeatPos(0.0),
+                value: 0.2,
+                shape: CurveShape::Linear,
+            },
+            BeatPoint {
+                beat: BeatPos(2.0),
+                value: 1.0,
+                shape: CurveShape::Bezier { c1: 0.2, c2: 0.9 },
+            },
+            BeatPoint {
+                beat: BeatPos(4.0),
+                value: 0.5,
+                shape: CurveShape::Step,
+            },
         ];
         edit.tracks.push(t);
     }
@@ -67,7 +96,12 @@ fn rt_path_never_allocates() {
     });
     let mut s = EditSession::new(busy_edit(), engine).unwrap();
     s.engine_mut().set_graph_metering(true);
-    let tracks: Vec<_> = s.edit().tracks.iter().map(|t| (t.id, t.channel.volume.id, t.clips[0].id)).collect();
+    let tracks: Vec<_> = s
+        .edit()
+        .tracks
+        .iter()
+        .map(|t| (t.id, t.channel.volume.id, t.clips[0].id))
+        .collect();
     s.set_loop(Some((BeatPos(0.5), BeatPos(3.5)))).unwrap();
     s.play().unwrap();
 
@@ -80,11 +114,22 @@ fn rt_path_never_allocates() {
         // Control-thread activity interleaved with processing.
         let (tid, vol, cid) = tracks[block % tracks.len()];
         match block % 50 {
-            7 => s.perform(MoveClip::new(tid, cid, BeatPos((block % 7) as f64 * 0.25))).unwrap(), // rebuild
+            7 => s
+                .perform(MoveClip::new(tid, cid, BeatPos((block % 7) as f64 * 0.25)))
+                .unwrap(), // rebuild
             13 => s
-                .perform(SetAutomation::new(vol, vec![BeatPoint { beat: BeatPos(0.0), value: 0.7, shape: CurveShape::Linear }]))
+                .perform(SetAutomation::new(
+                    vol,
+                    vec![BeatPoint {
+                        beat: BeatPos(0.0),
+                        value: 0.7,
+                        shape: CurveShape::Linear,
+                    }],
+                ))
                 .unwrap(), // curve swap via command ring
-            21 => s.perform(SetMute::new(ChannelRef::Track(tid), block % 100 < 50)).unwrap(),
+            21 => s
+                .perform(SetMute::new(ChannelRef::Track(tid), block % 100 < 50))
+                .unwrap(),
             29 => s.seek(BeatPos(1.0)).unwrap(),
             37 => {
                 s.stop().unwrap();
@@ -93,9 +138,14 @@ fn rt_path_never_allocates() {
             43 => {
                 s.undo().unwrap();
             }
-            47 => s.perform(ResizeClip::new(tid, cid, BeatPos(0.25), 3.0, 0.01)).unwrap(),
+            47 => s
+                .perform(ResizeClip::new(tid, cid, BeatPos(0.25), 3.0, 0.01))
+                .unwrap(),
             // Preview: new streams arrive, old ones are retired.
-            3 => s.engine_mut().preview_play(Box::new(Noise(44100.0)), 0).unwrap(),
+            3 => s
+                .engine_mut()
+                .preview_play(Box::new(Noise(44100.0)), 0)
+                .unwrap(),
             17 => s.engine_mut().preview_seek(1000).unwrap(),
             33 if block % 100 == 33 => s.engine_mut().preview_stop().unwrap(),
             49 => {

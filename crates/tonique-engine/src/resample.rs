@@ -31,11 +31,17 @@ pub fn resample_offline(input: &[f32], from_rate: f64, to_rate: f64) -> Vec<f32>
         // Output sample n sits at input position n * step / phases, so its
         // weights repeat every `phases` samples: compute them once.
         Some((step, phases)) => {
-            let table: Vec<Vec<f64>> = (0..phases).map(|p| kernel.weights(p as f64 / phases as f64)).collect();
+            let table: Vec<Vec<f64>> = (0..phases)
+                .map(|p| kernel.weights(p as f64 / phases as f64))
+                .collect();
             (0..out_len)
                 .map(|n| {
                     let pos = n as u64 * step;
-                    kernel.apply(input, (pos / phases) as isize, &table[(pos % phases) as usize])
+                    kernel.apply(
+                        input,
+                        (pos / phases) as isize,
+                        &table[(pos % phases) as usize],
+                    )
                 })
                 .collect()
         }
@@ -81,7 +87,12 @@ impl Kernel {
         // Cutoff relative to the input Nyquist; below 1 when downsampling.
         let cutoff = ratio.min(1.0) * 0.95;
         let half_width = SINC_ZERO_CROSSINGS / cutoff;
-        Self { ratio, cutoff, half_width, reach: half_width.ceil() as isize }
+        Self {
+            ratio,
+            cutoff,
+            half_width,
+            reach: half_width.ceil() as isize,
+        }
     }
 
     /// Normalised weights of the input samples around a point `frac` past
@@ -94,7 +105,11 @@ impl Kernel {
                     return 0.0;
                 }
                 let arg = PI * x * self.cutoff;
-                let sinc = if arg.abs() < 1e-12 { 1.0 } else { arg.sin() / arg };
+                let sinc = if arg.abs() < 1e-12 {
+                    1.0
+                } else {
+                    arg.sin() / arg
+                };
                 let u = x / self.half_width;
                 sinc * (0.42 + 0.5 * (PI * u).cos() + 0.08 * (2.0 * PI * u).cos())
             })
@@ -138,7 +153,10 @@ struct RatioGlide {
 impl RatioGlide {
     const COEF: f64 = 0.001;
     fn new(r: f64) -> Self {
-        Self { current: r, target: r }
+        Self {
+            current: r,
+            target: r,
+        }
     }
     #[inline]
     fn next(&mut self) -> f64 {
@@ -156,7 +174,11 @@ pub struct LinearResampler {
 
 impl LinearResampler {
     pub fn new(ratio: f64) -> Self {
-        Self { hist: [0.0; 2], frac: 1.0, ratio: RatioGlide::new(ratio) }
+        Self {
+            hist: [0.0; 2],
+            frac: 1.0,
+            ratio: RatioGlide::new(ratio),
+        }
     }
 }
 
@@ -169,7 +191,9 @@ impl Resampler for LinearResampler {
         let (mut consumed, mut produced) = (0, 0);
         while produced < output.len() {
             while self.frac >= 1.0 {
-                let Some(&x) = input.get(consumed) else { return (consumed, produced) };
+                let Some(&x) = input.get(consumed) else {
+                    return (consumed, produced);
+                };
                 self.hist = [self.hist[1], x];
                 consumed += 1;
                 self.frac -= 1.0;
@@ -192,7 +216,11 @@ pub struct HermiteResampler {
 
 impl HermiteResampler {
     pub fn new(ratio: f64) -> Self {
-        Self { hist: [0.0; 4], frac: 1.0, ratio: RatioGlide::new(ratio) }
+        Self {
+            hist: [0.0; 4],
+            frac: 1.0,
+            ratio: RatioGlide::new(ratio),
+        }
     }
 }
 
@@ -214,7 +242,9 @@ impl Resampler for HermiteResampler {
         let (mut consumed, mut produced) = (0, 0);
         while produced < output.len() {
             while self.frac >= 1.0 {
-                let Some(&x) = input.get(consumed) else { return (consumed, produced) };
+                let Some(&x) = input.get(consumed) else {
+                    return (consumed, produced);
+                };
                 self.hist = [self.hist[1], self.hist[2], self.hist[3], x];
                 consumed += 1;
                 self.frac -= 1.0;
@@ -241,7 +271,14 @@ pub struct DriftCorrector {
 
 impl DriftCorrector {
     pub fn new(nominal_ratio: f64, target_fill: usize) -> Self {
-        Self { nominal: nominal_ratio, target_fill: target_fill as f64, integral: 0.0, kp: 1e-6, ki: 1e-9, max_deviation: 0.005 }
+        Self {
+            nominal: nominal_ratio,
+            target_fill: target_fill as f64,
+            integral: 0.0,
+            kp: 1e-6,
+            ki: 1e-9,
+            max_deviation: 0.005,
+        }
     }
 
     /// Call once per block with the FIFO's current fill; returns the ratio
@@ -249,7 +286,8 @@ impl DriftCorrector {
     pub fn update(&mut self, fill: usize) -> f64 {
         let err = fill as f64 - self.target_fill;
         self.integral = (self.integral + err).clamp(-1e6, 1e6);
-        let adj = (self.kp * err + self.ki * self.integral).clamp(-self.max_deviation, self.max_deviation);
+        let adj = (self.kp * err + self.ki * self.integral)
+            .clamp(-self.max_deviation, self.max_deviation);
         self.nominal * (1.0 + adj)
     }
 }
@@ -277,9 +315,14 @@ impl BackgroundVarispeedNode {
             .name("tonique-varispeed".into())
             .spawn(move || {
                 let chans = source.num_channels();
-                let mut rs: Vec<HermiteResampler> = (0..2).map(|_| HermiteResampler::new(speed.get() as f64)).collect();
+                let mut rs: Vec<HermiteResampler> = (0..2)
+                    .map(|_| HermiteResampler::new(speed.get() as f64))
+                    .collect();
                 let mut read_pos = 0usize;
-                let (mut inbuf, mut outbuf) = (vec![0.0f32; 128 * 8 + 8], [vec![0.0f32; 128], vec![0.0f32; 128]]);
+                let (mut inbuf, mut outbuf) = (
+                    vec![0.0f32; 128 * 8 + 8],
+                    [vec![0.0f32; 128], vec![0.0f32; 128]],
+                );
                 while !worker_stop.load(Ordering::Relaxed) {
                     if tx.slots() < 128 {
                         std::thread::sleep(Duration::from_millis(1));
@@ -304,7 +347,12 @@ impl BackgroundVarispeedNode {
                 }
             })
             .expect("spawn varispeed worker");
-        Self { rx, stop, underruns: Arc::new(AtomicUsize::new(0)), worker: Some(worker) }
+        Self {
+            rx,
+            stop,
+            underruns: Arc::new(AtomicUsize::new(0)),
+            worker: Some(worker),
+        }
     }
 
     pub fn underrun_counter(&self) -> Arc<AtomicUsize> {
@@ -347,7 +395,9 @@ mod tests {
     use super::*;
 
     fn sine(freq: f64, rate: f64, len: usize) -> Vec<f32> {
-        (0..len).map(|i| (2.0 * PI * freq * i as f64 / rate).sin() as f32).collect()
+        (0..len)
+            .map(|i| (2.0 * PI * freq * i as f64 / rate).sin() as f32)
+            .collect()
     }
 
     #[test]
@@ -362,7 +412,11 @@ mod tests {
         for n in [0, 1, 159, 160, 2345, out.len() - 1] {
             let t = n as f64 * 44100.0 / 48000.0;
             let direct = kernel.apply(&input, t.floor() as isize, &kernel.weights(t.fract()));
-            assert!((out[n] - direct).abs() < 1e-6, "sample {n}: {} vs {direct}", out[n]);
+            assert!(
+                (out[n] - direct).abs() < 1e-6,
+                "sample {n}: {} vs {direct}",
+                out[n]
+            );
         }
     }
 
@@ -373,7 +427,11 @@ mod tests {
         assert_eq!(out.len(), 4410);
         let expected = sine(1000.0, 44100.0, 4410);
         // Ignore edges (filter ramp-in/out).
-        let err = out[200..4200].iter().zip(&expected[200..4200]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        let err = out[200..4200]
+            .iter()
+            .zip(&expected[200..4200])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
         assert!(err < 2e-3, "max err {err}");
     }
 
@@ -382,7 +440,9 @@ mod tests {
         // 20 kHz at 48k -> 22.05k: above the new Nyquist, should be filtered out.
         let input = sine(20000.0, 48000.0, 9600);
         let out = resample_offline(&input, 48000.0, 22050.0);
-        let peak = out[500..out.len() - 500].iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        let peak = out[500..out.len() - 500]
+            .iter()
+            .fold(0.0f32, |m, s| m.max(s.abs()));
         assert!(peak < 0.01, "alias peak {peak}");
     }
 
@@ -391,8 +451,11 @@ mod tests {
         for which in 0..2 {
             let input = sine(440.0, 48000.0, 48000);
             let mut out = vec![0.0; 44100];
-            let mut rs: Box<dyn Resampler> =
-                if which == 0 { Box::new(LinearResampler::new(48000.0 / 44100.0)) } else { Box::new(HermiteResampler::new(48000.0 / 44100.0)) };
+            let mut rs: Box<dyn Resampler> = if which == 0 {
+                Box::new(LinearResampler::new(48000.0 / 44100.0))
+            } else {
+                Box::new(HermiteResampler::new(48000.0 / 44100.0))
+            };
             // Feed in uneven chunks to exercise state carried across calls.
             let (mut ci, mut co) = (0, 0);
             while co < out.len() && ci < input.len() {
@@ -408,7 +471,10 @@ mod tests {
                     (out[n] - (2.0 * PI * 440.0 * t).sin() as f32).abs()
                 })
                 .fold(0.0, f32::max);
-            assert!(err < if which == 0 { 5e-3 } else { 1e-3 }, "resampler {which} err {err}");
+            assert!(
+                err < if which == 0 { 5e-3 } else { 1e-3 },
+                "resampler {which} err {err}"
+            );
         }
     }
 

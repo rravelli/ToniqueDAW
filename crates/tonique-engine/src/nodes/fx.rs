@@ -68,7 +68,13 @@ impl FilterNode {
             FilterMode::LowPass => ((1.0 - cos) / 2.0, 1.0 - cos, (1.0 - cos) / 2.0),
             FilterMode::HighPass => ((1.0 + cos) / 2.0, -(1.0 + cos), (1.0 + cos) / 2.0),
         };
-        self.coefs = Biquad { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: -2.0 * cos / a0, a2: (1.0 - alpha) / a0 };
+        self.coefs = Biquad {
+            b0: b0 / a0,
+            b1: b1 / a0,
+            b2: b2 / a0,
+            a1: -2.0 * cos / a0,
+            a2: (1.0 - alpha) / a0,
+        };
     }
 }
 
@@ -183,7 +189,10 @@ impl Node for EchoNode {
     fn prepare(&mut self, sample_rate: f64, _max_block: usize) {
         self.delay = ((self.time_s as f64 * sample_rate) as usize).max(1);
         self.line = AudioBuffer::new(2, self.delay);
-        for (s, p) in [(&mut self.fb_s, &self.feedback), (&mut self.mix_s, &self.mix)] {
+        for (s, p) in [
+            (&mut self.fb_s, &self.feedback),
+            (&mut self.mix_s, &self.mix),
+        ] {
             s.set_sample_rate(sample_rate);
             s.snap(p);
         }

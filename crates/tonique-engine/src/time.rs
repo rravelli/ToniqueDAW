@@ -70,7 +70,10 @@ pub struct TimeSignature {
 
 impl Default for TimeSignature {
     fn default() -> Self {
-        Self { numerator: 4, denominator: 4 }
+        Self {
+            numerator: 4,
+            denominator: 4,
+        }
     }
 }
 
@@ -101,7 +104,14 @@ pub struct TempoMap {
 impl TempoMap {
     pub fn new(bpm: f64) -> Self {
         assert!(bpm > 0.0);
-        Self { segments: vec![TempoSegment { beat: 0.0, bpm, seconds: 0.0 }], time_signature: TimeSignature::default() }
+        Self {
+            segments: vec![TempoSegment {
+                beat: 0.0,
+                bpm,
+                seconds: 0.0,
+            }],
+            time_signature: TimeSignature::default(),
+        }
     }
 
     /// Set the tempo from `beat` onwards (replacing any change at the same beat).
@@ -109,8 +119,19 @@ impl TempoMap {
         assert!(bpm > 0.0 && beat.0 >= 0.0);
         match self.segments.iter().position(|s| s.beat >= beat.0) {
             Some(i) if self.segments[i].beat == beat.0 => self.segments[i].bpm = bpm,
-            Some(i) => self.segments.insert(i, TempoSegment { beat: beat.0, bpm, seconds: 0.0 }),
-            None => self.segments.push(TempoSegment { beat: beat.0, bpm, seconds: 0.0 }),
+            Some(i) => self.segments.insert(
+                i,
+                TempoSegment {
+                    beat: beat.0,
+                    bpm,
+                    seconds: 0.0,
+                },
+            ),
+            None => self.segments.push(TempoSegment {
+                beat: beat.0,
+                bpm,
+                seconds: 0.0,
+            }),
         }
         self.recompute();
     }

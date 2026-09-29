@@ -15,7 +15,10 @@ use std::sync::Arc;
 use super::{Bus, BusId, Channel, ClipContent, Edit, Output, Parameter, PluginKind, Track};
 use crate::automation::AutomationCurve;
 use crate::graph::{GraphDescription, NodeId, NodeIdentity};
-use crate::nodes::{FilterMode, AudioClipNode, AutomationNode, ClipPlacement, DelayNode, EchoNode, FilterNode, MetronomeNode, MidiClipNode, SumNode, SynthNode, TimelineNote, VolumePanNode};
+use crate::nodes::{
+    AudioClipNode, AutomationNode, ClipPlacement, DelayNode, EchoNode, FilterMode, FilterNode,
+    MetronomeNode, MidiClipNode, SumNode, SynthNode, TimelineNote, VolumePanNode,
+};
 use crate::param::ParamId;
 use crate::time::{BeatPos, SamplePos};
 
@@ -26,13 +29,22 @@ pub fn automation_identity(param: ParamId) -> NodeIdentity {
 }
 
 pub fn build_graph(edit: &Edit, sample_rate: f64) -> GraphDescription {
-    let mut b = Builder { edit, sr: sample_rate, d: GraphDescription::new(), owner: None };
+    let mut b = Builder {
+        edit,
+        sr: sample_rate,
+        d: GraphDescription::new(),
+        owner: None,
+    };
     b.build()
 }
 
 /// Curve for a parameter, converted from beats through the tempo map.
 pub fn automation_curve(edit: &Edit, param: &Parameter, sample_rate: f64) -> Arc<AutomationCurve> {
-    Arc::new(AutomationCurve::from_beats(&param.automation, &edit.tempo, sample_rate))
+    Arc::new(AutomationCurve::from_beats(
+        &param.automation,
+        &edit.tempo,
+        sample_rate,
+    ))
 }
 
 struct Builder<'a> {
@@ -66,7 +78,8 @@ impl Builder<'_> {
             for send in &track.sends {
                 if let Some(&target) = bus_in.get(&send.bus) {
                     let id = NodeIdentity::of(&("send", track.id.0, send.level.id.0));
-                    let node = VolumePanNode::new(send.level.value.clone(), send.pan.clone()).with_identity(id);
+                    let node = VolumePanNode::new(send.level.value.clone(), send.pan.clone())
+                        .with_identity(id);
                     let s = self.d.add(node, &[out]);
                     let bus_name = self.edit.bus(send.bus).map_or("bus", |b| b.name.as_str());
                     self.label(s, format!("{} → {bus_name}", track.name));
@@ -81,9 +94,15 @@ impl Builder<'_> {
             self.d.connect(out, route(bus.output));
         }
         self.owner = None;
-        let master = self.channel(&self.edit.master, master_in, NodeIdentity::of(&"master"), "master");
+        let master = self.channel(
+            &self.edit.master,
+            master_in,
+            NodeIdentity::of(&"master"),
+            "master",
+        );
         // The click bypasses the master fader and meter.
-        let click = MetronomeNode::new(self.edit.tempo.clone(), self.edit.metronome.clone()).with_identity(NodeIdentity::of(&"metronome"));
+        let click = MetronomeNode::new(self.edit.tempo.clone(), self.edit.metronome.clone())
+            .with_identity(NodeIdentity::of(&"metronome"));
         let click = self.d.add(click, &[]);
         self.label(click, "metronome");
         let out = self.d.add(SumNode::new(2), &[master, click]);
@@ -109,9 +128,15 @@ impl Builder<'_> {
             let start = self.samples(clip.start.0);
             let end = self.samples(clip.end().0);
             let node = match &clip.content {
-                ClipContent::Audio { source, source_offset_s, gain } => {
+                ClipContent::Audio {
+                    source,
+                    source_offset_s,
+                    gain,
+                } => {
                     // Not loaded yet: silent until the source is set.
-                    let Some(source) = self.edit.source(*source) else { continue };
+                    let Some(source) = self.edit.source(*source) else {
+                        continue;
+                    };
                     let place = ClipPlacement {
                         start,
                         length: end - start,
@@ -120,17 +145,24 @@ impl Builder<'_> {
                         fade_out: (clip.fade_out_s * self.sr) as SamplePos,
                     };
                     // Stateless: no identity needed, and dedupable by content.
-                    self.d.add(AudioClipNode::new(source.clone(), place, *gain), &[])
+                    self.d
+                        .add(AudioClipNode::new(source.clone(), place, *gain), &[])
                 }
                 ClipContent::Midi { notes, channel } => {
                     let tl: Vec<TimelineNote> = notes
                         .iter()
                         .map(|n| {
                             let s = self.samples(clip.start.0 + n.start);
-                            TimelineNote { start: s, length: self.samples(clip.start.0 + n.start + n.length) - s, note: n.pitch, velocity: n.velocity }
+                            TimelineNote {
+                                start: s,
+                                length: self.samples(clip.start.0 + n.start + n.length) - s,
+                                note: n.pitch,
+                                velocity: n.velocity,
+                            }
                         })
                         .collect();
-                    let node = MidiClipNode::new(&tl, *channel, start, end).with_identity(NodeIdentity::of(&("clip", clip.id.0)));
+                    let node = MidiClipNode::new(&tl, *channel, start, end)
+                        .with_identity(NodeIdentity::of(&("clip", clip.id.0)));
                     self.d.add(node, &[])
                 }
             };
@@ -139,24 +171,51 @@ impl Builder<'_> {
         }
         let input = self.d.add(SumNode::new(2), &sources);
         self.label(input, format!("{} · clips Σ", track.name));
-        self.channel(&track.channel, input, NodeIdentity::of(&("track", track.id.0)), &track.name)
+        self.channel(
+            &track.channel,
+            input,
+            NodeIdentity::of(&("track", track.id.0)),
+            &track.name,
+        )
     }
 
     fn bus(&mut self, bus: &Bus, input: NodeId) -> NodeId {
-        self.channel(&bus.channel, input, NodeIdentity::of(&("bus", bus.id.0)), &bus.name)
+        self.channel(
+            &bus.channel,
+            input,
+            NodeIdentity::of(&("bus", bus.id.0)),
+            &bus.name,
+        )
     }
 
     /// Plugin chain + fader for a track, bus or the master.
-    fn channel(&mut self, ch: &Channel, input: NodeId, fader_identity: NodeIdentity, name: &str) -> NodeId {
+    fn channel(
+        &mut self,
+        ch: &Channel,
+        input: NodeId,
+        fader_identity: NodeIdentity,
+        name: &str,
+    ) -> NodeId {
         let mut prev = input;
         for plugin in ch.plugins.iter().filter(|p| !p.bypassed) {
             let id = NodeIdentity::of(&("plugin", plugin.id.0));
             let param = |name| plugin.param(name).expect("plugin param").value.clone();
             prev = match plugin.kind {
-                PluginKind::Synth(env) => self.d.add(SynthNode::new(env, param("gain")).with_identity(id), &[prev]),
-                PluginKind::Filter(mode) => self.d.add(FilterNode::new(mode, param("cutoff"), param("q")).with_identity(id), &[prev]),
-                PluginKind::Echo { time_s } => self.d.add(EchoNode::new(time_s, param("feedback"), param("mix")).with_identity(id), &[prev]),
-                PluginKind::Latency { samples } => self.d.add(DelayNode::reporting(samples, 2), &[prev]),
+                PluginKind::Synth(env) => self.d.add(
+                    SynthNode::new(env, param("gain")).with_identity(id),
+                    &[prev],
+                ),
+                PluginKind::Filter(mode) => self.d.add(
+                    FilterNode::new(mode, param("cutoff"), param("q")).with_identity(id),
+                    &[prev],
+                ),
+                PluginKind::Echo { time_s } => self.d.add(
+                    EchoNode::new(time_s, param("feedback"), param("mix")).with_identity(id),
+                    &[prev],
+                ),
+                PluginKind::Latency { samples } => {
+                    self.d.add(DelayNode::reporting(samples, 2), &[prev])
+                }
             };
             self.label(prev, format!("{name} · {}", plugin_label(plugin.kind)));
             for p in &plugin.params {
