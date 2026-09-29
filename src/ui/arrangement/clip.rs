@@ -106,7 +106,7 @@ impl ClipView<'_> {
 
         let response = ui.interact(
             hitbox,
-            format!("{:?}{}", clip.id, clip.position).into(),
+            format!("{:?}{}", clip.id, clip.position.0).into(),
             Sense::all(),
         );
         // Trim handles just inside each edge, registered after the header so

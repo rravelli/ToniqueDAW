@@ -3,19 +3,19 @@
 
 use super::{ProjectState, clip_ops::ClipOp};
 use crate::core::clip::AudioClip;
-use tonique_engine::edit::ClipId;
+use tonique_engine::{edit::ClipId, time::BeatPos};
 
 /// How far a clip edge may be past a zone edge and still count as on it, in
 /// beats: trims don't land exactly.
-const EDGE: f32 = 1e-4;
+const EDGE: f64 = 1e-4;
 
 /// A time range, in beats, over a span of tracks (indices, inclusive).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SelectionBounds {
     pub start_track_index: usize,
-    pub start_pos: f32,
+    pub start_pos: BeatPos,
     pub end_track_index: usize,
-    pub end_pos: f32,
+    pub end_pos: BeatPos,
 }
 
 impl SelectionBounds {
@@ -26,7 +26,7 @@ impl SelectionBounds {
     }
 
     /// Bounds between two corners, in any order.
-    pub fn between(a: (usize, f32), b: (usize, f32)) -> Self {
+    pub fn between(a: (usize, BeatPos), b: (usize, BeatPos)) -> Self {
         Self {
             start_track_index: a.0.min(b.0),
             start_pos: a.1.min(b.1),
@@ -96,7 +96,7 @@ impl ProjectState {
     }
     /// The time range covered by the selection: its zone, or else the span
     /// of the selected clips.
-    pub fn selection_range(&self) -> Option<(f32, f32)> {
+    pub fn selection_range(&self) -> Option<(BeatPos, BeatPos)> {
         if let Some(b) = self.clip_selection.bounds {
             return Some((b.start_pos, b.end_pos));
         }
@@ -173,7 +173,7 @@ impl ProjectState {
             clips: copies,
             bounds: bounds.map(|b| SelectionBounds {
                 start_pos: b.end_pos,
-                end_pos: 2. * b.end_pos - b.start_pos,
+                end_pos: b.end_pos + (b.end_pos - b.start_pos),
                 ..b
             }),
         };
@@ -230,7 +230,7 @@ impl ProjectState {
         }
     }
     /// Move the selection zone along with nudged clips.
-    pub(super) fn shift_selection_bounds(&mut self, delta: f32) {
+    pub(super) fn shift_selection_bounds(&mut self, delta: f64) {
         if let Some(b) = &mut self.clip_selection.bounds {
             b.start_pos += delta;
             b.end_pos += delta;

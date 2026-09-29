@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use egui::{Rect, Vec2};
+use tonique_engine::time::BeatPos;
 
-const DEFAULT_THRESHOLD: f32 = 0.3;
+const DEFAULT_THRESHOLD: f64 = 0.3;
 /// How close (in points) edits snap to clip edges, loop edges and the edit
 /// cursor. They win over the grid when in reach.
 pub const TARGET_REACH: f32 = 8.;
@@ -70,13 +71,13 @@ impl GridService {
         self.resolution
     }
     /// Spacing between grid lines, in beats.
-    pub fn step_beats(&self) -> f32 {
-        1.0 / self.resolution.divisions_per_beat(self.beats_per_bar)
+    pub fn step_beats(&self) -> f64 {
+        1.0 / self.resolution.divisions_per_beat(self.beats_per_bar) as f64
     }
     /// The nearest grid line, however far.
-    pub fn snap_to_step(&self, beats: f32) -> f32 {
+    pub fn snap_to_step(&self, beats: BeatPos) -> BeatPos {
         let step = self.step_beats();
-        (beats / step).round() * step
+        BeatPos((beats.0 / step).round() * step)
     }
     pub fn pixels_per_beat(&self) -> f32 {
         self.pixels_per_beat
@@ -86,12 +87,20 @@ impl GridService {
         duration.as_secs_f32() / 60.0 * bpm * self.pixels_per_beat
     }
     /// Position in beats to actual screen x position
-    pub fn beats_to_x(&self, beats: f32, viewport: Rect) -> f32 {
-        viewport.left() + beats * self.pixels_per_beat - self.offset.x
+    pub fn beats_to_x(&self, beats: BeatPos, viewport: Rect) -> f32 {
+        viewport.left() + beats.0 as f32 * self.pixels_per_beat - self.offset.x
     }
     /// Actual x position to beats position
-    pub fn x_to_beats(&self, x: f32, viewport: Rect) -> f32 {
-        (x + self.offset.x - viewport.left()) / self.pixels_per_beat
+    pub fn x_to_beats(&self, x: f32, viewport: Rect) -> BeatPos {
+        BeatPos(((x + self.offset.x - viewport.left()) / self.pixels_per_beat) as f64)
+    }
+    /// A width on screen, in beats.
+    pub fn width_to_beats(&self, width: f32) -> f64 {
+        (width / self.pixels_per_beat) as f64
+    }
+    /// A length in beats, as a width on screen.
+    pub fn beats_to_width(&self, beats: f64) -> f32 {
+        beats as f32 * self.pixels_per_beat
     }
 
     /// Zoom from a scroll delta, keeping the beat under `cursor_x` in place.
@@ -122,29 +131,29 @@ impl GridService {
     /// Snap `beats` to the nearest of `targets` within [`TARGET_REACH`]
     /// points, or else to the grid. Returns the snapped position and
     /// whether it came from `targets`.
-    pub fn snap_to_targets(&self, beats: f32, targets: &[f32]) -> Option<(f32, bool)> {
-        let reach = TARGET_REACH / self.pixels_per_beat;
+    pub fn snap_to_targets(&self, beats: BeatPos, targets: &[BeatPos]) -> Option<(BeatPos, bool)> {
+        let reach = self.width_to_beats(TARGET_REACH);
         let target = targets
             .iter()
             .copied()
-            .filter(|t| (t - beats).abs() <= reach)
-            .min_by(|a, b| (a - beats).abs().total_cmp(&(b - beats).abs()));
+            .filter(|t| (*t - beats).abs() <= reach)
+            .min_by(|a, b| (*a - beats).abs().total_cmp(&(*b - beats).abs()));
         match target {
             Some(t) => Some((t, true)),
             None => self.snap_at_grid_option(beats).map(|g| (g, false)),
         }
     }
 
-    pub fn snap_at_grid(&self, beats: f32) -> f32 {
+    pub fn snap_at_grid(&self, beats: BeatPos) -> BeatPos {
         self.snap_at_grid_with_threshold(beats, DEFAULT_THRESHOLD)
             .unwrap_or(beats)
     }
 
-    pub fn snap_at_grid_option(&self, beats: f32) -> Option<f32> {
+    pub fn snap_at_grid_option(&self, beats: BeatPos) -> Option<BeatPos> {
         self.snap_at_grid_with_threshold(beats, DEFAULT_THRESHOLD)
     }
 
-    pub fn snap_at_grid_with_threshold(&self, beats: f32, threshold: f32) -> Option<f32> {
+    pub fn snap_at_grid_with_threshold(&self, beats: BeatPos, threshold: f64) -> Option<BeatPos> {
         let step = self.step_beats();
         let nearest_position = self.snap_to_step(beats);
         if (beats - nearest_position).abs() < step * threshold {

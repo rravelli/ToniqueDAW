@@ -51,7 +51,7 @@ pub const MASTER_TRACK_ID: TrackId = TrackId(0);
 
 const DEFAULT_BPM: f64 = 120.;
 /// Length of the loop region in a new project.
-const DEFAULT_LOOP_BARS: f32 = 4.;
+const DEFAULT_LOOP_BARS: f64 = 4.;
 const TRACK_NAME: &str = "# Audio Track";
 /// Smallest height of an expanded row (its controls must fit).
 pub const MIN_EXPANDED_HEIGHT: f32 = TRACK_COLLAPSED_HEIGHT + 25.;
@@ -81,10 +81,10 @@ pub struct ProjectState {
     pub audio_error: Option<String>,
 
     /// Where the transport is, in beats (follows the engine while playing).
-    playhead: f32,
+    playhead: BeatPos,
     /// Where the user last clicked in the arrangement, in beats. Playback
     /// starts and returns here, and edits (cuts) happen here.
-    edit_cursor: f32,
+    edit_cursor: BeatPos,
     playback_state: PlaybackState,
     /// Whether the timeline scrolls to keep the playhead in view.
     follow_playhead: bool,
@@ -108,12 +108,13 @@ pub struct ProjectState {
     pub grid: GridService,
     metronome: bool,
     /// Loop region in beats; playback wraps over it while `looping`.
-    loop_range: (f32, f32),
+    loop_range: (BeatPos, BeatPos),
     looping: bool,
     /// Tempo the engine's loop (in samples) was computed with.
     loop_bpm: f32,
 
-    pub resized_clip: Option<(ClipId, f32, f32, f32)>,
+    /// The clip being resized: its trim start and end, and its position.
+    pub resized_clip: Option<(ClipId, f32, f32, BeatPos)>,
     /// Colours given to new tracks: the UI sets its theme's palette (grey
     /// until then).
     track_palette: Vec<Color32>,
@@ -129,11 +130,11 @@ impl ProjectState {
         Self {
             session,
             sources: SourceRegistry::new(sample_rate),
-            playhead: 0.,
+            playhead: BeatPos::ZERO,
             audio: None,
             settings: Settings::default(),
             audio_error: None,
-            edit_cursor: 0.,
+            edit_cursor: BeatPos::ZERO,
             playback_state: PlaybackState::Paused,
             follow_playhead: false,
             preview_playback_state: PlaybackState::Paused,
@@ -150,8 +151,8 @@ impl ProjectState {
             resized_clip: None,
             grid: GridService::new(),
             loop_range: (
-                0.,
-                DEFAULT_LOOP_BARS * GridService::new().beats_per_bar() as f32,
+                BeatPos::ZERO,
+                BeatPos(DEFAULT_LOOP_BARS * GridService::new().beats_per_bar() as f64),
             ),
             looping: false,
             loop_bpm: DEFAULT_BPM as f32,
@@ -172,7 +173,7 @@ impl ProjectState {
             self.sync_loop();
         }
         if self.playback_state == PlaybackState::Playing {
-            self.playhead = self.session.position().0 as f32;
+            self.playhead = self.session.position();
         }
         let engine = self.session.engine();
         if let Some(pos) = engine.preview_position() {
@@ -340,27 +341,27 @@ impl ProjectState {
     }
     // Playhead and edit cursor
     /// Move the playhead and the edit cursor there (ruler, playhead handle).
-    pub fn seek(&mut self, beats: f32) {
-        self.edit_cursor = beats.max(0.);
+    pub fn seek(&mut self, beats: BeatPos) {
+        self.edit_cursor = beats.max(BeatPos::ZERO);
         self.seek_playhead(self.edit_cursor);
     }
     /// Place the edit cursor (a click in the arrangement). Doesn't interrupt
     /// playback; when stopped, the playhead follows so play starts there.
-    pub fn set_edit_cursor(&mut self, beats: f32) {
-        self.edit_cursor = beats.max(0.);
+    pub fn set_edit_cursor(&mut self, beats: BeatPos) {
+        self.edit_cursor = beats.max(BeatPos::ZERO);
         if self.playback_state != PlaybackState::Playing {
             self.seek_playhead(self.edit_cursor);
         }
     }
-    fn seek_playhead(&mut self, beats: f32) {
+    fn seek_playhead(&mut self, beats: BeatPos) {
         self.playhead = beats;
-        let result = self.session.seek(BeatPos(beats as f64));
+        let result = self.session.seek(beats);
         report(result);
     }
-    pub fn playhead(&self) -> f32 {
+    pub fn playhead(&self) -> BeatPos {
         self.playhead
     }
-    pub fn edit_cursor(&self) -> f32 {
+    pub fn edit_cursor(&self) -> BeatPos {
         self.edit_cursor
     }
     pub fn follow_playhead(&self) -> bool {
@@ -416,12 +417,12 @@ impl ProjectState {
         self.looping = looping;
         self.sync_loop();
     }
-    pub fn loop_range(&self) -> (f32, f32) {
+    pub fn loop_range(&self) -> (BeatPos, BeatPos) {
         self.loop_range
     }
     /// Set the loop region (in any order). Empty regions are ignored.
-    pub fn set_loop_range(&mut self, a: f32, b: f32) {
-        let (start, end) = (a.min(b).max(0.), a.max(b).max(0.));
+    pub fn set_loop_range(&mut self, a: BeatPos, b: BeatPos) {
+        let (start, end) = (a.min(b).max(BeatPos::ZERO), a.max(b).max(BeatPos::ZERO));
         if end > start && (start, end) != self.loop_range {
             self.loop_range = (start, end);
             self.sync_loop();
@@ -431,10 +432,7 @@ impl ProjectState {
     /// again whenever the tempo changes.
     fn sync_loop(&mut self) {
         self.loop_bpm = self.bpm();
-        let (start, end) = self.loop_range;
-        let range = self
-            .looping
-            .then_some((BeatPos(start as f64), BeatPos(end as f64)));
+        let range = self.looping.then_some(self.loop_range);
         report(self.session.set_loop(range));
     }
     pub fn toggle_metronome(&mut self) {
@@ -576,7 +574,7 @@ impl ProjectState {
     pub fn add_clips(&mut self, track_id: &TrackId, mut clips: Vec<AudioClip>) {
         // Clips never start before the first beat.
         for clip in &mut clips {
-            clip.position = clip.position.max(0.);
+            clip.position = clip.position.max(BeatPos::ZERO);
         }
         self.clip_ops("Add clips", |s, ops| {
             let mut clips_on_track = s.track_clips(*track_id, ops);
@@ -585,11 +583,17 @@ impl ProjectState {
     }
     /// Move clip to a new position and a new track fixing all overlaps on this track.
     /// Clips never start before the first beat.
-    pub fn move_clip(&mut self, id: &ClipId, to_track: &TrackId, to_pos: f32, ignore: &[ClipId]) {
+    pub fn move_clip(
+        &mut self,
+        id: &ClipId,
+        to_track: &TrackId,
+        to_pos: BeatPos,
+        ignore: &[ClipId],
+    ) {
         let Some((from, clip)) = self.find_clip(*id) else {
             return;
         };
-        let to_pos = to_pos.max(0.);
+        let to_pos = to_pos.max(BeatPos::ZERO);
         self.clip_ops("Move clips", |s, ops| {
             let mut moved = clip.clone();
             moved.position = to_pos;
@@ -617,14 +621,18 @@ impl ProjectState {
         });
     }
     /// Cut clip located at position on given track. Does nothing it there is no clip.
-    pub fn cut_clip_at(&mut self, track_id: &TrackId, position: f32) {
+    pub fn cut_clip_at(&mut self, track_id: &TrackId, position: BeatPos) {
         self.clip_ops("Cut clip", |s, ops| {
             let mut clips_on_track = s.track_clips(*track_id, ops);
             clips_on_track.cut_at(position, &mut || s.new_clip_id());
         });
     }
     /// Duplicate clips fixing all overlaps on the tracks.
-    pub fn duplicate_clips(&mut self, ids: &[ClipId], bounds: Option<(f32, f32)>) -> Vec<ClipId> {
+    pub fn duplicate_clips(
+        &mut self,
+        ids: &[ClipId],
+        bounds: Option<(BeatPos, BeatPos)>,
+    ) -> Vec<ClipId> {
         let mut copy_ids = Vec::new();
         self.clip_ops("Duplicate clips", |s, ops| {
             let tracks: Vec<_> = s.edit().tracks.iter().map(|t| t.id).collect();
@@ -640,11 +648,11 @@ impl ProjectState {
     }
     /// Resize clip without computing overlap checks.
     /// Use `commit_resize_clip` to apply overlap checks and add to undo stack.
-    pub fn resize_clip(&mut self, id: &ClipId, start: f32, end: f32, pos: f32) {
+    pub fn resize_clip(&mut self, id: &ClipId, start: f32, end: f32, pos: BeatPos) {
         self.resized_clip = Some((*id, start, end, pos));
     }
     /// Resize clip and perform overlap checks
-    pub fn commit_resize_clip(&mut self, id: &ClipId, start: f32, end: f32, pos: f32) {
+    pub fn commit_resize_clip(&mut self, id: &ClipId, start: f32, end: f32, pos: BeatPos) {
         self.resized_clip = None;
         let Some((track, clip)) = self.find_clip(*id) else {
             return;
@@ -690,7 +698,7 @@ impl ProjectState {
                 to,
                 clip,
                 position,
-            } => self.perform(MoveClip::to_track(from, clip, to, BeatPos(position as f64))),
+            } => self.perform(MoveClip::to_track(from, clip, to, position)),
         }
     }
 
@@ -702,8 +710,8 @@ impl ProjectState {
             .get_or_insert(&clip.audio, || session.create(|e| e.new_source()));
         Clip {
             id: clip.id,
-            start: BeatPos(clip.position as f64),
-            length: (clip.end(bpm) - clip.position) as f64,
+            start: clip.position,
+            length: clip.end(bpm) - clip.position,
             fade_in_s: 0.005,
             fade_out_s: 0.005,
             content: ClipContent::Audio {
@@ -732,7 +740,7 @@ impl ProjectState {
         Some(AudioClip {
             id: clip.id,
             audio,
-            position: clip.start.0 as f32,
+            position: clip.start,
             trim_start,
             trim_end,
         })
@@ -950,7 +958,7 @@ impl ProjectState {
     }
     /// Positions (in beats) edits snap to besides the grid: the edges of the
     /// clips not in `exclude`, the loop edges and the edit cursor.
-    pub fn snap_targets(&self, exclude: &[ClipId]) -> Vec<f32> {
+    pub fn snap_targets(&self, exclude: &[ClipId]) -> Vec<BeatPos> {
         let bpm = self.bpm();
         let (loop_start, loop_end) = self.loop_range;
         self.tracks()
@@ -962,13 +970,17 @@ impl ProjectState {
     }
     /// Where the arrangement's content ends, in beats: the last clip end,
     /// the loop end while looping, or the playhead, whichever is furthest.
-    pub fn arrangement_end(&self) -> f32 {
+    pub fn arrangement_end(&self) -> BeatPos {
         let bpm = self.bpm();
-        let loop_end = if self.looping { self.loop_range.1 } else { 0. };
+        let loop_end = if self.looping {
+            self.loop_range.1
+        } else {
+            BeatPos::ZERO
+        };
         self.tracks()
             .flat_map(|t| t.clips)
             .map(|c| c.end(bpm))
-            .fold(self.playhead.max(loop_end), f32::max)
+            .fold(self.playhead.max(loop_end), BeatPos::max)
     }
     pub fn track_count(&self) -> usize {
         self.edit().tracks.len()

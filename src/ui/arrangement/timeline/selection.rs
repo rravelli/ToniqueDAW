@@ -6,10 +6,11 @@ use crate::{
     },
 };
 use egui::{Pos2, Rect, Response, Shape, Stroke, Ui};
+use tonique_engine::time::BeatPos;
 
 /// A rubber-band selection being drawn, from where it started.
 pub struct RubberBand {
-    start_pos: f32,
+    start_pos: BeatPos,
     start_track_index: usize,
 }
 

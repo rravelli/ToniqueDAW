@@ -233,7 +233,7 @@ impl TransportBar {
         let theme = ui.app_theme();
         let click = state.metronome()
             && matches!(state.playback_state(), PlaybackState::Playing)
-            && state.playhead() % 1.0 < 0.5;
+            && state.playhead().0 % 1.0 < 0.5;
         let res = ui.add(
             FlatButton::new(egui_phosphor::fill::METRONOME)
                 .square(BUTTON_SIZE)

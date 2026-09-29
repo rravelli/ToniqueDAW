@@ -2,6 +2,7 @@
 //! timeline, and revealing what an edit put off screen.
 
 use egui::{Pos2, Rect, Ui, Vec2, vec2};
+use tonique_engine::time::BeatPos;
 
 use crate::{
     core::{state::ProjectState, track::DEFAULT_TRACK_HEIGHT},
@@ -56,9 +57,11 @@ pub fn autoscroll(
 
 /// Scroll horizontally so `start..end` (beats) is in view. When it doesn't
 /// fit, show its start.
-pub fn reveal(ui: &Ui, state: &mut ProjectState, viewport: Rect, (start, end): (f32, f32)) {
-    let ppb = state.grid.pixels_per_beat();
-    let (start, end) = (start * ppb, end * ppb);
+pub fn reveal(ui: &Ui, state: &mut ProjectState, viewport: Rect, (start, end): (BeatPos, BeatPos)) {
+    let (start, end) = (
+        state.grid.beats_to_width(start.0),
+        state.grid.beats_to_width(end.0),
+    );
     let offset = state.grid.offset.x;
     let mut target = offset;
     if end > offset + viewport.width() - REVEAL_MARGIN {

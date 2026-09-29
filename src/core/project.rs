@@ -23,7 +23,7 @@ pub struct ProjectFile {
     pub version: u32,
     pub bpm: f32,
     /// Loop region in beats.
-    pub loop_range: (f32, f32),
+    pub loop_range: (f64, f64),
     pub looping: bool,
     pub master: ChannelFile,
     /// Parents before their subgroups.
@@ -84,7 +84,7 @@ pub struct ClipFile {
     /// The audio file: relative to the project's folder, or absolute.
     pub path: PathBuf,
     /// Start in the arrangement, in beats.
-    pub position: f32,
+    pub position: f64,
     /// Part of the file played, as ratios of its length.
     pub trim_start: f32,
     pub trim_end: f32,

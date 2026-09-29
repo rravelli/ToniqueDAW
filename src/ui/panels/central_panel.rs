@@ -14,7 +14,7 @@ use crate::{
 use egui::{Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
 /// Empty bars after the end of the arrangement.
-const TIMELINE_SLACK_BARS: f32 = 16.;
+const TIMELINE_SLACK_BARS: f64 = 16.;
 
 pub struct CentralPanel {
     timeline: Timeline,
@@ -94,10 +94,12 @@ impl CentralPanel {
 
         // The timeline spans the content plus some room to add more, and
         // never shrinks under the part being looked at.
-        let ppb = state.grid.pixels_per_beat();
-        let slack = TIMELINE_SLACK_BARS * state.grid.beats_per_bar() as f32;
-        let visible_end = (state.grid.offset.x + timeline_viewport.width()) / ppb;
-        ui.set_width((state.arrangement_end() + slack).max(visible_end) * ppb);
+        let slack = TIMELINE_SLACK_BARS * state.grid.beats_per_bar() as f64;
+        let visible_end = state
+            .grid
+            .width_to_beats(state.grid.offset.x + timeline_viewport.width());
+        let end = (state.arrangement_end() + slack).0.max(visible_end);
+        ui.set_width(state.grid.beats_to_width(end));
         let content_size = ui.min_size();
 
         let mut scrolled_x = false;
@@ -158,7 +160,7 @@ impl CentralPanel {
         {
             return;
         }
-        let x = state.playhead() * state.grid.pixels_per_beat();
+        let x = state.grid.beats_to_width(state.playhead().0);
         state.grid.offset.x = (x - viewport.width() / 2.).max(0.);
     }
 

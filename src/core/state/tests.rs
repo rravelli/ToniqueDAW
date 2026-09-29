@@ -11,6 +11,7 @@ use tonique_engine::{
     edit::{ClipId, TrackId},
     engine::{Engine, EngineConfig},
     sample::SampleBuffer,
+    time::BeatPos,
 };
 
 fn setup_state() -> ProjectState {
@@ -35,21 +36,24 @@ fn audio(seconds: f32) -> AudioInfo {
     }
 }
 
-fn add_clip(state: &mut ProjectState, track: TrackId, position: f32, seconds: f32) -> ClipId {
+fn add_clip(state: &mut ProjectState, track: TrackId, position: f64, seconds: f32) -> ClipId {
     let id = state.new_clip_id();
-    state.add_clips(&track, vec![AudioClip::new(id, audio(seconds), position)]);
+    state.add_clips(
+        &track,
+        vec![AudioClip::new(id, audio(seconds), BeatPos(position))],
+    );
     id
 }
 
 /// (position, end) of each clip on the track, sorted.
-fn spans(state: &ProjectState, track: TrackId) -> Vec<(f32, f32)> {
+fn spans(state: &ProjectState, track: TrackId) -> Vec<(f64, f64)> {
     let bpm = state.bpm();
     let track = state.tracks().find(|t| t.id == track).unwrap();
     let mut spans: Vec<_> = track
         .clips
         .iter()
         .map(|c| {
-            let round = |x: f32| (x * 1000.).round() / 1000.;
+            let round = |x: BeatPos| (x.0 * 1000.).round() / 1000.;
             (round(c.position), round(c.end(bpm)))
         })
         .collect();
@@ -128,14 +132,14 @@ fn move_resize_cut_and_duplicate_undo() {
     let b = state.add_track();
     let clip = add_clip(&mut state, a, 0., 2.); // beats 0..4
 
-    state.move_clip(&clip, &b, 8., &[]);
+    state.move_clip(&clip, &b, BeatPos(8.), &[]);
     assert!(spans(&state, a).is_empty());
     assert_eq!(spans(&state, b), [(8., 12.)]);
 
-    state.commit_resize_clip(&clip, 0.25, 1., 9.); // drop the first beat
+    state.commit_resize_clip(&clip, 0.25, 1., BeatPos(9.)); // drop the first beat
     assert_eq!(spans(&state, b), [(9., 12.)]);
 
-    state.cut_clip_at(&b, 10.);
+    state.cut_clip_at(&b, BeatPos(10.));
     assert_eq!(spans(&state, b), [(9., 10.), (10., 12.)]);
 
     state.duplicate_clips(&[clip], None);
@@ -285,7 +289,7 @@ fn clips_play_through_the_engine_once_loaded() {
     )));
     info.sample_rate = 44100;
     let id = state.new_clip_id();
-    state.add_clips(&track, vec![AudioClip::new(id, info, 0.)]);
+    state.add_clips(&track, vec![AudioClip::new(id, info, BeatPos(0.))]);
     state.play();
 
     // The file is converted on a background thread; the clip is silent until then.
@@ -305,43 +309,55 @@ fn clips_play_through_the_engine_once_loaded() {
     state.update();
     let [left, _] = state.metrics.tracks[&track].peak();
     assert!(left > 0.4, "track meter shows {left}");
-    assert!(state.playhead() > 0.);
+    assert!(state.playhead().0 > 0.);
 }
 
 #[test]
 fn edit_cursor_moves_the_playhead_only_when_stopped() {
     let mut state = setup_state();
-    state.set_edit_cursor(4.);
-    assert_eq!((state.edit_cursor(), state.playhead()), (4., 4.));
+    state.set_edit_cursor(BeatPos(4.));
+    assert_eq!(
+        (state.edit_cursor(), state.playhead()),
+        (BeatPos(4.), BeatPos(4.))
+    );
 
     state.play();
-    state.set_edit_cursor(8.);
-    assert_eq!((state.edit_cursor(), state.playhead()), (8., 4.));
+    state.set_edit_cursor(BeatPos(8.));
+    assert_eq!(
+        (state.edit_cursor(), state.playhead()),
+        (BeatPos(8.), BeatPos(4.))
+    );
 
     // Stopping returns to the edit cursor.
     state.stop();
-    assert_eq!(state.playhead(), 8.);
+    assert_eq!(state.playhead(), BeatPos(8.));
 }
 
 #[test]
 fn seeking_moves_both_cursors() {
     let mut state = setup_state();
     state.play();
-    state.seek(2.);
-    assert_eq!((state.edit_cursor(), state.playhead()), (2., 2.));
-    state.seek(-1.);
-    assert_eq!((state.edit_cursor(), state.playhead()), (0., 0.));
+    state.seek(BeatPos(2.));
+    assert_eq!(
+        (state.edit_cursor(), state.playhead()),
+        (BeatPos(2.), BeatPos(2.))
+    );
+    state.seek(BeatPos(-1.));
+    assert_eq!(
+        (state.edit_cursor(), state.playhead()),
+        (BeatPos(0.), BeatPos(0.))
+    );
 }
 
 #[test]
 fn loop_range_is_ordered_and_never_empty() {
     let mut state = setup_state();
-    state.set_loop_range(8., 4.);
-    assert_eq!(state.loop_range(), (4., 8.));
-    state.set_loop_range(-2., 1.);
-    assert_eq!(state.loop_range(), (0., 1.));
-    state.set_loop_range(3., 3.);
-    assert_eq!(state.loop_range(), (0., 1.));
+    state.set_loop_range(BeatPos(8.), BeatPos(4.));
+    assert_eq!(state.loop_range(), (BeatPos(4.), BeatPos(8.)));
+    state.set_loop_range(BeatPos(-2.), BeatPos(1.));
+    assert_eq!(state.loop_range(), (BeatPos(0.), BeatPos(1.)));
+    state.set_loop_range(BeatPos(3.), BeatPos(3.));
+    assert_eq!(state.loop_range(), (BeatPos(0.), BeatPos(1.)));
 }
 
 #[test]
@@ -354,26 +370,29 @@ fn playback_wraps_inside_the_loop_after_a_tempo_change() {
         ..Default::default()
     });
     let mut state = ProjectState::new(engine);
-    state.set_loop_range(0., 1.);
+    state.set_loop_range(BeatPos(0.), BeatPos(1.));
     state.set_looping(true);
     // The loop was sent in samples at 120 bpm: it must follow the new tempo.
     state.set_bpm(60.);
     state.play();
 
     // Two seconds, with the loop being one second long at 60 bpm.
-    let mut furthest = 0.0f32;
+    let mut furthest = BeatPos::ZERO;
     for _ in 0..(2 * 48000 / 256) {
         state.update();
         render_offline(&mut processor, 256, 2);
         state.update();
         furthest = furthest.max(state.playhead());
         assert!(
-            state.playhead() < 1.,
-            "played past the loop: {}",
+            state.playhead().0 < 1.,
+            "played past the loop: {:?}",
             state.playhead()
         );
     }
-    assert!(furthest > 0.9, "never reached the loop end ({furthest})");
+    assert!(
+        furthest.0 > 0.9,
+        "never reached the loop end ({furthest:?})"
+    );
 }
 
 #[test]
@@ -388,9 +407,9 @@ fn zone_selects_overlapping_clips_on_its_tracks() {
     let _outside_tracks = add_clip(&mut state, t2, 0., 1.);
 
     // Dragged from bottom right to top left: corners in any order.
-    state.select_in_bounds(SelectionBounds::between((1, 4.), (0, 1.)));
+    state.select_in_bounds(SelectionBounds::between((1, BeatPos(4.)), (0, BeatPos(1.))));
     assert_eq!(state.selected_clips(), &[a, b]);
-    assert_eq!(state.selection_range(), Some((1., 4.)));
+    assert_eq!(state.selection_range(), Some((BeatPos(1.), BeatPos(4.))));
 }
 
 #[test]
@@ -406,7 +425,7 @@ fn clicking_toggles_and_replaces_the_selection() {
     state.toggle_clip_selected(a);
     assert_eq!(state.selected_clips(), &[b]);
     // Without a zone, the range spans the selected clips.
-    assert_eq!(state.selection_range(), Some((4., 6.)));
+    assert_eq!(state.selection_range(), Some((BeatPos(4.), BeatPos(6.))));
     state.clear_clip_selection();
     assert_eq!(state.selection_range(), None);
 }
@@ -422,7 +441,7 @@ fn loop_selection_loops_over_the_selected_clips() {
     state.select_clips(vec![a, b]);
     assert!(state.loop_selection());
     assert!(state.looping());
-    assert_eq!(state.loop_range(), (2., 8.));
+    assert_eq!(state.loop_range(), (BeatPos(2.), BeatPos(8.)));
 }
 
 #[test]
@@ -432,13 +451,13 @@ fn duplicating_selects_the_copies() {
     let mut state = setup_state();
     let track = state.add_track();
     add_clip(&mut state, track, 0., 1.);
-    state.select_in_bounds(SelectionBounds::between((0, 0.), (0, 4.)));
+    state.select_in_bounds(SelectionBounds::between((0, BeatPos(0.)), (0, BeatPos(4.))));
     let originals = state.selected_clips().to_vec();
 
     state.duplicate_selected_clips();
     assert_eq!(state.selected_clips().len(), 1);
     assert_ne!(state.selected_clips(), originals.as_slice());
-    assert_eq!(state.selection_range(), Some((4., 8.)));
+    assert_eq!(state.selection_range(), Some((BeatPos(4.), BeatPos(8.))));
     assert_eq!(spans(&state, track), vec![(0., 2.), (4., 6.)]);
 }
 
@@ -462,15 +481,15 @@ fn deleted_or_undone_clips_leave_the_selection() {
 fn arrangement_end_covers_clips_loop_and_playhead() {
     let mut state = setup_state();
     let track = state.add_track();
-    assert_eq!(state.arrangement_end(), 0.);
+    assert_eq!(state.arrangement_end(), BeatPos(0.));
     add_clip(&mut state, track, 4., 1.);
-    assert_eq!(state.arrangement_end(), 6.);
-    state.set_loop_range(0., 12.);
-    assert_eq!(state.arrangement_end(), 6.); // the loop counts only when on
+    assert_eq!(state.arrangement_end(), BeatPos(6.));
+    state.set_loop_range(BeatPos(0.), BeatPos(12.));
+    assert_eq!(state.arrangement_end(), BeatPos(6.)); // the loop counts only when on
     state.set_looping(true);
-    assert_eq!(state.arrangement_end(), 12.);
-    state.seek(20.);
-    assert_eq!(state.arrangement_end(), 20.);
+    assert_eq!(state.arrangement_end(), BeatPos(12.));
+    state.seek(BeatPos(20.));
+    assert_eq!(state.arrangement_end(), BeatPos(20.));
 }
 
 #[test]
@@ -482,11 +501,11 @@ fn paste_goes_to_the_edit_cursor_on_the_selected_track_and_appends() {
     assert!(state.copy_selection());
 
     state.select_track(&t1);
-    state.set_edit_cursor(8.);
+    state.set_edit_cursor(BeatPos(8.));
     state.paste();
     state.paste(); // the cursor moved past the first paste
     assert_eq!(spans(&state, t1), vec![(8., 10.), (10., 12.)]);
-    assert_eq!(state.edit_cursor(), 12.);
+    assert_eq!(state.edit_cursor(), BeatPos(12.));
     assert_eq!(state.selected_clips().len(), 1);
 
     state.undo(); // each paste is one step
@@ -504,7 +523,7 @@ fn paste_keeps_track_offsets_and_creates_missing_tracks() {
     state.copy_selection();
 
     state.select_track(&t1);
-    state.set_edit_cursor(8.);
+    state.set_edit_cursor(BeatPos(8.));
     state.paste();
     assert_eq!(state.track_count(), 3);
     let t2 = state.tracks().nth(2).unwrap().id;
@@ -519,12 +538,12 @@ fn cutting_a_zone_removes_only_its_part() {
     let mut state = setup_state();
     let track = state.add_track();
     add_clip(&mut state, track, 0., 2.); // beats 0..4
-    state.select_in_bounds(SelectionBounds::between((0, 1.), (0, 3.)));
+    state.select_in_bounds(SelectionBounds::between((0, BeatPos(1.)), (0, BeatPos(3.))));
     state.cut_selection();
     assert_eq!(spans(&state, track), vec![(0., 1.), (3., 4.)]);
     assert!(state.selected_clips().is_empty());
 
-    state.set_edit_cursor(8.);
+    state.set_edit_cursor(BeatPos(8.));
     state.paste();
     assert_eq!(spans(&state, track), vec![(0., 1.), (3., 4.), (8., 10.)]);
 }
@@ -537,7 +556,7 @@ fn a_zone_only_picks_clips_inside_it_not_touching_it() {
     let track = state.add_track();
     add_clip(&mut state, track, 0., 1.); // beats 0..2, ends on the zone
     let inside = add_clip(&mut state, track, 2., 1.); // beats 2..4
-    state.select_in_bounds(SelectionBounds::between((0, 2.), (0, 3.)));
+    state.select_in_bounds(SelectionBounds::between((0, BeatPos(2.)), (0, BeatPos(3.))));
     assert_eq!(state.selected_clips(), &[inside]);
 }
 
@@ -549,7 +568,7 @@ fn deleting_a_zone_removes_only_its_part() {
     let (t0, t1) = (state.add_track(), state.add_track());
     add_clip(&mut state, t0, 0., 2.); // beats 0..4
     add_clip(&mut state, t1, 2., 2.); // beats 2..6
-    state.select_in_bounds(SelectionBounds::between((0, 1.), (1, 3.)));
+    state.select_in_bounds(SelectionBounds::between((0, BeatPos(1.)), (1, BeatPos(3.))));
     state.delete_selected_clips();
     assert_eq!(spans(&state, t0), vec![(0., 1.), (3., 4.)]);
     assert_eq!(spans(&state, t1), vec![(3., 6.)]);
@@ -567,12 +586,12 @@ fn nudging_a_zone_moves_only_its_part() {
     let mut state = setup_state();
     let track = state.add_track();
     add_clip(&mut state, track, 0., 3.); // beats 0..6
-    state.select_in_bounds(SelectionBounds::between((0, 1.), (0, 3.)));
+    state.select_in_bounds(SelectionBounds::between((0, BeatPos(1.)), (0, BeatPos(3.))));
 
     state.nudge_selection(1.);
     // The part 1..3 moved to 2..4, over what was left of the clip.
     assert_eq!(spans(&state, track), vec![(0., 1.), (2., 4.), (4., 6.)]);
-    assert_eq!(state.selection_range(), Some((2., 4.)));
+    assert_eq!(state.selection_range(), Some((BeatPos(2.), BeatPos(4.))));
     assert_eq!(state.selected_clips().len(), 1);
 
     // Stops at the start: the moved part, not the clip, starts at 0.
@@ -591,7 +610,7 @@ fn moving_a_zone_between_tracks_moves_only_its_part() {
     let mut state = setup_state();
     let (t0, t1) = (state.add_track(), state.add_track());
     add_clip(&mut state, t0, 0., 2.); // beats 0..4
-    state.select_in_bounds(SelectionBounds::between((0, 1.), (0, 3.)));
+    state.select_in_bounds(SelectionBounds::between((0, BeatPos(1.)), (0, BeatPos(3.))));
 
     state.move_selection_tracks(1);
     assert_eq!(spans(&state, t0), vec![(0., 1.), (3., 4.)]);
@@ -609,13 +628,13 @@ fn splitting_at_a_zone_keeps_the_ids_inside_for_a_drop() {
     let mut state = setup_state();
     let (t0, t1) = (state.add_track(), state.add_track());
     let clip = add_clip(&mut state, t0, 0., 2.); // beats 0..4
-    state.select_in_bounds(SelectionBounds::between((0, 1.), (0, 3.)));
+    state.select_in_bounds(SelectionBounds::between((0, BeatPos(1.)), (0, BeatPos(3.))));
 
     // What dropping dragged clips does: split, then move by id.
     state.begin_batch();
     state.split_at_zone();
     assert_eq!(state.selected_clips(), &[clip]);
-    state.move_clip(&clip, &t1, 5., &[clip]);
+    state.move_clip(&clip, &t1, BeatPos(5.), &[clip]);
     state.commit_batch();
     assert_eq!(spans(&state, t0), vec![(0., 1.), (3., 4.)]);
     assert_eq!(spans(&state, t1), vec![(5., 7.)]);
@@ -650,25 +669,25 @@ fn clips_never_start_before_the_first_beat() {
     let mut state = setup_state();
     let track = state.add_track();
     let id = state.new_clip_id();
-    state.add_clips(&track, vec![AudioClip::new(id, audio(1.), -3.)]);
+    state.add_clips(&track, vec![AudioClip::new(id, audio(1.), BeatPos(-3.))]);
     assert_eq!(spans(&state, track), vec![(0., 2.)]);
 
-    state.move_clip(&id, &track, -1., &[]);
+    state.move_clip(&id, &track, BeatPos(-1.), &[]);
     assert_eq!(spans(&state, track), vec![(0., 2.)]);
 }
 
 #[test]
 fn trimming_the_start_stops_at_the_first_beat() {
     let bpm = 120.;
-    let mut clip = AudioClip::new(ClipId(1), audio(2.), 1.); // beats 1..5
-    clip.trim_start_at(2., bpm); // hide the first 1 beat of the file: 2..5
+    let mut clip = AudioClip::new(ClipId(1), audio(2.), BeatPos(1.)); // beats 1..5
+    clip.trim_start_at(BeatPos(2.), bpm); // hide the first 1 beat of the file: 2..5
     clip.position -= 1.5; // moved near the start: 0.5..3.5, file starts at -0.5
 
-    clip.trim_start_at(-4., bpm);
-    assert_eq!(clip.position, 0.);
+    clip.trim_start_at(BeatPos(-4.), bpm);
+    assert_eq!(clip.position, BeatPos(0.));
     assert!(
-        (clip.end(bpm) - 3.5).abs() < 1e-4,
-        "the end moved: {}",
+        (clip.end(bpm).0 - 3.5).abs() < 1e-4,
+        "the end moved: {:?}",
         clip.end(bpm)
     );
 }
@@ -693,7 +712,7 @@ fn moving_between_tracks_keeps_the_block_and_stays_in_range() {
     add_clip(&mut state, t1, 0., 1.);
     add_clip(&mut state, t2, 1., 1.); // unselected, beats 1..3
     // Covering the clips whole: they move whole.
-    state.select_in_bounds(SelectionBounds::between((0, 0.), (1, 2.)));
+    state.select_in_bounds(SelectionBounds::between((0, BeatPos(0.)), (1, BeatPos(2.))));
 
     state.move_selection_tracks(5); // only one track of room below
     assert!(spans(&state, t0).is_empty());
@@ -719,11 +738,11 @@ fn snap_targets_are_other_clips_loop_and_edit_cursor() {
     let track = state.add_track();
     let a = add_clip(&mut state, track, 0., 1.); // beats 0..2
     add_clip(&mut state, track, 3., 1.); // beats 3..5
-    state.set_loop_range(8., 12.);
-    state.set_edit_cursor(6.);
+    state.set_loop_range(BeatPos(8.), BeatPos(12.));
+    state.set_edit_cursor(BeatPos(6.));
     let mut targets = state.snap_targets(&[a]);
-    targets.sort_by(f32::total_cmp);
-    assert_eq!(targets, vec![3., 5., 6., 8., 12.]);
+    targets.sort_by(BeatPos::total_cmp);
+    assert_eq!(targets, [3., 5., 6., 8., 12.].map(BeatPos));
 }
 
 #[test]
@@ -731,18 +750,19 @@ fn snapping_prefers_targets_in_reach_over_the_grid() {
     use crate::core::grid::{GridService, TARGET_REACH};
 
     let grid = GridService::new(); // one grid line per beat
-    let reach = TARGET_REACH / grid.pixels_per_beat();
+    let reach = grid.width_to_beats(TARGET_REACH);
+    let target = BeatPos(2.1 + reach * 0.9);
     // A target in reach wins over a nearer grid line.
     assert_eq!(
-        grid.snap_to_targets(2.1, &[2.1 + reach * 0.9]),
-        Some((2.1 + reach * 0.9, true))
+        grid.snap_to_targets(BeatPos(2.1), &[target]),
+        Some((target, true))
     );
     // Out of reach: the grid, when close enough to a line.
     assert_eq!(
-        grid.snap_to_targets(2.1, &[2.1 + reach * 2.]),
-        Some((2., false))
+        grid.snap_to_targets(BeatPos(2.1), &[BeatPos(2.1 + reach * 2.)]),
+        Some((BeatPos(2.), false))
     );
-    assert_eq!(grid.snap_to_targets(2.5, &[]), None);
+    assert_eq!(grid.snap_to_targets(BeatPos(2.5), &[]), None);
 }
 
 #[test]
@@ -790,8 +810,9 @@ mod projects {
     fn rounded(mut p: ProjectFile) -> ProjectFile {
         let r = |x: &mut f32| *x = (*x * 1e4).round() / 1e4;
         r(&mut p.bpm);
-        r(&mut p.loop_range.0);
-        r(&mut p.loop_range.1);
+        let r64 = |x: &mut f64| *x = (*x * 1e4).round() / 1e4;
+        r64(&mut p.loop_range.0);
+        r64(&mut p.loop_range.1);
         for channel in
             std::iter::once(&mut p.master).chain(p.tracks.iter_mut().map(|t| &mut t.channel))
         {
@@ -806,7 +827,7 @@ mod projects {
         for track in &mut p.tracks {
             r(&mut track.height);
             for clip in &mut track.clips {
-                r(&mut clip.position);
+                r64(&mut clip.position);
                 r(&mut clip.trim_start);
                 r(&mut clip.trim_end);
             }
@@ -821,13 +842,13 @@ mod projects {
 
         let mut state = setup_state();
         state.set_bpm(100.);
-        state.set_loop_range(4., 12.);
+        state.set_loop_range(BeatPos(4.), BeatPos(12.));
         state.set_looping(true);
         let track = state.add_track();
         let audio = AUDIO_ANALYSIS_CACHE
             .get_or_analyze(dir.join("loop.wav"))
             .unwrap();
-        let mut clip = AudioClip::new(state.new_clip_id(), audio, 2.);
+        let mut clip = AudioClip::new(state.new_clip_id(), audio, BeatPos(2.));
         clip.trim_start = 0.25;
         clip.trim_end = 0.75;
         state.add_clips(&track, vec![clip]);
@@ -1085,8 +1106,8 @@ mod groups {
         // A rubber band across the collapsed group doesn't pick what's hidden.
         let clip = add_clip(&mut state, b, 0., 1.);
         state.select_in_bounds(crate::core::state::SelectionBounds::between(
-            (0, 0.),
-            (2, 8.),
+            (0, BeatPos(0.)),
+            (2, BeatPos(8.)),
         ));
         assert!(!state.selected_clips().contains(&clip));
     }

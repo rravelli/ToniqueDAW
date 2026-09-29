@@ -1,5 +1,6 @@
 use egui::{CursorIcon, Painter, Rect, Sense, Stroke, Ui, Vec2, vec2};
 use egui_phosphor::fill::{ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL, LINE_SEGMENTS};
+use tonique_engine::time::BeatPos;
 
 use crate::{
     core::state::ProjectState,
@@ -23,11 +24,11 @@ enum LoopDrag {
     End,
     /// Moving the whole region, grabbed `offset` beats after its start.
     Move {
-        offset: f32,
+        offset: f64,
     },
     /// Drawing a new region from `anchor`.
     Create {
-        anchor: f32,
+        anchor: BeatPos,
     },
 }
 
@@ -109,7 +110,7 @@ impl Ruler {
                 })
             } else if x0 < x && x < x1 {
                 Some(LoopDrag::Move {
-                    offset: (x - x0) / pixels_per_beat,
+                    offset: ((x - x0) / pixels_per_beat) as f64,
                 })
             } else {
                 None
@@ -135,8 +136,8 @@ impl Ruler {
                 LoopDrag::Start => state.set_loop_range(snapped.min(end - step), end),
                 LoopDrag::End => state.set_loop_range(start, snapped.max(start + step)),
                 LoopDrag::Move { offset } => {
-                    let new_start = state.grid.snap_to_step(beats - offset).max(0.);
-                    state.set_loop_range(new_start, new_start + end - start);
+                    let new_start = state.grid.snap_to_step(beats - offset).max(BeatPos::ZERO);
+                    state.set_loop_range(new_start, new_start + (end - start));
                 }
                 LoopDrag::Create { anchor } => {
                     if snapped != anchor {

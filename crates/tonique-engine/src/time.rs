@@ -7,6 +7,61 @@ pub type SamplePos = i64;
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 pub struct BeatPos(pub f64);
 
+impl BeatPos {
+    pub const ZERO: Self = Self(0.0);
+
+    pub fn min(self, other: Self) -> Self {
+        Self(self.0.min(other.0))
+    }
+
+    pub fn max(self, other: Self) -> Self {
+        Self(self.0.max(other.0))
+    }
+
+    pub fn clamp(self, min: Self, max: Self) -> Self {
+        Self(self.0.clamp(min.0, max.0))
+    }
+
+    pub fn total_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+/// Moving a position by a length in beats.
+impl std::ops::Add<f64> for BeatPos {
+    type Output = Self;
+    fn add(self, beats: f64) -> Self {
+        Self(self.0 + beats)
+    }
+}
+
+impl std::ops::Sub<f64> for BeatPos {
+    type Output = Self;
+    fn sub(self, beats: f64) -> Self {
+        Self(self.0 - beats)
+    }
+}
+
+impl std::ops::AddAssign<f64> for BeatPos {
+    fn add_assign(&mut self, beats: f64) {
+        self.0 += beats;
+    }
+}
+
+impl std::ops::SubAssign<f64> for BeatPos {
+    fn sub_assign(&mut self, beats: f64) {
+        self.0 -= beats;
+    }
+}
+
+/// The length in beats between two positions.
+impl std::ops::Sub for BeatPos {
+    type Output = f64;
+    fn sub(self, other: Self) -> f64 {
+        self.0 - other.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TimeSignature {
     pub numerator: u32,

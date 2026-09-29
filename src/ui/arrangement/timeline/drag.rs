@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use egui::{Rect, Stroke, Ui, pos2, vec2};
-use tonique_engine::edit::ClipId;
+use tonique_engine::{edit::ClipId, time::BeatPos};
 
 #[derive(Clone)]
 pub struct ClipDrag {
@@ -118,7 +118,7 @@ impl Timeline {
             // Snap the nearest clip edge: starts to the grid or to snap
             // targets (other clips, loop, edit cursor), ends to targets only.
             // Alt disables snapping.
-            let mut beat_delta: f32 = f32::INFINITY;
+            let mut beat_delta = f64::INFINITY;
             let mut snapped_to = None;
             if ui.input(|i| !i.modifiers.alt) {
                 let targets = state.snap_targets(&clip_drag.dragged_ids());
@@ -127,7 +127,7 @@ impl Timeline {
                     let start = state
                         .grid
                         .x_to_beats(mouse_pos.x - dragged.grab_x, viewport);
-                    let end = start + dragged.clip.end(bpm) - dragged.clip.position;
+                    let end = start + (dragged.clip.end(bpm) - dragged.clip.position);
                     let candidates = [
                         state
                             .grid
@@ -148,7 +148,7 @@ impl Timeline {
                 }
             }
             // No clip are snapped
-            if beat_delta == f32::INFINITY {
+            if beat_delta == f64::INFINITY {
                 beat_delta = 0.;
             }
             // Keep the group from starting before the first beat.
@@ -156,9 +156,9 @@ impl Timeline {
                 .clips
                 .iter()
                 .map(|e| state.grid.x_to_beats(mouse_pos.x - e.grab_x, viewport))
-                .fold(f32::INFINITY, f32::min);
-            if -first > beat_delta {
-                beat_delta = -first;
+                .fold(BeatPos(f64::INFINITY), BeatPos::min);
+            if -first.0 > beat_delta {
+                beat_delta = -first.0;
                 snapped_to = None;
             }
             // Show what the clips snapped to.

@@ -6,9 +6,12 @@ use std::{
 };
 
 use egui::Vec2;
-use tonique_engine::edit::{
-    Bus, BusId, Channel, Edit, Output, TrackId,
-    commands::{AddBus, SetBypass, SetOutput, SetSolo},
+use tonique_engine::{
+    edit::{
+        Bus, BusId, Channel, Edit, Output, TrackId,
+        commands::{AddBus, SetBypass, SetOutput, SetSolo},
+    },
+    time::BeatPos,
 };
 
 use super::{
@@ -41,15 +44,18 @@ impl ProjectState {
         master.name = "Master".into();
         self.views = HashMap::from([(MASTER_TRACK_ID, master)]);
         self.sources = SourceRegistry::new(self.session.engine().config().sample_rate);
-        self.playhead = 0.;
-        self.edit_cursor = 0.;
+        self.playhead = BeatPos::ZERO;
+        self.edit_cursor = BeatPos::ZERO;
         self.selected_tracks.clear();
         self.clip_selection = Default::default();
         self.pending_actions.clear();
         self.batching = false;
         self.resized_clip = None;
         self.grid.offset = Vec2::ZERO;
-        self.loop_range = (0., DEFAULT_LOOP_BARS * self.grid.beats_per_bar() as f32);
+        self.loop_range = (
+            BeatPos::ZERO,
+            BeatPos(DEFAULT_LOOP_BARS * self.grid.beats_per_bar() as f64),
+        );
         self.looping = false;
         self.sync_loop();
         self.graph.reset();
@@ -115,7 +121,7 @@ impl ProjectState {
                         .filter_map(|clip| self.clip_view(clip, bpm))
                         .map(|clip| ClipFile {
                             path: store_path(&clip.audio.path, dir),
-                            position: clip.position,
+                            position: clip.position.0,
                             trim_start: clip.trim_start,
                             trim_end: clip.trim_end,
                         })
@@ -126,7 +132,7 @@ impl ProjectState {
         ProjectFile {
             version: VERSION,
             bpm,
-            loop_range: self.loop_range,
+            loop_range: (self.loop_range.0.0, self.loop_range.1.0),
             looping: self.looping,
             master: self.channel_file(&edit.master),
             groups,
@@ -164,7 +170,7 @@ impl ProjectState {
         self.new_project();
         let mut problems = Vec::new();
         self.set_bpm(project.bpm);
-        self.set_loop_range(project.loop_range.0, project.loop_range.1);
+        self.set_loop_range(BeatPos(project.loop_range.0), BeatPos(project.loop_range.1));
         self.set_looping(project.looping);
         self.restore_channel(MASTER_TRACK_ID, &project.master, &mut problems);
 
@@ -245,7 +251,7 @@ impl ProjectState {
         Some(AudioClip {
             id: self.new_clip_id(),
             audio,
-            position: clip.position,
+            position: BeatPos(clip.position),
             trim_start: clip.trim_start,
             trim_end: clip.trim_end,
         })
