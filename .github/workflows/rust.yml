@@ -26,8 +26,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      # The engine crate isn't rustfmt-clean yet: switch to `--all` once it is.
-      - run: cargo fmt -p tonique_daw --check
+      - run: cargo fmt --all --check
 
   clippy:
     name: Lint

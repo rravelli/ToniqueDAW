@@ -1,0 +1,50 @@
+#!/bin/sh
+# Pre-commit checks, the same as CI: whitespace, formatting, clippy, tests.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+# Skip the tests:          SKIP_TESTS=1 git commit ...
+# Skip everything:         git commit --no-verify
+
+set -e
+exec 1>&2
+
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    against=HEAD
+else
+    against=$(git hash-object -t tree /dev/null)
+fi
+
+step() { printf '\033[1m==> %s\033[0m\n' "$1"; }
+fail() { printf '\033[31merror:\033[0m %s\n' "$1"; exit 1; }
+
+step "Whitespace"
+git diff-index --check --cached "$against" -- || fail "trailing whitespace or conflict markers (see above)"
+
+# The rest only matters when Rust code or the build configuration changes.
+staged=$(git diff --cached --name-only --diff-filter=ACMR "$against")
+if ! printf '%s\n' "$staged" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|clippy\.toml$|rustfmt\.toml$'; then
+    exit 0
+fi
+
+# Checks below read the working tree: unstaged edits can hide or cause failures.
+if ! git diff --quiet -- '*.rs'; then
+    printf '\033[33mwarning:\033[0m unstaged Rust changes are checked too, not only what is committed\n'
+fi
+
+step "Format"
+rs=$(printf '%s\n' "$staged" | grep '\.rs$' || true)
+if [ -n "$rs" ]; then
+    # shellcheck disable=SC2086 # one path per word
+    rustfmt --edition 2024 --check $rs >/dev/null ||
+        fail "not formatted: run \`cargo fmt --all\` and stage the result"
+fi
+
+step "Clippy"
+cargo clippy --workspace --all-targets --all-features --quiet -- -D warnings ||
+    fail "clippy found problems (see above)"
+
+if [ "${SKIP_TESTS:-0}" != 1 ]; then
+    step "Tests"
+    out=$(cargo test --workspace --all-features --quiet 2>&1) ||
+        { printf '%s\n' "$out" | tail -60; fail "tests failed"; }
+fi
