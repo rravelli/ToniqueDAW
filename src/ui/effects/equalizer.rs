@@ -3,6 +3,7 @@ use crate::{
     ui::{
         buttons::paint_circle_button,
         effect::UIEffectContent,
+        effects::EffectId,
         theme::{Theme, ThemeExt},
     },
 };
@@ -243,5 +244,18 @@ impl UIEffectContent for EqualizerEffect {
 
     fn id(&self) -> String {
         self.id.clone()
+    }
+
+    fn effect_id(&self) -> EffectId {
+        EffectId::Equalizer
+    }
+
+    fn read_params(&mut self) {
+        if let Some(p) = &self.cutoff_param {
+            self.cutoff = p.get();
+        }
+        if let Some(p) = &self.q_param {
+            self.q = p.get();
+        }
     }
 }

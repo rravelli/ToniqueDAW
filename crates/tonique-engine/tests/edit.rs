@@ -522,3 +522,18 @@ fn the_edit_moves_to_a_new_engine_with_its_history() {
     assert!(s.undo().unwrap(), "history survives");
     assert_eq!(s.edit().tracks.len(), 1);
 }
+
+#[test]
+fn reset_replaces_the_edit_and_forgets_history() {
+    let (engine, _processor) = engine(0);
+    let mut session = EditSession::new(Edit::new(120.0), engine).unwrap();
+    let track = session.create(|e| Track::new(e, "a"));
+    session.perform(AddTrack::at(track, 0)).unwrap();
+    assert!(session.undo_manager().can_undo());
+
+    session.reset(Edit::new(90.0)).unwrap();
+    assert!(session.edit().tracks.is_empty());
+    assert_eq!(session.edit().tempo.bpm_at(BeatPos(0.0)), 90.0);
+    assert!(!session.undo_manager().can_undo());
+    assert!(!session.undo().unwrap());
+}

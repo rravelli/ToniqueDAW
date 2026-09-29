@@ -1,5 +1,6 @@
 mod clip_ops;
 mod clipboard;
+mod project;
 mod selection;
 mod sources;
 #[cfg(test)]

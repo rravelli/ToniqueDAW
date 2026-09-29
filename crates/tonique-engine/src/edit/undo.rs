@@ -129,6 +129,13 @@ impl UndoManager {
         !self.redo_stack.is_empty()
     }
 
+    /// Forget every step, e.g. once a project is loaded.
+    pub fn clear(&mut self) {
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.open = None;
+    }
+
     pub fn undo_label(&self) -> Option<&'static str> {
         self.undo_stack.last().map(|t| t.label)
     }

@@ -11,7 +11,7 @@ use egui::{
 mod file;
 mod library;
 
-pub use file::format_color;
+pub use file::{format_color, parse_color};
 pub use library::ThemeLibrary;
 
 /// Declares every colour of [`Theme`] once, with the group and description

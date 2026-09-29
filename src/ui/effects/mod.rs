@@ -2,7 +2,9 @@ use crate::ui::{effect::UIEffectContent, effects::equalizer::EqualizerEffect};
 
 pub mod equalizer;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// Kind of effect, as saved in project files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EffectId {
     Equalizer,
 }

@@ -641,3 +641,151 @@ fn new_tracks_go_through_the_palette() {
         .collect();
     assert_eq!(colors, [Color32::RED, Color32::BLUE, Color32::RED]);
 }
+
+mod projects {
+    use super::*;
+    use crate::{
+        cache::AUDIO_ANALYSIS_CACHE,
+        core::{
+            project::{ClipFile, ProjectFile},
+            state::MASTER_TRACK_ID,
+        },
+    };
+    use egui::Color32;
+    use std::{fs, path::Path};
+    use tonique_engine::sample::WavWriter;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tonique-save-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A 2 s stereo WAV of silence.
+    fn write_wav(path: &Path) {
+        let mut wav = WavWriter::create(path, 2, 48000.).unwrap();
+        wav.write_interleaved(&vec![0.; 2 * 96000]).unwrap();
+        wav.finalize().unwrap();
+    }
+
+    /// Floats to 1e-4, so values recomputed on load compare equal.
+    fn rounded(mut p: ProjectFile) -> ProjectFile {
+        let r = |x: &mut f32| *x = (*x * 1e4).round() / 1e4;
+        r(&mut p.bpm);
+        r(&mut p.loop_range.0);
+        r(&mut p.loop_range.1);
+        for channel in
+            std::iter::once(&mut p.master).chain(p.tracks.iter_mut().map(|t| &mut t.channel))
+        {
+            r(&mut channel.volume);
+            r(&mut channel.pan);
+            channel
+                .effects
+                .iter_mut()
+                .flat_map(|e| e.params.values_mut())
+                .for_each(r);
+        }
+        for track in &mut p.tracks {
+            r(&mut track.height);
+            for clip in &mut track.clips {
+                r(&mut clip.position);
+                r(&mut clip.trim_start);
+                r(&mut clip.trim_end);
+            }
+        }
+        p
+    }
+
+    #[test]
+    fn projects_round_trip_through_a_file() {
+        let dir = temp_dir("round-trip");
+        write_wav(&dir.join("loop.wav"));
+
+        let mut state = setup_state();
+        state.set_bpm(100.);
+        state.set_loop_range(4., 12.);
+        state.set_looping(true);
+        let track = state.add_track();
+        let audio = AUDIO_ANALYSIS_CACHE
+            .get_or_analyze(dir.join("loop.wav"))
+            .unwrap();
+        let mut clip = ClipCore::new(state.new_clip_id(), audio, 2.);
+        clip.trim_start = 0.25;
+        clip.trim_end = 0.75;
+        state.add_clips(&track, vec![clip]);
+        state.commit_volume(track, 1.0, 0.5);
+        state.commit_volume(MASTER_TRACK_ID, 1.0, 0.8);
+        state.set_mute(track, true);
+        state.toggle_solo(track, false);
+        let view = state.track_mut(&track);
+        view.name = "Drums".into();
+        view.color = Color32::from_rgb(10, 20, 30);
+        view.height = 90.;
+        view.closed = true;
+        state.commit_track_mut(&track);
+        state.add_effect(&track, EffectId::Equalizer, 0);
+        let plugin = state.edit().track(track).unwrap().channel.plugins[0].clone();
+        plugin.param("cutoff").unwrap().set(800.);
+        state.effects_mut(&track).unwrap()[0].toggle();
+        state.sync_effects();
+
+        let saved = state.project(Some(&dir));
+        let track_file = &saved.tracks[0];
+        assert_eq!(track_file.clips[0].path, Path::new("loop.wav"));
+        assert_eq!(track_file.color, "#0a141e");
+        assert!(!track_file.channel.effects[0].enabled);
+        let path = dir.join("song.tonique");
+        saved.write(&path).unwrap();
+
+        let mut loaded = setup_state();
+        let problems = loaded.load_project(&ProjectFile::read(&path).unwrap(), &dir);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(rounded(loaded.project(Some(&dir))), rounded(saved));
+        assert!(!loaded.can_undo(), "loading isn't undoable");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_audio_is_reported_and_the_rest_loads() {
+        let dir = temp_dir("missing");
+        let mut project = setup_state().project(Some(&dir));
+        project.tracks.push(crate::core::project::TrackFile {
+            name: "Gone".into(),
+            color: "#ffffff".into(),
+            height: 60.,
+            closed: false,
+            soloed: false,
+            channel: project.master.clone(),
+            clips: vec![ClipFile {
+                path: "gone.wav".into(),
+                position: 0.,
+                trim_start: 0.,
+                trim_end: 1.,
+            }],
+        });
+        let mut state = setup_state();
+        let problems = state.load_project(&project, &dir);
+        assert_eq!(problems, ["Missing audio file: gone.wav"]);
+        let tracks: Vec<_> = state.tracks().collect();
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].name, "Gone");
+        assert!(tracks[0].clips.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_new_project_is_empty() {
+        let mut state = setup_state();
+        let track = state.add_track();
+        add_clip(&mut state, track, 0., 1.);
+        state.set_bpm(90.);
+        state.set_looping(true);
+        state.new_project();
+        assert_eq!(state.tracks().count(), 0);
+        assert_eq!(state.bpm(), 120.);
+        assert!(!state.looping());
+        assert!(!state.can_undo());
+        assert_eq!(state.project(None), setup_state().project(None));
+    }
+}

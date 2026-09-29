@@ -1,4 +1,5 @@
 pub mod keymap;
+pub mod recent;
 pub mod settings;
 
 use directories::ProjectDirs;
