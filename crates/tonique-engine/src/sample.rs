@@ -96,10 +96,37 @@ impl SampleBuffer {
     }
 }
 
-/// Incrementally writes planar blocks to a 32-bit float WAV file.
+/// Sample format of a written WAV file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WavFormat {
+    Int16,
+    #[default]
+    Int24,
+    Float32,
+}
+
+impl WavFormat {
+    fn spec(self, channels: usize, sample_rate: f64) -> hound::WavSpec {
+        let (bits_per_sample, sample_format) = match self {
+            WavFormat::Int16 => (16, hound::SampleFormat::Int),
+            WavFormat::Int24 => (24, hound::SampleFormat::Int),
+            WavFormat::Float32 => (32, hound::SampleFormat::Float),
+        };
+        hound::WavSpec {
+            channels: channels as u16,
+            sample_rate: sample_rate.round() as u32,
+            bits_per_sample,
+            sample_format,
+        }
+    }
+}
+
+/// Incrementally writes audio to a WAV file (32-bit float unless created
+/// with [`WavWriter::create_as`]). Integer formats clip outside -1..1.
 pub struct WavWriter {
     inner: hound::WavWriter<std::io::BufWriter<std::fs::File>>,
     channels: usize,
+    format: WavFormat,
 }
 
 impl WavWriter {
@@ -108,16 +135,29 @@ impl WavWriter {
         channels: usize,
         sample_rate: f64,
     ) -> Result<Self, hound::Error> {
-        let spec = hound::WavSpec {
-            channels: channels as u16,
-            sample_rate: sample_rate.round() as u32,
-            bits_per_sample: 32,
-            sample_format: hound::SampleFormat::Float,
-        };
+        Self::create_as(path, channels, sample_rate, WavFormat::Float32)
+    }
+
+    pub fn create_as(
+        path: impl AsRef<Path>,
+        channels: usize,
+        sample_rate: f64,
+        format: WavFormat,
+    ) -> Result<Self, hound::Error> {
         Ok(Self {
-            inner: hound::WavWriter::create(path, spec)?,
+            inner: hound::WavWriter::create(path, format.spec(channels, sample_rate))?,
             channels,
+            format,
         })
+    }
+
+    fn write_sample(&mut self, s: f32) -> Result<(), hound::Error> {
+        let int = |max: f32| (s.clamp(-1.0, 1.0) * max).round() as i32;
+        match self.format {
+            WavFormat::Int16 => self.inner.write_sample(int(i16::MAX as f32) as i16),
+            WavFormat::Int24 => self.inner.write_sample(int(8_388_607.0)),
+            WavFormat::Float32 => self.inner.write_sample(s),
+        }
     }
 
     pub fn write_block(&mut self, block: &AudioBlock) -> Result<(), hound::Error> {
@@ -128,17 +168,51 @@ impl WavWriter {
                 } else {
                     block.channel(ch.min(block.channels() - 1))[i]
                 };
-                self.inner.write_sample(s)?;
+                self.write_sample(s)?;
             }
         }
         Ok(())
     }
 
     pub fn write_interleaved(&mut self, data: &[f32]) -> Result<(), hound::Error> {
-        data.iter().try_for_each(|s| self.inner.write_sample(*s))
+        data.iter().try_for_each(|s| self.write_sample(*s))
     }
 
     pub fn finalize(self) -> Result<(), hound::Error> {
         self.inner.finalize()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Integer formats scale full scale to their largest value and clip.
+    #[test]
+    fn writes_integer_and_float_wavs() {
+        let dir = std::env::temp_dir().join(format!("tonique-wav-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let data = [0.0, 0.5, -1.0, 2.0];
+        for (format, expected) in [
+            (WavFormat::Int16, vec![0, 16384, -32767, 32767]),
+            (WavFormat::Int24, vec![0, 4_194_304, -8_388_607, 8_388_607]),
+        ] {
+            let path = dir.join(format!("{format:?}.wav"));
+            let mut wav = WavWriter::create_as(&path, 2, 44100., format).unwrap();
+            wav.write_interleaved(&data).unwrap();
+            wav.finalize().unwrap();
+            let mut reader = hound::WavReader::open(&path).unwrap();
+            assert_eq!(reader.spec().sample_rate, 44100);
+            let read: Vec<i32> = reader.samples::<i32>().map(Result::unwrap).collect();
+            assert_eq!(read, expected, "{format:?}");
+        }
+        let path = dir.join("float.wav");
+        let mut wav = WavWriter::create(&path, 2, 48000.).unwrap();
+        wav.write_interleaved(&data).unwrap();
+        wav.finalize().unwrap();
+        let mut reader = hound::WavReader::open(&path).unwrap();
+        let read: Vec<f32> = reader.samples::<f32>().map(Result::unwrap).collect();
+        assert_eq!(read, data);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
