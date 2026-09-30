@@ -4246,6 +4246,7 @@ dependencies = [
  "egui-phosphor",
  "egui_extras",
  "egui_kittest",
+ "hound",
  "image",
  "once_cell",
  "rand 0.9.5",

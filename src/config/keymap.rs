@@ -13,6 +13,7 @@ pub enum Action {
     OpenProject,
     SaveProject,
     SaveProjectAs,
+    ExportAudio,
     // Transport
     PlayStop,
     Loop,
@@ -42,11 +43,12 @@ pub enum Action {
 
 impl Action {
     /// In the order shown in the settings.
-    pub const ALL: [Action; 26] = [
+    pub const ALL: [Action; 27] = [
         Action::NewProject,
         Action::OpenProject,
         Action::SaveProject,
         Action::SaveProjectAs,
+        Action::ExportAudio,
         Action::PlayStop,
         Action::Loop,
         Action::ToggleMetronome,
@@ -100,6 +102,7 @@ impl Action {
             Action::OpenProject => "open_project",
             Action::SaveProject => "save_project",
             Action::SaveProjectAs => "save_project_as",
+            Action::ExportAudio => "export_audio",
         }
     }
 
@@ -135,6 +138,7 @@ impl Action {
             Action::OpenProject => "Open project…",
             Action::SaveProject => "Save project",
             Action::SaveProjectAs => "Save project as…",
+            Action::ExportAudio => "Export audio…",
         }
     }
 
@@ -143,7 +147,8 @@ impl Action {
             Action::NewProject
             | Action::OpenProject
             | Action::SaveProject
-            | Action::SaveProjectAs => "File",
+            | Action::SaveProjectAs
+            | Action::ExportAudio => "File",
             Action::PlayStop
             | Action::Loop
             | Action::ToggleMetronome
@@ -213,6 +218,7 @@ impl Action {
             Action::OpenProject => vec![cmd(Key::O)],
             Action::SaveProject => vec![cmd(Key::S)],
             Action::SaveProjectAs => vec![cmd_shift(Key::S)],
+            Action::ExportAudio => vec![cmd_shift(Key::E)],
             Action::ToggleEffectsPanel => vec![cmd(Key::J)],
             Action::ToggleTrackList => vec![cmd_shift(Key::J)],
             Action::ToggleGraphView => vec![cmd_shift(Key::G)],

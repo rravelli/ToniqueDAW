@@ -59,3 +59,4 @@ opt-level = 3
 [dev-dependencies]
 egui_kittest = { version = "0.36", features = ["eframe", "wgpu", "snapshot"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+hound = "3.5"

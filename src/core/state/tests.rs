@@ -1776,3 +1776,117 @@ fn time_signature_changes_are_undoable() {
     state.set_time_signature(TimeSignature::new(7, 8).unwrap());
     assert_eq!(spans(&state, track), [(6., 8.)]);
 }
+
+mod export {
+    use super::*;
+    use crate::core::export::{Export, ExportOptions, ExportOutcome, ExportRange};
+    use std::{fs, time::Instant};
+    use tonique_engine::sample::WavFormat;
+
+    /// A project with one clip of `seconds` (at 120 bpm, 2 beats a second)
+    /// whose samples are all `level`, once its audio reached the engine.
+    fn project_with_clip(seconds: usize, level: f32) -> ProjectState {
+        let mut state = setup_state();
+        let track = state.add_track();
+        let mut info = audio(seconds as f32);
+        let samples = vec![level; 48000 * seconds];
+        info.data = Arc::new(AudioData::from_samples(SampleBuffer::new(
+            vec![samples.clone(), samples],
+            48000.,
+        )));
+        let id = state.new_clip_id();
+        state.add_clips(&track, vec![AudioClip::new(id, info, BeatPos(0.), 120.)]);
+        let started = Instant::now();
+        while !state.sources_ready(48000.) {
+            assert!(started.elapsed() < Duration::from_secs(10), "never loaded");
+            state.update();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        state
+    }
+
+    fn finish(mut export: Export) -> ExportOutcome {
+        let started = Instant::now();
+        loop {
+            if let Some(outcome) = export.outcome() {
+                return outcome.clone();
+            }
+            assert!(started.elapsed() < Duration::from_secs(20), "export hangs");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn temp_wav(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("tonique-export-{name}-{}.wav", std::process::id()))
+    }
+
+    fn read(path: &PathBuf) -> (hound::WavSpec, Vec<f32>) {
+        let mut reader = hound::WavReader::open(path).unwrap();
+        let samples = reader.samples::<f32>().map(Result::unwrap).collect();
+        (reader.spec(), samples)
+    }
+
+    #[test]
+    fn exports_the_whole_project_to_a_wav_file() {
+        let state = project_with_clip(1, 0.5);
+        let path = temp_wav("whole");
+        let options = ExportOptions {
+            range: ExportRange::Project,
+            format: WavFormat::Float32,
+        };
+        let export = state.export(path.clone(), options).unwrap();
+        assert_eq!(finish(export), ExportOutcome::Done);
+
+        let (spec, samples) = read(&path);
+        assert_eq!((spec.channels, spec.sample_rate), (2, 48000));
+        assert_eq!(samples.len(), 2 * 48000, "one second, stereo");
+        let peak = samples.iter().fold(0f32, |m, s| m.max(s.abs()));
+        assert!(peak > 0.3, "the clip is in the file (peak {peak})");
+        assert!(!path.with_extension("wav.exporting").exists());
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn exports_the_loop_region() {
+        let mut state = project_with_clip(2, 0.5);
+        state.set_loop_range(BeatPos(1.), BeatPos(2.));
+        let path = temp_wav("loop");
+        let options = ExportOptions {
+            range: ExportRange::Loop,
+            format: WavFormat::Float32,
+        };
+        assert_eq!(
+            finish(state.export(path.clone(), options).unwrap()),
+            ExportOutcome::Done
+        );
+        let (_, samples) = read(&path);
+        assert_eq!(samples.len(), 2 * 24000, "one beat at 120 bpm");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_metronome_is_not_exported() {
+        let mut state = project_with_clip(1, 0.);
+        state.toggle_metronome();
+        assert!(state.metronome());
+        let path = temp_wav("metronome");
+        let options = ExportOptions {
+            format: WavFormat::Float32,
+            ..Default::default()
+        };
+        assert_eq!(
+            finish(state.export(path.clone(), options).unwrap()),
+            ExportOutcome::Done
+        );
+        let (_, samples) = read(&path);
+        assert!(samples.iter().all(|s| *s == 0.), "only silence was playing");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn nothing_to_export_is_refused() {
+        let state = setup_state();
+        let options = ExportOptions::default();
+        assert!(state.export(temp_wav("empty"), options).is_err());
+    }
+}

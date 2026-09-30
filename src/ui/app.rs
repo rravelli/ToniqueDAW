@@ -4,6 +4,7 @@ use crate::{
     core::state::{PlaybackState, ProjectState},
     ui::{
         commands::Commands,
+        export::ExportWindow,
         panels::{
             bottom_panel::BottomPanel,
             central_panel::CentralPanel,
@@ -31,6 +32,7 @@ pub struct ToniqueApp {
     central_panel: CentralPanel,
     setting_window: SettingsWindow,
     project: ProjectManager,
+    export_window: ExportWindow,
 }
 
 impl ToniqueApp {
@@ -58,6 +60,7 @@ impl ToniqueApp {
             left_panel: LeftPanel::new(),
             central_panel: CentralPanel::new(),
             setting_window: SettingsWindow::new(themes, theme_warnings),
+            export_window: ExportWindow::new(),
         }
     }
 }
@@ -127,6 +130,7 @@ impl ToniqueApp {
         if self.project.take_replaced() {
             self.workspace.bottom_view = BottomView::Effects;
         }
+        self.export_window.show(ui, &self.state);
     }
 
     /// Queue this frame's shortcuts.
@@ -181,6 +185,7 @@ impl ToniqueApp {
             Action::OpenProject => self.project.request(ProjectAction::Open, state),
             Action::SaveProject => self.project.request(ProjectAction::Save, state),
             Action::SaveProjectAs => self.project.request(ProjectAction::SaveAs, state),
+            Action::ExportAudio => self.export_window.open(&self.project),
             Action::SelectAll
             | Action::Duplicate
             | Action::Rename

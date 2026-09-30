@@ -9,6 +9,7 @@ mod clip_details;
 mod commands;
 mod dnd;
 mod effects;
+mod export;
 mod font;
 mod graph;
 mod panels;

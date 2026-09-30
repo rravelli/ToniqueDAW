@@ -85,11 +85,12 @@ impl AppMenuBar {
         ui.menu_button("File", |ui| {
             let keymap = &state.settings().keymap;
             let shortcut = |action| keymap.shortcut_text(ui.ctx(), action);
-            let (new, open, save, save_as) = (
+            let (new, open, save, save_as, export) = (
                 shortcut(Action::NewProject),
                 shortcut(Action::OpenProject),
                 shortcut(Action::SaveProject),
                 shortcut(Action::SaveProjectAs),
+                shortcut(Action::ExportAudio),
             );
             if menu_item(ui, "New", new) {
                 commands.push(Action::NewProject);
@@ -108,6 +109,10 @@ impl AppMenuBar {
             }
             if menu_item(ui, "Save as…", save_as) {
                 commands.push(Action::SaveProjectAs);
+            }
+            ui.separator();
+            if menu_item(ui, "Export audio…", export) {
+                commands.push(Action::ExportAudio);
             }
         });
         picked

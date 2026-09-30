@@ -1,5 +1,6 @@
 mod clip_ops;
 mod clipboard;
+mod export;
 mod groups;
 mod project;
 mod selection;
