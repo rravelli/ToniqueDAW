@@ -7,13 +7,13 @@ use egui::{Color32, Painter, Pos2, Rect, Sense, Vec2, Widget};
 const RANGE: f32 = 60.;
 const SPACE: f32 = 1.;
 #[derive(Clone)]
-pub struct LoudnessMeter {
+pub struct LevelMeter {
     size: Vec2,
     disabled: bool,
     metrics: AudioMetrics,
 }
 
-impl LoudnessMeter {
+impl LevelMeter {
     pub fn new(size: Vec2, metrics: AudioMetrics) -> Self {
         Self {
             size,
@@ -58,12 +58,12 @@ fn to_scale(value: f32) -> f32 {
     ((20. * value.log10() + RANGE) / RANGE).clamp(0., 1.)
 }
 
-impl Widget for LoudnessMeter {
+impl Widget for LevelMeter {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let (res, painter) = ui.allocate_painter(self.size, Sense::click());
         let rect = res.rect;
-        let peak = self.metrics.get_peak();
-        let rms = self.metrics.get_rms();
+        let peak = self.metrics.peak();
+        let rms = self.metrics.rms();
 
         let theme = ui.app_theme();
         // Peak behind, RMS in front.

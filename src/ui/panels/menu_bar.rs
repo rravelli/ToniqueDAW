@@ -1,8 +1,13 @@
 use crate::{
     config::{keymap::Action, settings::UI_SCALE_RANGE},
     core::project::project_name,
-    core::state::{CentralView, ToniqueProjectState},
-    ui::{project::ProjectAction, theme::ThemeExt},
+    core::state::ProjectState,
+    ui::{
+        commands::Commands,
+        project::ProjectAction,
+        theme::ThemeExt,
+        workspace::{MainView, Workspace},
+    },
 };
 use egui::{Button, Context, Frame, Margin, MenuBar, Ui};
 use std::path::PathBuf;
@@ -10,28 +15,24 @@ use std::path::PathBuf;
 const ZOOM_STEP: f32 = 0.1;
 
 /// Application menus at the very top of the window.
-pub struct UIMenuBar;
+pub struct AppMenuBar;
 
-/// What the menu bar asks the app to do.
-#[derive(Default)]
-pub struct MenuActions {
-    pub open_settings: bool,
-    pub project: Option<ProjectAction>,
-}
-
-impl UIMenuBar {
+impl AppMenuBar {
     pub fn new() -> Self {
         Self
     }
 
-    /// `recent`: recently opened projects, newest first.
+    /// `recent`: recently opened projects, newest first. Returns what was
+    /// picked in the recent projects menu; other items push actions.
     pub fn show(
         &mut self,
         ui: &mut Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        commands: &mut Commands,
         recent: &[PathBuf],
-    ) -> MenuActions {
-        let mut actions = MenuActions::default();
+    ) -> Option<ProjectAction> {
+        let mut picked = None;
         egui::Panel::top("menu-bar")
             .resizable(false)
             .frame(
@@ -42,26 +43,27 @@ impl UIMenuBar {
             .show(ui, |ui| {
                 MenuBar::new().ui(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 8.;
-                    actions.project = self.file_menu(ui, state, recent);
-                    self.edit_menu(ui, state);
-                    self.view_menu(ui, state);
+                    picked = self.file_menu(ui, state, commands, recent);
+                    self.edit_menu(ui, state, commands);
+                    self.view_menu(ui, state, workspace);
                     let tooltip = state.settings().keymap.with_shortcut(
                         ui.ctx(),
                         "Settings",
                         Action::OpenSettings,
                     );
                     if ui.button("Settings").on_hover_text(tooltip).clicked() {
-                        actions.open_settings = true;
+                        commands.push(Action::OpenSettings);
                     }
                 });
             });
-        actions
+        picked
     }
 
     fn file_menu(
         &self,
         ui: &mut Ui,
-        state: &ToniqueProjectState,
+        state: &ProjectState,
+        commands: &mut Commands,
         recent: &[PathBuf],
     ) -> Option<ProjectAction> {
         let mut picked = None;
@@ -75,10 +77,10 @@ impl UIMenuBar {
                 shortcut(Action::SaveProjectAs),
             );
             if menu_item(ui, "New", new) {
-                picked = Some(ProjectAction::New);
+                commands.push(Action::NewProject);
             }
             if menu_item(ui, "Open…", open) {
-                picked = Some(ProjectAction::Open);
+                commands.push(Action::OpenProject);
             }
             ui.menu_button("Open recent", |ui| {
                 if let Some(project) = recent_menu(ui, recent) {
@@ -87,16 +89,16 @@ impl UIMenuBar {
             });
             ui.separator();
             if menu_item(ui, "Save", save) {
-                picked = Some(ProjectAction::Save);
+                commands.push(Action::SaveProject);
             }
             if menu_item(ui, "Save as…", save_as) {
-                picked = Some(ProjectAction::SaveAs);
+                commands.push(Action::SaveProjectAs);
             }
         });
         picked
     }
 
-    fn edit_menu(&self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn edit_menu(&self, ui: &mut Ui, state: &ProjectState, commands: &mut Commands) {
         ui.menu_button("Edit", |ui| {
             let keymap = &state.settings().keymap;
             let undo =
@@ -104,10 +106,10 @@ impl UIMenuBar {
             let redo =
                 Button::new("Redo").shortcut_text(keymap.shortcut_text(ui.ctx(), Action::Redo));
             if ui.add_enabled(state.can_undo(), undo).clicked() {
-                state.undo();
+                commands.push(Action::Undo);
             }
             if ui.add_enabled(state.can_redo(), redo).clicked() {
-                state.redo();
+                commands.push(Action::Redo);
             }
             ui.separator();
             let add_track = Button::new("Add audio track").shortcut_text(
@@ -117,23 +119,23 @@ impl UIMenuBar {
                     .shortcut_text(ui.ctx(), Action::AddTrack),
             );
             if ui.add(add_track).clicked() {
-                state.add_track();
+                commands.push(Action::AddTrack);
             }
         });
     }
 
-    fn view_menu(&self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    fn view_menu(&self, ui: &mut Ui, state: &mut ProjectState, workspace: &mut Workspace) {
         ui.menu_button("View", |ui| {
             let keymap = state.settings().keymap.clone();
             let label = |text, action| keymap.with_shortcut(ui.ctx(), text, action);
             let graph = label("Audio graph", Action::ToggleGraphView);
             let browser = label("Browser", Action::ToggleBrowser);
             let effects = label("Effects panel", Action::ToggleEffectsPanel);
-            ui.radio_value(&mut state.central_view, CentralView::Timeline, "Timeline");
-            ui.radio_value(&mut state.central_view, CentralView::Graph, graph);
+            ui.radio_value(&mut workspace.main_view, MainView::Timeline, "Timeline");
+            ui.radio_value(&mut workspace.main_view, MainView::Graph, graph);
             ui.separator();
-            ui.checkbox(&mut state.left_panel_open, browser);
-            ui.checkbox(&mut state.bottom_panel_open, effects);
+            ui.checkbox(&mut workspace.left_panel_open, browser);
+            ui.checkbox(&mut workspace.bottom_panel_open, effects);
             ui.separator();
             let scale = state.settings().ui_scale;
             if ui
@@ -159,7 +161,7 @@ impl UIMenuBar {
 }
 
 /// Apply and save a new interface scale.
-pub fn set_ui_scale(ctx: &Context, state: &mut ToniqueProjectState, scale: f32) {
+pub fn set_ui_scale(ctx: &Context, state: &mut ProjectState, scale: f32) {
     let scale = scale.clamp(*UI_SCALE_RANGE.start(), *UI_SCALE_RANGE.end());
     ctx.set_zoom_factor(scale);
     let mut settings = state.settings().clone();

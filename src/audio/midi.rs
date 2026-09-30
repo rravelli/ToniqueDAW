@@ -23,16 +23,15 @@ pub fn spawn_midi_thread(mut tx: Producer<Vec<u8>>) -> thread::JoinHandle<()> {
                 "midir-read-input",
                 move |_, message, _| {
                     let res = LiveEvent::parse(message);
-                    match res {
-                        Ok(event) => match event {
+                    if let Ok(event) = res {
+                        match event {
                             LiveEvent::Midi {
                                 channel: _,
                                 message: _,
                             } => todo!(),
                             LiveEvent::Common(_) => todo!(),
                             LiveEvent::Realtime(_) => todo!(),
-                        },
-                        Err(_) => {}
+                        }
                     };
                     if message.len() >= 3 {
                         let _ = tx.push(message.to_vec());

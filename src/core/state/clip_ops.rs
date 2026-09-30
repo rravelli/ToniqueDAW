@@ -2,20 +2,23 @@
 //! snapshots of a track's clips. They return [`ClipOp`]s, which the state
 //! turns into engine commands inside one undo transaction.
 
-use crate::core::clip::ClipCore;
-use tonique_engine::edit::{ClipId, TrackId};
+use crate::core::clip::AudioClip;
+use tonique_engine::{
+    edit::{ClipId, TrackId},
+    time::BeatPos,
+};
 
 #[derive(Debug, Clone)]
 pub enum ClipOp {
-    Add(TrackId, ClipCore),
+    Add(TrackId, AudioClip),
     Remove(TrackId, ClipId),
     /// Change the clip's position and trims to those of the given clip.
-    Resize(TrackId, ClipCore),
+    Resize(TrackId, AudioClip),
     Move {
         from: TrackId,
         to: TrackId,
         clip: ClipId,
-        position: f32,
+        position: BeatPos,
     },
 }
 
@@ -23,7 +26,7 @@ pub enum ClipOp {
 /// operations see each other's effects.
 pub struct TrackClips<'a> {
     pub track: TrackId,
-    pub clips: Vec<ClipCore>,
+    pub clips: Vec<AudioClip>,
     pub bpm: f32,
     pub ops: &'a mut Vec<ClipOp>,
 }
@@ -33,8 +36,8 @@ impl TrackClips<'_> {
     /// or removed. Clips in `ignore` are left alone.
     pub fn carve(
         &mut self,
-        start: f32,
-        end: f32,
+        start: BeatPos,
+        end: BeatPos,
         ignore: &[ClipId],
         new_id: &mut impl FnMut() -> ClipId,
     ) {
@@ -73,7 +76,7 @@ impl TrackClips<'_> {
     }
 
     /// Add clips, trimming whatever they overlap.
-    pub fn add(&mut self, added: Vec<ClipCore>, new_id: &mut impl FnMut() -> ClipId) {
+    pub fn add(&mut self, added: Vec<AudioClip>, new_id: &mut impl FnMut() -> ClipId) {
         for clip in added {
             self.carve(clip.position, clip.end(self.bpm), &[], new_id);
             self.ops.push(ClipOp::Add(self.track, clip.clone()));
@@ -82,7 +85,7 @@ impl TrackClips<'_> {
     }
 
     /// Split the clip under `position` in two.
-    pub fn cut_at(&mut self, position: f32, new_id: &mut impl FnMut() -> ClipId) {
+    pub fn cut_at(&mut self, position: BeatPos, new_id: &mut impl FnMut() -> ClipId) {
         let bpm = self.bpm;
         let Some(clip) = self
             .clips
@@ -105,9 +108,9 @@ impl TrackClips<'_> {
     pub fn duplicates(
         &self,
         ids: &[ClipId],
-        bounds: Option<(f32, f32)>,
+        bounds: Option<(BeatPos, BeatPos)>,
         new_id: &mut impl FnMut() -> ClipId,
-    ) -> Vec<ClipCore> {
+    ) -> Vec<AudioClip> {
         let bpm = self.bpm;
         self.clips
             .iter()
@@ -135,7 +138,7 @@ mod tests {
 
     const BPM: f32 = 60.; // one beat per second: clip seconds == beats
 
-    fn clip(id: u64, position: f32, seconds: f32) -> ClipCore {
+    fn clip(id: u64, position: f64, seconds: f32) -> AudioClip {
         let audio = AudioInfo {
             name: "test".into(),
             duration: Some(Duration::from_secs_f32(seconds)),
@@ -146,7 +149,7 @@ mod tests {
             num_samples: None,
             path: PathBuf::from("test.wav"),
         };
-        ClipCore::new(ClipId(id), audio, position)
+        AudioClip::new(ClipId(id), audio, BeatPos(position))
     }
 
     fn ids() -> impl FnMut() -> ClipId {
@@ -157,8 +160,8 @@ mod tests {
         }
     }
 
-    fn span(c: &ClipCore) -> (f32, f32) {
-        (c.position, c.end(BPM))
+    fn span(c: &AudioClip) -> (f64, f64) {
+        (c.position.0, c.end(BPM).0)
     }
 
     #[test]
@@ -212,7 +215,7 @@ mod tests {
             bpm: BPM,
             ops: &mut ops,
         };
-        t.carve(2., 4., &[], &mut ids());
+        t.carve(BeatPos(2.), BeatPos(4.), &[], &mut ids());
         assert!(ops.is_empty());
     }
 
@@ -227,12 +230,12 @@ mod tests {
         };
         let copies = t.duplicates(&[ClipId(1)], None, &mut ids());
         assert_eq!(span(&copies[0]), (4., 8.));
-        let copies = t.duplicates(&[ClipId(1)], Some((1., 3.)), &mut ids());
+        let copies = t.duplicates(&[ClipId(1)], Some((BeatPos(1.), BeatPos(3.))), &mut ids());
         let (a, b) = span(&copies[0]);
         assert!((a - 3.).abs() < 1e-4 && (b - 5.).abs() < 1e-4);
 
-        t.cut_at(1., &mut ids());
-        t.cut_at(4., &mut ids()); // on the edge: nothing to cut
+        t.cut_at(BeatPos(1.), &mut ids());
+        t.cut_at(BeatPos(4.), &mut ids()); // on the edge: nothing to cut
         assert_eq!(ops.len(), 2);
         let (ClipOp::Resize(_, left), ClipOp::Add(_, right)) = (&ops[0], &ops[1]) else {
             panic!("{ops:?}")
@@ -245,14 +248,14 @@ mod tests {
     fn duplicating_a_zone_past_a_trimmed_clip_keeps_the_trim() {
         let mut ops = Vec::new();
         let mut trimmed = clip(1, 0., 4.);
-        trimmed.trim_end_at(2., BPM); // audible 0..2 out of 0..4
+        trimmed.trim_end_at(BeatPos(2.), BPM); // audible 0..2 out of 0..4
         let t = TrackClips {
             track: TrackId(1),
             clips: vec![trimmed],
             bpm: BPM,
             ops: &mut ops,
         };
-        let copies = t.duplicates(&[ClipId(1)], Some((1., 6.)), &mut ids());
+        let copies = t.duplicates(&[ClipId(1)], Some((BeatPos(1.), BeatPos(6.))), &mut ids());
         let (a, b) = span(&copies[0]);
         assert!((a - 6.).abs() < 1e-4 && (b - 7.).abs() < 1e-4, "{a}..{b}");
     }

@@ -1,4 +1,4 @@
-use crate::core::clip::ClipCore;
+use crate::core::clip::AudioClip;
 use egui::Color32;
 use tonique_engine::edit::TrackId;
 
@@ -18,31 +18,34 @@ pub enum TrackKind {
 }
 
 pub const DEFAULT_TRACK_HEIGHT: f32 = 60.;
-pub const TRACK_CLOSED_HEIGHT: f32 = 22.;
+pub const TRACK_COLLAPSED_HEIGHT: f32 = 22.;
 
-/// Read-only snapshot of a track for the UI, built from the engine's edit.
+/// Read-only snapshot of a row of the track list (a track or a group) for
+/// the UI, built from the engine's edit.
 #[derive(Debug, Clone)]
-pub struct TrackReferenceCore {
+pub struct TrackRow {
     pub id: TrackId,
-    pub clips: Vec<ClipCore>,
+    pub clips: Vec<AudioClip>,
     pub muted: bool,
     pub volume: f32,
-    pub arm: bool,
+    /// Armed for recording.
+    pub armed: bool,
     pub name: String,
     pub height: f32,
-    pub closed: bool,
+    pub collapsed: bool,
     pub color: Color32,
     pub selected: bool,
     pub solo: TrackSoloState,
-    /// Position in the engine's track list; for a group, its first track's.
-    pub index: usize,
+    /// Position in the engine's track list of its first track: the track
+    /// itself, or a group's first.
+    pub first_track_index: usize,
     pub kind: TrackKind,
     /// Groups it's nested in.
     pub depth: usize,
 }
 
-impl TrackReferenceCore {
-    pub fn disabled(&self) -> bool {
+impl TrackRow {
+    pub fn is_silenced(&self) -> bool {
         self.muted && !matches!(self.solo, TrackSoloState::Solo)
             || matches!(self.solo, TrackSoloState::Soloing)
     }
@@ -51,27 +54,28 @@ impl TrackReferenceCore {
 /// Track fields edited in place by the UI. Only `name` is stored in the
 /// engine (and undoable); the rest is display state.
 #[derive(Clone, Debug, PartialEq)]
-pub struct MutableTrackCore {
+pub struct TrackView {
     pub name: String,
     pub height: f32,
-    /// Collapsed; for a group, folded (what's inside is hidden).
-    pub closed: bool,
+    /// Shown as a thin row; for a group, what's inside is hidden too.
+    pub collapsed: bool,
     /// Height to go back to when opened.
-    pub open_height: f32,
+    pub expanded_height: f32,
     pub color: Color32,
-    pub arm: bool,
+    /// Armed for recording.
+    pub armed: bool,
 }
 
-impl MutableTrackCore {
+impl TrackView {
     pub fn new() -> Self {
         Self {
-            closed: false,
+            collapsed: false,
             height: DEFAULT_TRACK_HEIGHT,
-            open_height: DEFAULT_TRACK_HEIGHT,
-            // New tracks get a palette colour from `ToniqueProjectState`.
+            expanded_height: DEFAULT_TRACK_HEIGHT,
+            // New tracks get a palette colour from `ProjectState`.
             color: Color32::GRAY,
             name: "# Audio Track".into(),
-            arm: false,
+            armed: false,
         }
     }
 }

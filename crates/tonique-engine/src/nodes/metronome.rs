@@ -27,7 +27,14 @@ pub struct MetronomeNode {
 
 impl MetronomeNode {
     pub fn new(tempo: TempoMap, gain: Arc<AtomicParam>) -> Self {
-        Self { tempo, gain_s: Smoother::new(gain.get()), gain, click_t: None, freq: TICK_HZ, identity: None }
+        Self {
+            tempo,
+            gain_s: Smoother::new(gain.get()),
+            gain,
+            click_t: None,
+            freq: TICK_HZ,
+            identity: None,
+        }
     }
 
     pub fn with_identity(mut self, id: NodeIdentity) -> Self {
@@ -92,8 +99,16 @@ impl Node for MetronomeNode {
             }
             let g = self.gain_s.next();
             let Some(t) = self.click_t else { continue };
-            let env = if t < ATTACK_S { t / ATTACK_S } else { (-(t - ATTACK_S) * DECAY_PER_S).exp() };
-            let square = if (t * self.freq).fract() < 0.5 { 1.0 } else { -1.0 };
+            let env = if t < ATTACK_S {
+                t / ATTACK_S
+            } else {
+                (-(t - ATTACK_S) * DECAY_PER_S).exp()
+            };
+            let square = if (t * self.freq).fract() < 0.5 {
+                1.0
+            } else {
+                -1.0
+            };
             let s = square * env * g;
             l[i] = s;
             r[i] = s;

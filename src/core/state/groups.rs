@@ -15,8 +15,8 @@ use tonique_engine::edit::{
     commands::{AddBus, MoveTrack, RemoveBus, RemoveTrack, SetBusOutput, SetOutput},
 };
 
-use super::{MASTER_TRACK_ID, ToniqueProjectState};
-use crate::core::track::{MutableTrackCore, TrackKind, TrackReferenceCore, TrackSoloState};
+use super::{MASTER_TRACK_ID, ProjectState};
+use crate::core::track::{TrackKind, TrackRow, TrackSoloState, TrackView};
 
 /// Where a dragged row lands.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,7 +35,7 @@ enum Node {
     Group(BusId),
 }
 
-impl ToniqueProjectState {
+impl ProjectState {
     pub fn is_group(&self, id: TrackId) -> bool {
         id != MASTER_TRACK_ID && self.edit().bus(BusId(id.0)).is_ok()
     }
@@ -73,18 +73,18 @@ impl ToniqueProjectState {
     }
 
     /// The tracks inside group `id` however deep, in order, as rows.
-    pub fn group_tracks(&self, id: TrackId) -> Vec<TrackReferenceCore> {
+    pub fn group_tracks(&self, id: TrackId) -> Vec<TrackRow> {
         self.tracks_in(id)
             .into_iter()
             .filter_map(|t| self.track_index(t).and_then(|i| self.track_from_index(i)))
             .collect()
     }
 
-    /// Whether `id` is inside a folded group.
+    /// Whether `id` is inside a collapsed group.
     pub fn is_hidden(&self, id: TrackId) -> bool {
         self.ancestors(id)
             .iter()
-            .any(|g| self.views.get(g).is_some_and(|v| v.closed))
+            .any(|g| self.views.get(g).is_some_and(|v| v.collapsed))
     }
 
     /// The tracks inside `id` however deep, in order; a track is its own.
@@ -134,34 +134,38 @@ impl ToniqueProjectState {
     }
 
     /// Every row in display order with its depth, including those inside
-    /// folded groups.
+    /// collapsed groups.
     fn layout(&self) -> Vec<(Node, usize)> {
         let edit = self.edit();
         let mut rows = Vec::new();
-        let mut open: Vec<BusId> = Vec::new();
+        let mut enclosing: Vec<BusId> = Vec::new();
         for track in &edit.tracks {
             let mut path = edit.buses_along(track.output);
             path.reverse(); // outermost first
-            let shared = open.iter().zip(&path).take_while(|(a, b)| a == b).count();
-            open.truncate(shared);
+            let shared = enclosing
+                .iter()
+                .zip(&path)
+                .take_while(|(a, b)| a == b)
+                .count();
+            enclosing.truncate(shared);
             for bus in &path[shared..] {
-                rows.push((Node::Group(*bus), open.len()));
-                open.push(*bus);
+                rows.push((Node::Group(*bus), enclosing.len()));
+                enclosing.push(*bus);
             }
-            rows.push((Node::Track(track.id), open.len()));
+            rows.push((Node::Track(track.id), enclosing.len()));
         }
         rows
     }
 
     /// The rows of the track list in display order: tracks and groups,
-    /// without what's inside folded groups.
-    pub fn rows(&self) -> Vec<TrackReferenceCore> {
+    /// without what's inside collapsed groups.
+    pub fn rows(&self) -> Vec<TrackRow> {
         let mut rows = Vec::new();
-        // Depth of the folded group hiding the rows below it.
+        // Depth of the collapsed group hiding the rows below it.
         let mut hiding: Option<usize> = None;
         for (node, depth) in self.layout() {
-            if let Some(folded) = hiding {
-                if depth > folded {
+            if let Some(collapsed_depth) = hiding {
+                if depth > collapsed_depth {
                     continue;
                 }
                 hiding = None;
@@ -171,7 +175,7 @@ impl ToniqueProjectState {
                 Node::Group(bus) => self.group_ref(bus, depth),
             };
             if let Some(row) = row {
-                if row.kind == TrackKind::Group && row.closed {
+                if row.kind == TrackKind::Group && row.collapsed {
                     hiding = Some(depth);
                 }
                 rows.push(row);
@@ -180,8 +184,8 @@ impl ToniqueProjectState {
         rows
     }
 
-    /// Every group, folded ones and their subgroups included.
-    pub fn groups(&self) -> Vec<TrackReferenceCore> {
+    /// Every group, collapsed ones and their subgroups included.
+    pub fn groups(&self) -> Vec<TrackRow> {
         self.edit()
             .buses
             .iter()
@@ -190,18 +194,14 @@ impl ToniqueProjectState {
     }
 
     /// The row of group `id`.
-    pub(super) fn group_row(&self, id: TrackId) -> Option<TrackReferenceCore> {
+    pub(super) fn group_row(&self, id: TrackId) -> Option<TrackRow> {
         self.group_ref(BusId(id.0), self.ancestors(id).len())
     }
 
-    fn group_ref(&self, bus: BusId, depth: usize) -> Option<TrackReferenceCore> {
+    fn group_ref(&self, bus: BusId, depth: usize) -> Option<TrackRow> {
         let group = self.edit().bus(bus).ok()?;
         let id = TrackId(bus.0);
-        let view = self
-            .views
-            .get(&id)
-            .cloned()
-            .unwrap_or_else(MutableTrackCore::new);
+        let view = self.views.get(&id).cloned().unwrap_or_else(TrackView::new);
         let tracks = self.tracks_in(id);
         let bpm = self.bpm();
         // Everything inside, for the lane's overview.
@@ -211,15 +211,15 @@ impl ToniqueProjectState {
             .flat_map(|t| t.clips.iter())
             .filter_map(|c| self.clip_view(c, bpm))
             .collect();
-        Some(TrackReferenceCore {
+        Some(TrackRow {
             id,
             clips,
             muted: group.channel.muted,
             volume: group.channel.volume.get(),
-            arm: false,
+            armed: false,
             name: group.name.clone(),
             height: view.height,
-            closed: view.closed,
+            collapsed: view.collapsed,
             color: view.color,
             selected: self.selected_tracks.contains(&id),
             solo: if group.soloed {
@@ -227,7 +227,7 @@ impl ToniqueProjectState {
             } else {
                 TrackSoloState::NotSoloing
             },
-            index: tracks
+            first_track_index: tracks
                 .first()
                 .and_then(|t| self.track_index(*t))
                 .unwrap_or(0),
@@ -369,7 +369,7 @@ impl ToniqueProjectState {
             .session
             .create(|e| Bus::new(e, format!("Group {number}")));
         let id = TrackId(bus.id.0);
-        let mut view = MutableTrackCore::new();
+        let mut view = TrackView::new();
         view.name.clone_from(&bus.name);
         view.color = self.next_track_color();
         self.views.insert(id, view);
@@ -402,7 +402,6 @@ impl ToniqueProjectState {
             s.normalize();
         });
         self.selected_tracks.retain(|t| *t != id);
-        self.sync_effects();
     }
 
     /// Delete group `id` with everything inside, as one undo step.
@@ -426,7 +425,6 @@ impl ToniqueProjectState {
         });
         self.selected_tracks
             .retain(|t| !tracks.contains(t) && !groups.contains(t));
-        self.sync_effects();
     }
 
     /// Delete a track (its group goes too if left empty) as one undo step.
@@ -468,7 +466,7 @@ impl ToniqueProjectState {
                 let to = match anchor.and_then(|a| s.track_index(a)) {
                     Some(at) if from < at => at - 1,
                     Some(at) => at,
-                    None => s.track_len() - 1,
+                    None => s.track_count() - 1,
                 };
                 if from != to {
                     s.perform(MoveTrack::new(*track, to));

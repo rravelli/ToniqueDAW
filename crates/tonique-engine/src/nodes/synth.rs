@@ -29,7 +29,15 @@ struct Voice {
 }
 
 impl Voice {
-    const IDLE: Voice = Voice { note: 0, stage: Stage::Off, env: 0.0, velocity: 0.0, phase: 0.0, inc: 0.0, age: 0 };
+    const IDLE: Voice = Voice {
+        note: 0,
+        stage: Stage::Off,
+        env: 0.0,
+        velocity: 0.0,
+        phase: 0.0,
+        inc: 0.0,
+        age: 0,
+    };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -42,7 +50,12 @@ pub struct Envelope {
 
 impl Default for Envelope {
     fn default() -> Self {
-        Self { attack_s: 0.005, decay_s: 0.2, sustain: 0.6, release_s: 0.25 }
+        Self {
+            attack_s: 0.005,
+            decay_s: 0.2,
+            sustain: 0.6,
+            release_s: 0.25,
+        }
     }
 }
 
@@ -108,7 +121,11 @@ impl SynthNode {
     }
 
     fn note_off(&mut self, note: u8) {
-        for v in self.voices.iter_mut().filter(|v| v.note == note && v.stage != Stage::Off) {
+        for v in self
+            .voices
+            .iter_mut()
+            .filter(|v| v.note == note && v.stage != Stage::Off)
+        {
             v.stage = Stage::Release;
         }
     }
@@ -117,7 +134,11 @@ impl SynthNode {
         match msg {
             MidiMessage::NoteOn { note, velocity, .. } => self.note_on(note, velocity),
             MidiMessage::NoteOff { note, .. } => self.note_off(note),
-            MidiMessage::AllNotesOff { .. } => self.voices.iter_mut().filter(|v| v.stage != Stage::Off).for_each(|v| v.stage = Stage::Release),
+            MidiMessage::AllNotesOff { .. } => self
+                .voices
+                .iter_mut()
+                .filter(|v| v.stage != Stage::Off)
+                .for_each(|v| v.stage = Stage::Release),
             _ => {}
         }
     }

@@ -443,13 +443,12 @@ pub fn parse_shortcut(text: &str) -> Option<KeyboardShortcut> {
     };
     let mut parsed = Modifiers::NONE;
     for name in modifiers.split('+').filter(|name| !name.is_empty()) {
-        parsed = parsed
-            | match name.trim() {
-                "Ctrl" | "Cmd" => Modifiers::COMMAND,
-                "Shift" => Modifiers::SHIFT,
-                "Alt" | "Option" => Modifiers::ALT,
-                _ => return None,
-            };
+        parsed |= match name.trim() {
+            "Ctrl" | "Cmd" => Modifiers::COMMAND,
+            "Shift" => Modifiers::SHIFT,
+            "Alt" | "Option" => Modifiers::ALT,
+            _ => return None,
+        };
     }
     Some(KeyboardShortcut::new(parsed, Key::from_name(key.trim())?))
 }

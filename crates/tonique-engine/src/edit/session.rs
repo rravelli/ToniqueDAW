@@ -27,7 +27,12 @@ pub struct EditSession {
 impl EditSession {
     pub fn new(edit: Edit, engine: Engine) -> Result<Self, EditError> {
         edit.refresh_mute_gains();
-        let mut s = Self { edit, undo: UndoManager::default(), engine, last_stats: None };
+        let mut s = Self {
+            edit,
+            undo: UndoManager::default(),
+            engine,
+            last_stats: None,
+        };
         s.rebuild()?;
         Ok(s)
     }
@@ -131,7 +136,10 @@ impl EditSession {
         let sr = self.engine.config().sample_rate;
         for id in effects.curves {
             let curve = automation_curve(&self.edit, self.edit.param(id)?, sr);
-            self.engine.send(Command::SendToNode { target: automation_identity(id), msg: NodeMessage::Curve(curve) })?;
+            self.engine.send(Command::SendToNode {
+                target: automation_identity(id),
+                msg: NodeMessage::Curve(curve),
+            })?;
         }
         Ok(())
     }
@@ -145,7 +153,9 @@ impl EditSession {
     }
 
     fn to_samples(&self, b: BeatPos) -> i64 {
-        self.edit.tempo.beats_to_samples(b, self.engine.config().sample_rate)
+        self.edit
+            .tempo
+            .beats_to_samples(b, self.engine.config().sample_rate)
     }
 
     pub fn play(&mut self) -> Result<(), EditError> {
@@ -167,6 +177,8 @@ impl EditSession {
     }
 
     pub fn position(&self) -> BeatPos {
-        self.edit.tempo.samples_to_beats(self.engine.position(), self.engine.config().sample_rate)
+        self.edit
+            .tempo
+            .samples_to_beats(self.engine.position(), self.engine.config().sample_rate)
     }
 }

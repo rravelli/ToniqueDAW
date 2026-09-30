@@ -30,7 +30,12 @@ pub struct AudioClipNode {
 
 impl AudioClipNode {
     pub fn new(source: Arc<SampleBuffer>, place: ClipPlacement, gain: f32) -> Self {
-        Self { source, place, gain, identity: None }
+        Self {
+            source,
+            place,
+            gain,
+            identity: None,
+        }
     }
 
     pub fn with_identity(mut self, id: NodeIdentity) -> Self {
@@ -56,7 +61,11 @@ impl AudioClipNode {
 impl Node for AudioClipNode {
     fn properties(&self) -> NodeProperties {
         // Same source data + placement + gain => same output: dedupable.
-        let content = ContentId::of(&(Arc::as_ptr(&self.source) as usize, self.place, self.gain.to_bits()));
+        let content = ContentId::of(&(
+            Arc::as_ptr(&self.source) as usize,
+            self.place,
+            self.gain.to_bits(),
+        ));
         let p = NodeProperties::audio(2).with_content(content);
         match self.identity {
             Some(id) => p.with_identity(id),
@@ -122,7 +131,12 @@ pub struct MidiClipNode {
 
 impl MidiClipNode {
     /// Notes are clipped to `[clip_start, clip_end)`.
-    pub fn new(notes: &[TimelineNote], channel: u8, clip_start: SamplePos, clip_end: SamplePos) -> Self {
+    pub fn new(
+        notes: &[TimelineNote],
+        channel: u8,
+        clip_start: SamplePos,
+        clip_end: SamplePos,
+    ) -> Self {
         let mut events = Vec::with_capacity(notes.len() * 2);
         for n in notes {
             let on = n.start.max(clip_start);
@@ -130,8 +144,22 @@ impl MidiClipNode {
             if on >= off {
                 continue;
             }
-            events.push(TimedMidi { time: on, message: MidiMessage::NoteOn { channel, note: n.note, velocity: n.velocity } });
-            events.push(TimedMidi { time: off, message: MidiMessage::NoteOff { channel, note: n.note, velocity: 0 } });
+            events.push(TimedMidi {
+                time: on,
+                message: MidiMessage::NoteOn {
+                    channel,
+                    note: n.note,
+                    velocity: n.velocity,
+                },
+            });
+            events.push(TimedMidi {
+                time: off,
+                message: MidiMessage::NoteOff {
+                    channel,
+                    note: n.note,
+                    velocity: 0,
+                },
+            });
         }
         // Note-offs sort before note-ons at the same time so a repeated
         // note retriggers instead of being cut.
@@ -183,7 +211,8 @@ impl Node for MidiClipNode {
             }
         }
         if (start..end).contains(&self.clip_end) {
-            self.active.release_all(ctx.midi_out, (self.clip_end - start) as u32);
+            self.active
+                .release_all(ctx.midi_out, (self.clip_end - start) as u32);
         }
     }
 

@@ -1,11 +1,12 @@
 use crate::{
-    analysis::AudioInfo,
-    core::state::ToniqueProjectState,
+    core::{effect::EffectKind, state::ProjectState},
     ui::{
-        effects::EffectId,
+        browser::FileBrowser,
+        commands::Commands,
+        dnd::DragPayload,
         theme::ThemeExt,
-        view::filebrowser::FileBrowser,
-        widget::{item_button::ItemButton, search_bar::SearchBar, tab_bar::TabBar},
+        widget::{list_row::ListRow, search_bar::SearchBar, tab_bar::TabBar},
+        workspace::Workspace,
     },
 };
 use egui::{Frame, Margin, Ui};
@@ -14,35 +15,38 @@ use egui::{Frame, Margin, Ui};
 const HEADER_SPACING: f32 = 4.;
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum LeftPanelTabs {
+pub enum LeftPanelTab {
     Files,
     Effects,
 }
 
-#[derive(Clone)]
-pub enum DragPayload {
-    File(AudioInfo),
-    Effect(EffectId),
-}
-
-pub struct UILeftPanel {
+pub struct LeftPanel {
     pub file_browser: FileBrowser,
-    tab: LeftPanelTabs,
+    /// The last click was in the panel: the browser has the keyboard.
+    focused: bool,
+    tab: LeftPanelTab,
     search: SearchBar,
 }
 
-impl UILeftPanel {
+impl LeftPanel {
     pub fn new() -> Self {
         Self {
             file_browser: FileBrowser::new(),
-            tab: LeftPanelTabs::Files,
+            focused: false,
+            tab: LeftPanelTab::Files,
             search: SearchBar::new("Search"),
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
-        let mut open = state.left_panel_open;
-        egui::Panel::left("left-pannel")
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        commands: &mut Commands,
+    ) {
+        let mut open = workspace.left_panel_open;
+        egui::Panel::left("left-panel")
             .min_size(100.)
             .max_size(400.)
             .frame(
@@ -58,12 +62,26 @@ impl UILeftPanel {
             )
             .default_size(220.)
             .show_collapsible(ui, &mut open, |ui| {
-                self.ui(ui, state);
+                let panel = ui.max_rect();
+                if let Some(pos) = ui
+                    .input(|i| {
+                        i.pointer
+                            .primary_pressed()
+                            .then(|| i.pointer.interact_pos())
+                    })
+                    .flatten()
+                {
+                    self.focused = panel.contains(pos);
+                }
+                self.ui(ui, state, commands);
             });
-        state.left_panel_open = open;
+        workspace.left_panel_open = open;
+        if !open {
+            self.focused = false;
+        }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, commands: &mut Commands) {
         ui.vertical(|ui| {
             ui.set_width(ui.available_width());
             Frame::new()
@@ -74,8 +92,8 @@ impl UILeftPanel {
                         TabBar::new(
                             &mut self.tab,
                             [
-                                (LeftPanelTabs::Files, "Files"),
-                                (LeftPanelTabs::Effects, "Effects"),
+                                (LeftPanelTab::Files, "Files"),
+                                (LeftPanelTab::Effects, "Effects"),
                             ],
                         )
                         .height(25.),
@@ -86,16 +104,16 @@ impl UILeftPanel {
                 });
 
             match self.tab {
-                LeftPanelTabs::Files => {
-                    self.file_browser.ui(ui, state);
+                LeftPanelTab::Files => {
+                    self.file_browser.ui(ui, state, commands, self.focused);
                 }
-                LeftPanelTabs::Effects => {
-                    let res = ui.add(ItemButton::new(format!(
+                LeftPanelTab::Effects => {
+                    let res = ui.add(ListRow::new(format!(
                         "{} {}",
                         egui_phosphor::fill::STAR_FOUR,
-                        "Filter"
+                        EffectKind::Filter.name()
                     )));
-                    res.dnd_set_drag_payload(DragPayload::Effect(EffectId::Equalizer));
+                    res.dnd_set_drag_payload(DragPayload::Effect(EffectKind::Filter));
                 }
             }
         });

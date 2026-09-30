@@ -1,43 +1,51 @@
 use crate::{
-    core::state::{CentralView, PlaybackState, ToniqueProjectState},
+    core::state::{PlaybackState, ProjectState},
     ui::{
-        theme::{ThemeExt, with_alpha},
-        view::{
-            graph::UIGraphView, navigation_bar::UINavigationBar, timeline::UITimeline,
-            tracks::UITracks,
+        arrangement::{
+            row_layout::RowLayout, ruler::Ruler, timeline::Timeline, track_headers::TrackHeaders,
         },
+        commands::Commands,
+        graph::GraphView,
+        theme::{ThemeExt, with_alpha},
+        widget::scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
+        workspace::{MainView, Workspace},
     },
 };
 use egui::{Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
-pub const SCROLLBAR_WIDTH: f32 = 5.;
 /// Empty bars after the end of the arrangement.
-const TIMELINE_SLACK_BARS: f32 = 16.;
+const TIMELINE_SLACK_BARS: f64 = 16.;
 
-pub struct UICentralPanel {
-    timeline: UITimeline,
-    navigation_bar: UINavigationBar,
-    tracks: UITracks,
-    graph: UIGraphView,
+pub struct CentralPanel {
+    timeline: Timeline,
+    ruler: Ruler,
+    tracks: TrackHeaders,
+    graph: GraphView,
     /// Following the playhead is paused after scrolling by hand during
     /// playback, until playback starts again.
     follow_paused: bool,
     was_playing: bool,
 }
 
-impl UICentralPanel {
+impl CentralPanel {
     pub fn new() -> Self {
         Self {
-            timeline: UITimeline::new(),
-            navigation_bar: UINavigationBar::new(),
-            tracks: UITracks::new(),
-            graph: UIGraphView::new(),
+            timeline: Timeline::new(),
+            ruler: Ruler::new(),
+            tracks: TrackHeaders::new(),
+            graph: GraphView::new(),
             follow_paused: false,
             was_playing: false,
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        commands: &mut Commands,
+    ) {
         egui::CentralPanel::default()
             .frame(
                 Frame::central_panel(ui.style())
@@ -45,18 +53,24 @@ impl UICentralPanel {
                     .fill(ui.app_theme().bg_base),
             )
             .show(ui, |ui| {
-                self.ui(ui, state);
+                self.ui(ui, state, workspace, commands);
             });
     }
 
-    fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
-        if state.central_view == CentralView::Graph {
+    fn ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        commands: &mut Commands,
+    ) {
+        if workspace.main_view == MainView::Graph {
             self.graph.ui(ui, state);
             return;
         }
         let available_rect = ui.available_rect_before_wrap();
         // Draw navigation bar on top
-        self.navigation_bar.ui(ui, state, self.tracks.width);
+        self.ruler.ui(ui, state, self.tracks.width);
 
         let (viewport, _) = ui.allocate_exact_size(ui.available_size(), Sense::all());
         ui.set_clip_rect(viewport);
@@ -65,18 +79,27 @@ impl UICentralPanel {
             viewport.min,
             pos2(viewport.max.x - self.tracks.width, viewport.max.y),
         );
+        let mut layout = RowLayout::new(state, viewport.top(), state.grid.offset.y);
         // Draw timeline
-        self.timeline
-            .ui(ui, state, timeline_viewport, state.grid.offset);
+        self.timeline.ui(
+            ui,
+            state,
+            workspace,
+            commands,
+            &mut layout,
+            timeline_viewport,
+        );
         // Draw tracks
-        self.tracks.ui(ui, state, viewport);
+        self.tracks.ui(ui, state, workspace, &layout, viewport);
 
         // The timeline spans the content plus some room to add more, and
         // never shrinks under the part being looked at.
-        let ppb = state.grid.pixels_per_beat();
-        let slack = TIMELINE_SLACK_BARS * state.grid.beats_per_bar() as f32;
-        let visible_end = (state.grid.offset.x + timeline_viewport.width()) / ppb;
-        ui.set_width((state.arrangement_end() + slack).max(visible_end) * ppb);
+        let slack = TIMELINE_SLACK_BARS * state.grid.beats_per_bar() as f64;
+        let visible_end = state
+            .grid
+            .width_to_beats(state.grid.offset.x + timeline_viewport.width());
+        let end = (state.arrangement_end() + slack).0.max(visible_end);
+        ui.set_width(state.grid.beats_to_width(end));
         let content_size = ui.min_size();
 
         let mut scrolled_x = false;
@@ -96,9 +119,9 @@ impl UICentralPanel {
                 state.grid.offset.y = state.grid.offset.y.clamp(0., max_y);
             }
         }
-        scrolled_x |= self.draw_scrollbars(ui, viewport, content_size, &mut state.grid.offset);
+        scrolled_x |= self.scrollbars_ui(ui, viewport, content_size, &mut state.grid.offset);
         self.follow_playhead(ui, state, timeline_viewport, scrolled_x);
-        self.draw_cursors(
+        self.cursors_ui(
             ui,
             state,
             Rect::from_min_size(
@@ -117,7 +140,7 @@ impl UICentralPanel {
     fn follow_playhead(
         &mut self,
         ui: &Ui,
-        state: &mut ToniqueProjectState,
+        state: &mut ProjectState,
         viewport: Rect,
         scrolled_by_hand: bool,
     ) {
@@ -137,13 +160,13 @@ impl UICentralPanel {
         {
             return;
         }
-        let x = state.playhead() * state.grid.pixels_per_beat();
+        let x = state.grid.beats_to_width(state.playhead().0);
         state.grid.offset.x = (x - viewport.width() / 2.).max(0.);
     }
 
-    /// Draw horizontal and vertical scrollbars. Returns whether the
-    /// horizontal one was dragged.
-    fn draw_scrollbars(
+    /// The timeline's scrollbars, when the content overflows. Returns
+    /// whether the horizontal one was dragged.
+    fn scrollbars_ui(
         &self,
         ui: &mut Ui,
         viewport: Rect,
@@ -151,68 +174,35 @@ impl UICentralPanel {
         offset: &mut Vec2,
     ) -> bool {
         let mut scrolled_x = false;
-        let theme = ui.app_theme();
-        let painter = ui.painter();
-        let handle_color = theme.text_disabled;
-
-        // === HORIZONTAL SCROLLBAR ===
         if content_size.x > viewport.max.x {
-            let track_rect = Rect::from_min_max(
+            let track = Rect::from_min_max(
                 pos2(viewport.left(), viewport.bottom() - SCROLLBAR_WIDTH),
                 pos2(viewport.right() - self.tracks.width, viewport.bottom()),
             );
-            let max_scroll = content_size.x - viewport.right();
-            // Thumb size and position
-            let visible_ratio_x = viewport.width() / content_size.x;
-            let thumb_width = (visible_ratio_x * track_rect.width()).max(16.0);
-            let thumb_x =
-                track_rect.left() + (offset.x / max_scroll) * (track_rect.width() - thumb_width);
-
-            let thumb_rect = Rect::from_min_max(
-                pos2(thumb_x, track_rect.top()),
-                pos2(thumb_x + thumb_width, track_rect.bottom()),
-            );
-
-            let resp = ui.interact(thumb_rect, ui.id().with("hscroll"), Sense::click_and_drag());
-            painter.rect_filled(track_rect, 2.0, theme.bg_deep);
-            painter.rect_filled(thumb_rect, 4.0, handle_color);
-
-            if resp.dragged() {
-                scrolled_x = true;
-                let drag_x = resp.drag_delta().x;
-                let ratio = max_scroll / (track_rect.width() - thumb_width);
-                offset.x = (offset.x + drag_x * ratio).clamp(0., max_scroll);
-            }
+            scrolled_x = ui
+                .add(ScrollBar::new(
+                    "hscroll",
+                    Axis::Horizontal,
+                    track,
+                    &mut offset.x,
+                    content_size.x - viewport.right(),
+                    viewport.width() / content_size.x,
+                ))
+                .dragged();
         }
-
-        // === VERTICAL SCROLLBAR ===
         if content_size.y > viewport.max.y {
-            let track_rect = Rect::from_min_max(
+            let track = Rect::from_min_max(
                 pos2(viewport.right() - SCROLLBAR_WIDTH, viewport.top()),
                 pos2(viewport.right(), viewport.bottom()),
             );
-            let max_scroll = content_size.y - viewport.bottom();
-            let visible_ratio_y = viewport.height() / (content_size.y - viewport.top());
-            let thumb_height = (visible_ratio_y * track_rect.height()).max(16.0);
-            let thumb_y = track_rect.top()
-                + (offset.y / (content_size.y - viewport.bottom()))
-                    * (track_rect.height() - thumb_height);
-
-            let thumb_rect = Rect::from_min_max(
-                pos2(track_rect.left(), thumb_y),
-                pos2(track_rect.right(), thumb_y + thumb_height),
-            );
-
-            let resp = ui.interact(thumb_rect, ui.id().with("vscroll"), Sense::click_and_drag());
-            painter.rect_filled(track_rect, 2.0, theme.bg_deep);
-            painter.rect_filled(thumb_rect, 4.0, handle_color);
-
-            if resp.dragged() {
-                let drag_y = resp.drag_delta().y;
-
-                let ratio = max_scroll / (track_rect.height() - thumb_height);
-                offset.y = (offset.y + drag_y * ratio).clamp(0., max_scroll);
-            }
+            ui.add(ScrollBar::new(
+                "vscroll",
+                Axis::Vertical,
+                track,
+                &mut offset.y,
+                content_size.y - viewport.bottom(),
+                viewport.height() / (content_size.y - viewport.top()),
+            ));
         }
         scrolled_x
     }
@@ -220,7 +210,7 @@ impl UICentralPanel {
     /// Loop bounds (while looping), edit cursor (only while it differs from
     /// the playhead) and playhead
     /// with its draggable handle.
-    fn draw_cursors(&self, ui: &mut Ui, state: &mut ToniqueProjectState, rect: Rect) {
+    fn cursors_ui(&self, ui: &mut Ui, state: &mut ProjectState, rect: Rect) {
         ui.set_clip_rect(rect);
         let theme = ui.app_theme();
         let painter = ui.painter();
@@ -307,29 +297,36 @@ mod tests {
     use super::*;
     use tonique_engine::engine::{Engine, EngineConfig};
 
-    /// The track list and timeline draw nested and folded groups without
+    /// The track list and timeline draw nested and collapsed groups without
     /// trouble, headless.
     #[test]
     fn draws_groups_headless() {
         let (engine, _processor) = Engine::new(EngineConfig::default());
-        let mut state = ToniqueProjectState::new(engine);
+        let mut state = ProjectState::new(engine);
         let tracks: Vec<_> = (0..5).map(|_| state.add_track()).collect();
         let inner = state.group(&tracks[..2]).unwrap();
         let outer = state.group(&[inner, tracks[2]]).unwrap();
         state.group(&[tracks[4]]).unwrap();
-        state.track_mut(&outer).closed = false;
-        state.track_mut(&inner).closed = true;
+        state.track_view_mut(&outer).collapsed = false;
+        state.track_view_mut(&inner).collapsed = true;
 
         let ctx = egui::Context::default();
-        ctx.set_fonts(crate::ui::font::get_fonts());
+        ctx.set_fonts(crate::ui::font::fonts());
         let input = || egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200., 800.))),
             ..Default::default()
         };
-        let mut panel = UICentralPanel::new();
+        let mut panel = CentralPanel::new();
         let mut shapes = 0;
         for _ in 0..2 {
-            let mut output = ctx.run_ui(input(), |ui| panel.show(ui, &mut state));
+            let mut output = ctx.run_ui(input(), |ui| {
+                panel.show(
+                    ui,
+                    &mut state,
+                    &mut Workspace::default(),
+                    &mut Commands::default(),
+                )
+            });
             output.textures_delta.clear();
             shapes = output.shapes.len();
         }
@@ -337,27 +334,27 @@ mod tests {
         assert_eq!(
             state.rows().len(),
             6,
-            "outer, inner (folded), t3, t4, group, t5"
+            "outer, inner (collapsed), t3, t4, group, t5"
         );
     }
 
-    /// Dragging a file over a folded group opens it; leaving folds it
-    /// again; dropping inside leaves it open.
+    /// Dragging a file over a collapsed group expands it; leaving collapses
+    /// it again; dropping inside leaves it expanded.
     #[test]
-    fn folded_groups_open_while_dragging_over_them() {
-        use crate::ui::view::navigation_bar::NAVIGATION_BAR_HEIGHT;
-        use crate::{analysis::AudioInfo, ui::panels::left_panel::DragPayload};
+    fn collapsed_groups_expand_while_dragging_over_them() {
+        use crate::ui::arrangement::ruler::RULER_HEIGHT;
+        use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
         use egui::{Event, PointerButton, Pos2};
 
         let (engine, _processor) = Engine::new(EngineConfig::default());
-        let mut state = ToniqueProjectState::new(engine);
+        let mut state = ProjectState::new(engine);
         let tracks: Vec<_> = (0..3).map(|_| state.add_track()).collect();
         let group = state.group(&tracks[..2]).unwrap();
-        state.set_closed(&group, true);
+        state.set_collapsed(&group, true);
 
         let ctx = egui::Context::default();
-        ctx.set_fonts(crate::ui::font::get_fonts());
-        let mut panel = UICentralPanel::new();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let mut panel = CentralPanel::new();
         let audio = AudioInfo {
             name: "a.wav".into(),
             duration: Some(std::time::Duration::from_secs(1)),
@@ -368,32 +365,44 @@ mod tests {
             num_samples: None,
             path: Default::default(),
         };
-        let mut frame = |state: &mut ToniqueProjectState, events: Vec<Event>| {
+        let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
             let input = egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
                 events,
                 ..Default::default()
             };
-            let mut output = ctx.run_ui(input, |ui| panel.show(ui, state));
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(
+                    ui,
+                    state,
+                    &mut Workspace::default(),
+                    &mut Commands::default(),
+                )
+            });
             output.textures_delta.clear();
         };
-        let closed = |state: &ToniqueProjectState| {
-            state.rows().iter().find(|r| r.id == group).unwrap().closed
+        let collapsed = |state: &ProjectState| {
+            state
+                .rows()
+                .iter()
+                .find(|r| r.id == group)
+                .unwrap()
+                .collapsed
         };
         // The group's row is the first lane, just below the ruler.
-        let over_group = Pos2::new(300., NAVIGATION_BAR_HEIGHT + 10.);
+        let over_group = Pos2::new(300., RULER_HEIGHT + 10.);
         let far_below = Pos2::new(300., 600.);
 
         frame(&mut state, Vec::new()); // lay out once
         egui::DragAndDrop::set_payload(&ctx, DragPayload::File(audio.clone()));
         frame(&mut state, vec![Event::PointerMoved(over_group)]);
-        assert!(!closed(&state), "opens while dragged over");
+        assert!(!collapsed(&state), "expands while dragged over");
 
         frame(&mut state, vec![Event::PointerMoved(far_below)]);
-        assert!(closed(&state), "folds again once left");
+        assert!(collapsed(&state), "collapses again once left");
 
         frame(&mut state, vec![Event::PointerMoved(over_group)]);
-        assert!(!closed(&state));
+        assert!(!collapsed(&state));
         // Drop inside.
         let release = Event::PointerButton {
             pos: over_group,
@@ -404,6 +413,6 @@ mod tests {
         frame(&mut state, vec![release]);
         frame(&mut state, vec![Event::PointerMoved(over_group)]);
         frame(&mut state, vec![Event::PointerMoved(far_below)]);
-        assert!(!closed(&state), "stays open after a drop inside");
+        assert!(!collapsed(&state), "stays expanded after a drop inside");
     }
 }

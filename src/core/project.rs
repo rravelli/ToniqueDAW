@@ -10,7 +10,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::ui::effects::EffectId;
+use crate::core::effect::EffectKind;
 
 /// Extension of project files.
 pub const EXTENSION: &str = "tonique";
@@ -23,7 +23,7 @@ pub struct ProjectFile {
     pub version: u32,
     pub bpm: f32,
     /// Loop region in beats.
-    pub loop_range: (f32, f32),
+    pub loop_range: (f64, f64),
     pub looping: bool,
     pub master: ChannelFile,
     /// Parents before their subgroups.
@@ -39,7 +39,9 @@ pub struct GroupFile {
     /// `#rrggbb`.
     pub color: String,
     pub height: f32,
-    pub folded: bool,
+    /// Older projects call it `folded`.
+    #[serde(alias = "folded")]
+    pub collapsed: bool,
     pub soloed: bool,
     /// Index in `groups` of the group holding it.
     pub parent: Option<usize>,
@@ -53,7 +55,9 @@ pub struct TrackFile {
     /// `#rrggbb`.
     pub color: String,
     pub height: f32,
-    pub closed: bool,
+    /// Older projects call it `closed`.
+    #[serde(alias = "closed")]
+    pub collapsed: bool,
     pub soloed: bool,
     /// Index in `groups` of the group holding it.
     #[serde(default)]
@@ -80,7 +84,7 @@ pub struct ClipFile {
     /// The audio file: relative to the project's folder, or absolute.
     pub path: PathBuf,
     /// Start in the arrangement, in beats.
-    pub position: f32,
+    pub position: f64,
     /// Part of the file played, as ratios of its length.
     pub trim_start: f32,
     pub trim_end: f32,
@@ -88,7 +92,7 @@ pub struct ClipFile {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EffectFile {
-    pub kind: EffectId,
+    pub kind: EffectKind,
     pub enabled: bool,
     /// Parameter values by name.
     pub params: BTreeMap<String, f32>,
@@ -215,7 +219,7 @@ mod tests {
                 name: "Drums".into(),
                 color: "#e5736b".into(),
                 height: 60.,
-                closed: false,
+                collapsed: false,
                 soloed: true,
                 group: None,
                 channel: ChannelFile {
@@ -223,7 +227,7 @@ mod tests {
                     pan: -0.25,
                     muted: true,
                     effects: vec![EffectFile {
-                        kind: EffectId::Equalizer,
+                        kind: EffectKind::Filter,
                         enabled: false,
                         params: BTreeMap::from([("cutoff".into(), 800.)]),
                     }],

@@ -1,4 +1,5 @@
 pub mod clip;
+pub mod effect;
 pub mod graph_monitor;
 pub mod grid;
 pub mod metrics;

@@ -48,14 +48,24 @@ pub fn flush_denormals_enabled() -> bool {
 pub fn set_realtime_priority(priority: i32) -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
     {
-        let param = libc::sched_param { sched_priority: priority };
-        let rc = unsafe { libc::pthread_setschedparam(libc::pthread_self(), libc::SCHED_FIFO, &param) };
-        if rc == 0 { Ok(()) } else { Err(std::io::Error::from_raw_os_error(rc)) }
+        let param = libc::sched_param {
+            sched_priority: priority,
+        };
+        let rc =
+            unsafe { libc::pthread_setschedparam(libc::pthread_self(), libc::SCHED_FIFO, &param) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::from_raw_os_error(rc))
+        }
     }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = priority;
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "not implemented on this platform"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "not implemented on this platform",
+        ))
     }
 }
 

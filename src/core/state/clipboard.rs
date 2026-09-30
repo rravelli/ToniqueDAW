@@ -1,21 +1,22 @@
 //! Copy, cut and paste of clips, and nudging the selection.
 
-use super::{MASTER_TRACK_ID, ToniqueProjectState};
-use crate::core::clip::ClipCore;
+use super::{MASTER_TRACK_ID, ProjectState};
+use crate::core::clip::AudioClip;
+use tonique_engine::time::BeatPos;
 
 /// Copied clips, placed relative to the copied range: time from its start,
 /// tracks from the topmost copied one.
 #[derive(Debug, Clone, Default)]
 pub struct Clipboard {
-    clips: Vec<(usize, ClipCore)>,
+    clips: Vec<(usize, AudioClip)>,
     /// Length of the copied range, in beats.
-    length: f32,
+    length: f64,
     /// Index of the topmost copied track, to paste back there when no
     /// track is selected.
     top_track: usize,
 }
 
-impl ToniqueProjectState {
+impl ProjectState {
     pub fn can_paste(&self) -> bool {
         !self.clipboard.clips.is_empty()
     }
@@ -28,7 +29,7 @@ impl ToniqueProjectState {
         };
         let bpm = self.bpm();
         let cropped = self.selection_bounds().is_some();
-        let clips: Vec<(usize, ClipCore)> = self
+        let clips: Vec<(usize, AudioClip)> = self
             .selected_clips()
             .iter()
             .filter_map(|id| self.find_clip(*id))
@@ -36,7 +37,8 @@ impl ToniqueProjectState {
                 if cropped {
                     clip.crop(start, end, bpm);
                 }
-                clip.position -= start;
+                // From here, positions are relative to the copied range.
+                clip.position = BeatPos(clip.position - start);
                 Some((self.track_index(track)?, clip))
             })
             .collect();
@@ -98,12 +100,12 @@ impl ToniqueProjectState {
         self.begin_batch();
         for (offset, clip) in clipboard.clips {
             let index = top_track + offset;
-            while self.track_len() <= index {
+            while self.track_count() <= index {
                 self.add_track();
             }
             let track = self.edit().tracks[index].id;
             let mut copy = clip.with_id(self.new_clip_id());
-            copy.position += at;
+            copy.position = at + copy.position.0;
             pasted.push(copy.id);
             self.add_clips(&track, vec![copy]);
         }
@@ -113,19 +115,29 @@ impl ToniqueProjectState {
     }
 
     /// Move the selected clips (and zone) by `delta` beats as one block,
-    /// without going before the start of the arrangement.
-    pub fn nudge_selection(&mut self, delta: f32) {
-        let ids = self.selected_clips().to_vec();
-        let moves: Vec<_> = ids.iter().filter_map(|id| self.find_clip(*id)).collect();
-        let Some(first) = moves.iter().map(|(_, c)| c.position).reduce(f32::min) else {
+    /// without going before the start of the arrangement. With a zone, only
+    /// its part of the clips moves.
+    pub fn nudge_selection(&mut self, delta: f64) {
+        let zone_start = self.selection_bounds().map(|b| b.start_pos);
+        let Some(first) = self
+            .selected_clips()
+            .iter()
+            .filter_map(|id| self.find_clip(*id))
+            // Where each moved part starts: inside the zone, if any.
+            .map(|(_, c)| zone_start.map_or(c.position, |start| c.position.max(start)))
+            .reduce(BeatPos::min)
+        else {
             return;
         };
-        let delta = delta.max(-first);
+        let delta = delta.max(-first.0);
         if delta == 0. {
             return;
         }
         // One undo step; the selected clips don't carve each other.
         self.begin_batch();
+        self.split_at_zone();
+        let ids = self.selected_clips().to_vec();
+        let moves: Vec<_> = ids.iter().filter_map(|id| self.find_clip(*id)).collect();
         for (track, clip) in &moves {
             self.move_clip(&clip.id, track, clip.position + delta, &ids);
         }

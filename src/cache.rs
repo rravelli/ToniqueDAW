@@ -2,7 +2,7 @@ use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
 
-use crate::analysis::{AudioInfo, get_audio_info};
+use crate::analysis::{AudioInfo, read_audio_info};
 
 // Inner struct to keep cache logic encapsulated
 pub struct AudioAnalysisCache {
@@ -15,7 +15,7 @@ impl AudioAnalysisCache {
             return Some(result.clone());
         }
 
-        let result = get_audio_info(path.clone());
+        let result = read_audio_info(path.clone());
 
         match result {
             Ok(info) => {

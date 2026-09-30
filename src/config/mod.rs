@@ -19,7 +19,7 @@ mod serde_pathbuf_vec {
     use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
     use std::path::PathBuf;
 
-    pub fn serialize<S>(dirs: &Vec<PathBuf>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(dirs: &[PathBuf], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -49,21 +49,20 @@ struct ConfigSerdeHelper {
 impl Config {
     /// Load config from disk
     pub fn load() -> Self {
-        if let Some(path) = get_config_path() {
-            if let Ok(data) = fs::read_to_string(&path) {
-                if let Ok(helper) = serde_json::from_str::<ConfigSerdeHelper>(&data) {
-                    return Config {
-                        directories: helper.directories,
-                    };
-                }
-            }
+        if let Some(path) = config_path()
+            && let Ok(data) = fs::read_to_string(&path)
+            && let Ok(helper) = serde_json::from_str::<ConfigSerdeHelper>(&data)
+        {
+            return Config {
+                directories: helper.directories,
+            };
         }
         Config::default()
     }
 
     /// Save config to disk
     pub fn save(&self) {
-        if let Some(path) = get_config_path() {
+        if let Some(path) = config_path() {
             println!("{:?}", path);
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent);
@@ -101,7 +100,7 @@ impl Config {
 }
 
 /// Returns the configuration file path.
-fn get_config_path() -> Option<PathBuf> {
+fn config_path() -> Option<PathBuf> {
     config_dir().map(|dir| dir.join("config.json"))
 }
 

@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use crate::automation::AutomationCurve;
-use crate::graph::{Node, NodeIdentity, NodeMessage, NodeProperties, ProcessContext, StateTransfer};
+use crate::graph::{
+    Node, NodeIdentity, NodeMessage, NodeProperties, ProcessContext, StateTransfer,
+};
 use crate::param::AtomicParam;
 
 /// Drives an [`AtomicParam`] from an automation curve while the transport
@@ -18,8 +20,16 @@ pub struct AutomationNode {
 }
 
 impl AutomationNode {
-    pub fn new(curve: Arc<AutomationCurve>, target: Arc<AtomicParam>, identity: NodeIdentity) -> Self {
-        Self { curve, target, identity }
+    pub fn new(
+        curve: Arc<AutomationCurve>,
+        target: Arc<AtomicParam>,
+        identity: NodeIdentity,
+    ) -> Self {
+        Self {
+            curve,
+            target,
+            identity,
+        }
     }
 }
 
@@ -33,8 +43,16 @@ impl Node for AutomationNode {
             return;
         }
         let end = ctx.timeline_pos + ctx.block_len as i64;
-        let ramp_ms = if ctx.jumped { 0.0 } else { (ctx.block_len as f64 / ctx.sample_rate * 1000.0) as f32 };
-        let value = if ctx.jumped { self.curve.value_at(ctx.timeline_pos) } else { self.curve.value_at(end) };
+        let ramp_ms = if ctx.jumped {
+            0.0
+        } else {
+            (ctx.block_len as f64 / ctx.sample_rate * 1000.0) as f32
+        };
+        let value = if ctx.jumped {
+            self.curve.value_at(ctx.timeline_pos)
+        } else {
+            self.curve.value_at(end)
+        };
         self.target.set(value, ramp_ms);
     }
 

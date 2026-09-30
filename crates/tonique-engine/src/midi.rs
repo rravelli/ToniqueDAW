@@ -6,12 +6,29 @@ pub const MAX_MIDI_EVENTS_PER_BLOCK: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MidiMessage {
-    NoteOn { channel: u8, note: u8, velocity: u8 },
-    NoteOff { channel: u8, note: u8, velocity: u8 },
-    ControlChange { channel: u8, controller: u8, value: u8 },
+    NoteOn {
+        channel: u8,
+        note: u8,
+        velocity: u8,
+    },
+    NoteOff {
+        channel: u8,
+        note: u8,
+        velocity: u8,
+    },
+    ControlChange {
+        channel: u8,
+        controller: u8,
+        value: u8,
+    },
     /// -8192..=8191, 0 is centre.
-    PitchBend { channel: u8, value: i16 },
-    AllNotesOff { channel: u8 },
+    PitchBend {
+        channel: u8,
+        value: i16,
+    },
+    AllNotesOff {
+        channel: u8,
+    },
 }
 
 impl MidiMessage {
@@ -22,21 +39,52 @@ impl MidiMessage {
         let d1 = bytes.get(1).copied().unwrap_or(0) & 0x7f;
         let d2 = bytes.get(2).copied().unwrap_or(0) & 0x7f;
         Some(match status & 0xf0 {
-            0x80 => Self::NoteOff { channel, note: d1, velocity: d2 },
-            0x90 if d2 == 0 => Self::NoteOff { channel, note: d1, velocity: 0 },
-            0x90 => Self::NoteOn { channel, note: d1, velocity: d2 },
+            0x80 => Self::NoteOff {
+                channel,
+                note: d1,
+                velocity: d2,
+            },
+            0x90 if d2 == 0 => Self::NoteOff {
+                channel,
+                note: d1,
+                velocity: 0,
+            },
+            0x90 => Self::NoteOn {
+                channel,
+                note: d1,
+                velocity: d2,
+            },
             0xb0 if d1 == 123 => Self::AllNotesOff { channel },
-            0xb0 => Self::ControlChange { channel, controller: d1, value: d2 },
-            0xe0 => Self::PitchBend { channel, value: ((d2 as i16) << 7 | d1 as i16) - 8192 },
+            0xb0 => Self::ControlChange {
+                channel,
+                controller: d1,
+                value: d2,
+            },
+            0xe0 => Self::PitchBend {
+                channel,
+                value: ((d2 as i16) << 7 | d1 as i16) - 8192,
+            },
             _ => return None,
         })
     }
 
     pub fn to_bytes(self) -> [u8; 3] {
         match self {
-            Self::NoteOn { channel, note, velocity } => [0x90 | channel, note, velocity],
-            Self::NoteOff { channel, note, velocity } => [0x80 | channel, note, velocity],
-            Self::ControlChange { channel, controller, value } => [0xb0 | channel, controller, value],
+            Self::NoteOn {
+                channel,
+                note,
+                velocity,
+            } => [0x90 | channel, note, velocity],
+            Self::NoteOff {
+                channel,
+                note,
+                velocity,
+            } => [0x80 | channel, note, velocity],
+            Self::ControlChange {
+                channel,
+                controller,
+                value,
+            } => [0xb0 | channel, controller, value],
             Self::PitchBend { channel, value } => {
                 let v = (value + 8192).clamp(0, 16383) as u16;
                 [0xe0 | channel, (v & 0x7f) as u8, (v >> 7) as u8]
@@ -69,11 +117,17 @@ impl Default for MidiEventList {
 impl MidiEventList {
     /// A list with no capacity: every push is dropped. Never allocates.
     pub const fn empty() -> Self {
-        Self { events: Vec::new(), dropped: 0 }
+        Self {
+            events: Vec::new(),
+            dropped: 0,
+        }
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
-        Self { events: Vec::with_capacity(capacity), dropped: 0 }
+        Self {
+            events: Vec::with_capacity(capacity),
+            dropped: 0,
+        }
     }
 
     /// Appends an event; returns `false` (and counts a drop) when full.
@@ -147,8 +201,12 @@ pub struct ActiveNotes {
 impl ActiveNotes {
     pub fn observe(&mut self, msg: &MidiMessage) {
         match *msg {
-            MidiMessage::NoteOn { channel, note, .. } => self.bits[channel as usize & 15] |= 1 << note,
-            MidiMessage::NoteOff { channel, note, .. } => self.bits[channel as usize & 15] &= !(1 << note),
+            MidiMessage::NoteOn { channel, note, .. } => {
+                self.bits[channel as usize & 15] |= 1 << note
+            }
+            MidiMessage::NoteOff { channel, note, .. } => {
+                self.bits[channel as usize & 15] &= !(1 << note)
+            }
             MidiMessage::AllNotesOff { channel } => self.bits[channel as usize & 15] = 0,
             _ => {}
         }
@@ -164,7 +222,14 @@ impl ActiveNotes {
             while *bits != 0 {
                 let note = bits.trailing_zeros() as u8;
                 *bits &= !(1 << note);
-                out.push(offset, MidiMessage::NoteOff { channel: channel as u8, note, velocity: 0 });
+                out.push(
+                    offset,
+                    MidiMessage::NoteOff {
+                        channel: channel as u8,
+                        note,
+                        velocity: 0,
+                    },
+                );
             }
         }
     }
@@ -177,11 +242,29 @@ mod tests {
     #[test]
     fn roundtrip_bytes() {
         for m in [
-            MidiMessage::NoteOn { channel: 3, note: 60, velocity: 100 },
-            MidiMessage::NoteOff { channel: 0, note: 1, velocity: 0 },
-            MidiMessage::ControlChange { channel: 15, controller: 7, value: 127 },
-            MidiMessage::PitchBend { channel: 1, value: -8192 },
-            MidiMessage::PitchBend { channel: 1, value: 8191 },
+            MidiMessage::NoteOn {
+                channel: 3,
+                note: 60,
+                velocity: 100,
+            },
+            MidiMessage::NoteOff {
+                channel: 0,
+                note: 1,
+                velocity: 0,
+            },
+            MidiMessage::ControlChange {
+                channel: 15,
+                controller: 7,
+                value: 127,
+            },
+            MidiMessage::PitchBend {
+                channel: 1,
+                value: -8192,
+            },
+            MidiMessage::PitchBend {
+                channel: 1,
+                value: 8191,
+            },
             MidiMessage::AllNotesOff { channel: 2 },
         ] {
             assert_eq!(MidiMessage::from_bytes(&m.to_bytes()), Some(m));
@@ -191,8 +274,16 @@ mod tests {
     #[test]
     fn list_is_bounded_and_sorts_stably() {
         let mut l = MidiEventList::with_capacity(3);
-        let off = MidiMessage::NoteOff { channel: 0, note: 60, velocity: 0 };
-        let on = MidiMessage::NoteOn { channel: 0, note: 60, velocity: 1 };
+        let off = MidiMessage::NoteOff {
+            channel: 0,
+            note: 60,
+            velocity: 0,
+        };
+        let on = MidiMessage::NoteOn {
+            channel: 0,
+            note: 60,
+            velocity: 1,
+        };
         assert!(l.push(5, on));
         assert!(l.push(2, off));
         assert!(l.push(2, on));
@@ -206,8 +297,16 @@ mod tests {
     #[test]
     fn active_notes_release() {
         let mut a = ActiveNotes::default();
-        a.observe(&MidiMessage::NoteOn { channel: 1, note: 64, velocity: 9 });
-        a.observe(&MidiMessage::NoteOn { channel: 1, note: 127, velocity: 9 });
+        a.observe(&MidiMessage::NoteOn {
+            channel: 1,
+            note: 64,
+            velocity: 9,
+        });
+        a.observe(&MidiMessage::NoteOn {
+            channel: 1,
+            note: 127,
+            velocity: 9,
+        });
         let mut out = MidiEventList::default();
         a.release_all(&mut out, 7);
         assert_eq!(out.len(), 2);

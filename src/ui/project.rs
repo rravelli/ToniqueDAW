@@ -10,9 +10,9 @@ use crate::{
     config::recent::RecentProjects,
     core::{
         project::{EXTENSION, ProjectFile, project_name},
-        state::ToniqueProjectState,
+        state::ProjectState,
     },
-    ui::{theme::ThemeExt, widget::square_button::SquareButton},
+    ui::{theme::ThemeExt, widget::flat_button::FlatButton},
 };
 
 const BUTTON_HEIGHT: f32 = 22.;
@@ -45,7 +45,7 @@ struct Notice {
     lines: Vec<String>,
 }
 
-pub struct UIProject {
+pub struct ProjectManager {
     /// `None` until first saved or opened.
     path: Option<PathBuf>,
     /// The project as last saved or opened: anything different is unsaved.
@@ -58,8 +58,8 @@ pub struct UIProject {
     title: String,
 }
 
-impl UIProject {
-    pub fn new(state: &ToniqueProjectState) -> Self {
+impl ProjectManager {
+    pub fn new(state: &ProjectState) -> Self {
         Self {
             path: None,
             saved: state.project(None),
@@ -89,11 +89,11 @@ impl UIProject {
         self.path.as_deref().map_or("Untitled".into(), project_name)
     }
 
-    pub fn is_modified(&self, state: &ToniqueProjectState) -> bool {
+    pub fn is_modified(&self, state: &ProjectState) -> bool {
         state.project(self.dir()) != self.saved
     }
 
-    pub fn request(&mut self, action: ProjectAction, state: &mut ToniqueProjectState) {
+    pub fn request(&mut self, action: ProjectAction, state: &mut ProjectState) {
         match action {
             ProjectAction::New => self.after_prompt(Pending::New, state),
             ProjectAction::Open => self.after_prompt(Pending::Open(None), state),
@@ -113,7 +113,7 @@ impl UIProject {
 
     /// Run `pending` now, or once the user answered the prompt about unsaved
     /// changes.
-    fn after_prompt(&mut self, pending: Pending, state: &mut ToniqueProjectState) {
+    fn after_prompt(&mut self, pending: Pending, state: &mut ProjectState) {
         if self.is_modified(state) {
             self.pending = Some(pending);
         } else {
@@ -121,7 +121,7 @@ impl UIProject {
         }
     }
 
-    fn run(&mut self, pending: Pending, state: &mut ToniqueProjectState) {
+    fn run(&mut self, pending: Pending, state: &mut ProjectState) {
         match pending {
             Pending::New => {
                 state.new_project();
@@ -134,7 +134,7 @@ impl UIProject {
     }
 
     /// Open `path`, or the project the user picks.
-    fn open(&mut self, path: Option<PathBuf>, state: &mut ToniqueProjectState) {
+    fn open(&mut self, path: Option<PathBuf>, state: &mut ProjectState) {
         let Some(path) = path.or_else(|| project_dialog(self.dir()).pick_file()) else {
             return;
         };
@@ -166,14 +166,14 @@ impl UIProject {
     }
 
     /// Save to the current file, or ask where. Returns whether it saved.
-    fn save(&mut self, state: &ToniqueProjectState) -> bool {
+    fn save(&mut self, state: &ProjectState) -> bool {
         match self.path.clone() {
             Some(path) => self.write(&path, state),
             None => self.save_as(state),
         }
     }
 
-    fn save_as(&mut self, state: &ToniqueProjectState) -> bool {
+    fn save_as(&mut self, state: &ProjectState) -> bool {
         let Some(mut path) = project_dialog(self.dir())
             .set_file_name(format!("{}.{EXTENSION}", self.name()))
             .save_file()
@@ -186,7 +186,7 @@ impl UIProject {
         self.write(&path, state)
     }
 
-    fn write(&mut self, path: &Path, state: &ToniqueProjectState) -> bool {
+    fn write(&mut self, path: &Path, state: &ProjectState) -> bool {
         let project = state.project(path.parent());
         match project.write(path) {
             Ok(()) => {
@@ -206,7 +206,7 @@ impl UIProject {
     }
 
     /// Window title, closing the window, the prompt and notices.
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ToniqueProjectState) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let modified = self.is_modified(state);
         let title = format!(
             "{}{} — Tonique",
@@ -234,7 +234,7 @@ impl UIProject {
         self.notice(ui);
     }
 
-    fn prompt(&mut self, ui: &Ui, pending: Pending, state: &mut ToniqueProjectState) {
+    fn prompt(&mut self, ui: &Ui, pending: Pending, state: &mut ProjectState) {
         let theme = ui.app_theme();
         let mut answer = None;
         let modal = Modal::new(Id::new("unsaved-changes")).show(ui.ctx(), |ui| {
@@ -304,8 +304,8 @@ fn project_dialog(dir: Option<&Path>) -> FileDialog {
     }
 }
 
-fn button(text: &str) -> SquareButton {
-    SquareButton::new(text)
+fn button(text: &str) -> FlatButton {
+    FlatButton::new(text)
         .size(vec2(0., BUTTON_HEIGHT))
         .padding(10.)
         .font(egui::FontId::proportional(12.))

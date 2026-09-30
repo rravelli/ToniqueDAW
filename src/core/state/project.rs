@@ -6,29 +6,32 @@ use std::{
 };
 
 use egui::Vec2;
-use tonique_engine::edit::{
-    Bus, BusId, Channel, Edit, Output, TrackId,
-    commands::{AddBus, SetBypass, SetOutput, SetSolo},
+use tonique_engine::{
+    edit::{
+        Bus, BusId, Channel, Edit, Output, TrackId,
+        commands::{AddBus, SetBypass, SetOutput, SetSolo},
+    },
+    time::BeatPos,
 };
 
 use super::{
-    DEFAULT_BPM, DEFAULT_LOOP_BARS, MASTER_TRACK_ID, ToniqueProjectState, report,
-    sources::SourceRegistry,
+    DEFAULT_BPM, DEFAULT_LOOP_BARS, MASTER_TRACK_ID, ProjectState, report, sources::SourceRegistry,
 };
 use crate::{
     cache::AUDIO_ANALYSIS_CACHE,
     core::{
-        clip::ClipCore,
+        clip::AudioClip,
+        effect::EffectKind,
         project::{
             ChannelFile, ClipFile, EffectFile, GroupFile, ProjectFile, TrackFile, VERSION,
             resolve_path, store_path,
         },
-        track::MutableTrackCore,
+        track::TrackView,
     },
-    ui::theme::{format_color, parse_color},
+    utils::color::{format_color, parse_color},
 };
 
-impl ToniqueProjectState {
+impl ProjectState {
     /// Start an empty project on the same engine: no tracks, default tempo
     /// and loop, empty undo history. Settings, the audio output and view
     /// preferences (panels, theme palette, metronome switch) are kept.
@@ -37,21 +40,22 @@ impl ToniqueProjectState {
         self.pause_preview();
         report(self.session.reset(Edit::new(DEFAULT_BPM)));
 
-        let mut master = MutableTrackCore::new();
+        let mut master = TrackView::new();
         master.name = "Master".into();
         self.views = HashMap::from([(MASTER_TRACK_ID, master)]);
         self.sources = SourceRegistry::new(self.session.engine().config().sample_rate);
-        self.playhead = 0.;
-        self.edit_cursor = 0.;
+        self.playhead = BeatPos::ZERO;
+        self.edit_cursor = BeatPos::ZERO;
         self.selected_tracks.clear();
         self.clip_selection = Default::default();
-        self.effects.clear();
-        self.detached_effects.clear();
         self.pending_actions.clear();
         self.batching = false;
         self.resized_clip = None;
         self.grid.offset = Vec2::ZERO;
-        self.loop_range = (0., DEFAULT_LOOP_BARS * self.grid.beats_per_bar() as f32);
+        self.loop_range = (
+            BeatPos::ZERO,
+            BeatPos(DEFAULT_LOOP_BARS * self.grid.beats_per_bar() as f64),
+        );
         self.looping = false;
         self.sync_loop();
         self.graph.reset();
@@ -82,19 +86,15 @@ impl ToniqueProjectState {
             .filter_map(|bus| edit.bus(*bus).ok())
             .map(|group| {
                 let id = TrackId(group.id.0);
-                let view = self
-                    .views
-                    .get(&id)
-                    .cloned()
-                    .unwrap_or_else(MutableTrackCore::new);
+                let view = self.views.get(&id).cloned().unwrap_or_else(TrackView::new);
                 GroupFile {
                     name: group.name.clone(),
                     color: format_color(view.color),
                     height: view.height,
-                    folded: view.closed,
+                    collapsed: view.collapsed,
                     soloed: group.soloed,
                     parent: index_of(group.output),
-                    channel: self.channel_file(id, &group.channel),
+                    channel: self.channel_file(&group.channel),
                 }
             })
             .collect();
@@ -106,22 +106,22 @@ impl ToniqueProjectState {
                     .views
                     .get(&track.id)
                     .cloned()
-                    .unwrap_or_else(MutableTrackCore::new);
+                    .unwrap_or_else(TrackView::new);
                 TrackFile {
                     name: track.name.clone(),
                     color: format_color(view.color),
                     height: view.height,
-                    closed: view.closed,
+                    collapsed: view.collapsed,
                     soloed: track.soloed,
                     group: index_of(track.output),
-                    channel: self.channel_file(track.id, &track.channel),
+                    channel: self.channel_file(&track.channel),
                     clips: track
                         .clips
                         .iter()
                         .filter_map(|clip| self.clip_view(clip, bpm))
                         .map(|clip| ClipFile {
                             path: store_path(&clip.audio.path, dir),
-                            position: clip.position,
+                            position: clip.position.0,
                             trim_start: clip.trim_start,
                             trim_end: clip.trim_end,
                         })
@@ -132,15 +132,15 @@ impl ToniqueProjectState {
         ProjectFile {
             version: VERSION,
             bpm,
-            loop_range: self.loop_range,
+            loop_range: (self.loop_range.0.0, self.loop_range.1.0),
             looping: self.looping,
-            master: self.channel_file(MASTER_TRACK_ID, &edit.master),
+            master: self.channel_file(&edit.master),
             groups,
             tracks,
         }
     }
 
-    fn channel_file(&self, track: TrackId, channel: &Channel) -> ChannelFile {
+    fn channel_file(&self, channel: &Channel) -> ChannelFile {
         ChannelFile {
             volume: channel.volume.get(),
             pan: channel.pan.get(),
@@ -150,7 +150,7 @@ impl ToniqueProjectState {
                 .iter()
                 .filter_map(|plugin| {
                     Some(EffectFile {
-                        kind: self.effect(track, plugin.id)?.effect_id(),
+                        kind: EffectKind::of(&plugin.kind)?,
                         enabled: !plugin.bypassed,
                         params: plugin
                             .params
@@ -170,7 +170,7 @@ impl ToniqueProjectState {
         self.new_project();
         let mut problems = Vec::new();
         self.set_bpm(project.bpm);
-        self.set_loop_range(project.loop_range.0, project.loop_range.1);
+        self.set_loop_range(BeatPos(project.loop_range.0), BeatPos(project.loop_range.1));
         self.set_looping(project.looping);
         self.restore_channel(MASTER_TRACK_ID, &project.master, &mut problems);
 
@@ -184,10 +184,10 @@ impl ToniqueProjectState {
             }
             let id = TrackId(bus.id.0);
             self.perform(AddBus::new(bus));
-            let mut view = MutableTrackCore::new();
+            let mut view = TrackView::new();
             view.name.clone_from(&group.name);
             view.height = group.height;
-            view.closed = group.folded;
+            view.collapsed = group.collapsed;
             if let Some(color) = parse_color(&group.color) {
                 view.color = color;
             }
@@ -204,14 +204,14 @@ impl ToniqueProjectState {
             if let Some(group) = track.group.and_then(|i| groups.get(i)) {
                 self.perform(SetOutput::new(id, Output::Bus(BusId(group.0))));
             }
-            let view = self.track_mut(&id);
+            let view = self.track_view_mut(&id);
             view.name.clone_from(&track.name);
             view.height = track.height;
-            view.closed = track.closed;
+            view.collapsed = track.collapsed;
             if let Some(color) = parse_color(&track.color) {
                 view.color = color;
             }
-            self.commit_track_mut(&id);
+            self.commit_track_view(&id);
             if track.soloed {
                 self.perform(SetSolo::new(id, true));
             }
@@ -227,7 +227,6 @@ impl ToniqueProjectState {
         // Whatever the file said, keep groups together and never empty.
         self.normalize();
         self.remove_empty_groups();
-        self.sync_effects();
         self.session.clear_history();
         problems
     }
@@ -237,7 +236,7 @@ impl ToniqueProjectState {
         clip: &ClipFile,
         dir: &Path,
         problems: &mut Vec<String>,
-    ) -> Option<ClipCore> {
+    ) -> Option<AudioClip> {
         let path: PathBuf = resolve_path(&clip.path, dir);
         // The cache remembers files by path, even ones deleted since.
         let audio = path
@@ -249,10 +248,10 @@ impl ToniqueProjectState {
             problems.push(format!("Missing audio file: {}", clip.path.display()));
             return None;
         };
-        Some(ClipCore {
+        Some(AudioClip {
             id: self.new_clip_id(),
             audio,
-            position: clip.position,
+            position: BeatPos(clip.position),
             trim_start: clip.trim_start,
             trim_end: clip.trim_end,
         })
@@ -268,13 +267,7 @@ impl ToniqueProjectState {
         }
         for (index, effect) in channel.effects.iter().enumerate() {
             self.add_effect(&id, effect.kind, index);
-            let Some(plugin) = self
-                .edit()
-                .channel(self.channel_ref(id))
-                .ok()
-                .and_then(|c| c.plugins.get(index))
-                .cloned()
-            else {
+            let Some(plugin) = self.effects(&id).get(index).map(|e| e.plugin.clone()) else {
                 continue;
             };
             for (name, value) in &effect.params {
@@ -285,10 +278,6 @@ impl ToniqueProjectState {
             }
             if !effect.enabled {
                 self.perform(SetBypass::new(self.channel_ref(id), plugin.id, true));
-            }
-            self.sync_effects();
-            if let Some(editor) = self.effects.get_mut(&id).and_then(|e| e.get_mut(index)) {
-                editor.read_params();
             }
         }
     }

@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use eframe::NativeOptions;
 
-const APP_ICON: &'static [u8; 15773] = include_bytes!("../../images/logo.png");
+const APP_ICON: &[u8] = include_bytes!("../../images/logo.png");
 
-pub fn get_native_options() -> NativeOptions {
+pub fn native_options() -> NativeOptions {
     let mut options = NativeOptions::default();
     // App icon
     let d = eframe::icon_data::from_png_bytes(APP_ICON).expect("Invalid icon");

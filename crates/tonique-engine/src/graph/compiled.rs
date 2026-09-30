@@ -7,8 +7,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::compile::{CompileOptions, CompileStats};
+use super::node::{
+    BlockInfo, Node, NodeIdentity, NodeIo, NodeMessage, NodeProperties, ProcessContext,
+    StateTransfer,
+};
 use super::topology::{GraphTopology, NodeMeters};
-use super::node::{BlockInfo, Node, NodeIdentity, NodeIo, NodeMessage, NodeProperties, ProcessContext, StateTransfer};
 use crate::audio::{AudioBlock, AudioBlockMut, AudioBuffer};
 use crate::midi::MidiEventList;
 
@@ -20,8 +23,18 @@ pub(crate) struct CompiledNode {
 }
 
 impl CompiledNode {
-    pub(crate) fn new(node: Box<dyn Node>, name: &'static str, props: NodeProperties, inputs: Vec<usize>) -> Self {
-        Self { node: UnsafeCell::new(node), name, props, inputs: inputs.into_iter().map(|i| i as u32).collect() }
+    pub(crate) fn new(
+        node: Box<dyn Node>,
+        name: &'static str,
+        props: NodeProperties,
+        inputs: Vec<usize>,
+    ) -> Self {
+        Self {
+            node: UnsafeCell::new(node),
+            name,
+            props,
+            inputs: inputs.into_iter().map(|i| i as u32).collect(),
+        }
     }
 }
 
@@ -78,22 +91,42 @@ impl CompiledGraph {
         topology: GraphTopology,
     ) -> Self {
         let n = nodes.len();
-        let mut slots: Vec<AudioBuffer> = (0..slot_count).map(|_| AudioBuffer::new(slot_channels, opts.max_block)).collect();
-        let mut midi: Vec<MidiEventList> =
-            nodes.iter().map(|c| if c.props.has_midi { MidiEventList::default() } else { MidiEventList::empty() }).collect();
+        let mut slots: Vec<AudioBuffer> = (0..slot_count)
+            .map(|_| AudioBuffer::new(slot_channels, opts.max_block))
+            .collect();
+        let mut midi: Vec<MidiEventList> = nodes
+            .iter()
+            .map(|c| {
+                if c.props.has_midi {
+                    MidiEventList::default()
+                } else {
+                    MidiEventList::empty()
+                }
+            })
+            .collect();
         let io = (0..n)
             .map(|i| {
                 let (audio, channels) = match slot_of[i] {
                     Some(s) => (slots[s].as_mut_ptr(), nodes[i].props.channels),
                     None => (std::ptr::null_mut(), 0),
                 };
-                NodeIo { audio, channels, stride: opts.max_block, midi: &mut midi[i] as *mut _ }
+                NodeIo {
+                    audio,
+                    channels,
+                    stride: opts.max_block,
+                    midi: &mut midi[i] as *mut _,
+                }
             })
             .collect();
-        let roots = (0..n as u32).filter(|&i| dep_template[i as usize] == 0).collect();
+        let roots = (0..n as u32)
+            .filter(|&i| dep_template[i as usize] == 0)
+            .collect();
         Self {
             io,
-            dependents: dependents.into_iter().map(|d| d.into_iter().map(|x| x as u32).collect()).collect(),
+            dependents: dependents
+                .into_iter()
+                .map(|d| d.into_iter().map(|x| x as u32).collect())
+                .collect(),
             remaining: dep_template.iter().map(|&d| AtomicU32::new(d)).collect(),
             dep_template,
             done: AtomicUsize::new(0),
@@ -174,7 +207,9 @@ impl CompiledGraph {
         let mut ctx = ProcessContext {
             input_indices: &cn.inputs,
             io: &self.io,
-            audio_out: unsafe { AudioBlockMut::from_raw(io.audio, io.channels, io.stride, info.block_len) },
+            audio_out: unsafe {
+                AudioBlockMut::from_raw(io.audio, io.channels, io.stride, info.block_len)
+            },
             midi_out: unsafe { &mut *io.midi },
             block_len: info.block_len,
             sample_rate: info.sample_rate,
@@ -188,7 +223,8 @@ impl CompiledGraph {
         if self.meters.is_enabled() {
             let started = Instant::now();
             node.process(&mut ctx);
-            self.meters.record(idx, ctx.audio_out.as_block().peak(), started.elapsed());
+            self.meters
+                .record(idx, ctx.audio_out.as_block().peak(), started.elapsed());
         } else {
             node.process(&mut ctx);
         }
@@ -208,7 +244,14 @@ impl CompiledGraph {
     pub fn output(&self, len: usize) -> AudioBlock<'_> {
         let io = self.io[self.output];
         // SAFETY: only called when no block is being processed.
-        unsafe { AudioBlock::from_raw(io.audio, io.channels, io.stride, len.min(self.opts.max_block)) }
+        unsafe {
+            AudioBlock::from_raw(
+                io.audio,
+                io.channels,
+                io.stride,
+                len.min(self.opts.max_block),
+            )
+        }
     }
 
     /// Carry state over from `old` for every node whose identity matches:
@@ -265,7 +308,11 @@ impl CompiledGraph {
 
     /// Longest tail among nodes (how long to keep rendering after the end).
     pub fn max_tail_samples(&mut self) -> usize {
-        self.nodes.iter_mut().map(|n| n.node.get_mut().tail_samples()).max().unwrap_or(0)
+        self.nodes
+            .iter_mut()
+            .map(|n| n.node.get_mut().tail_samples())
+            .max()
+            .unwrap_or(0)
     }
 
     #[cfg(test)]
@@ -275,6 +322,12 @@ impl CompiledGraph {
 
     #[cfg(test)]
     pub(crate) fn index_of_name_nth(&self, name: &str, nth: usize) -> usize {
-        self.nodes.iter().enumerate().filter(|(_, n)| n.name == name).nth(nth).unwrap().0
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.name == name)
+            .nth(nth)
+            .unwrap()
+            .0
     }
 }

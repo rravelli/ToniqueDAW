@@ -16,11 +16,17 @@ impl Effects {
     }
 
     pub fn rebuild() -> Self {
-        Self { rebuild: true, curves: Vec::new() }
+        Self {
+            rebuild: true,
+            curves: Vec::new(),
+        }
     }
 
     pub fn curve(id: ParamId) -> Self {
-        Self { rebuild: false, curves: vec![id] }
+        Self {
+            rebuild: false,
+            curves: vec![id],
+        }
     }
 
     pub fn merge(&mut self, other: Effects) {
@@ -55,15 +61,27 @@ impl Default for UndoManager {
 
 impl UndoManager {
     pub fn new(max_depth: usize) -> Self {
-        Self { undo_stack: Vec::new(), redo_stack: Vec::new(), open: None, max_depth }
+        Self {
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            open: None,
+            max_depth,
+        }
     }
 
-    pub fn perform(&mut self, edit: &mut Edit, mut cmd: Box<dyn EditCommand>) -> Result<Effects, EditError> {
+    pub fn perform(
+        &mut self,
+        edit: &mut Edit,
+        mut cmd: Box<dyn EditCommand>,
+    ) -> Result<Effects, EditError> {
         let effects = cmd.apply(edit)?;
         self.redo_stack.clear();
         match &mut self.open {
             Some(t) => t.commands.push(cmd),
-            None => self.push(Transaction { label: cmd.label(), commands: vec![cmd] }),
+            None => self.push(Transaction {
+                label: cmd.label(),
+                commands: vec![cmd],
+            }),
         }
         Ok(effects)
     }
@@ -77,7 +95,10 @@ impl UndoManager {
 
     pub fn begin_transaction(&mut self, label: &'static str) {
         if self.open.is_none() {
-            self.open = Some(Transaction { label, commands: Vec::new() });
+            self.open = Some(Transaction {
+                label,
+                commands: Vec::new(),
+            });
         }
     }
 
@@ -102,7 +123,9 @@ impl UndoManager {
 
     pub fn undo(&mut self, edit: &mut Edit) -> Result<Option<Effects>, EditError> {
         self.commit_transaction();
-        let Some(mut t) = self.undo_stack.pop() else { return Ok(None) };
+        let Some(mut t) = self.undo_stack.pop() else {
+            return Ok(None);
+        };
         let mut effects = Effects::none();
         for c in t.commands.iter_mut().rev() {
             effects.merge(c.revert(edit)?);
@@ -112,7 +135,9 @@ impl UndoManager {
     }
 
     pub fn redo(&mut self, edit: &mut Edit) -> Result<Option<Effects>, EditError> {
-        let Some(mut t) = self.redo_stack.pop() else { return Ok(None) };
+        let Some(mut t) = self.redo_stack.pop() else {
+            return Ok(None);
+        };
         let mut effects = Effects::none();
         for c in t.commands.iter_mut() {
             effects.merge(c.apply(edit)?);

@@ -36,7 +36,11 @@ fn ramp(len: usize, rate: f64) -> Box<Ramp> {
 }
 
 fn engine() -> (Engine, AudioProcessor) {
-    Engine::new(EngineConfig { sample_rate: SR, housekeeping_thread: false, ..Default::default() })
+    Engine::new(EngineConfig {
+        sample_rate: SR,
+        housekeeping_thread: false,
+        ..Default::default()
+    })
 }
 
 /// Let the feeder thread fill the ring, and pick up the command.
@@ -57,7 +61,11 @@ fn plays_the_source_while_the_transport_is_stopped() {
     settle(&mut p);
     let out = render_offline(&mut p, 4096, 2);
     for (i, frame) in out.chunks(2).enumerate() {
-        assert!((frame[0] - i as f32 * STEP).abs() < 1e-6, "frame {i}: {}", frame[0]);
+        assert!(
+            (frame[0] - i as f32 * STEP).abs() < 1e-6,
+            "frame {i}: {}",
+            frame[0]
+        );
         assert_eq!(frame[1], -frame[0]);
     }
     assert_eq!(e.preview_position(), Some(4096));
@@ -75,14 +83,21 @@ fn seek_drops_queued_audio_and_stop_silences() {
     assert_eq!(e.preview_position(), Some(50_000));
     settle(&mut p);
     let out = left(&render_offline(&mut p, 256, 2));
-    assert!((out[0] - 50_000.0 * STEP).abs() < 1e-5, "resumed at {}", out[0] / STEP);
+    assert!(
+        (out[0] - 50_000.0 * STEP).abs() < 1e-5,
+        "resumed at {}",
+        out[0] / STEP
+    );
 
     e.preview_stop().unwrap();
     assert!(!e.is_previewing());
     assert_eq!(e.preview_position(), None);
     settle(&mut p);
     assert!(render_offline(&mut p, 256, 2).iter().all(|s| *s == 0.0));
-    assert!(e.collect_garbage() > 0, "old streams are freed off the audio thread");
+    assert!(
+        e.collect_garbage() > 0,
+        "old streams are freed off the audio thread"
+    );
 }
 
 #[test]
@@ -104,7 +119,11 @@ fn resamples_to_the_engine_rate() {
     settle(&mut p);
     let out = left(&render_offline(&mut p, 1000, 2));
     // Halfway through the output, halfway through the source.
-    assert!((out[500] / STEP - 250.0).abs() < 3.0, "at {}", out[500] / STEP);
+    assert!(
+        (out[500] / STEP - 250.0).abs() < 3.0,
+        "at {}",
+        out[500] / STEP
+    );
     assert_eq!(e.preview_position(), Some(500));
     render_offline(&mut p, 1100, 2);
     assert!(!e.is_previewing());

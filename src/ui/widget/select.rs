@@ -6,7 +6,7 @@ use egui::{
 };
 use egui_phosphor::fill::CARET_DOWN;
 
-use crate::ui::{font::PHOSPHOR_FILL, theme::ThemeExt, widget::item_button::ItemButton};
+use crate::ui::{font::PHOSPHOR_FILL, theme::ThemeExt, widget::list_row::ListRow};
 
 const HEIGHT: f32 = 20.;
 const PADDING: f32 = 6.;
@@ -121,7 +121,7 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
                     .max_height(MAX_POPUP_HEIGHT)
                     .show(ui, |ui| {
                         for (value, label) in &self.options {
-                            let item = ItemButton::new(label).selected(value == &*self.value);
+                            let item = ListRow::new(label).selected(value == &*self.value);
                             if ui.add(item).clicked() {
                                 picked = Some(value.clone());
                             }
@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn picking_an_option_changes_the_value() {
         let ctx = Context::default();
-        ctx.set_fonts(crate::ui::font::get_fonts());
+        ctx.set_fonts(crate::ui::font::fonts());
         let mut value = 1;
         let frame = |events: Vec<Event>, value: &mut i32| {
             let input = RawInput {

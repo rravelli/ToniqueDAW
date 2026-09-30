@@ -73,7 +73,15 @@ pub const PARAM_RAMP_MS: f32 = 20.0;
 
 impl Parameter {
     pub fn new(id: ParamId, name: &'static str, min: f32, max: f32, default: f32) -> Self {
-        Self { id, name, min, max, default, value: Arc::new(AtomicParam::new(default)), automation: Vec::new() }
+        Self {
+            id,
+            name,
+            min,
+            max,
+            default,
+            value: Arc::new(AtomicParam::new(default)),
+            automation: Vec::new(),
+        }
     }
 
     pub fn get(&self) -> f32 {
@@ -81,7 +89,13 @@ impl Parameter {
     }
 
     fn duplicate(&self, edit: &mut Edit) -> Self {
-        let mut p = Self::new(ParamId(edit.next_id()), self.name, self.min, self.max, self.default);
+        let mut p = Self::new(
+            ParamId(edit.next_id()),
+            self.name,
+            self.min,
+            self.max,
+            self.default,
+        );
         p.value.set(self.get(), 0.0);
         p.automation = self.automation.clone();
         p
@@ -98,9 +112,13 @@ pub enum PluginKind {
     Synth(Envelope),
     Filter(FilterMode),
     /// Echo with a fixed delay time (seconds).
-    Echo { time_s: f32 },
+    Echo {
+        time_s: f32,
+    },
     /// Stand-in for a lookahead plugin: a pure delay that reports latency.
-    Latency { samples: usize },
+    Latency {
+        samples: usize,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -113,14 +131,23 @@ pub struct Plugin {
 
 impl Plugin {
     pub fn new(edit: &mut Edit, kind: PluginKind) -> Self {
-        let mut p = |name, min, max, default| Parameter::new(ParamId(edit.next_id()), name, min, max, default);
+        let mut p = |name, min, max, default| {
+            Parameter::new(ParamId(edit.next_id()), name, min, max, default)
+        };
         let params = match kind {
             PluginKind::Synth(_) => vec![p("gain", 0.0, 2.0, 1.0)],
-            PluginKind::Filter(_) => vec![p("cutoff", 20.0, 20000.0, 2000.0), p("q", 0.1, 10.0, 0.707)],
+            PluginKind::Filter(_) => {
+                vec![p("cutoff", 20.0, 20000.0, 2000.0), p("q", 0.1, 10.0, 0.707)]
+            }
             PluginKind::Echo { .. } => vec![p("feedback", 0.0, 0.95, 0.4), p("mix", 0.0, 1.0, 0.3)],
             PluginKind::Latency { .. } => vec![],
         };
-        Self { id: PluginId(edit.next_id()), kind, params, bypassed: false }
+        Self {
+            id: PluginId(edit.next_id()),
+            kind,
+            params,
+            bypassed: false,
+        }
     }
 
     pub fn param(&self, name: &str) -> Option<&Parameter> {
@@ -129,7 +156,12 @@ impl Plugin {
 
     fn duplicate(&self, edit: &mut Edit) -> Self {
         let params = self.params.iter().map(|p| p.duplicate(edit)).collect();
-        Self { id: PluginId(edit.next_id()), kind: self.kind, params, bypassed: self.bypassed }
+        Self {
+            id: PluginId(edit.next_id()),
+            kind: self.kind,
+            params,
+            bypassed: self.bypassed,
+        }
     }
 }
 
@@ -145,8 +177,15 @@ pub struct Note {
 #[derive(Clone, Debug)]
 pub enum ClipContent {
     /// Plays silence until the source's data is set.
-    Audio { source: SourceId, source_offset_s: f64, gain: f32 },
-    Midi { notes: Vec<Note>, channel: u8 },
+    Audio {
+        source: SourceId,
+        source_offset_s: f64,
+        gain: f32,
+    },
+    Midi {
+        notes: Vec<Note>,
+        channel: u8,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -162,7 +201,14 @@ pub struct Clip {
 
 impl Clip {
     pub fn midi(edit: &mut Edit, start: BeatPos, length: f64, notes: Vec<Note>) -> Self {
-        Self { id: ClipId(edit.next_id()), start, length, fade_in_s: 0.0, fade_out_s: 0.0, content: ClipContent::Midi { notes, channel: 0 } }
+        Self {
+            id: ClipId(edit.next_id()),
+            start,
+            length,
+            fade_in_s: 0.0,
+            fade_out_s: 0.0,
+            content: ClipContent::Midi { notes, channel: 0 },
+        }
     }
 
     pub fn audio(edit: &mut Edit, start: BeatPos, length: f64, source: SourceId) -> Self {
@@ -172,7 +218,11 @@ impl Clip {
             length,
             fade_in_s: 0.005,
             fade_out_s: 0.005,
-            content: ClipContent::Audio { source, source_offset_s: 0.0, gain: 1.0 },
+            content: ClipContent::Audio {
+                source,
+                source_offset_s: 0.0,
+                gain: 1.0,
+            },
         }
     }
 
@@ -198,7 +248,11 @@ pub struct Send {
 impl Send {
     pub fn new(edit: &mut Edit, bus: BusId, level: f32) -> Self {
         let level_param = Parameter::new(ParamId(edit.next_id()), "send", 0.0, 2.0, level);
-        Self { bus, level: level_param, pan: Arc::new(AtomicParam::new(0.0)) }
+        Self {
+            bus,
+            level: level_param,
+            pan: Arc::new(AtomicParam::new(0.0)),
+        }
     }
 }
 
@@ -252,11 +306,15 @@ impl Channel {
     }
 
     fn params(&self) -> impl Iterator<Item = &Parameter> {
-        [&self.volume, &self.pan].into_iter().chain(self.plugins.iter().flat_map(|p| p.params.iter()))
+        [&self.volume, &self.pan]
+            .into_iter()
+            .chain(self.plugins.iter().flat_map(|p| p.params.iter()))
     }
 
     fn params_mut(&mut self) -> impl Iterator<Item = &mut Parameter> {
-        [&mut self.volume, &mut self.pan].into_iter().chain(self.plugins.iter_mut().flat_map(|p| p.params.iter_mut()))
+        [&mut self.volume, &mut self.pan]
+            .into_iter()
+            .chain(self.plugins.iter_mut().flat_map(|p| p.params.iter_mut()))
     }
 }
 
@@ -291,7 +349,14 @@ impl Track {
     /// Deep copy with fresh IDs throughout (track, clips, plugins, params).
     /// Sends are not copied.
     pub fn duplicate(&self, edit: &mut Edit) -> Self {
-        let clips = self.clips.iter().map(|c| Clip { id: ClipId(edit.next_id()), ..c.clone() }).collect();
+        let clips = self
+            .clips
+            .iter()
+            .map(|c| Clip {
+                id: ClipId(edit.next_id()),
+                ..c.clone()
+            })
+            .collect();
         Self {
             id: TrackId(edit.next_id()),
             name: self.name.clone(),
@@ -316,7 +381,13 @@ pub struct Bus {
 
 impl Bus {
     pub fn new(edit: &mut Edit, name: impl Into<String>) -> Self {
-        Self { id: BusId(edit.next_id()), name: name.into(), channel: Channel::new(edit), output: Output::Master, soloed: false }
+        Self {
+            id: BusId(edit.next_id()),
+            name: name.into(),
+            channel: Channel::new(edit),
+            output: Output::Master,
+            soloed: false,
+        }
     }
 }
 
@@ -387,19 +458,31 @@ impl Edit {
     }
 
     pub fn track(&self, id: TrackId) -> Result<&Track, EditError> {
-        self.tracks.iter().find(|t| t.id == id).ok_or(EditError::TrackNotFound(id))
+        self.tracks
+            .iter()
+            .find(|t| t.id == id)
+            .ok_or(EditError::TrackNotFound(id))
     }
 
     pub fn track_mut(&mut self, id: TrackId) -> Result<&mut Track, EditError> {
-        self.tracks.iter_mut().find(|t| t.id == id).ok_or(EditError::TrackNotFound(id))
+        self.tracks
+            .iter_mut()
+            .find(|t| t.id == id)
+            .ok_or(EditError::TrackNotFound(id))
     }
 
     pub fn bus(&self, id: BusId) -> Result<&Bus, EditError> {
-        self.buses.iter().find(|b| b.id == id).ok_or(EditError::BusNotFound(id))
+        self.buses
+            .iter()
+            .find(|b| b.id == id)
+            .ok_or(EditError::BusNotFound(id))
     }
 
     pub fn bus_mut(&mut self, id: BusId) -> Result<&mut Bus, EditError> {
-        self.buses.iter_mut().find(|b| b.id == id).ok_or(EditError::BusNotFound(id))
+        self.buses
+            .iter_mut()
+            .find(|b| b.id == id)
+            .ok_or(EditError::BusNotFound(id))
     }
 
     /// The buses `output` leads through on its way to the master, nearest
@@ -428,7 +511,14 @@ impl Edit {
     pub fn channel_mut(&mut self, r: ChannelRef) -> Result<&mut Channel, EditError> {
         Ok(match r {
             ChannelRef::Track(id) => &mut self.track_mut(id)?.channel,
-            ChannelRef::Bus(id) => &mut self.buses.iter_mut().find(|b| b.id == id).ok_or(EditError::BusNotFound(id))?.channel,
+            ChannelRef::Bus(id) => {
+                &mut self
+                    .buses
+                    .iter_mut()
+                    .find(|b| b.id == id)
+                    .ok_or(EditError::BusNotFound(id))?
+                    .channel
+            }
             ChannelRef::Master => &mut self.master,
         })
     }
@@ -442,13 +532,19 @@ impl Edit {
     }
 
     pub fn param(&self, id: ParamId) -> Result<&Parameter, EditError> {
-        self.all_params().find(|p| p.id == id).ok_or(EditError::ParamNotFound(id))
+        self.all_params()
+            .find(|p| p.id == id)
+            .ok_or(EditError::ParamNotFound(id))
     }
 
     pub fn param_mut(&mut self, id: ParamId) -> Result<&mut Parameter, EditError> {
         self.tracks
             .iter_mut()
-            .flat_map(|t| t.channel.params_mut().chain(t.sends.iter_mut().map(|s| &mut s.level)))
+            .flat_map(|t| {
+                t.channel
+                    .params_mut()
+                    .chain(t.sends.iter_mut().map(|s| &mut s.level))
+            })
             .chain(self.buses.iter_mut().flat_map(|b| b.channel.params_mut()))
             .chain(self.master.params_mut())
             .find(|p| p.id == id)
@@ -462,9 +558,14 @@ impl Edit {
         for t in &self.tracks {
             // A soloed bus solos everything routed into it.
             let soloed = t.soloed
-                || self.buses_along(t.output).iter().any(|id| self.bus(*id).is_ok_and(|b| b.soloed));
+                || self
+                    .buses_along(t.output)
+                    .iter()
+                    .any(|id| self.bus(*id).is_ok_and(|b| b.soloed));
             let audible = !t.channel.muted && (!any_solo || soloed);
-            t.channel.mute_gain.set(if audible { 1.0 } else { 0.0 }, 10.0);
+            t.channel
+                .mute_gain
+                .set(if audible { 1.0 } else { 0.0 }, 10.0);
         }
         for c in self.buses.iter().map(|b| &b.channel).chain([&self.master]) {
             c.mute_gain.set(if c.muted { 0.0 } else { 1.0 }, 10.0);
@@ -473,13 +574,26 @@ impl Edit {
 
     /// End of the last clip.
     pub fn length(&self) -> BeatPos {
-        BeatPos(self.tracks.iter().flat_map(|t| &t.clips).map(|c| c.end().0).fold(0.0, f64::max))
+        BeatPos(
+            self.tracks
+                .iter()
+                .flat_map(|t| &t.clips)
+                .map(|c| c.end().0)
+                .fold(0.0, f64::max),
+        )
     }
 }
 
 impl Channel {
     fn placeholder() -> Self {
         let p = Parameter::new(ParamId(0), "", 0.0, 0.0, 0.0);
-        Self { plugins: Vec::new(), volume: p.clone(), pan: p, muted: false, mute_gain: Arc::new(AtomicParam::new(1.0)), meter: Arc::default() }
+        Self {
+            plugins: Vec::new(),
+            volume: p.clone(),
+            pan: p,
+            muted: false,
+            mute_gain: Arc::new(AtomicParam::new(1.0)),
+            meter: Arc::default(),
+        }
     }
 }

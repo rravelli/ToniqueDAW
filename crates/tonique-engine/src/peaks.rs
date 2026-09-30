@@ -35,7 +35,9 @@ pub struct WaveformPeaks {
 impl WaveformPeaks {
     pub fn from_buffer(buffer: &SampleBuffer) -> Self {
         let mut builder = PeakBuilder::new(buffer.num_channels(), buffer.sample_rate());
-        let channels: Vec<&[f32]> = (0..buffer.num_channels()).map(|c| buffer.channel(c)).collect();
+        let channels: Vec<&[f32]> = (0..buffer.num_channels())
+            .map(|c| buffer.channel(c))
+            .collect();
         builder.push(&channels);
         builder.snapshot()
     }
@@ -73,14 +75,27 @@ impl WaveformPeaks {
     /// buckets hold at most `resolution` samples. Edges are rounded out to
     /// that level's buckets. Cheaper than `range` when drawing many
     /// adjacent columns: pass about a quarter of the samples per column.
-    pub fn range_approx(&self, ch: usize, start: usize, end: usize, resolution: usize) -> Option<(f32, f32)> {
+    pub fn range_approx(
+        &self,
+        ch: usize,
+        start: usize,
+        end: usize,
+        resolution: usize,
+    ) -> Option<(f32, f32)> {
         let levels = self.channels.get(ch)?;
         let end = end.min(self.frames);
         if start >= end || levels.is_empty() {
             return None;
         }
-        let level = &levels[levels.iter().rposition(|l| l.bucket <= resolution).unwrap_or(0)];
-        let (min, max) = reduce(level, start / level.bucket, end.div_ceil(level.bucket).min(level.min.len()));
+        let level = &levels[levels
+            .iter()
+            .rposition(|l| l.bucket <= resolution)
+            .unwrap_or(0)];
+        let (min, max) = reduce(
+            level,
+            start / level.bucket,
+            end.div_ceil(level.bucket).min(level.min.len()),
+        );
         (min <= max).then_some((min, max))
     }
 
@@ -97,7 +112,11 @@ impl WaveformPeaks {
             for level in levels {
                 out.extend_from_slice(&(level.bucket as u64).to_le_bytes());
                 out.extend_from_slice(&(level.min.len() as u64).to_le_bytes());
-                level.min.iter().chain(&level.max).for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+                level
+                    .min
+                    .iter()
+                    .chain(&level.max)
+                    .for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
             }
         }
         out
@@ -128,7 +147,11 @@ impl WaveformPeaks {
             }
             channels.push(levels);
         }
-        r.0.is_empty().then_some(Self { channels, frames, sample_rate })
+        r.0.is_empty().then_some(Self {
+            channels,
+            frames,
+            sample_rate,
+        })
     }
 }
 
@@ -158,8 +181,14 @@ fn range_at(levels: &[PeakLevel], l: usize, start: usize, end: usize) -> (f32, f
 
 fn reduce(level: &PeakLevel, from: usize, to: usize) -> (f32, f32) {
     let from = from.min(to);
-    let min = level.min[from..to].iter().copied().fold(f32::INFINITY, f32::min);
-    let max = level.max[from..to].iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let min = level.min[from..to]
+        .iter()
+        .copied()
+        .fold(f32::INFINITY, f32::min);
+    let max = level.max[from..to]
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
     (min, max)
 }
 
@@ -186,7 +215,14 @@ impl<'a> Reader<'a> {
     }
     fn f32s(&mut self, n: usize) -> Option<Vec<f32>> {
         let bytes = self.take(n.checked_mul(4)?)?;
-        Some(bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
+        Some(
+            bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| f32::from_le_bytes(*c))
+                .collect(),
+        )
     }
 }
 
@@ -213,7 +249,11 @@ impl ChannelBuilder {
     fn push_at(&mut self, l: usize, min: f32, max: f32) {
         if l == self.levels.len() {
             let bucket = BASE_BUCKET * LEVEL_FACTOR.pow(l as u32);
-            self.levels.push(PeakLevel { bucket, min: Vec::new(), max: Vec::new() });
+            self.levels.push(PeakLevel {
+                bucket,
+                min: Vec::new(),
+                max: Vec::new(),
+            });
             self.pending.push((f32::INFINITY, f32::NEG_INFINITY, 0));
         }
         let per_bucket = if l == 0 { BASE_BUCKET } else { LEVEL_FACTOR };
@@ -252,7 +292,13 @@ impl ChannelBuilder {
 
 impl PeakBuilder {
     pub fn new(num_channels: usize, sample_rate: f64) -> Self {
-        Self { channels: (0..num_channels).map(|_| ChannelBuilder::default()).collect(), frames: 0, sample_rate }
+        Self {
+            channels: (0..num_channels)
+                .map(|_| ChannelBuilder::default())
+                .collect(),
+            frames: 0,
+            sample_rate,
+        }
     }
 
     pub fn frames(&self) -> usize {
@@ -263,7 +309,10 @@ impl PeakBuilder {
     pub fn push(&mut self, block: &[&[f32]]) {
         assert_eq!(block.len(), self.channels.len(), "channel count mismatch");
         let len = block.first().map_or(0, |c| c.len());
-        assert!(block.iter().all(|c| c.len() == len), "channels must have equal length");
+        assert!(
+            block.iter().all(|c| c.len() == len),
+            "channels must have equal length"
+        );
         for (builder, samples) in self.channels.iter_mut().zip(block) {
             samples.iter().for_each(|&s| builder.push_sample(s));
         }
@@ -272,7 +321,11 @@ impl PeakBuilder {
 
     /// Peaks for everything pushed so far, including partial buckets.
     pub fn snapshot(&self) -> WaveformPeaks {
-        WaveformPeaks { channels: self.channels.iter().map(ChannelBuilder::snapshot).collect(), frames: self.frames, sample_rate: self.sample_rate }
+        WaveformPeaks {
+            channels: self.channels.iter().map(ChannelBuilder::snapshot).collect(),
+            frames: self.frames,
+            sample_rate: self.sample_rate,
+        }
     }
 }
 
@@ -282,7 +335,9 @@ mod tests {
 
     /// Deterministic pseudo-random samples in [-1, 1).
     fn noise(len: usize, seed: u64) -> Vec<f32> {
-        let mut x = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let mut x = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (0..len)
             .map(|_| {
                 x ^= x << 13;
@@ -295,17 +350,36 @@ mod tests {
 
     fn brute(samples: &[f32], start: usize, end: usize) -> (f32, f32) {
         let s = &samples[start..end.min(samples.len())];
-        (s.iter().copied().fold(f32::INFINITY, f32::min), s.iter().copied().fold(f32::NEG_INFINITY, f32::max))
+        (
+            s.iter().copied().fold(f32::INFINITY, f32::min),
+            s.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        )
     }
 
     #[test]
     fn range_matches_brute_force_on_bucket_rounded_edges() {
         let samples = noise(100_003, 1);
         let peaks = WaveformPeaks::from_buffer(&SampleBuffer::new(vec![samples.clone()], 48000.));
-        let spans: [(usize, usize); 8] = [(0, 1), (5, 70), (63, 65), (0, 100_003), (1000, 90_000), (12_345, 67_890), (99_990, 200_000), (4096, 8192)];
+        let spans: [(usize, usize); 8] = [
+            (0, 1),
+            (5, 70),
+            (63, 65),
+            (0, 100_003),
+            (1000, 90_000),
+            (12_345, 67_890),
+            (99_990, 200_000),
+            (4096, 8192),
+        ];
         for (start, end) in spans {
-            let rounded = (start / BASE_BUCKET * BASE_BUCKET, end.div_ceil(BASE_BUCKET) * BASE_BUCKET);
-            assert_eq!(peaks.range(0, start, end), Some(brute(&samples, rounded.0, rounded.1)), "{start}..{end}");
+            let rounded = (
+                start / BASE_BUCKET * BASE_BUCKET,
+                end.div_ceil(BASE_BUCKET) * BASE_BUCKET,
+            );
+            assert_eq!(
+                peaks.range(0, start, end),
+                Some(brute(&samples, rounded.0, rounded.1)),
+                "{start}..{end}"
+            );
         }
     }
 
@@ -313,11 +387,24 @@ mod tests {
     fn approx_range_rounds_to_the_chosen_level() {
         let samples = noise(100_000, 8);
         let peaks = WaveformPeaks::from_buffer(&SampleBuffer::new(vec![samples.clone()], 48000.));
-        let spans: [(usize, usize, usize); 5] = [(10, 20, 1), (100, 900, 200), (1_000, 9_000, 2_000), (5, 99_999, 30_000), (70_000, 200_000, 4_096)];
+        let spans: [(usize, usize, usize); 5] = [
+            (10, 20, 1),
+            (100, 900, 200),
+            (1_000, 9_000, 2_000),
+            (5, 99_999, 30_000),
+            (70_000, 200_000, 4_096),
+        ];
         for (start, end, resolution) in spans {
-            let bucket = [BASE_BUCKET, 256, 1024, 4096, 16384].into_iter().rfind(|&b| b <= resolution).unwrap_or(BASE_BUCKET);
+            let bucket = [BASE_BUCKET, 256, 1024, 4096, 16384]
+                .into_iter()
+                .rfind(|&b| b <= resolution)
+                .unwrap_or(BASE_BUCKET);
             let rounded = (start / bucket * bucket, end.div_ceil(bucket) * bucket);
-            assert_eq!(peaks.range_approx(0, start, end, resolution), Some(brute(&samples, rounded.0, rounded.1)), "{start}..{end}");
+            assert_eq!(
+                peaks.range_approx(0, start, end, resolution),
+                Some(brute(&samples, rounded.0, rounded.1)),
+                "{start}..{end}"
+            );
         }
         assert_eq!(peaks.range_approx(0, 100_000, 100_010, 64), None);
     }
@@ -328,7 +415,10 @@ mod tests {
         let peaks = WaveformPeaks::from_buffer(&SampleBuffer::new(vec![samples.clone()], 48000.));
         for start in (0..40_000).step_by(BASE_BUCKET * 37) {
             for len in [BASE_BUCKET, 256, 1024, 3200, 9984] {
-                assert_eq!(peaks.range(0, start, start + len), Some(brute(&samples, start, start + len)));
+                assert_eq!(
+                    peaks.range(0, start, start + len),
+                    Some(brute(&samples, start, start + len))
+                );
             }
         }
     }
@@ -336,7 +426,8 @@ mod tests {
     #[test]
     fn incremental_build_equals_one_shot() {
         let (l, r) = (noise(70_001, 3), noise(70_001, 4));
-        let one_shot = WaveformPeaks::from_buffer(&SampleBuffer::new(vec![l.clone(), r.clone()], 44100.));
+        let one_shot =
+            WaveformPeaks::from_buffer(&SampleBuffer::new(vec![l.clone(), r.clone()], 44100.));
         let mut builder = PeakBuilder::new(2, 44100.);
         let mut at = 0;
         for chunk in [1, 63, 1000, 4097, 20_000, 44_840] {
@@ -370,7 +461,10 @@ mod tests {
 
     #[test]
     fn bytes_round_trip() {
-        let peaks = WaveformPeaks::from_buffer(&SampleBuffer::new(vec![noise(33_333, 6), noise(33_333, 7)], 48000.));
+        let peaks = WaveformPeaks::from_buffer(&SampleBuffer::new(
+            vec![noise(33_333, 6), noise(33_333, 7)],
+            48000.,
+        ));
         let bytes = peaks.to_bytes();
         assert_eq!(WaveformPeaks::from_bytes(&bytes), Some(peaks));
         assert_eq!(WaveformPeaks::from_bytes(&bytes[..bytes.len() - 1]), None);
@@ -381,6 +475,9 @@ mod tests {
     fn empty_peaks() {
         let peaks = WaveformPeaks::default();
         assert_eq!(peaks.range(0, 0, 100), None);
-        assert_eq!(PeakBuilder::new(2, 48000.).snapshot().range(0, 0, 100), None);
+        assert_eq!(
+            PeakBuilder::new(2, 48000.).snapshot().range(0, 0, 100),
+            None
+        );
     }
 }

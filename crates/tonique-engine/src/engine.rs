@@ -22,7 +22,10 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::graph::scheduler::WorkerPool;
-use crate::graph::{BlockInfo, CompileError, CompileOptions, CompileStats, CompiledGraph, GraphDescription, GraphTopology, NodeIdentity, NodeMessage, compile};
+use crate::graph::{
+    BlockInfo, CompileError, CompileOptions, CompileStats, CompiledGraph, GraphDescription,
+    GraphTopology, NodeIdentity, NodeMessage, compile,
+};
 use crate::preview::{PreviewControl, PreviewShared, PreviewSource, PreviewStream};
 use crate::rt;
 use crate::time::SamplePos;
@@ -66,9 +69,15 @@ pub enum Command {
     SetLoop(Option<(SamplePos, SamplePos)>),
     /// Deliver a message to the node with this identity (e.g. swap in a new
     /// automation curve without rebuilding the graph).
-    SendToNode { target: NodeIdentity, msg: NodeMessage },
+    SendToNode {
+        target: NodeIdentity,
+        msg: NodeMessage,
+    },
     /// Replace the preview stream (`None` stops the preview).
-    SetPreview { stream: Option<PreviewStream>, generation: u64 },
+    SetPreview {
+        stream: Option<PreviewStream>,
+        generation: u64,
+    },
 }
 
 /// Things the RT thread has let go of, to be dropped elsewhere.
@@ -181,7 +190,10 @@ impl Engine {
         let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(GARBAGE_CAPACITY);
         let shared = Arc::new(Shared::default());
         let garbage = Arc::new(Mutex::new(garbage_rx));
-        let graphs = Arc::new(Mutex::new(GraphOutbox { tx: graph_tx, pending: None }));
+        let graphs = Arc::new(Mutex::new(GraphOutbox {
+            tx: graph_tx,
+            pending: None,
+        }));
 
         let housekeeping = config.housekeeping_thread.then(|| {
             let stop = Arc::new(AtomicBool::new(false));
@@ -218,7 +230,17 @@ impl Engine {
             preview_generation: 0,
             preview_shared: preview.shared(),
         };
-        let engine = Engine { config, commands: cmd_tx, graphs, shared, garbage, housekeeping, preview, topology: None, graph_metering: false };
+        let engine = Engine {
+            config,
+            commands: cmd_tx,
+            graphs,
+            shared,
+            garbage,
+            housekeeping,
+            preview,
+            topology: None,
+            graph_metering: false,
+        };
         (engine, processor)
     }
 
@@ -227,7 +249,10 @@ impl Engine {
     }
 
     pub fn compile_options(&self) -> CompileOptions {
-        CompileOptions { sample_rate: self.config.sample_rate, max_block: self.config.max_block }
+        CompileOptions {
+            sample_rate: self.config.sample_rate,
+            max_block: self.config.max_block,
+        }
     }
 
     /// Compile off-thread (here, on the caller's thread) and hand the result
@@ -265,7 +290,9 @@ impl Engine {
     }
 
     pub fn send(&mut self, cmd: Command) -> Result<(), EngineError> {
-        self.commands.push(cmd).map_err(|_| EngineError::CommandQueueFull)
+        self.commands
+            .push(cmd)
+            .map_err(|_| EngineError::CommandQueueFull)
     }
 
     pub fn play(&mut self) -> Result<(), EngineError> {
@@ -328,23 +355,36 @@ impl Engine {
 
     /// Play `source` from source frame `from`, alongside (and independent
     /// of) the transport. Replaces any preview already playing.
-    pub fn preview_play(&mut self, source: Box<dyn PreviewSource>, from: usize) -> Result<(), EngineError> {
+    pub fn preview_play(
+        &mut self,
+        source: Box<dyn PreviewSource>,
+        from: usize,
+    ) -> Result<(), EngineError> {
         let (stream, generation) = self.preview.play(source, from);
-        self.send(Command::SetPreview { stream: Some(stream), generation })
+        self.send(Command::SetPreview {
+            stream: Some(stream),
+            generation,
+        })
     }
 
     /// Continue the last previewed source from `from` (does nothing if
     /// nothing was previewed yet).
     pub fn preview_seek(&mut self, from: usize) -> Result<(), EngineError> {
         match self.preview.seek(from) {
-            Some((stream, generation)) => self.send(Command::SetPreview { stream: Some(stream), generation }),
+            Some((stream, generation)) => self.send(Command::SetPreview {
+                stream: Some(stream),
+                generation,
+            }),
             None => Ok(()),
         }
     }
 
     pub fn preview_stop(&mut self) -> Result<(), EngineError> {
         let generation = self.preview.stop();
-        self.send(Command::SetPreview { stream: None, generation })
+        self.send(Command::SetPreview {
+            stream: None,
+            generation,
+        })
     }
 
     /// True from `preview_play`/`preview_seek` until stopped or played to the end.
@@ -415,7 +455,11 @@ impl AudioProcessor {
                 {
                     n = (le - self.position) as usize; // split exactly at the loop end
                 }
-                self.render_chunk(&mut out[done * channels..(done + n) * channels], channels, n);
+                self.render_chunk(
+                    &mut out[done * channels..(done + n) * channels],
+                    channels,
+                    n,
+                );
                 done += n;
             }
             self.mix_preview(out, channels);
@@ -426,13 +470,17 @@ impl AudioProcessor {
         let budget = frames_to_secs(out.len() / channels.max(1), self.config.sample_rate);
         if budget > 0.0 {
             let load = started.elapsed().as_secs_f64() / budget;
-            self.shared.load_permille.store((load * 1000.0) as u64, Ordering::Relaxed);
+            self.shared
+                .load_permille
+                .store((load * 1000.0) as u64, Ordering::Relaxed);
         }
     }
 
     /// Add queued preview frames to the first two channels of `out`.
     fn mix_preview(&mut self, out: &mut [f32], channels: usize) {
-        let Some(stream) = &mut self.preview else { return };
+        let Some(stream) = &mut self.preview else {
+            return;
+        };
         let frames = out.len() / channels.max(1);
         let n = stream.slots().min(frames);
         if let Ok(chunk) = stream.read_chunk(n) {
@@ -445,10 +493,14 @@ impl AudioProcessor {
             }
             chunk.commit_all();
         }
-        self.preview_shared.played.fetch_add(n as u64, Ordering::Relaxed);
+        self.preview_shared
+            .played
+            .fetch_add(n as u64, Ordering::Relaxed);
         // The feeder abandons the ring at the end of the source.
         if stream.is_empty() && stream.is_abandoned() {
-            self.preview_shared.finished.store(self.preview_generation, Ordering::Relaxed);
+            self.preview_shared
+                .finished
+                .store(self.preview_generation, Ordering::Relaxed);
         }
     }
 
@@ -464,13 +516,19 @@ impl AudioProcessor {
         match self.current.as_deref_mut() {
             Some(graph) => {
                 match &self.pool {
-                    Some(pool) if graph.len() >= self.config.parallel_threshold => pool.run_block(graph, &info),
+                    Some(pool) if graph.len() >= self.config.parallel_threshold => {
+                        pool.run_block(graph, &info)
+                    }
                     _ => graph.process_sequential(&info),
                 }
                 let block = graph.output(n);
                 for (f, frame) in out.chunks_exact_mut(channels).enumerate() {
                     for (c, s) in frame.iter_mut().enumerate() {
-                        *s = if block.channels() == 0 { 0.0 } else { block.channel(c.min(block.channels() - 1))[f] };
+                        *s = if block.channels() == 0 {
+                            0.0
+                        } else {
+                            block.channel(c.min(block.channels() - 1))[f]
+                        };
                     }
                 }
             }
@@ -513,13 +571,20 @@ impl AudioProcessor {
                     }
                     let _ = self.garbage.push(Garbage::Message(msg));
                 }
-                Command::SetPreview { mut stream, generation } => {
+                Command::SetPreview {
+                    mut stream,
+                    generation,
+                } => {
                     std::mem::swap(&mut self.preview, &mut stream);
                     self.preview_generation = generation;
                     self.preview_shared.played.store(0, Ordering::Relaxed);
-                    self.preview_shared.generation.store(generation, Ordering::Relaxed);
+                    self.preview_shared
+                        .generation
+                        .store(generation, Ordering::Relaxed);
                     // The old stream is freed off the RT thread.
-                    let _ = self.garbage.push(Garbage::Command(Command::SetPreview { stream, generation }));
+                    let _ = self
+                        .garbage
+                        .push(Garbage::Command(Command::SetPreview { stream, generation }));
                 }
             }
         }
@@ -529,7 +594,9 @@ impl AudioProcessor {
         // Adopt every pending graph in order, migrating state each time, so
         // instances flow forward even through graphs that never played.
         while self.garbage.slots() > 0 {
-            let Ok(mut next) = self.graphs.pop() else { return };
+            let Ok(mut next) = self.graphs.pop() else {
+                return;
+            };
             let migrated = match self.current.take() {
                 Some(mut old) => {
                     let m = next.adopt_state_from(&mut old);
@@ -539,7 +606,9 @@ impl AudioProcessor {
                 None => 0,
             };
             self.current = Some(next);
-            self.shared.last_migrated.store(migrated as u64, Ordering::Relaxed);
+            self.shared
+                .last_migrated
+                .store(migrated as u64, Ordering::Relaxed);
             self.shared.graphs_adopted.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -580,7 +649,12 @@ mod tests {
     }
 
     fn engine() -> (Engine, AudioProcessor) {
-        Engine::new(EngineConfig { max_block: 16, output_channels: 1, housekeeping_thread: false, ..Default::default() })
+        Engine::new(EngineConfig {
+            max_block: 16,
+            output_channels: 1,
+            housekeeping_thread: false,
+            ..Default::default()
+        })
     }
 
     #[test]
@@ -594,7 +668,10 @@ mod tests {
         e.seek(20).unwrap();
         e.play().unwrap();
         let out = render_offline(&mut p, 12, 1);
-        let expect: Vec<f32> = [20, 21, 22, 23, 24, 10, 11, 12, 13, 14, 15, 16].iter().map(|&x| x as f32).collect();
+        let expect: Vec<f32> = [20, 21, 22, 23, 24, 10, 11, 12, 13, 14, 15, 16]
+            .iter()
+            .map(|&x| x as f32)
+            .collect();
         assert_eq!(out, expect);
         e.stop().unwrap();
         let out = render_offline(&mut p, 4, 1);
@@ -623,7 +700,14 @@ mod tests {
         let mut d = GraphDescription::new();
         let c = d.add(Clock, &[]);
         d.set_output(c);
-        let g = compile(d, &CompileOptions { sample_rate: 44100.0, max_block: 16 }).unwrap();
+        let g = compile(
+            d,
+            &CompileOptions {
+                sample_rate: 44100.0,
+                max_block: 16,
+            },
+        )
+        .unwrap();
         assert!(matches!(e.publish(g), Err(EngineError::Incompatible(_))));
     }
 }

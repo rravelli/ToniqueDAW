@@ -15,5 +15,8 @@ mod topology;
 pub use compile::{CompileError, CompileOptions, CompileStats, compile};
 pub use compiled::CompiledGraph;
 pub use desc::{GraphDescription, NodeId};
+pub use node::{
+    BlockInfo, ContentId, Node, NodeIdentity, NodeMessage, NodeProperties, ProcessContext,
+    StateTransfer, hash_of,
+};
 pub use topology::{GraphTopology, NodeMeters, NodeReading, TopologyNode};
-pub use node::{BlockInfo, ContentId, Node, NodeIdentity, NodeMessage, NodeProperties, ProcessContext, StateTransfer, hash_of};

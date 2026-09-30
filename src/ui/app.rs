@@ -1,31 +1,35 @@
 use crate::{
     audio::host::AudioHost,
     config::{keymap::Action, settings::Settings},
-    core::state::{CentralView, PlaybackState, ToniqueProjectState},
+    core::state::{PlaybackState, ProjectState},
     ui::{
+        commands::Commands,
         panels::{
-            bottom_panel::UIBottomPanel,
-            central_panel::UICentralPanel,
-            left_panel::UILeftPanel,
-            menu_bar::{UIMenuBar, set_ui_scale},
-            top_bar::UITopBar,
+            bottom_panel::BottomPanel,
+            central_panel::CentralPanel,
+            left_panel::LeftPanel,
+            menu_bar::{AppMenuBar, set_ui_scale},
+            transport_bar::TransportBar,
         },
-        project::{ProjectAction, UIProject},
+        project::{ProjectAction, ProjectManager},
+        settings::SettingsWindow,
         theme::{ThemeExt, ThemeLibrary},
-        windows::settings::UISettingsWindow,
+        workspace::{MainView, Workspace},
     },
 };
 use tonique_engine::engine::Engine;
 
 pub struct ToniqueApp {
-    state: ToniqueProjectState,
-    menu_bar: UIMenuBar,
-    top_bar: UITopBar,
-    bottom_panel: UIBottomPanel,
-    left_panel: UILeftPanel,
-    central_panel: UICentralPanel,
-    setting_window: UISettingsWindow,
-    project: UIProject,
+    state: ProjectState,
+    workspace: Workspace,
+    commands: Commands,
+    menu_bar: AppMenuBar,
+    transport_bar: TransportBar,
+    bottom_panel: BottomPanel,
+    left_panel: LeftPanel,
+    central_panel: CentralPanel,
+    setting_window: SettingsWindow,
+    project: ProjectManager,
 }
 
 impl ToniqueApp {
@@ -37,18 +41,22 @@ impl ToniqueApp {
     ) -> Self {
         let themes = ThemeLibrary::load();
         let (theme, theme_warnings) = themes.resolve(&settings.theme);
+        let palette = theme.palette.clone();
         theme.install(&cc.egui_ctx);
-        let mut state = ToniqueProjectState::new(engine);
+        let mut state = ProjectState::new(engine);
+        state.set_track_palette(&palette);
         state.attach_audio(audio, settings);
         Self {
-            project: UIProject::new(&state),
+            project: ProjectManager::new(&state),
             state,
-            menu_bar: UIMenuBar::new(),
-            top_bar: UITopBar::new(),
-            bottom_panel: UIBottomPanel::new(),
-            left_panel: UILeftPanel::new(),
-            central_panel: UICentralPanel::new(),
-            setting_window: UISettingsWindow::new(themes, theme_warnings),
+            workspace: Workspace::default(),
+            commands: Commands::default(),
+            menu_bar: AppMenuBar::new(),
+            transport_bar: TransportBar::new(),
+            bottom_panel: BottomPanel::new(),
+            left_panel: LeftPanel::new(),
+            central_panel: CentralPanel::new(),
+            setting_window: SettingsWindow::new(themes, theme_warnings),
         }
     }
 }
@@ -56,6 +64,8 @@ impl ToniqueApp {
 impl eframe::App for ToniqueApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Update state
+        self.state
+            .set_monitor_graph(self.workspace.main_view == MainView::Graph);
         self.state.update();
         // Keep the saved scale in sync with egui's zoom shortcuts (Ctrl +/-/0)
         if (ctx.zoom_factor() - self.state.settings().ui_scale).abs() > f32::EPSILON {
@@ -65,78 +75,89 @@ impl eframe::App for ToniqueApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.handle_shortcuts(ui);
+        self.shortcuts(ui);
         self.state.set_track_palette(&ui.app_theme().palette);
-        let actions = self
+        let (state, workspace, commands) =
+            (&mut self.state, &mut self.workspace, &mut self.commands);
+        let recent = self
             .menu_bar
-            .show(ui, &mut self.state, self.project.recent());
-        self.top_bar.show(ui, &mut self.state);
-        self.bottom_panel.show(ui, &mut self.state);
-        self.left_panel.show(ui, &mut self.state);
-        self.central_panel.show(ui, &mut self.state);
+            .show(ui, state, workspace, commands, self.project.recent());
+        self.transport_bar.show(ui, state, workspace, commands);
+        self.bottom_panel.show(ui, state, workspace, commands);
+        self.left_panel.show(ui, state, workspace, commands);
+        self.central_panel.show(ui, state, workspace, commands);
 
-        if actions.open_settings {
-            self.setting_window.open(&self.state);
-        }
-        self.setting_window.show(ui, &mut self.state);
-        if let Some(action) = actions.project {
+        if let Some(action) = recent {
             self.project.request(action, &mut self.state);
         }
+        for action in self.commands.take_all() {
+            self.dispatch(action);
+        }
+        self.setting_window.show(ui, &mut self.state);
         self.project.ui(ui, &mut self.state);
     }
 }
 
 impl ToniqueApp {
-    /// Shortcuts that work in every view. The timeline handles the ones
-    /// acting on its selection ([`Action::is_timeline`]).
-    fn handle_shortcuts(&mut self, ui: &egui::Ui) {
+    /// Queue this frame's shortcuts.
+    fn shortcuts(&mut self, ui: &egui::Ui) {
         // Keys typed into a widget (or recorded as a shortcut) aren't commands.
         if ui.memory(|m| m.focused().is_some()) || !ui.input(|i| i.focused) {
             return;
         }
-        let actions = ui.input(|i| self.state.settings().keymap.triggered(i));
+        for action in ui.input(|i| self.state.settings().keymap.triggered(i)) {
+            self.commands.push(action);
+        }
+    }
+
+    /// Run an action no panel took. Those acting on the timeline's
+    /// selection ([`Action::is_timeline`]) do nothing while it's hidden.
+    fn dispatch(&mut self, action: Action) {
         let state = &mut self.state;
-        for action in actions.into_iter().filter(|a| !a.is_timeline()) {
-            match action {
-                Action::PlayStop => {
-                    if state.playback_state() == PlaybackState::Playing {
-                        state.stop();
-                    } else {
-                        state.play();
-                    }
+        let workspace = &mut self.workspace;
+        match action {
+            Action::PlayStop => {
+                if state.playback_state() == PlaybackState::Playing {
+                    state.stop();
+                } else {
+                    state.play();
                 }
-                // Loop the selection, or toggle looping
-                Action::Loop => {
-                    if !state.loop_selection() {
-                        state.set_looping(!state.looping());
-                    }
-                }
-                Action::ToggleMetronome => state.toggle_metronome(),
-                Action::ToggleFollowPlayhead => state.set_follow_playhead(!state.follow_playhead()),
-                Action::Undo => state.undo(),
-                Action::Redo => state.redo(),
-                Action::AddTrack => {
-                    state.add_track();
-                }
-                Action::GroupTracks => {
-                    let selected = state.selected_tracks().clone();
-                    state.group(&selected);
-                }
-                Action::ToggleBrowser => state.left_panel_open = !state.left_panel_open,
-                Action::ToggleEffectsPanel => state.bottom_panel_open = !state.bottom_panel_open,
-                Action::ToggleGraphView => {
-                    state.central_view = match state.central_view {
-                        CentralView::Graph => CentralView::Timeline,
-                        _ => CentralView::Graph,
-                    }
-                }
-                Action::OpenSettings => self.setting_window.toggle(state),
-                Action::NewProject => self.project.request(ProjectAction::New, state),
-                Action::OpenProject => self.project.request(ProjectAction::Open, state),
-                Action::SaveProject => self.project.request(ProjectAction::Save, state),
-                Action::SaveProjectAs => self.project.request(ProjectAction::SaveAs, state),
-                _ => {}
             }
+            // Loop the selection, or toggle looping
+            Action::Loop => {
+                if !state.loop_selection() {
+                    state.set_looping(!state.looping());
+                }
+            }
+            Action::ToggleMetronome => state.toggle_metronome(),
+            Action::ToggleFollowPlayhead => state.set_follow_playhead(!state.follow_playhead()),
+            Action::Undo => state.undo(),
+            Action::Redo => state.redo(),
+            Action::AddTrack => {
+                state.add_track();
+            }
+            Action::GroupTracks => {
+                let selected = state.selected_tracks().clone();
+                state.group(&selected);
+            }
+            Action::ToggleBrowser => workspace.left_panel_open = !workspace.left_panel_open,
+            Action::ToggleEffectsPanel => {
+                workspace.bottom_panel_open = !workspace.bottom_panel_open
+            }
+            Action::ToggleGraphView => workspace.toggle_graph(),
+            Action::OpenSettings => self.setting_window.toggle(state),
+            Action::NewProject => self.project.request(ProjectAction::New, state),
+            Action::OpenProject => self.project.request(ProjectAction::Open, state),
+            Action::SaveProject => self.project.request(ProjectAction::Save, state),
+            Action::SaveProjectAs => self.project.request(ProjectAction::SaveAs, state),
+            Action::SelectAll
+            | Action::Duplicate
+            | Action::Delete
+            | Action::SplitAtCursor
+            | Action::NudgeLeft
+            | Action::NudgeRight
+            | Action::MoveTrackUp
+            | Action::MoveTrackDown => {}
         }
     }
 }

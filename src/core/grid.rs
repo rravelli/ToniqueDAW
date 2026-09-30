@@ -1,10 +1,9 @@
 use std::time::Duration;
 
-use egui::{Align2, Color32, FontId, Painter, Rect, Stroke, Vec2, pos2};
+use egui::{Rect, Vec2};
+use tonique_engine::time::BeatPos;
 
-use crate::ui::theme::{Theme, with_alpha};
-
-const DEFAULT_THRESHOLD: f32 = 0.3;
+const DEFAULT_THRESHOLD: f64 = 0.3;
 /// How close (in points) edits snap to clip edges, loop edges and the edit
 /// cursor. They win over the grid when in reach.
 pub const TARGET_REACH: f32 = 8.;
@@ -67,14 +66,18 @@ impl GridService {
     pub fn beats_per_bar(&self) -> usize {
         self.beats_per_bar
     }
+    /// Which lines the grid shows at this zoom.
+    pub fn resolution(&self) -> GridResolution {
+        self.resolution
+    }
     /// Spacing between grid lines, in beats.
-    pub fn step_beats(&self) -> f32 {
-        1.0 / self.resolution.divisions_per_beat(self.beats_per_bar)
+    pub fn step_beats(&self) -> f64 {
+        1.0 / self.resolution.divisions_per_beat(self.beats_per_bar) as f64
     }
     /// The nearest grid line, however far.
-    pub fn snap_to_step(&self, beats: f32) -> f32 {
+    pub fn snap_to_step(&self, beats: BeatPos) -> BeatPos {
         let step = self.step_beats();
-        (beats / step).round() * step
+        BeatPos((beats.0 / step).round() * step)
     }
     pub fn pixels_per_beat(&self) -> f32 {
         self.pixels_per_beat
@@ -84,12 +87,20 @@ impl GridService {
         duration.as_secs_f32() / 60.0 * bpm * self.pixels_per_beat
     }
     /// Position in beats to actual screen x position
-    pub fn beats_to_x(&self, beats: f32, viewport: Rect) -> f32 {
-        viewport.left() + beats * self.pixels_per_beat - self.offset.x
+    pub fn beats_to_x(&self, beats: BeatPos, viewport: Rect) -> f32 {
+        viewport.left() + beats.0 as f32 * self.pixels_per_beat - self.offset.x
     }
     /// Actual x position to beats position
-    pub fn x_to_beats(&self, x: f32, viewport: Rect) -> f32 {
-        (x + self.offset.x - viewport.left()) / self.pixels_per_beat
+    pub fn x_to_beats(&self, x: f32, viewport: Rect) -> BeatPos {
+        BeatPos(((x + self.offset.x - viewport.left()) / self.pixels_per_beat) as f64)
+    }
+    /// A width on screen, in beats.
+    pub fn width_to_beats(&self, width: f32) -> f64 {
+        (width / self.pixels_per_beat) as f64
+    }
+    /// A length in beats, as a width on screen.
+    pub fn beats_to_width(&self, beats: f64) -> f32 {
+        beats as f32 * self.pixels_per_beat
     }
 
     /// Zoom from a scroll delta, keeping the beat under `cursor_x` in place.
@@ -120,29 +131,29 @@ impl GridService {
     /// Snap `beats` to the nearest of `targets` within [`TARGET_REACH`]
     /// points, or else to the grid. Returns the snapped position and
     /// whether it came from `targets`.
-    pub fn snap_to_targets(&self, beats: f32, targets: &[f32]) -> Option<(f32, bool)> {
-        let reach = TARGET_REACH / self.pixels_per_beat;
+    pub fn snap_to_targets(&self, beats: BeatPos, targets: &[BeatPos]) -> Option<(BeatPos, bool)> {
+        let reach = self.width_to_beats(TARGET_REACH);
         let target = targets
             .iter()
             .copied()
-            .filter(|t| (t - beats).abs() <= reach)
-            .min_by(|a, b| (a - beats).abs().total_cmp(&(b - beats).abs()));
+            .filter(|t| (*t - beats).abs() <= reach)
+            .min_by(|a, b| (*a - beats).abs().total_cmp(&(*b - beats).abs()));
         match target {
             Some(t) => Some((t, true)),
             None => self.snap_at_grid_option(beats).map(|g| (g, false)),
         }
     }
 
-    pub fn snap_at_grid(&self, beats: f32) -> f32 {
+    pub fn snap_at_grid(&self, beats: BeatPos) -> BeatPos {
         self.snap_at_grid_with_threshold(beats, DEFAULT_THRESHOLD)
             .unwrap_or(beats)
     }
 
-    pub fn snap_at_grid_option(&self, beats: f32) -> Option<f32> {
+    pub fn snap_at_grid_option(&self, beats: BeatPos) -> Option<BeatPos> {
         self.snap_at_grid_with_threshold(beats, DEFAULT_THRESHOLD)
     }
 
-    pub fn snap_at_grid_with_threshold(&self, beats: f32, threshold: f32) -> Option<f32> {
+    pub fn snap_at_grid_with_threshold(&self, beats: BeatPos, threshold: f64) -> Option<BeatPos> {
         let step = self.step_beats();
         let nearest_position = self.snap_to_step(beats);
         if (beats - nearest_position).abs() < step * threshold {
@@ -167,175 +178,5 @@ impl GridService {
             GridResolution::Height
         };
         self.resolution = new_resolution;
-    }
-
-    pub fn render_clip_grid(&self, painter: &Painter, viewport: Rect, rect: Rect, color: Color32) {
-        if self.resolution.divisions_per_beat(self.beats_per_bar)
-            <= GridResolution::Bar.divisions_per_beat(self.beats_per_bar)
-        {
-            return;
-        }
-        let divisions_per_beat = GridResolution::Bar.divisions_per_beat(self.beats_per_bar);
-
-        let step = self.pixels_per_beat / divisions_per_beat; // pixel spacing between grid lines
-        let clip_offset = self.offset.x + rect.left() - viewport.left();
-        let mut step_index = (clip_offset / step).floor() as i32;
-        let mut x = rect.left() - clip_offset.rem_euclid(step);
-        // Jump to the first visible line
-        let skipped = ((viewport.left() - x) / step).floor().max(0.);
-        x += skipped * step;
-        step_index += skipped as i32;
-        let right = rect.right().min(viewport.right());
-        while x < right {
-            // Skip if out of bounds
-            if step_index < 0 {
-                step_index += 1;
-                x += step;
-                continue;
-            }
-
-            painter.line_segment(
-                [pos2(x, rect.top()), pos2(x, rect.bottom())],
-                Stroke::new(1.0, color),
-            );
-
-            step_index += 1;
-            x += step;
-        }
-    }
-
-    pub fn render_grid(&self, painter: &Painter, viewport: Rect, theme: &Theme) {
-        let divisions_per_beat = self.resolution.divisions_per_beat(self.beats_per_bar);
-        let step = self.pixels_per_beat / divisions_per_beat; // pixel spacing between grid lines
-
-        let mut step_index = (self.offset.x / step).floor() as i32;
-        let right = viewport.right();
-        let mut x = viewport.left() - self.offset.x.rem_euclid(step);
-
-        let lines_per_bar = (self.beats_per_bar as f32 * divisions_per_beat).max(1.0) as i32;
-        let lines_per_beat = divisions_per_beat.max(1.0) as i32;
-
-        while x < right {
-            // Skip if out of bounds
-            if step_index < 0 {
-                step_index += 1;
-                x += step;
-                continue;
-            }
-            let is_bar = step_index % lines_per_bar == 0;
-            let is_major_beat = step_index % lines_per_beat == 0;
-
-            let color = if is_bar {
-                theme.grid_bar
-            } else if is_major_beat {
-                theme.grid_beat
-            } else {
-                with_alpha(theme.grid_beat, theme.grid_beat.a() / 2)
-            };
-
-            painter.line_segment(
-                [pos2(x, viewport.top()), pos2(x, viewport.bottom())],
-                Stroke::new(if is_bar { 2.0 } else { 1.0 }, color),
-            );
-
-            step_index += 1;
-            x += step;
-        }
-    }
-
-    pub fn render_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
-        let divisions_per_beat = self.resolution.divisions_per_beat(self.beats_per_bar);
-        let step = self.pixels_per_beat / divisions_per_beat; // pixel spacing between grid lines
-
-        let mut step_index = (self.offset.x / step).floor() as i32;
-        let right = rect.right();
-        let mut x = rect.left() - self.offset.x.rem_euclid(step);
-
-        let lines_per_bar = (self.beats_per_bar as f32 * divisions_per_beat).max(1.0) as i32;
-        let lines_per_beat = divisions_per_beat.max(1.0) as i32;
-
-        while x < right {
-            // Skip if out of bounds
-            if step_index < 0 {
-                step_index += 1;
-                x += step;
-                continue;
-            }
-
-            let is_bar = step_index % lines_per_bar == 0;
-            let is_major_beat = step_index % lines_per_beat == 0;
-
-            let bar_index = step_index.div_euclid(lines_per_bar) + 1;
-            if is_bar {
-                let text = format!("{}", bar_index);
-                painter.text(
-                    pos2(x + 3.0, rect.bottom() - 1.0),
-                    Align2::LEFT_BOTTOM,
-                    text,
-                    FontId::new(8., egui::FontFamily::Monospace),
-                    theme.text_muted,
-                );
-                painter.line_segment(
-                    [pos2(x, rect.bottom() - 8.0), pos2(x, rect.bottom())],
-                    Stroke::new(2.0, theme.text_disabled),
-                );
-            }
-            let beat_index =
-                step_index.div_euclid(lines_per_beat) % (self.beats_per_bar as i32) + 1;
-            if divisions_per_beat >= GridResolution::Quarter.divisions_per_beat(self.beats_per_bar)
-                && is_major_beat
-            {
-                let text = format!("{}.{}", bar_index, beat_index);
-                painter.text(
-                    pos2(x + 3.0, rect.bottom() - 1.0),
-                    Align2::LEFT_BOTTOM,
-                    text,
-                    FontId::new(8., egui::FontFamily::Monospace),
-                    theme.text_muted,
-                );
-                painter.line_segment(
-                    [pos2(x, rect.bottom() - 8.0), pos2(x, rect.bottom())],
-                    Stroke::new(1.0, theme.text_disabled),
-                );
-            }
-
-            step_index += 1;
-            x += step;
-        }
-
-        self.render_time_labels(painter, rect, bpm, theme);
-    }
-
-    fn render_time_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
-        let seconds_step = self.resolution.step_size_secs();
-        let step = self.pixels_per_beat * bpm / 60. * seconds_step;
-        let mut step_index = (self.offset.x / step).floor() as i32;
-        let mut x = rect.left() - self.offset.x.rem_euclid(step);
-
-        while x < rect.right() {
-            // Skip if out of bounds
-            if step_index < 0 {
-                step_index += 1;
-                x += step;
-                continue;
-            }
-            let time = (step_index as f32 * seconds_step).floor() as i32;
-            let seconds = time % 60;
-            let minutes = (time / 60) % 60;
-            let text = format!("{}:{:0>2}", minutes, seconds);
-            painter.text(
-                pos2(x + 3.0, rect.top() + 1.0),
-                Align2::LEFT_TOP,
-                text,
-                FontId::new(8., egui::FontFamily::Monospace),
-                theme.text_disabled,
-            );
-            painter.line_segment(
-                [pos2(x, rect.top()), pos2(x, rect.top() + 8.0)],
-                Stroke::new(2.0, theme.text_disabled),
-            );
-            step_index += 1;
-            x += step;
-        }
     }
 }

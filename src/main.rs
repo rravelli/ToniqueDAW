@@ -1,7 +1,7 @@
 use crate::{
     audio::{host::start_audio, midi::spawn_midi_thread},
     config::settings::Settings,
-    ui::spawn_ui_thread,
+    ui::run,
 };
 
 use rtrb::RingBuffer;
@@ -32,5 +32,5 @@ fn main() {
         start_audio(&settings).expect("failed to start audio output")
     });
     // Ui thread (main thread). Opens the app window
-    spawn_ui_thread(engine, audio, settings).unwrap();
+    run(engine, audio, settings).unwrap();
 }

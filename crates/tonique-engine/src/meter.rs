@@ -51,7 +51,9 @@ impl std::fmt::Debug for ChannelMeter {
 
 /// `f32` max/add on an `AtomicU32` holding the value's bits.
 fn update_f32(a: &AtomicU32, f: impl Fn(f32) -> f32) {
-    let _ = a.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bits| Some(f(f32::from_bits(bits)).to_bits()));
+    let _ = a.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
+        Some(f(f32::from_bits(bits)).to_bits())
+    });
 }
 
 impl ChannelMeter {
@@ -74,7 +76,8 @@ impl ChannelMeter {
             update_f32(&self.sum_sq[ch], |s| s + sum);
         }
         self.count.fetch_add(n as u32, Ordering::Relaxed);
-        self.scope_pos.store((start + n) % SCOPE_LEN, Ordering::Relaxed);
+        self.scope_pos
+            .store((start + n) % SCOPE_LEN, Ordering::Relaxed);
     }
 
     /// UI side: levels since the previous call, then reset. `None` if no
@@ -87,7 +90,10 @@ impl ChannelMeter {
         Some(std::array::from_fn(|ch| {
             let peak = f32::from_bits(self.peak[ch].swap(0, Ordering::Relaxed));
             let sum = f32::from_bits(self.sum_sq[ch].swap(0, Ordering::Relaxed));
-            Level { peak, rms: (sum / count as f32).sqrt() }
+            Level {
+                peak,
+                rms: (sum / count as f32).sqrt(),
+            }
         }))
     }
 
@@ -98,7 +104,8 @@ impl ChannelMeter {
         let end = self.scope_pos.load(Ordering::Relaxed);
         let ring = &self.scope[channel.min(CHANNELS - 1)];
         for (i, o) in out[..n].iter_mut().enumerate() {
-            *o = f32::from_bits(ring[(end + SCOPE_LEN - n + i) % SCOPE_LEN].load(Ordering::Relaxed));
+            *o =
+                f32::from_bits(ring[(end + SCOPE_LEN - n + i) % SCOPE_LEN].load(Ordering::Relaxed));
         }
     }
 }
