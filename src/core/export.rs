@@ -5,7 +5,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU32, Ordering},
     },
     thread::{self, JoinHandle},
@@ -44,13 +44,43 @@ pub enum ExportOutcome {
     Failed(String),
 }
 
+/// Columns of the mix's waveform gathered while rendering.
+pub const WAVEFORM_COLUMNS: usize = 480;
+
+/// What the render shows of itself as it goes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Waveform {
+    /// Lowest and highest sample of each column, over all channels. Columns
+    /// not rendered yet are silent.
+    pub columns: Vec<(f32, f32)>,
+    /// Largest absolute sample so far (above 1 clips integer formats).
+    pub peak: f32,
+}
+
+impl Default for Waveform {
+    fn default() -> Self {
+        Self {
+            columns: vec![(0., 0.); WAVEFORM_COLUMNS],
+            peak: 0.,
+        }
+    }
+}
+
+/// Between the export and its thread.
+#[derive(Default)]
+struct Shared {
+    /// Fraction done, as `f32` bits.
+    progress: AtomicU32,
+    cancel: AtomicBool,
+    waveform: Mutex<Waveform>,
+}
+
 /// An export running in the background. The file only appears at `path`
 /// once complete.
 pub struct Export {
     path: PathBuf,
-    /// Fraction done, as `f32` bits.
-    progress: Arc<AtomicU32>,
-    cancel: Arc<AtomicBool>,
+    seconds: f64,
+    shared: Arc<Shared>,
     thread: Option<JoinHandle<ExportOutcome>>,
     outcome: Option<ExportOutcome>,
 }
@@ -65,16 +95,16 @@ impl Export {
         path: PathBuf,
         format: WavFormat,
     ) -> Self {
-        let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
-        let cancel = Arc::new(AtomicBool::new(false));
+        let tempo = &edit.tempo;
+        let seconds = tempo.beats_to_seconds(span.1) - tempo.beats_to_seconds(span.0);
+        let shared = Arc::new(Shared::default());
         let job = Job {
             edit,
             config,
             span,
             path: path.clone(),
             format,
-            progress: progress.clone(),
-            cancel: cancel.clone(),
+            shared: shared.clone(),
         };
         let thread = thread::Builder::new()
             .name("export".into())
@@ -86,8 +116,8 @@ impl Export {
         };
         Self {
             path,
-            progress,
-            cancel,
+            seconds,
+            shared,
             thread,
             outcome,
         }
@@ -97,14 +127,28 @@ impl Export {
         &self.path
     }
 
+    /// Length of the exported audio, in seconds.
+    pub fn seconds(&self) -> f64 {
+        self.seconds
+    }
+
     /// Fraction done, 0 to 1.
     pub fn progress(&self) -> f32 {
-        f32::from_bits(self.progress.load(Ordering::Relaxed))
+        f32::from_bits(self.shared.progress.load(Ordering::Relaxed))
+    }
+
+    /// The mix rendered so far.
+    pub fn waveform(&self) -> Waveform {
+        self.shared
+            .waveform
+            .lock()
+            .map(|w| w.clone())
+            .unwrap_or_default()
     }
 
     /// Stop rendering; nothing is written.
     pub fn cancel(&self) {
-        self.cancel.store(true, Ordering::Relaxed);
+        self.shared.cancel.store(true, Ordering::Relaxed);
     }
 
     /// How it ended, once it has.
@@ -128,8 +172,7 @@ struct Job {
     span: (BeatPos, BeatPos),
     path: PathBuf,
     format: WavFormat,
-    progress: Arc<AtomicU32>,
-    cancel: Arc<AtomicBool>,
+    shared: Arc<Shared>,
 }
 
 impl Job {
@@ -170,9 +213,10 @@ impl Job {
             Err(e) => return failed(&e),
         };
         let mut buffer = vec![0.; CHUNK_FRAMES * channels];
+        let mut waveform = Waveform::default();
         let mut done = 0;
         while done < frames {
-            if self.cancel.load(Ordering::Relaxed) {
+            if self.shared.cancel.load(Ordering::Relaxed) {
                 return ExportOutcome::Cancelled;
             }
             let n = CHUNK_FRAMES.min(frames - done);
@@ -182,9 +226,23 @@ impl Job {
             if let Err(e) = wav.write_interleaved(out) {
                 return failed(&e);
             }
+            for (i, frame) in out.chunks_exact(channels).enumerate() {
+                let column = (done + i) * WAVEFORM_COLUMNS / frames;
+                let (low, high) = &mut waveform.columns[column];
+                for &s in frame {
+                    *low = low.min(s);
+                    *high = high.max(s);
+                    waveform.peak = waveform.peak.max(s.abs());
+                }
+            }
             done += n;
+            if let Ok(mut shared) = self.shared.waveform.lock() {
+                shared.clone_from(&waveform);
+            }
             let fraction = done as f32 / frames as f32;
-            self.progress.store(fraction.to_bits(), Ordering::Relaxed);
+            self.shared
+                .progress
+                .store(fraction.to_bits(), Ordering::Relaxed);
         }
         match wav.finalize() {
             Ok(()) => ExportOutcome::Done,

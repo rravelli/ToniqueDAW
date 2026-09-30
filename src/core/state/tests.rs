@@ -1834,8 +1834,19 @@ mod export {
             range: ExportRange::Project,
             format: WavFormat::Float32,
         };
-        let export = state.export(path.clone(), options).unwrap();
-        assert_eq!(finish(export), ExportOutcome::Done);
+        let mut export = state.export(path.clone(), options).unwrap();
+        let started = Instant::now();
+        while export.outcome().is_none() {
+            assert!(started.elapsed() < Duration::from_secs(20), "export hangs");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(export.outcome(), Some(&ExportOutcome::Done));
+        assert!((export.seconds() - 1.).abs() < 1e-9);
+        let waveform = export.waveform();
+        assert!(waveform.peak > 0.3, "peak {}", waveform.peak);
+        // The clip's edges fade in and out against clicks.
+        let middle = &waveform.columns[1..waveform.columns.len() - 1];
+        assert!(middle.iter().all(|&(low, high)| high > 0.3 && low <= high));
 
         let (spec, samples) = read(&path);
         assert_eq!((spec.channels, spec.sample_rate), (2, 48000));
