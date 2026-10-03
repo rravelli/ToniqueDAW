@@ -1,3 +1,8 @@
+use std::{
+    sync::mpsc::{self, Receiver},
+    thread,
+};
+
 use crate::config::settings::Settings;
 use tonique_engine::{
     device::{DeviceError, OutputDevice, OutputStream},
@@ -49,4 +54,16 @@ pub fn start_audio(settings: &Settings) -> Result<(AudioHost, Engine), DeviceErr
         buffer_frames,
     };
     Ok((host, engine))
+}
+
+/// Check on another thread whether an output can be opened with
+/// `settings`: listing devices can block for a while on some systems.
+pub fn probe_output(settings: &Settings) -> Receiver<bool> {
+    let options = settings.device_options();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        // The receiver may be gone if audio came back meanwhile.
+        let _ = tx.send(OutputDevice::open(&options).is_ok());
+    });
+    rx
 }

@@ -8,7 +8,7 @@ mod sources;
 mod tests;
 use crate::{
     audio::{
-        host::{AudioHost, start_audio},
+        host::{AudioHost, probe_output, start_audio},
         preview::FilePreview,
     },
     config::settings::Settings,
@@ -32,6 +32,7 @@ use std::{
     collections::HashMap,
     mem::take,
     path::PathBuf,
+    sync::mpsc::{Receiver, TryRecvError},
     time::{Duration, Instant},
 };
 
@@ -88,6 +89,9 @@ pub struct ProjectState {
     pub audio_error: Option<String>,
     /// When to try opening the output again, while there's none.
     reconnect_at: Option<Instant>,
+    /// Whether an output can be opened, checked off the UI thread before
+    /// reconnecting.
+    probe: Option<Receiver<bool>>,
 
     /// Where the transport is, in beats (follows the engine while playing).
     playhead: BeatPos,
@@ -144,6 +148,7 @@ impl ProjectState {
             settings: Settings::default(),
             audio_error: None,
             reconnect_at: None,
+            probe: None,
             edit_cursor: BeatPos::ZERO,
             playback_state: PlaybackState::Paused,
             follow_playhead: false,
@@ -224,14 +229,32 @@ impl ProjectState {
         if self.audio.as_ref().is_some_and(AudioHost::is_lost) {
             self.lose_audio("the audio device was disconnected".into());
         }
-        if self.reconnect_at.is_some_and(|at| Instant::now() >= at) {
-            match self.restart_audio() {
-                Ok(()) => {
-                    self.reconnect_at = None;
-                    self.audio_error = None;
-                }
-                Err(e) => self.lose_audio(e),
+        if self.probe.is_none() && self.reconnect_at.is_some_and(|at| Instant::now() >= at) {
+            self.probe = Some(probe_output(&self.settings));
+        }
+        let Some(probe) = &self.probe else {
+            return;
+        };
+        let available = match probe.try_recv() {
+            Ok(available) => available,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => false,
+        };
+        self.probe = None;
+        if !self.audio_lost() {
+            // Reconnected meanwhile (e.g. from the settings).
+            return;
+        }
+        if !available {
+            self.reconnect_at = Some(Instant::now() + AUDIO_RETRY);
+            return;
+        }
+        match self.restart_audio() {
+            Ok(()) => {
+                self.reconnect_at = None;
+                self.audio_error = None;
             }
+            Err(e) => self.lose_audio(e),
         }
     }
     fn lose_audio(&mut self, error: String) {
