@@ -210,23 +210,36 @@ impl ProjectManager {
     }
 
     /// Save unsaved changes to a new file after a crash: next to the
-    /// project, or with the settings if it was never saved. Returns where.
-    pub fn save_recovery(&self, state: &ProjectState) -> Option<PathBuf> {
+    /// project, or with the settings if it was never saved or that folder
+    /// can't be written. Returns where, or `None` if nothing was unsaved.
+    pub fn save_recovery(&self, state: &ProjectState) -> Result<Option<PathBuf>, String> {
         if !self.is_modified(state) {
-            return None;
+            return Ok(None);
         }
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
         let file = format!("{} (recovered {stamp}).{EXTENSION}", self.name());
-        let dir = match self.dir() {
-            Some(dir) => dir.to_path_buf(),
-            None => config_dir()?.join("recovery"),
-        };
-        fs::create_dir_all(&dir).ok()?;
-        let path = dir.join(file);
-        state.project(Some(&dir)).write(&path).ok()?;
-        Some(path)
+        let dirs = self
+            .dir()
+            .map(Path::to_path_buf)
+            .into_iter()
+            .chain(config_dir().map(|dir| dir.join("recovery")));
+        let mut errors = Vec::new();
+        for dir in dirs {
+            let path = dir.join(&file);
+            let written = fs::create_dir_all(&dir)
+                .map_err(|e| e.to_string())
+                .and_then(|()| state.project(Some(&dir)).write(&path));
+            match written {
+                Ok(()) => return Ok(Some(path)),
+                Err(e) => errors.push(format!("{}: {e}", dir.display())),
+            }
+        }
+        if errors.is_empty() {
+            errors.push("no folder to save it in".into());
+        }
+        Err(errors.join("; "))
     }
 
     /// Window title, closing the window, the prompt and notices.
@@ -351,10 +364,10 @@ mod tests {
         let mut state = ProjectState::new(engine);
         let mut manager = ProjectManager::new(&state);
         manager.path = Some(dir.join(format!("song.{EXTENSION}")));
-        assert_eq!(manager.save_recovery(&state), None);
+        assert_eq!(manager.save_recovery(&state), Ok(None));
 
         state.add_track();
-        let path = manager.save_recovery(&state).expect("saved");
+        let path = manager.save_recovery(&state).ok().flatten().expect("saved");
         assert_eq!(path.parent(), Some(dir.as_path()));
         assert!(path.to_string_lossy().contains("song (recovered"));
         let recovered = ProjectFile::read(&path).unwrap();

@@ -80,11 +80,12 @@ impl ToniqueApp {
             return;
         };
         match catch_unwind(AssertUnwindSafe(|| self.project.save_recovery(&self.state))) {
-            Ok(Some(path)) => eprintln!(
+            Ok(Ok(Some(path))) => eprintln!(
                 "Tonique crashed; unsaved work was saved to {}",
                 path.display()
             ),
-            Ok(None) => {}
+            Ok(Ok(None)) => {}
+            Ok(Err(e)) => eprintln!("Tonique crashed; unsaved work couldn't be saved: {e}"),
             Err(_) => eprintln!("Tonique crashed; unsaved work couldn't be saved"),
         }
         resume_unwind(panic);
