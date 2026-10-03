@@ -47,8 +47,12 @@ impl AudioClip {
     }
     /// Move the clip's start to `beats`, keeping its end: no earlier than
     /// the start of the file or the first beat, no later than the end.
+    /// Does nothing when the file's length is unknown.
     pub fn trim_start_at(&mut self, beats: BeatPos, bpm: f32) {
         let duration = self.source_beats(bpm);
+        if duration <= 0. {
+            return;
+        }
         let file_start = self.position - duration * self.trim_start as f64;
         let clamped_beats = beats.clamp(file_start.max(BeatPos::ZERO), self.end(bpm));
         self.trim_start += ((clamped_beats - self.position) / duration) as f32;
@@ -57,8 +61,13 @@ impl AudioClip {
         self.trim_start = self.trim_start.clamp(0., 1.);
     }
 
+    /// Move the clip's end to `beats`. Does nothing when the file's length
+    /// is unknown.
     pub fn trim_end_at(&mut self, beats: BeatPos, bpm: f32) {
         let duration = self.source_beats(bpm);
+        if duration <= 0. {
+            return;
+        }
         self.trim_end = ((beats - self.position) / duration) as f32 + self.trim_start;
         self.trim_end = self.trim_end.clamp(0., 1.);
     }
@@ -77,7 +86,7 @@ impl AudioClip {
 
     /// Length of the whole source file, in beats.
     fn source_beats(&self, bpm: f32) -> f64 {
-        self.audio.duration.unwrap().as_secs_f64() * bpm as f64 / 60.
+        self.audio.duration.map_or(0., |d| d.as_secs_f64()) * bpm as f64 / 60.
     }
 }
 

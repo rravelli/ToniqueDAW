@@ -107,7 +107,11 @@ impl SynthNode {
             .voices
             .iter()
             .position(|v| v.stage == Stage::Off)
-            .unwrap_or_else(|| (0..VOICES).min_by_key(|&i| self.voices[i].age).unwrap());
+            .unwrap_or_else(|| {
+                (0..VOICES)
+                    .min_by_key(|&i| self.voices[i].age)
+                    .expect("there are voices")
+            });
         let freq = 440.0 * 2f32.powf((note as f32 - 69.0) / 12.0);
         self.voices[idx] = Voice {
             note,

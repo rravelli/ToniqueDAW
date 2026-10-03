@@ -1,13 +1,17 @@
 //! New, open and save: file dialogs, the unsaved-changes prompt, the window
 //! title and closing the window.
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use egui::{Id, Modal, RichText, Ui, ViewportCommand, vec2};
 use rfd::FileDialog;
 
 use crate::{
-    config::recent::RecentProjects,
+    config::{config_dir, recent::RecentProjects},
     core::{
         project::{EXTENSION, ProjectFile, project_name},
         state::ProjectState,
@@ -205,6 +209,39 @@ impl ProjectManager {
         }
     }
 
+    /// Save unsaved changes to a new file after a crash: next to the
+    /// project, or with the settings if it was never saved or that folder
+    /// can't be written. Returns where, or `None` if nothing was unsaved.
+    pub fn save_recovery(&self, state: &ProjectState) -> Result<Option<PathBuf>, String> {
+        if !self.is_modified(state) {
+            return Ok(None);
+        }
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let file = format!("{} (recovered {stamp}).{EXTENSION}", self.name());
+        let dirs = self
+            .dir()
+            .map(Path::to_path_buf)
+            .into_iter()
+            .chain(config_dir().map(|dir| dir.join("recovery")));
+        let mut errors = Vec::new();
+        for dir in dirs {
+            let path = dir.join(&file);
+            let written = fs::create_dir_all(&dir)
+                .map_err(|e| e.to_string())
+                .and_then(|()| state.project(Some(&dir)).write(&path));
+            match written {
+                Ok(()) => return Ok(Some(path)),
+                Err(e) => errors.push(format!("{}: {e}", dir.display())),
+            }
+        }
+        if errors.is_empty() {
+            errors.push("no folder to save it in".into());
+        }
+        Err(errors.join("; "))
+    }
+
     /// Window title, closing the window, the prompt and notices.
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let modified = self.is_modified(state);
@@ -310,4 +347,31 @@ fn button(text: &str) -> FlatButton {
         .padding(10.)
         .font(egui::FontId::proportional(12.))
         .border_radius(2.)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tonique_engine::engine::{Engine, EngineConfig};
+
+    /// After a crash, unsaved changes land in a new file next to the
+    /// project; nothing is written when there were none.
+    #[test]
+    fn recovery_saves_unsaved_changes_next_to_the_project() {
+        let dir = std::env::temp_dir().join(format!("tonique-recovery-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        let mut manager = ProjectManager::new(&state);
+        manager.path = Some(dir.join(format!("song.{EXTENSION}")));
+        assert_eq!(manager.save_recovery(&state), Ok(None));
+
+        state.add_track();
+        let path = manager.save_recovery(&state).ok().flatten().expect("saved");
+        assert_eq!(path.parent(), Some(dir.as_path()));
+        assert!(path.to_string_lossy().contains("song (recovered"));
+        let recovered = ProjectFile::read(&path).unwrap();
+        assert_eq!(recovered, state.project(Some(&dir)));
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

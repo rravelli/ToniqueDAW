@@ -166,11 +166,7 @@ impl FileList {
                 return;
             };
 
-            let extension = if let Some(ext) = file.path.extension() {
-                ext.to_str().unwrap()
-            } else {
-                ""
-            };
+            let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if updated {
                 let is_audio = PLAYABLE_FORMAT.contains(&extension);
                 if !file.is_dir && is_audio {
@@ -191,11 +187,7 @@ impl FileList {
     ) -> bool {
         let is_dir = file.is_dir;
         let selected = self.selected.is_some_and(|idx| idx == index);
-        let extension = if let Some(ext) = file.path.extension() {
-            ext.to_str().unwrap()
-        } else {
-            ""
-        };
+        let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let is_audio = PLAYABLE_FORMAT.contains(&extension);
 
         let icon = if is_dir {

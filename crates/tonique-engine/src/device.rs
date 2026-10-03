@@ -1,5 +1,9 @@
 //! Real-time output through cpal (enable the `device` feature).
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use cpal::ErrorKind;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::engine::AudioProcessor;
@@ -149,12 +153,13 @@ impl OutputDevice {
     }
 
     /// Start streaming. Keep the returned stream alive to keep playing.
-    pub fn start(self, mut processor: AudioProcessor) -> Result<cpal::Stream, DeviceError> {
+    pub fn start(self, mut processor: AudioProcessor) -> Result<OutputStream, DeviceError> {
         if processor.config().sample_rate != self.sample_rate() {
             return Err("engine sample rate differs from the device's".into());
         }
         let channels = self.channels();
         let mut first = true;
+        let lost = Arc::new(AtomicBool::new(false));
         let stream = self.device.build_output_stream::<f32, _, _>(
             self.config,
             move |data, _info| {
@@ -166,10 +171,40 @@ impl OutputDevice {
                 }
                 processor.process_interleaved(data, channels);
             },
-            |err| eprintln!("audio stream error: {err}"),
+            {
+                let lost = lost.clone();
+                move |err: cpal::Error| {
+                    if matches!(
+                        err.kind(),
+                        ErrorKind::DeviceNotAvailable
+                            | ErrorKind::HostUnavailable
+                            | ErrorKind::StreamInvalidated
+                    ) {
+                        lost.store(true, Ordering::Relaxed);
+                    }
+                    eprintln!("audio stream error: {err}");
+                }
+            },
             None,
         )?;
         stream.play()?;
-        Ok(stream)
+        Ok(OutputStream {
+            _stream: stream,
+            lost,
+        })
+    }
+}
+
+/// A playing output stream. Dropping it stops the stream.
+pub struct OutputStream {
+    _stream: cpal::Stream,
+    lost: Arc<AtomicBool>,
+}
+
+impl OutputStream {
+    /// Whether the stream stopped for good (e.g. the device was unplugged):
+    /// open a device again to keep playing.
+    pub fn is_lost(&self) -> bool {
+        self.lost.load(Ordering::Relaxed)
     }
 }

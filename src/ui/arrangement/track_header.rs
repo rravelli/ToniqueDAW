@@ -4,6 +4,7 @@ use crate::{
         track::{TrackKind, TrackRow},
     },
     ui::{
+        RECORDING,
         font::PHOSPHOR_FILL,
         theme::{Theme, ThemeExt, with_alpha},
         widget::{
@@ -148,7 +149,7 @@ impl TrackHeader {
                             self.collapse_button(ui, track, state);
 
                             // Groups and the master have no arm button.
-                            let armable = !is_group && track.id != MASTER_TRACK_ID;
+                            let armable = RECORDING && !is_group && track.id != MASTER_TRACK_ID;
                             let buttons = if armable { 3. } else { 2. };
                             let text_width = ui.available_width()
                                 - 4. * PADDING
