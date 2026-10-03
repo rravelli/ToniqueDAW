@@ -694,6 +694,21 @@ fn trimming_the_start_stops_at_the_first_beat() {
 }
 
 #[test]
+fn trimming_a_clip_of_unknown_length_does_nothing() {
+    let bpm = 120.;
+    let mut info = audio(2.);
+    info.duration = None;
+    let mut clip = AudioClip::new(ClipId(1), info, BeatPos(1.));
+    clip.trim_start_at(BeatPos(2.), bpm);
+    clip.trim_end_at(BeatPos(1.5), bpm);
+    clip.crop(BeatPos(0.), BeatPos(3.), bpm);
+    assert_eq!(
+        (clip.position, clip.trim_start, clip.trim_end),
+        (BeatPos(1.), 0., 1.)
+    );
+}
+
+#[test]
 fn select_all_selects_every_clip() {
     let mut state = setup_state();
     let (t0, t1) = (state.add_track(), state.add_track());
