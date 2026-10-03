@@ -1,0 +1,47 @@
+name: Docs
+
+on:
+  push:
+    branches: [master]
+    paths: [docs/**, .github/workflows/docs.yml]
+  pull_request:
+    branches: [master]
+    paths: [docs/**, .github/workflows/docs.yml]
+  workflow_dispatch:
+
+# One deployment at a time; a newer push doesn't cancel one in progress.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Prebuilt binary: seconds instead of compiling mdbook every run.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+      - run: mdbook build docs
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: docs/book
+
+  # PRs only check that the book builds; master publishes it.
+  deploy:
+    name: Deploy
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

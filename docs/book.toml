@@ -1,0 +1,11 @@
+[book]
+title = "Tonique User Guide"
+authors = ["Rémi Ravelli"]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/rravelli/ToniqueDAW"
+edit-url-template = "https://github.com/rravelli/ToniqueDAW/edit/master/docs/{path}"

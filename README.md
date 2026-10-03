@@ -2,6 +2,16 @@
 
 A rust based Digital Audio Workstation (DAW).
 
+## User guide
+
+The user guide lives in [`docs/`](docs/src/SUMMARY.md) and is published at
+<https://rravelli.github.io/ToniqueDAW/>. To read it locally:
+
+```bash
+cargo install mdbook
+mdbook serve docs --open
+```
+
 ## Setup
 
 For linux, install required dependencies from [alsa-sys](https://github.com/diwic/alsa-sys)
