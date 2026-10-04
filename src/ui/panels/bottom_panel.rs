@@ -803,18 +803,38 @@ mod tests {
         let mono =
             |state: &ProjectState| state.effects(&track)[0].plugin.param("mono").unwrap().get();
         assert_eq!(mono(&state), 0.);
-        // The first switch, under the knobs, centred left of the meter.
+        // The first switch, under the knobs, centred in the editor: in the
+        // frame (left of its meter, 3 + 4), within its 6 margins.
         let frame = panel.rects[0];
-        let body = Rect::from_min_max(frame.min + vec2(6., 20. + 6.), frame.max - vec2(6., 6.));
-        let controls_centre = body.left() + (body.width() - 8. - 6.) / 2.;
-        let switches_top = body.center().y - (52. + 4. + 18.) / 2. + 52. + 4.;
+        let body = Rect::from_min_max(
+            frame.min + vec2(6., 20. + 6.),
+            frame.max - vec2(3. + 4. + 6., 6.),
+        );
+        let switches_top = body.center().y - (52. + 6. + 18.) / 2. + 52. + 6.;
         let at = egui::pos2(
-            controls_centre - (3. * 28. + 2. * 2.) / 2. + 14.,
+            body.center().x - (3. * 28. + 2. * 2.) / 2. + 14.,
             switches_top + 9.,
         );
         run(&ctx, &mut panel, &mut state, click(at), &[]);
         assert_eq!(mono(&state), 1.);
         state.undo();
         assert_eq!(mono(&state), 0.);
+    }
+
+    /// Every shown effect's output is recorded for its meter; a bypassed
+    /// one's isn't, as it isn't heard.
+    #[test]
+    fn shown_effects_meter_their_output() {
+        let (ctx, mut panel, mut state, track) = setup();
+        let echo = state.effects(&track)[1].plugin.id;
+        state.set_effect_enabled(&track, echo, false);
+        run(&ctx, &mut panel, &mut state, vec![], &[]);
+        let effects = state.effects(&track);
+        assert_eq!(
+            effects[0].plugin.tap.take_block(1),
+            [true, true],
+            "filter: its spectrum's input, and its meter"
+        );
+        assert_eq!(effects[1].plugin.tap.take_block(1), [false, false]);
     }
 }
