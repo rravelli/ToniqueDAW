@@ -1,229 +1,310 @@
+//! Editor of [`EffectKind::Filter`](crate::core::effect::EffectKind::Filter):
+//! its response over the live spectrum, with a handle for cutoff and
+//! resonance, the mode, and cutoff and Q knobs.
+
 use crate::{
-    core::metrics::AudioMetrics,
+    core::effect::Setting,
     ui::{
-        effects::EffectEditor,
+        effects::{EditorContext, EffectEdit, EffectEditor, format_hz, graph_rect, track_drag},
         theme::{Theme, ThemeExt},
-        widget::knob::paint_knob,
+        widget::flat_button::FlatButton,
     },
 };
-use egui::{Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
+use egui::{
+    Align, Align2, Color32, CursorIcon, FontId, Layout, Mesh, Painter, Pos2, Rect, Sense, Shape,
+    Stroke, Ui, pos2, vec2,
+};
 use std::f32::consts::PI;
-use tonique_engine::edit::{Plugin, PluginId};
+use tonique_engine::{edit::PluginKind, nodes::FilterMode};
 
-const BOTTOM_HEIGHT: f32 = 50.;
+const MIN_HZ: f32 = 20.;
+const MAX_HZ: f32 = 20_000.;
+/// Gain range of the graph, in dB.
+const TOP_DB: f32 = 24.;
+const BOTTOM_DB: f32 = -36.;
+/// Quietest level of the spectrum shown, in dBFS.
+const SPECTRUM_FLOOR: f32 = -96.;
+const HANDLE_RADIUS: f32 = 5.;
 
-/// Editor of [`EffectKind::Filter`](crate::core::effect::EffectKind::Filter):
-/// its response curve over the live spectrum, and cutoff and Q knobs.
-pub struct FilterEditor {
-    /// Salt for the knobs' ids.
-    id: String,
-    /// The plugin's values, read every frame.
-    q: f32,
-    cutoff: f32,
+pub struct FilterEditor;
 
-    min_freq: f32,
-    max_freq: f32,
+/// Gain of the engine's filter at `hz`, in dB. Mirrors
+/// [`FilterNode`](tonique_engine::nodes::FilterNode)'s RBJ biquad, so the
+/// curve shows what's heard.
+pub fn response_db(mode: FilterMode, cutoff: f32, q: f32, sample_rate: f32, hz: f32) -> f32 {
+    let f = cutoff.clamp(10., sample_rate * 0.49);
+    let w0 = 2. * PI * f / sample_rate;
+    let (sin0, cos0) = w0.sin_cos();
+    let alpha = sin0 / (2. * q.max(0.05));
+    let (b0, b1, b2) = match mode {
+        FilterMode::LowPass => ((1. - cos0) / 2., 1. - cos0, (1. - cos0) / 2.),
+        FilterMode::HighPass => ((1. + cos0) / 2., -(1. + cos0), (1. + cos0) / 2.),
+    };
+    let (a0, a1, a2) = (1. + alpha, -2. * cos0, 1. - alpha);
+    // H(e^jw), with z^-1 = e^-jw.
+    let w = 2. * PI * hz / sample_rate;
+    let magnitude = |c0: f32, c1: f32, c2: f32| {
+        let re = c0 + c1 * w.cos() + c2 * (2. * w).cos();
+        let im = -(c1 * w.sin() + c2 * (2. * w).sin());
+        (re * re + im * im).sqrt()
+    };
+    20. * (magnitude(b0, b1, b2) / magnitude(a0, a1, a2))
+        .max(1e-9)
+        .log10()
 }
 
-impl FilterEditor {
-    pub fn new(plugin: PluginId) -> Self {
-        Self {
-            id: format!("filter-{}", plugin.0),
-            cutoff: 1300.,
-            q: 0.5,
-            min_freq: 50.,
-            max_freq: 20_000.,
-        }
+/// Maps frequencies and gains to the graph and back.
+struct Scale {
+    rect: Rect,
+}
+
+impl Scale {
+    fn x(&self, hz: f32) -> f32 {
+        self.rect.left() + (hz / MIN_HZ).ln() / (MAX_HZ / MIN_HZ).ln() * self.rect.width()
     }
-
-    fn format_freq(f: f32) -> String {
-        if f < 1000. {
-            format!("{:.0}Hz", f)
-        } else {
-            format!("{:.0}kHz", f / 1000.)
-        }
+    fn hz(&self, x: f32) -> f32 {
+        MIN_HZ * (MAX_HZ / MIN_HZ).powf((x - self.rect.left()) / self.rect.width())
     }
-
-    fn paint_grid(&self, shapes: &mut Vec<Shape>, rect: Rect, theme: &Theme) {
-        let mut f = self.min_freq;
-        let mut mul = 10.;
-        let mut pow = 2.;
-        while f < self.max_freq {
-            f += mul;
-            if f.log10() >= pow {
-                mul *= 10.;
-                pow += 1.
-            }
-            let x = rect.left()
-                + ((f.log10() - self.min_freq.log10())
-                    / (self.max_freq.log10() - self.min_freq.log10()))
-                    * rect.width();
-            shapes.push(Shape::line_segment(
-                [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                Stroke::new(1.0, theme.grid_beat),
-            ));
-        }
+    fn y(&self, db: f32) -> f32 {
+        self.rect.top() + (TOP_DB - db) / (TOP_DB - BOTTOM_DB) * self.rect.height()
     }
-
-    fn paint_spectrum(
-        &self,
-        shapes: &mut Vec<Shape>,
-        rect: Rect,
-        metrics: &mut AudioMetrics,
-        theme: &Theme,
-    ) {
-        let spectrum = metrics.spectrum();
-        let n = spectrum.len();
-        let sample_rate = 44100.;
-        let bin_freqs: Vec<f32> = (0..n).map(|i| i as f32 * sample_rate / n as f32).collect();
-        let mut max = -100.;
-        let mut prev = None;
-
-        for i in 0..n {
-            let x = rect.left()
-                + ((bin_freqs[i].log10() - self.min_freq.log10())
-                    / (self.max_freq.log10() - self.min_freq.log10()))
-                    * rect.width();
-            let y = rect.bottom() - ((spectrum[i] + 14.0) / 28.0).clamp(0.0, 1.0) * rect.height();
-            let pos = Pos2::new(x, y);
-            if spectrum[i] > max {
-                max = spectrum[i];
-            }
-            if let Some(prev) = prev {
-                shapes.push(Shape::line_segment(
-                    [prev, pos],
-                    Stroke::new(1.0, theme.text_disabled),
-                ));
-            }
-            prev = Some(pos);
-        }
+    fn db(&self, y: f32) -> f32 {
+        TOP_DB - (y - self.rect.top()) / self.rect.height() * (TOP_DB - BOTTOM_DB)
     }
 }
 
 impl EffectEditor for FilterEditor {
-    fn ui(&mut self, ui: &mut Ui, plugin: &Plugin, metrics: &mut AudioMetrics, enabled: bool) {
-        let (cutoff, q) = (plugin.param("cutoff"), plugin.param("q"));
-        if let Some(p) = cutoff {
-            self.cutoff = p.get();
+    fn ui(&mut self, ui: &mut Ui, cx: &mut EditorContext) {
+        let PluginKind::Filter(mode) = cx.effect.plugin.kind else {
+            return;
+        };
+        let (Some(cutoff), Some(q)) = (cx.param("cutoff").cloned(), cx.param("q").cloned()) else {
+            return;
+        };
+        let (rect, response) = graph_rect(ui, Sense::click_and_drag());
+        let scale = Scale { rect };
+
+        // Drag anywhere: the handle follows, setting the cutoff from x and
+        // the resonance (the gain at the cutoff, which is Q) from y.
+        let before = (cutoff.get(), q.get());
+        if response.dragged()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            cutoff.set(scale.hz(pos.x));
+            q.set(10f32.powf(scale.db(pos.y) / 20.));
         }
-        if let Some(p) = q {
-            self.q = p.get();
-        }
-        let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::all());
-        let full_rect = response.rect;
-
-        let rect = Rect::from_min_size(
-            full_rect.min,
-            Vec2::new(full_rect.width(), full_rect.height() - BOTTOM_HEIGHT),
-        );
-
-        let mut shapes = Vec::new();
-        let mut last_pos = None;
-        // // Filter parameters
-        let sample_rate = 44100.0;
-        // // Compute biquad coefficients (digital 2nd order lowpass)
-        let omega_c = 2.0 * PI * self.cutoff / sample_rate;
-        let alpha = omega_c.sin() / (2.0 * self.q);
-        let cos_omega_c = omega_c.cos();
-
-        let b0 = (1.0 - cos_omega_c) / 2.0;
-        let b1 = 1.0 - cos_omega_c;
-        let b2 = (1.0 - cos_omega_c) / 2.0;
-        let a0 = 1.0 + alpha;
-        let a1 = -2.0 * cos_omega_c;
-        let a2 = 1.0 - alpha;
-
-        // Frequency range (logarithmic)
-
-        let n_points = 500;
-
-        self.paint_grid(&mut shapes, rect, &ui.app_theme());
-        if enabled {
-            self.paint_spectrum(&mut shapes, rect, metrics, &ui.app_theme());
-        }
-        for i in 0..n_points {
-            let freq = self.min_freq
-                * (self.max_freq / self.min_freq).powf(i as f32 / (n_points - 1) as f32);
-
-            let omega = 2.0 * PI * freq / sample_rate;
-            let cos_omega = omega.cos();
-            let sin_omega = omega.sin();
-
-            // Calculate numerator and denominator (complex)
-            let num_re = b0 + b1 * cos_omega + b2 * cos_omega * cos_omega;
-            let num_im = b1 * sin_omega + b2 * 2.0 * cos_omega * sin_omega;
-            let den_re = a0 + a1 * cos_omega + a2 * cos_omega * cos_omega;
-            let den_im = a1 * sin_omega + a2 * 2.0 * cos_omega * sin_omega;
-
-            let num_mag = (num_re * num_re + num_im * num_im).sqrt();
-            let den_mag = (den_re * den_re + den_im * den_im).sqrt();
-
-            let mag = num_mag / den_mag;
-            let db = 20.0 * mag.log10();
-
-            // X: log frequency
-            let x = rect.left()
-                + ((freq.log10() - self.min_freq.log10())
-                    / (self.max_freq.log10() - self.min_freq.log10()))
-                    * rect.width();
-            // Y: dB scale (from +6 to -60 dB)
-            let y = rect.bottom() - ((db + 14.0) / 28.0).clamp(0.0, 1.0) * rect.height();
-
-            if let Some(last) = last_pos {
-                shapes.push(Shape::line_segment(
-                    [last, egui::pos2(x, y)],
-                    egui::Stroke::new(2.0, ui.app_theme().accent),
-                ));
-            }
-            last_pos = Some(egui::pos2(x, y));
-        }
-        shapes.push(Shape::line_segment(
-            [rect.left_bottom(), rect.right_bottom()],
-            Stroke::new(1.0, ui.app_theme().separator),
-        ));
-
-        let label = Self::format_freq(self.cutoff);
-
-        let freq_res = paint_knob(
-            ui,
-            &painter,
-            Pos2::new(rect.left() + 20., rect.bottom() + BOTTOM_HEIGHT / 2.),
-            &mut self.cutoff,
-            self.id.clone(),
-            "Freq".into(),
-            label.into(),
-            self.min_freq,
-            self.max_freq,
-            true,
-        );
-
-        let label = format!("{:.1}", self.q.clone());
-
-        let q_res = paint_knob(
-            ui,
-            &painter,
-            Pos2::new(rect.left() + 50., rect.bottom() + BOTTOM_HEIGHT / 2.),
-            &mut self.q,
-            self.id.clone(),
-            "Q".into(),
-            Some(label),
-            0.5,
-            10.0,
-            false,
-        );
-
-        if q_res.dragged() || freq_res.dragged() {
-            for (param, value) in [(q, self.q), (cutoff, self.cutoff)] {
-                if let Some(p) = param {
+        if response.double_clicked() {
+            for p in [&cutoff, &q] {
+                if let Some(value) = cx.effect.kind.initial_value(&cx.effect.plugin, p.name) {
                     p.set(value);
                 }
             }
         }
+        for (p, before) in [(&cutoff, before.0), (&q, before.1)] {
+            if let Some(old) = track_drag(ui, &response, before) {
+                cx.edits.push(EffectEdit::Param {
+                    id: p.id,
+                    old,
+                    new: p.get(),
+                });
+            }
+        }
+        let active = response.hovered() || response.dragged();
+        if active {
+            ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+        }
 
-        painter.add(shapes);
+        let theme = ui.app_theme();
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 2., theme.bg_deep);
+        paint_grid(&painter, &scale, &theme);
+        if cx.enabled() {
+            paint_spectrum(&painter, &scale, cx, &theme);
+        }
+        let (cutoff, q) = (cutoff.get(), q.get());
+        let color = if cx.enabled() {
+            theme.accent
+        } else {
+            theme.text_disabled
+        };
+        let points: Vec<Pos2> = (0..=rect.width().ceil() as usize)
+            .map(|i| {
+                let x = rect.left() + i as f32;
+                let db = response_db(mode, cutoff, q, cx.sample_rate, scale.hz(x));
+                pos2(x, scale.y(db))
+            })
+            .collect();
+        painter.add(fill_below(
+            &points,
+            rect.bottom(),
+            color.gamma_multiply(0.15),
+        ));
+        painter.add(Shape::line(points, Stroke::new(1.5, color)));
+
+        let handle = pos2(scale.x(cutoff), scale.y(20. * q.log10()));
+        painter.circle(
+            handle,
+            HANDLE_RADIUS,
+            if active { color } else { theme.bg_deep },
+            Stroke::new(1.5, color),
+        );
+        if active {
+            painter.text(
+                rect.right_top() + vec2(-4., 3.),
+                Align2::RIGHT_TOP,
+                format!("{} · Q {q:.2}", format_hz(cutoff)),
+                FontId::proportional(9.),
+                theme.text,
+            );
+        }
+
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                ui.spacing_mut().item_spacing.y = 2.;
+                for (option, name, tooltip) in [
+                    (FilterMode::LowPass, "LP", "Low-pass: cut above the cutoff"),
+                    (
+                        FilterMode::HighPass,
+                        "HP",
+                        "High-pass: cut below the cutoff",
+                    ),
+                ] {
+                    let button = FlatButton::new(name)
+                        .size(vec2(28., 18.))
+                        .font(FontId::proportional(10.))
+                        .selected(mode == option)
+                        .tooltip(tooltip);
+                    if ui.add(button).clicked() && mode != option {
+                        cx.edits.push(EffectEdit::Setting(Setting::Mode(option)));
+                    }
+                }
+            });
+            cx.param_knob(ui, "cutoff", "Freq", &format_hz, true);
+            cx.param_knob(ui, "q", "Q", &|q| format!("{q:.2}"), true);
+        });
     }
 
     fn width(&self) -> f32 {
-        300.
+        280.
+    }
+}
+
+/// Lines at 1-2-5 steps, labelled at the decades; the 0 dB line.
+fn paint_grid(painter: &Painter, scale: &Scale, theme: &Theme) {
+    let rect = scale.rect;
+    let mut decade = 10.;
+    while decade < MAX_HZ {
+        for step in [1., 2., 5.] {
+            let hz = decade * step;
+            if !(MIN_HZ..=MAX_HZ).contains(&hz) {
+                continue;
+            }
+            let x = scale.x(hz);
+            let color = if step == 1. {
+                theme.grid_bar
+            } else {
+                theme.grid_beat
+            };
+            painter.vline(x, rect.y_range(), Stroke::new(1., color));
+            if step == 1. {
+                painter.text(
+                    pos2(x + 2., rect.bottom() - 2.),
+                    Align2::LEFT_BOTTOM,
+                    format_hz(hz).replace(' ', ""),
+                    FontId::proportional(8.),
+                    theme.text_muted,
+                );
+            }
+        }
+        decade *= 10.;
+    }
+    let mut db = (BOTTOM_DB / 12.).ceil() * 12.;
+    while db < TOP_DB {
+        let color = if db == 0. {
+            theme.grid_bar
+        } else {
+            theme.grid_beat
+        };
+        painter.hline(rect.x_range(), scale.y(db), Stroke::new(1., color));
+        db += 12.;
+    }
+}
+
+/// The track's spectrum, its loudest bin per pixel column.
+fn paint_spectrum(painter: &Painter, scale: &Scale, cx: &EditorContext, theme: &Theme) {
+    let spectrum = cx.metrics.spectrum();
+    if spectrum.is_empty() {
+        return;
+    }
+    let rect = scale.rect;
+    let bin_hz = cx.sample_rate / (2 * spectrum.len()) as f32;
+    let y = |db: f32| {
+        rect.bottom() - ((db - SPECTRUM_FLOOR) / -SPECTRUM_FLOOR).clamp(0., 1.) * rect.height()
+    };
+    let mut points: Vec<Pos2> = Vec::new();
+    for (i, db) in spectrum.iter().enumerate().skip(1) {
+        let x = scale.x(i as f32 * bin_hz).round();
+        if x < rect.left() || x > rect.right() {
+            continue;
+        }
+        match points.last_mut() {
+            Some(last) if last.x == x => last.y = last.y.min(y(*db)),
+            _ => points.push(pos2(x, y(*db))),
+        }
+    }
+    painter.add(fill_below(
+        &points,
+        rect.bottom(),
+        theme.text_disabled.gamma_multiply(0.25),
+    ));
+    painter.add(Shape::line(points, Stroke::new(1., theme.text_disabled)));
+}
+
+/// Fill between a curve going left to right and `bottom`. Unlike a
+/// polygon fill, it can be any shape.
+fn fill_below(points: &[Pos2], bottom: f32, color: Color32) -> Shape {
+    let mut mesh = Mesh::default();
+    for (i, p) in points.iter().enumerate() {
+        mesh.colored_vertex(*p, color);
+        mesh.colored_vertex(pos2(p.x, bottom.max(p.y)), color);
+        if i > 0 {
+            let n = 2 * i as u32;
+            mesh.add_triangle(n - 2, n - 1, n);
+            mesh.add_triangle(n - 1, n, n + 1);
+        }
+    }
+    Shape::mesh(mesh)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 48_000.;
+
+    #[test]
+    fn response_matches_the_filter() {
+        for mode in [FilterMode::LowPass, FilterMode::HighPass] {
+            // The gain at the cutoff is Q.
+            let db = response_db(mode, 1000., 4., SR, 1000.);
+            assert!((db - 20. * 4f32.log10()).abs() < 0.01, "{mode:?}: {db}");
+        }
+        let low = |hz| response_db(FilterMode::LowPass, 1000., 0.707, SR, hz);
+        assert!(low(20.).abs() < 0.01, "passes the lows");
+        assert!(low(10_000.) < -35., "cuts the highs: {}", low(10_000.));
+        let high = |hz| response_db(FilterMode::HighPass, 1000., 0.707, SR, hz);
+        assert!(high(15_000.).abs() < 0.1, "passes the highs");
+        assert!(high(100.) < -35., "cuts the lows: {}", high(100.));
+    }
+
+    #[test]
+    fn scale_maps_back() {
+        let scale = Scale {
+            rect: Rect::from_min_size(pos2(10., 20.), vec2(300., 100.)),
+        };
+        assert!((scale.hz(scale.x(1234.)) - 1234.).abs() < 0.1);
+        assert!((scale.db(scale.y(-7.)) + 7.).abs() < 1e-3);
+        assert_eq!(scale.x(MIN_HZ), 10.);
+        assert_eq!(scale.y(TOP_DB), 20.);
     }
 }

@@ -147,7 +147,7 @@ impl TrackHeaders {
                 if let Some(payload) = response.dnd_release_payload::<DragPayload>()
                     && let DragPayload::Effect(id) = *payload
                 {
-                    state.add_effect(&track.id, id, 0);
+                    state.add_effect(&track.id, id, usize::MAX);
                 }
             }
             paint_group_scopes(ui, layout.rows(), x);

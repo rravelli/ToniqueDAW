@@ -3,14 +3,15 @@ use crate::{
     config::settings::Settings,
     core::{
         clip::AudioClip,
-        effect::EffectKind,
+        effect::{EffectKind, Setting},
         state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
     },
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tonique_engine::{
-    edit::{ClipId, TrackId},
+    edit::{ClipId, PluginKind, TrackId},
     engine::{Engine, EngineConfig},
+    nodes::FilterMode,
     sample::SampleBuffer,
     time::BeatPos,
 };
@@ -234,6 +235,125 @@ fn only_tracks_can_be_armed() {
     assert!(!state.rows()[0].armed, "a group");
     state.set_armed(&MASTER_TRACK_ID, true);
     assert!(!state.master_track().armed);
+}
+
+#[test]
+fn changing_a_setting_swaps_the_plugin_and_keeps_the_rest() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    state.add_effect(&track, EffectKind::Echo, 0);
+    state.add_effect(&track, EffectKind::Filter, 1);
+    let filter = state.effects(&track)[1].plugin.clone();
+    filter.param("cutoff").unwrap().set(440.);
+    state.set_effect_enabled(&track, filter.id, false);
+
+    state.set_effect_setting(&track, filter.id, Setting::Mode(FilterMode::HighPass));
+    let effects = state.effects(&track);
+    assert_eq!(effects.len(), 2);
+    let swapped = &effects[1].plugin;
+    assert_eq!(swapped.kind, PluginKind::Filter(FilterMode::HighPass));
+    assert_eq!(swapped.id, filter.id, "same effect to the UI");
+    assert_eq!(swapped.param("cutoff").unwrap().get(), 440.);
+    assert!(swapped.bypassed);
+
+    state.undo();
+    assert_eq!(
+        state.effects(&track)[1].plugin.kind,
+        PluginKind::Filter(FilterMode::LowPass)
+    );
+    assert_eq!(state.effects(&track).len(), 2);
+
+    // A setting another effect has does nothing.
+    state.set_effect_setting(&track, filter.id, Setting::Time(1.));
+    assert_eq!(
+        state.effects(&track)[1].plugin.kind,
+        PluginKind::Filter(FilterMode::LowPass)
+    );
+}
+
+#[test]
+fn duplicated_effects_follow_their_originals_and_are_independent() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    state.add_effect(&track, EffectKind::Filter, 0);
+    state.add_effect_with(&track, EffectKind::Echo, Some(Setting::Time(0.5)), 1);
+    let filter = state.effects(&track)[0].plugin.clone();
+    filter.param("cutoff").unwrap().set(440.);
+    state.set_effect_setting(&track, filter.id, Setting::Mode(FilterMode::HighPass));
+    let echo = state.effects(&track)[1].plugin.id;
+    state.set_effect_enabled(&track, echo, false);
+
+    let copies = state.duplicate_effects(&track, &[1, 0]);
+    assert_eq!(copies, [1, 3]);
+    let effects = state.effects(&track);
+    let kinds: Vec<_> = effects.iter().map(|e| e.plugin.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            PluginKind::Filter(FilterMode::HighPass),
+            PluginKind::Filter(FilterMode::HighPass),
+            PluginKind::Echo { time_s: 0.5 },
+            PluginKind::Echo { time_s: 0.5 },
+        ]
+    );
+    assert!(!effects[3].enabled(), "bypassed like its original");
+    let copy = &effects[1].plugin;
+    assert_ne!(copy.id, filter.id);
+    assert_eq!(copy.param("cutoff").unwrap().get(), 440.);
+    copy.param("cutoff").unwrap().set(2000.);
+    assert_eq!(
+        filter.param("cutoff").unwrap().get(),
+        440.,
+        "own parameters"
+    );
+
+    state.undo();
+    assert_eq!(state.effects(&track).len(), 2, "one undo step");
+}
+
+#[test]
+fn effects_move_as_one_undo_step() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    for kind in [EffectKind::Filter, EffectKind::Echo, EffectKind::Filter] {
+        let index = state.effects(&track).len();
+        state.add_effect(&track, kind, index);
+    }
+    let ids = |state: &ProjectState| -> Vec<_> {
+        state.effects(&track).iter().map(|e| e.plugin.id).collect()
+    };
+    let [a, b, c] = ids(&state)[..] else {
+        panic!("three effects");
+    };
+    state.move_effect(&track, 0, 3);
+    assert_eq!(ids(&state), [b, c, a], "to the end");
+    state.move_effect(&track, 2, 0);
+    assert_eq!(ids(&state), [a, b, c], "to the start");
+    state.move_effect(&track, 0, 2);
+    assert_eq!(ids(&state), [b, a, c], "between");
+    state.move_effect(&track, 1, 1);
+    state.move_effect(&track, 1, 2);
+    assert_eq!(ids(&state), [b, a, c], "to where it is");
+    state.undo();
+    assert_eq!(ids(&state), [a, b, c]);
+}
+
+#[test]
+fn knob_moves_are_one_undo_step() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    state.add_effect(&track, EffectKind::Filter, 0);
+    let plugin = state.effects(&track)[0].plugin.clone();
+    let (cutoff, q) = (plugin.param("cutoff").unwrap(), plugin.param("q").unwrap());
+    // Dragged live, then committed from where the drag started.
+    cutoff.set(300.);
+    q.set(4.);
+    state.commit_params(&[(cutoff.id, 1300., 300.), (q.id, 0.5, 4.)]);
+    assert_eq!((cutoff.get(), q.get()), (300., 4.));
+    state.undo();
+    assert_eq!((cutoff.get(), q.get()), (1300., 0.5));
+    state.redo();
+    assert_eq!((cutoff.get(), q.get()), (300., 4.));
 }
 
 #[test]
@@ -885,9 +1005,14 @@ mod projects {
         let plugin = state.edit().track(track).unwrap().channel.plugins[0].clone();
         plugin.param("cutoff").unwrap().set(800.);
         state.set_effect_enabled(&track, plugin.id, false);
+        state.set_effect_setting(&track, plugin.id, Setting::Mode(FilterMode::HighPass));
+        state.add_effect_with(&track, EffectKind::Echo, Some(Setting::Time(0.5)), 1);
 
         let saved = state.project(Some(&dir));
         let track_file = &saved.tracks[0];
+        // Settings are saved among the parameters.
+        assert_eq!(track_file.channel.effects[0].params["mode"], 1.);
+        assert_eq!(track_file.channel.effects[1].params["time"], 0.5);
         assert_eq!(track_file.clips[0].path, Path::new("loop.wav"));
         assert_eq!(track_file.color, "#0a141e");
         assert!(!track_file.channel.effects[0].enabled);

@@ -15,8 +15,9 @@ use crate::core::effect::EffectKind;
 /// Extension of project files.
 pub const EXTENSION: &str = "tonique";
 /// Format version written; files from newer versions are refused.
-/// 2 added groups.
-pub const VERSION: u32 = 2;
+/// 2 added groups; 3 the echo effect, and settings (filter `mode`, echo
+/// `time`) among effect parameters.
+pub const VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
