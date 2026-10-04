@@ -7,6 +7,9 @@ use super::node::{Node, NodeIdentity, NodeProperties};
 use super::topology::{GraphTopology, TopologyNode};
 use crate::nodes::DelayNode;
 
+/// Nodes are only taken out of `work` once placed, and each is placed once.
+const LIVE: &str = "a node still being compiled";
+
 #[derive(Clone, Copy, Debug)]
 pub struct CompileOptions {
     pub sample_rate: f64,
@@ -104,7 +107,7 @@ pub fn compile(
         if std::mem::replace(&mut reachable[n], true) {
             continue;
         }
-        let w = work[n].as_ref().unwrap();
+        let w = work[n].as_ref().expect(LIVE);
         stack.extend(
             w.inputs
                 .iter()
@@ -130,7 +133,7 @@ pub fn compile(
     let mut deduplicated = 0;
     let mut deduped_order = Vec::with_capacity(order.len());
     for &i in &order {
-        let w = work[i].as_mut().unwrap();
+        let w = work[i].as_mut().expect(LIVE);
         for p in w.inputs.iter_mut().chain(w.after.iter_mut()) {
             *p = canon[*p];
         }
@@ -171,7 +174,7 @@ pub fn compile(
     let mut final_order = Vec::with_capacity(deduped_order.len());
     let mut delays_inserted = 0;
     for &i in &deduped_order {
-        let inputs = work[i].as_ref().unwrap().inputs.clone();
+        let inputs = work[i].as_ref().expect(LIVE).inputs.clone();
         let max_in = inputs.iter().map(|&p| latency[p]).max().unwrap_or(0);
         let mut new_inputs = inputs.clone();
         for (slot, &p) in inputs.iter().enumerate() {
@@ -180,7 +183,7 @@ pub fn compile(
                 continue;
             }
             let d = *delay_cache.entry((p, diff)).or_insert_with(|| {
-                let src = work[p].as_ref().unwrap();
+                let src = work[p].as_ref().expect(LIVE);
                 let (owner, src) = (src.owner, &src.props);
                 let node = DelayNode::new(diff, src.channels, src.has_midi);
                 let props = node.properties();
@@ -201,7 +204,7 @@ pub fn compile(
             });
             new_inputs[slot] = d;
         }
-        let w = work[i].as_mut().unwrap();
+        let w = work[i].as_mut().expect(LIVE);
         w.inputs = new_inputs;
         latency[i] = max_in + w.props.latency_samples;
         final_order.push(i);
@@ -215,7 +218,7 @@ pub fn compile(
     }
     let mut nodes: Vec<WorkNode> = Vec::with_capacity(n);
     for &i in &final_order {
-        let mut w = work[i].take().unwrap();
+        let mut w = work[i].take().expect(LIVE);
         w.inputs.iter_mut().for_each(|p| *p = index_of[*p]);
         w.after.iter_mut().for_each(|p| *p = index_of[*p]);
         nodes.push(w);
@@ -340,8 +343,8 @@ fn topological_sort(work: &[Option<WorkNode>]) -> Result<Vec<usize>, CompileErro
     let live = work.iter().filter(|w| w.is_some()).count();
     if order.len() != live {
         let stuck = (0..len)
-            .filter(|&i| work[i].is_some() && indegree[i] > 0)
-            .map(|i| work[i].as_ref().unwrap().name)
+            .filter(|&i| indegree[i] > 0)
+            .filter_map(|i| work[i].as_ref().map(|w| w.name))
             .collect();
         return Err(CompileError::Cycle(stuck));
     }

@@ -51,7 +51,7 @@ impl std::fmt::Debug for ChannelMeter {
 
 /// `f32` max/add on an `AtomicU32` holding the value's bits.
 fn update_f32(a: &AtomicU32, f: impl Fn(f32) -> f32) {
-    let _ = a.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
+    let _ = a.try_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
         Some(f(f32::from_bits(bits)).to_bits())
     });
 }

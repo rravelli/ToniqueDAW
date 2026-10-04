@@ -291,7 +291,7 @@ impl Timeline {
         let x = state.grid.beats_to_x(clip.position, viewport);
         let width = state
             .grid
-            .duration_to_width(clip.duration().unwrap(), state.bpm());
+            .duration_to_width(clip.duration().unwrap_or_default(), state.bpm());
 
         if x + width < viewport.left()
             || x > viewport.right()
@@ -353,8 +353,10 @@ impl Timeline {
         state.begin_batch();
         if !dropped_files.is_empty() {
             for file in dropped_files {
+                // Files of unknown length can't be placed (see `preview_clip_ui`).
                 if let Some(audio_info) =
                     AUDIO_ANALYSIS_CACHE.get_or_analyze(file.path().to_path_buf())
+                    && audio_info.duration.is_some()
                     && let Some(mouse_pos) = ui.ctx().input(|i| i.pointer.hover_pos())
                     && viewport.contains(mouse_pos)
                 {

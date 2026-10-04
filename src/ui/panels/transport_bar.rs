@@ -3,13 +3,14 @@ use egui::{
 };
 use egui_phosphor::{
     fill::SIDEBAR_SIMPLE,
-    regular::{GRAPH, RECORD},
+    regular::{GRAPH, RECORD, SPEAKER_SLASH},
 };
 
 use crate::{
     config::keymap::Action,
     core::state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
     ui::{
+        RECORDING,
         commands::Commands,
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::{ThemeExt, with_alpha},
@@ -70,7 +71,9 @@ impl TransportBar {
             if self.play_button_ui(ui, state).clicked() {
                 commands.push(Action::PlayStop);
             }
-            self.record_button_ui(ui);
+            if RECORDING {
+                self.record_button_ui(ui);
+            }
             self.loop_ui(ui, state);
             if self.follow_ui(ui, state).clicked() {
                 commands.push(Action::ToggleFollowPlayhead);
@@ -90,6 +93,9 @@ impl TransportBar {
                 }
                 self.usage_ui(ui, state);
                 self.fps_ui(ui);
+                if state.audio_lost() && self.no_audio_ui(ui, state).clicked() {
+                    commands.push(Action::OpenSettings);
+                }
                 self.waveform_ui(ui, state);
             });
         });
@@ -305,6 +311,19 @@ impl TransportBar {
                 .font(FontId::new(10., egui::FontFamily::Proportional))
                 .color(ui.app_theme().text_muted)
                 .tooltip("CPU usage"),
+        )
+    }
+
+    /// Shown while there's no audio output; opens the settings.
+    fn no_audio_ui(&mut self, ui: &mut Ui, state: &ProjectState) -> Response {
+        let error = state.audio_error.as_deref().unwrap_or("no device");
+        ui.add(
+            FlatButton::new(SPEAKER_SLASH)
+                .square(BUTTON_SIZE)
+                .color(ui.app_theme().danger)
+                .tooltip(format!(
+                    "No audio output ({error}). Retrying… Click to choose a device."
+                )),
         )
     }
 
