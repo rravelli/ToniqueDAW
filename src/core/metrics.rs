@@ -1,4 +1,3 @@
-use rustfft::{FftPlanner, num_complex::Complex};
 use std::collections::HashMap;
 use tonique_engine::{
     edit::TrackId,
@@ -11,7 +10,7 @@ pub struct AudioMetrics {
     rms: [f32; 2],
     /// Smoothing factor
     alpha: f32,
-    /// Most recent samples, for the spectrum view.
+    /// Most recent samples, for the scope (the master's only).
     pub samples: [Vec<f32>; 2],
 }
 
@@ -25,53 +24,23 @@ impl AudioMetrics {
         }
     }
 
-    /// Pull the latest levels and samples from an engine channel meter.
-    /// Keeps the previous levels if no audio was processed since the last call.
-    pub fn update(&mut self, meter: &ChannelMeter) {
+    /// Pull the latest levels from an engine channel meter, and its recent
+    /// samples if `scope`: only the master's are shown, and copying every
+    /// channel's each frame adds up. Keeps the previous levels if no audio
+    /// was processed since the last call.
+    pub fn update(&mut self, meter: &ChannelMeter, scope: bool) {
         if let Some(levels) = meter.take_levels() {
             for (ch, level) in levels.iter().enumerate() {
                 self.peak[ch] = level.peak;
                 self.rms[ch] = self.alpha * level.rms + (1. - self.alpha) * self.rms[ch];
             }
         }
-        for ch in 0..2 {
-            self.samples[ch].resize(SCOPE_LEN, 0.);
-            meter.read_scope(ch, &mut self.samples[ch]);
+        if scope {
+            for ch in 0..2 {
+                self.samples[ch].resize(SCOPE_LEN, 0.);
+                meter.read_scope(ch, &mut self.samples[ch]);
+            }
         }
-    }
-
-    /// Magnitude spectrum of the latest samples (both channels mixed), in
-    /// dBFS. Bin `i` of the `n` returned is at `i * sample_rate / (2 * n)`
-    /// Hz.
-    pub fn spectrum(&self) -> Vec<f32> {
-        let n = self.samples[0].len().min(self.samples[1].len());
-        if n < 2 {
-            return Vec::new();
-        }
-        let mut planner = FftPlanner::<f32>::new();
-        let fft = planner.plan_fft_forward(n);
-
-        let hann: Vec<f32> = (0..n)
-            .map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (n as f32 - 1.0)).cos()))
-            .collect();
-
-        let mut buffer: Vec<Complex<f32>> = (0..n)
-            .map(|i| {
-                Complex::new(
-                    (self.samples[0][i] + self.samples[1][i]) * 0.5 * hann[i],
-                    0.0,
-                )
-            })
-            .collect();
-
-        fft.process(&mut buffer);
-
-        let window_sum = hann.iter().sum::<f32>();
-        buffer
-            .iter()
-            .take(n / 2)
-            .map(|c| 20.0 * (c.norm() * 2.0 / window_sum).max(1e-9).log10())
-            .collect()
     }
 
     pub fn rms(&self) -> [f32; 2] {

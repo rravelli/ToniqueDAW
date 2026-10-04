@@ -17,6 +17,8 @@ pub enum EffectKind {
     Filter,
     /// Feedback delay.
     Echo,
+    /// Shows the spectrum at its place in the chain; leaves audio as is.
+    Spectrum,
 }
 
 /// Delay of a new echo, in seconds.
@@ -26,13 +28,14 @@ pub const ECHO_TIMES: RangeInclusive<f32> = 0.01..=2.;
 
 impl EffectKind {
     /// In the order the browser lists them.
-    pub const ALL: [EffectKind; 2] = [EffectKind::Filter, EffectKind::Echo];
+    pub const ALL: [EffectKind; 3] = [EffectKind::Filter, EffectKind::Echo, EffectKind::Spectrum];
 
     /// Shown in the browser and on the effect's header.
     pub fn name(self) -> &'static str {
         match self {
             EffectKind::Filter => "Filter",
             EffectKind::Echo => "Echo",
+            EffectKind::Spectrum => "Spectrum",
         }
     }
 
@@ -41,6 +44,7 @@ impl EffectKind {
         match self {
             EffectKind::Filter => PluginKind::Filter(FilterMode::LowPass),
             EffectKind::Echo => PluginKind::Echo { time_s: ECHO_TIME },
+            EffectKind::Spectrum => PluginKind::Analyzer,
         }
     }
 
@@ -49,6 +53,7 @@ impl EffectKind {
         match plugin {
             PluginKind::Filter(_) => Some(EffectKind::Filter),
             PluginKind::Echo { .. } => Some(EffectKind::Echo),
+            PluginKind::Analyzer => Some(EffectKind::Spectrum),
             _ => None,
         }
     }
@@ -58,7 +63,7 @@ impl EffectKind {
     pub fn initial_params(self) -> &'static [(&'static str, f32)] {
         match self {
             EffectKind::Filter => &[("cutoff", 1300.), ("q", 0.5)],
-            EffectKind::Echo => &[],
+            EffectKind::Echo | EffectKind::Spectrum => &[],
         }
     }
 
@@ -134,9 +139,16 @@ impl Setting {
 pub struct Effect {
     pub kind: EffectKind,
     pub plugin: Plugin,
+    /// Shown folded to a strip.
+    pub collapsed: bool,
 }
 
 impl Effect {
+    /// The user's name for it, or its kind's.
+    pub fn name(&self) -> &str {
+        self.plugin.name.as_deref().unwrap_or(self.kind.name())
+    }
+
     /// Not bypassed.
     pub fn enabled(&self) -> bool {
         !self.plugin.bypassed

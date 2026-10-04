@@ -15,7 +15,7 @@ use crate::core::effect::EffectKind;
 /// Extension of project files.
 pub const EXTENSION: &str = "tonique";
 /// Format version written; files from newer versions are refused.
-/// 2 added groups; 3 the echo effect, and settings (filter `mode`, echo
+/// 2 added groups; 3 the echo and spectrum effects, and settings (filter `mode`, echo
 /// `time`) among effect parameters.
 pub const VERSION: u32 = 3;
 
@@ -94,7 +94,12 @@ pub struct ClipFile {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EffectFile {
     pub kind: EffectKind,
+    /// Given by the user; none to go by the kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub collapsed: bool,
     /// Parameter values by name.
     pub params: BTreeMap<String, f32>,
 }
@@ -229,7 +234,9 @@ mod tests {
                     muted: true,
                     effects: vec![EffectFile {
                         kind: EffectKind::Filter,
+                        name: Some("Tops".into()),
                         enabled: false,
+                        collapsed: true,
                         params: BTreeMap::from([("cutoff".into(), 800.)]),
                     }],
                 },

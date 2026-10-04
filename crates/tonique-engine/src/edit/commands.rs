@@ -452,6 +452,42 @@ impl EditCommand for RemovePlugin {
     }
 }
 
+/// Name a plugin, or `None` to go back to its kind's name.
+pub struct RenamePlugin {
+    target: ChannelRef,
+    id: PluginId,
+    name: Option<String>,
+}
+
+impl RenamePlugin {
+    pub fn new(target: ChannelRef, id: PluginId, name: Option<String>) -> Self {
+        Self { target, id, name }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        let p = edit
+            .channel_mut(self.target)?
+            .plugins
+            .iter_mut()
+            .find(|p| p.id == self.id)
+            .ok_or(EditError::PluginNotFound(self.id))?;
+        std::mem::swap(&mut p.name, &mut self.name);
+        Ok(Effects::none())
+    }
+}
+
+impl EditCommand for RenamePlugin {
+    fn label(&self) -> &'static str {
+        "Rename plugin"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+}
+
 pub struct SetBypass {
     target: ChannelRef,
     id: PluginId,

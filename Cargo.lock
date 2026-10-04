@@ -3791,6 +3791,7 @@ dependencies = [
  "hound",
  "libc",
  "rtrb 0.4.0",
+ "rustfft",
 ]
 
 [[package]]

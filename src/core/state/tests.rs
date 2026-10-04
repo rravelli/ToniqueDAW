@@ -312,6 +312,36 @@ fn duplicated_effects_follow_their_originals_and_are_independent() {
 }
 
 #[test]
+fn effects_are_renamed_with_undo_and_collapsed() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    state.add_effect(&track, EffectKind::Filter, 0);
+    let plugin = state.effects(&track)[0].plugin.id;
+    let name = |state: &ProjectState| state.effects(&track)[0].name().to_string();
+    assert_eq!(name(&state), "Filter");
+
+    state.rename_effect(&track, plugin, Some("  Tops ".into()));
+    assert_eq!(name(&state), "Tops", "trimmed");
+    state.undo();
+    assert_eq!(name(&state), "Filter");
+    state.redo();
+    state.rename_effect(&track, plugin, Some(" ".into()));
+    assert_eq!(name(&state), "Filter", "blank: back to the kind's name");
+    assert_eq!(state.effects(&track)[0].plugin.name, None);
+
+    state.rename_effect(&track, plugin, Some("Tops".into()));
+    state.set_effect_collapsed(plugin, true);
+    assert!(state.effects(&track)[0].collapsed);
+    // Copies keep both.
+    state.duplicate_effects(&track, &[0]);
+    let copy = &state.effects(&track)[1];
+    assert_eq!((copy.name(), copy.collapsed), ("Tops", true));
+    state.set_effect_collapsed(plugin, false);
+    assert!(!state.effects(&track)[0].collapsed);
+    assert!(state.effects(&track)[1].collapsed, "each its own");
+}
+
+#[test]
 fn effects_move_as_one_undo_step() {
     let mut state = setup_state();
     let track = state.add_track();
@@ -1007,12 +1037,22 @@ mod projects {
         state.set_effect_enabled(&track, plugin.id, false);
         state.set_effect_setting(&track, plugin.id, Setting::Mode(FilterMode::HighPass));
         state.add_effect_with(&track, EffectKind::Echo, Some(Setting::Time(0.5)), 1);
+        state.add_effect(&track, EffectKind::Spectrum, 2);
+        let spectrum = state.effects(&track)[2].plugin.id;
+        state.rename_effect(&track, spectrum, Some("Bus check".into()));
+        state.set_effect_collapsed(spectrum, true);
 
         let saved = state.project(Some(&dir));
         let track_file = &saved.tracks[0];
         // Settings are saved among the parameters.
         assert_eq!(track_file.channel.effects[0].params["mode"], 1.);
         assert_eq!(track_file.channel.effects[1].params["time"], 0.5);
+        assert_eq!(track_file.channel.effects[2].kind, EffectKind::Spectrum);
+        assert_eq!(
+            track_file.channel.effects[2].name.as_deref(),
+            Some("Bus check")
+        );
+        assert!(track_file.channel.effects[2].collapsed);
         assert_eq!(track_file.clips[0].path, Path::new("loop.wav"));
         assert_eq!(track_file.color, "#0a141e");
         assert!(!track_file.channel.effects[0].enabled);

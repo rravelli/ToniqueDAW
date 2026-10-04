@@ -33,6 +33,41 @@ impl Node for SumNode {
     }
 }
 
+/// Passes its inputs through. Unlike a [`SumNode`] it has an identity, so
+/// it's never merged with another: a fixed point in a chain, e.g. to tap.
+pub struct ThroughNode {
+    channels: usize,
+    identity: Option<NodeIdentity>,
+}
+
+impl ThroughNode {
+    pub fn new(channels: usize) -> Self {
+        Self {
+            channels,
+            identity: None,
+        }
+    }
+
+    pub fn with_identity(mut self, id: NodeIdentity) -> Self {
+        self.identity = Some(id);
+        self
+    }
+}
+
+impl Node for ThroughNode {
+    fn properties(&self) -> NodeProperties {
+        let p = NodeProperties::audio(self.channels);
+        match self.identity {
+            Some(id) => p.with_identity(id),
+            None => p,
+        }
+    }
+
+    fn process(&mut self, ctx: &mut ProcessContext) {
+        ctx.sum_inputs_to_output();
+    }
+}
+
 /// Pure delay line for audio and MIDI. Inserted by the compiler for latency
 /// compensation, or used directly (with [`DelayNode::reporting`]) to model
 /// a node with inherent latency.
