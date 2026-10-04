@@ -1,9 +1,13 @@
 //! Effect editors: the UI of each [`EffectKind`], in a frame with a header
-//! holding the power and collapse buttons and its name. A collapsed effect
+//! holding the power and collapse buttons and its name. Beside the frame,
+//! low at its right, a meter of its output, as in Bitwig. A collapsed effect
 //! is a strip with its name up it.
 
 use crate::{
-    core::effect::{Effect, EffectKind, Setting},
+    core::{
+        effect::{Effect, EffectKind, Setting},
+        metrics::AudioMetrics,
+    },
     ui::{
         effects::{
             echo::EchoEditor, filter::FilterEditor, spectrum::SpectrumEditor,
@@ -15,6 +19,7 @@ use crate::{
             context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
             flat_button::FlatButton,
             knob::Knob,
+            meter::LevelMeter,
         },
     },
 };
@@ -42,6 +47,11 @@ pub mod utility;
 /// Size of a parameter's switch.
 pub const TOGGLE_SIZE: Vec2 = vec2(30., 20.);
 const HEADER_HEIGHT: f32 = 20.;
+/// The output meter outside an effect's frame, low at its right, and the
+/// space between them.
+const METER_WIDTH: f32 = 4.;
+const METER_HEIGHT: f32 = 48.;
+const METER_GAP: f32 = 3.;
 /// Width of a collapsed effect: a strip with its name up it.
 pub const STRIP_WIDTH: f32 = 24.;
 
@@ -188,7 +198,7 @@ fn editor(kind: EffectKind) -> Box<dyn EffectEditor> {
         EffectKind::Filter => Box::new(FilterEditor::new()),
         EffectKind::Echo => Box::new(EchoEditor),
         EffectKind::Spectrum => Box::new(SpectrumEditor::new()),
-        EffectKind::Utility => Box::new(UtilityEditor::new()),
+        EffectKind::Utility => Box::new(UtilityEditor),
     }
 }
 
@@ -206,7 +216,7 @@ pub struct EffectResponse {
     /// Name it this (`None` for its kind's).
     pub renamed: Option<Option<String>>,
     pub edits: Vec<EffectEdit>,
-    /// The whole frame.
+    /// The whole effect: its frame, and its meter when expanded.
     pub rect: Rect,
     /// The editor drew past the frame.
     #[cfg(test)]
@@ -238,10 +248,17 @@ struct Renaming {
     focused: bool,
 }
 
+/// An effect's editor, and the levels its meter shows.
+struct Slot {
+    editor: Box<dyn EffectEditor>,
+    /// What comes out of the effect.
+    levels: AudioMetrics,
+}
+
 /// The editors of the effects shown, made when first shown.
 #[derive(Default)]
 pub struct EffectRack {
-    editors: HashMap<PluginId, Box<dyn EffectEditor>>,
+    editors: HashMap<PluginId, Slot>,
     renaming: Option<Renaming>,
 }
 
@@ -280,17 +297,48 @@ impl EffectRack {
         if effect.collapsed {
             return self.strip_ui(ui, effect, height, selected);
         }
-        let width = self
+        let slot = self
             .editors
             .entry(effect.plugin.id)
-            .or_insert_with(|| editor(effect.kind))
-            .width();
+            .or_insert_with(|| Slot {
+                editor: editor(effect.kind),
+                levels: AudioMetrics::new(),
+            });
+        let width = slot.editor.width();
+        // Its output, while shown: a bypassed effect isn't heard, so it has
+        // none.
+        if effect.enabled() {
+            let output = &effect.plugin.tap;
+            output.watch_output_for((sample_rate / 2.) as u32);
+            slot.levels.update(&output.output, false);
+        }
+        let levels = slot.levels.clone();
         let theme = ui.app_theme();
-        let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        let (whole, _) = ui.allocate_exact_size(
+            vec2(width + METER_GAP + METER_WIDTH, height),
+            Sense::hover(),
+        );
+        let rect = Rect::from_min_size(whole.min, vec2(width, height));
         ui.painter().rect_filled(rect, 3., theme.bg_raised);
         let clip = rect.intersect(ui.clip_rect());
         let header = Rect::from_min_size(rect.min, vec2(width, HEADER_HEIGHT));
         let mut response = self.header(ui, effect, header, clip, selected);
+
+        // Outside the frame, low down at its right.
+        let meter = Rect::from_min_max(
+            pos2(
+                whole.right() - METER_WIDTH,
+                rect.bottom() - METER_HEIGHT.min(height),
+            ),
+            whole.right_bottom(),
+        );
+        let mut meter_ui = ui.new_child(
+            UiBuilder::new()
+                .id_salt(("effect-meter", effect.plugin.id.0))
+                .max_rect(meter),
+        );
+        meter_ui.set_clip_rect(meter.intersect(ui.clip_rect()));
+        meter_ui.add(LevelMeter::new(meter.size(), levels).disabled(!effect.enabled()));
 
         let body = Rect::from_min_max(rect.min + vec2(0., HEADER_HEIGHT), rect.max).shrink(6.);
         // Salted by the plugin: what its controls keep in memory, like a
@@ -308,8 +356,8 @@ impl EffectRack {
             sample_rate,
             edits: Vec::new(),
         };
-        if let Some(editor) = self.editors.get_mut(&effect.plugin.id) {
-            editor.ui(&mut body_ui, &mut cx);
+        if let Some(slot) = self.editors.get_mut(&effect.plugin.id) {
+            slot.editor.ui(&mut body_ui, &mut cx);
         }
         response.edits = cx.edits;
         #[cfg(test)]
@@ -318,7 +366,7 @@ impl EffectRack {
         }
 
         paint_outline(ui, rect, selected);
-        response.rect = rect;
+        response.rect = whole;
         response
     }
 

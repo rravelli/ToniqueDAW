@@ -1,37 +1,20 @@
 //! Editor of [`EffectKind::Utility`](crate::core::effect::EffectKind::Utility):
-//! gain, balance and width knobs, mono and phase switches, and the level
-//! coming out.
+//! gain, balance and width knobs, and mono and phase switches. Its level
+//! shows on the meter every effect has.
 
-use crate::{
-    core::metrics::AudioMetrics,
-    ui::{
-        effects::{EditorContext, EffectEditor, TOGGLE_SIZE},
-        widget::{knob::Knob, meter::LevelMeter},
-    },
+use crate::ui::{
+    effects::{EditorContext, EffectEditor, TOGGLE_SIZE},
+    widget::knob::Knob,
 };
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
 use tonique_engine::nodes::UTILITY_SILENT_DB;
 
-const METER_WIDTH: f32 = 8.;
-/// Between the controls and the meter.
-const GAP: f32 = 6.;
 const KNOB_GAP: f32 = 6.;
 const TOGGLE_GAP: f32 = 2.;
 /// Between the knobs and the switches.
 const ROW_GAP: f32 = 6.;
 
-pub struct UtilityEditor {
-    /// The output's levels.
-    levels: AudioMetrics,
-}
-
-impl UtilityEditor {
-    pub fn new() -> Self {
-        Self {
-            levels: AudioMetrics::new(),
-        }
-    }
-}
+pub struct UtilityEditor;
 
 pub fn format_gain(db: f32) -> String {
     if db <= UTILITY_SILENT_DB {
@@ -55,23 +38,8 @@ pub fn format_balance(balance: f32) -> String {
 
 impl EffectEditor for UtilityEditor {
     fn ui(&mut self, ui: &mut Ui, cx: &mut EditorContext) {
-        let enabled = cx.enabled();
-        if enabled {
-            let tap = &cx.effect.plugin.tap;
-            tap.watch_output_for((cx.sample_rate / 2.) as u32);
-            self.levels.update(&tap.output, false);
-        }
-        // The meter down the right; the controls centred in what's left.
-        let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
-        let meter = Rect::from_min_size(
-            pos2(rect.right() - METER_WIDTH, rect.top()),
-            vec2(METER_WIDTH, rect.height()),
-        );
-        ui.put(
-            meter,
-            LevelMeter::new(meter.size(), self.levels.clone()).disabled(!enabled),
-        );
-        let controls = Rect::from_min_max(rect.min, pos2(meter.left() - GAP, rect.bottom()));
+        // The controls centred.
+        let (controls, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
         let knobs = vec2(3. * Knob::WIDTH + 2. * KNOB_GAP, Knob::HEIGHT);
         let toggles = vec2(3. * TOGGLE_SIZE.x + 2. * TOGGLE_GAP, TOGGLE_SIZE.y);
         let top = controls.center().y - (knobs.y + ROW_GAP + toggles.y) / 2.;
@@ -120,7 +88,7 @@ impl EffectEditor for UtilityEditor {
     }
 
     fn width(&self) -> f32 {
-        186.
+        172.
     }
 }
 
