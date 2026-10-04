@@ -29,7 +29,7 @@ use crate::{
 };
 use egui::Color32;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     mem::take,
     path::PathBuf,
     sync::mpsc::{Receiver, TryRecvError},
@@ -44,7 +44,8 @@ use tonique_engine::{
         PluginId, Track, TrackId,
         commands::{
             AddClip, AddPlugin, AddTrack, EditCommand, MoveClip, RemoveClip, RemovePlugin,
-            RenameBus, RenameTrack, ResizeClip, SetBypass, SetMute, SetParam, SetSolo, SetTempoMap,
+            RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetMute, SetParam,
+            SetSolo, SetTempoMap,
         },
     },
     engine::Engine,
@@ -112,6 +113,9 @@ pub struct ProjectState {
 
     /// UI-only track fields; kept for deleted tracks so undo restores them.
     views: HashMap<TrackId, TrackView>,
+    /// Effects shown folded. Like a track's `collapsed`, a view setting:
+    /// saved, not undoable.
+    collapsed_effects: HashSet<PluginId>,
     selected_tracks: Vec<TrackId>,
     clip_selection: ClipSelection,
     clipboard: Clipboard,
@@ -159,6 +163,7 @@ impl ProjectState {
             graph: GraphMonitor::new(),
             monitor_graph: false,
             views: HashMap::from([(MASTER_TRACK_ID, master)]),
+            collapsed_effects: HashSet::new(),
             selected_tracks: Vec::new(),
             clip_selection: ClipSelection::default(),
             clipboard: Clipboard::default(),
@@ -950,6 +955,10 @@ impl ProjectState {
                 let original = &effects[index].plugin;
                 let mut copy = s.session.create(|e| Plugin::new(e, original.kind));
                 copy.bypassed = original.bypassed;
+                copy.name.clone_from(&original.name);
+                if effects[index].collapsed {
+                    s.collapsed_effects.insert(copy.id);
+                }
                 for param in &mut copy.params {
                     if let Some(from) = original.param(param.name) {
                         param.set(from.get());
@@ -990,11 +999,32 @@ impl ProjectState {
                         Some(Effect {
                             kind: EffectKind::of(&plugin.kind)?,
                             plugin: plugin.clone(),
+                            collapsed: self.collapsed_effects.contains(&plugin.id),
                         })
                     })
                     .collect()
             })
             .unwrap_or_default()
+    }
+    /// Name an effect, as an undo step. Blank (or `None`) goes back to its
+    /// kind's name.
+    pub fn rename_effect(&mut self, id: &TrackId, plugin: PluginId, name: Option<String>) {
+        let name = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        let Some(effect) = self.effect(id, plugin) else {
+            return;
+        };
+        if effect.plugin.name == name {
+            return;
+        }
+        self.perform(RenamePlugin::new(self.channel_ref(*id), plugin, name));
+    }
+    /// Fold an effect to a strip, or unfold it.
+    pub fn set_effect_collapsed(&mut self, plugin: PluginId, collapsed: bool) {
+        if collapsed {
+            self.collapsed_effects.insert(plugin);
+        } else {
+            self.collapsed_effects.remove(&plugin);
+        }
     }
     /// Power button: bypass the effect or not, as an undo step.
     pub fn set_effect_enabled(&mut self, id: &TrackId, plugin: PluginId, enabled: bool) {
@@ -1277,7 +1307,7 @@ impl ProjectState {
 
     fn update_metrics(&mut self) {
         let edit = self.session.edit();
-        self.metrics.master.update(edit.master.meter());
+        self.metrics.master.update(edit.master.meter(), true);
         self.metrics
             .tracks
             .insert(MASTER_TRACK_ID, self.metrics.master.clone());
@@ -1291,7 +1321,7 @@ impl ProjectState {
                 .tracks
                 .entry(id)
                 .or_insert_with(AudioMetrics::new)
-                .update(channel.meter());
+                .update(channel.meter(), false);
         }
         self.metrics.latency = self.session.engine().cpu_load();
     }

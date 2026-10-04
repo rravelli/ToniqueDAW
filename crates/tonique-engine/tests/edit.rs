@@ -808,3 +808,109 @@ fn buses_are_removed_once_unused_and_renamed() {
     assert_eq!(s.edit().bus(outer).unwrap().name, "outer");
     assert_eq!(s.edit().bus(inner).unwrap().output, Output::Bus(outer));
 }
+
+#[test]
+fn plugin_taps_record_input_and_output_only_while_watched() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000 * 4));
+    let mut track = Track::new(&mut edit, "t");
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 8.0, src);
+    track.clips.push(clip);
+    // A low-pass far below the sine (~380 Hz): the output is much quieter.
+    let filter = Plugin::new(&mut edit, PluginKind::Filter(FilterMode::LowPass));
+    filter.param("cutoff").unwrap().set(40.0);
+    let tap = filter.tap.clone();
+    track.channel.plugins.push(filter);
+    edit.tracks.push(track);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+
+    render_offline(&mut p, 4800, 2);
+    assert_eq!(
+        tap.input.take_levels(),
+        None,
+        "not watched: nothing recorded"
+    );
+
+    tap.watch_input_for(9600);
+    tap.watch_output_for(9600);
+    render_offline(&mut p, 4800, 2);
+    let input = tap.input.take_levels().unwrap()[0];
+    let output = tap.output.take_levels().unwrap()[0];
+    assert!(
+        (input.peak - 0.5).abs() < 0.01,
+        "before the filter: {input:?}"
+    );
+    assert!(output.peak < 0.1, "after it: {output:?}");
+    let mut scope = vec![0.0; 1024];
+    tap.input.read_scope(0, &mut scope);
+    assert!(peak(&scope) > 0.4);
+
+    // Watched for 9600 frames: it stops on its own.
+    render_offline(&mut p, 9600, 2);
+    tap.input.take_levels();
+    render_offline(&mut p, 4800, 2);
+    assert_eq!(tap.input.take_levels(), None);
+
+    // Each side only when it's watched.
+    tap.output.take_levels();
+    tap.watch_output_for(4800);
+    render_offline(&mut p, 4800, 2);
+    assert_eq!(tap.input.take_levels(), None);
+    assert!(tap.output.take_levels().is_some());
+}
+
+#[test]
+fn analyzers_pass_audio_through_untouched_and_tap_it() {
+    let render = |analyzer: bool| {
+        let mut edit = Edit::new(120.0);
+        let src = edit.add_source(sine(48000 * 4));
+        let mut track = Track::new(&mut edit, "t");
+        let clip = Clip::audio(&mut edit, BeatPos(0.0), 8.0, src);
+        track.clips.push(clip);
+        let plugin = Plugin::new(&mut edit, PluginKind::Analyzer);
+        assert!(plugin.params.is_empty());
+        let tap = plugin.tap.clone();
+        tap.watch_output_for(48000);
+        if analyzer {
+            track.channel.plugins.push(plugin);
+        }
+        edit.tracks.push(track);
+        let (e, mut p) = engine(0);
+        let mut s = EditSession::new(edit, e).unwrap();
+        s.play().unwrap();
+        (render_offline(&mut p, 4800, 2), tap)
+    };
+    let (with, tap) = render(true);
+    let (without, _) = render(false);
+    assert_eq!(with, without);
+    assert!((tap.output.take_levels().unwrap()[0].peak - 0.5).abs() < 0.01);
+}
+
+#[test]
+fn plugins_can_be_renamed_with_undo() {
+    let mut edit = Edit::new(120.0);
+    let mut track = Track::new(&mut edit, "t");
+    let plugin = Plugin::new(&mut edit, PluginKind::Analyzer);
+    let id = plugin.id;
+    assert_eq!(plugin.name, None);
+    track.channel.plugins.push(plugin);
+    let tid = track.id;
+    edit.tracks.push(track);
+    let (e, _p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    let name = |s: &EditSession| s.edit().track(tid).unwrap().channel.plugins[0].name.clone();
+
+    s.perform(RenamePlugin::new(
+        ChannelRef::Track(tid),
+        id,
+        Some("Tops".into()),
+    ))
+    .unwrap();
+    assert_eq!(name(&s).as_deref(), Some("Tops"));
+    s.undo().unwrap();
+    assert_eq!(name(&s), None);
+    s.redo().unwrap();
+    assert_eq!(name(&s).as_deref(), Some("Tops"));
+}

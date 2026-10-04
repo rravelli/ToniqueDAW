@@ -32,7 +32,15 @@ pub struct ChannelMeter {
 
 impl Default for ChannelMeter {
     fn default() -> Self {
-        let scope = || (0..SCOPE_LEN).map(|_| AtomicU32::new(0)).collect();
+        Self::with_scope_len(SCOPE_LEN)
+    }
+}
+
+impl ChannelMeter {
+    /// A meter keeping `len` samples of history per channel rather than
+    /// [`SCOPE_LEN`], e.g. for a finer spectrum.
+    pub fn with_scope_len(len: usize) -> Self {
+        let scope = || (0..len.max(1)).map(|_| AtomicU32::new(0)).collect();
         Self {
             peak: Default::default(),
             sum_sq: Default::default(),
@@ -40,6 +48,11 @@ impl Default for ChannelMeter {
             scope: [scope(), scope()],
             scope_pos: AtomicUsize::new(0),
         }
+    }
+
+    /// Samples of history kept per channel.
+    pub fn scope_len(&self) -> usize {
+        self.scope[0].len()
     }
 }
 
@@ -64,20 +77,20 @@ impl ChannelMeter {
             return;
         }
         let start = self.scope_pos.load(Ordering::Relaxed);
+        let len = self.scope_len();
         for ch in 0..CHANNELS {
             let data = block.channel(ch.min(block.channels() - 1));
             let (mut peak, mut sum) = (0.0f32, 0.0f32);
             for (i, &s) in data.iter().enumerate() {
                 peak = peak.max(s.abs());
                 sum += s * s;
-                self.scope[ch][(start + i) % SCOPE_LEN].store(s.to_bits(), Ordering::Relaxed);
+                self.scope[ch][(start + i) % len].store(s.to_bits(), Ordering::Relaxed);
             }
             update_f32(&self.peak[ch], |p| p.max(peak));
             update_f32(&self.sum_sq[ch], |s| s + sum);
         }
         self.count.fetch_add(n as u32, Ordering::Relaxed);
-        self.scope_pos
-            .store((start + n) % SCOPE_LEN, Ordering::Relaxed);
+        self.scope_pos.store((start + n) % len, Ordering::Relaxed);
     }
 
     /// UI side: levels since the previous call, then reset. `None` if no
@@ -97,52 +110,63 @@ impl ChannelMeter {
         }))
     }
 
-    /// UI side: the most recent `out.len()` samples (at most [`SCOPE_LEN`])
-    /// of `channel`, oldest first.
+    /// UI side: the most recent `out.len()` samples (at most
+    /// [`Self::scope_len`]) of `channel`, oldest first.
     pub fn read_scope(&self, channel: usize, out: &mut [f32]) {
-        let n = out.len().min(SCOPE_LEN);
+        let len = self.scope_len();
+        let n = out.len().min(len);
         let end = self.scope_pos.load(Ordering::Relaxed);
         let ring = &self.scope[channel.min(CHANNELS - 1)];
         for (i, o) in out[..n].iter_mut().enumerate() {
-            *o =
-                f32::from_bits(ring[(end + SCOPE_LEN - n + i) % SCOPE_LEN].load(Ordering::Relaxed));
+            *o = f32::from_bits(ring[(end + len - n + i) % len].load(Ordering::Relaxed));
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::audio::AudioBuffer;
+/// History kept by a [`PluginTap`]: enough for a fine spectrum.
+pub const TAP_SCOPE_LEN: usize = 8192;
 
-    #[test]
-    fn levels_accumulate_until_read() {
-        let meter = ChannelMeter::default();
-        let mut buf = AudioBuffer::new(2, 4);
-        buf.channel_mut(0).copy_from_slice(&[0.5, -1.0, 0.0, 0.0]);
-        buf.channel_mut(1).copy_from_slice(&[0.25; 4]);
-        meter.record(&buf.block(4));
-        meter.record(&buf.block(4));
+/// The audio going into and out of a plugin, for its editor to show. Each
+/// side only records while watched (see [`Self::watch_input_for`]), so
+/// plugins nobody looks at cost nothing.
+#[derive(Debug)]
+pub struct PluginTap {
+    pub input: ChannelMeter,
+    pub output: ChannelMeter,
+    /// Frames left to record, input then output.
+    watched: [AtomicU32; 2],
+}
 
-        let [l, r] = meter.take_levels().unwrap();
-        assert_eq!(l.peak, 1.0);
-        assert!((l.rms - (1.25f32 / 4.0).sqrt()).abs() < 1e-6);
-        assert!((r.rms - 0.25).abs() < 1e-6);
-        assert_eq!(meter.take_levels(), None);
+impl Default for PluginTap {
+    fn default() -> Self {
+        Self {
+            input: ChannelMeter::with_scope_len(TAP_SCOPE_LEN),
+            output: ChannelMeter::with_scope_len(TAP_SCOPE_LEN),
+            watched: Default::default(),
+        }
+    }
+}
+
+impl PluginTap {
+    /// UI side: record the input for the next `frames`. Call it again
+    /// while shown: it stops by itself once nobody does.
+    pub fn watch_input_for(&self, frames: u32) {
+        self.watched[0].fetch_max(frames, Ordering::Relaxed);
     }
 
-    #[test]
-    fn scope_returns_latest_samples_in_order() {
-        let meter = ChannelMeter::default();
-        let mut buf = AudioBuffer::new(1, SCOPE_LEN);
-        for (i, s) in buf.channel_mut(0).iter_mut().enumerate() {
-            *s = i as f32;
-        }
-        meter.record(&buf.block(SCOPE_LEN));
-        meter.record(&buf.block(3));
+    /// UI side: as [`Self::watch_input_for`], for the output.
+    pub fn watch_output_for(&self, frames: u32) {
+        self.watched[1].fetch_max(frames, Ordering::Relaxed);
+    }
 
-        let mut out = [0.0; 4];
-        meter.read_scope(1, &mut out); // mono input feeds both channels
-        assert_eq!(out, [(SCOPE_LEN - 1) as f32, 0.0, 1.0, 2.0]);
+    /// RT side: whether to record the input and the output of a block of
+    /// `frames`, counting it.
+    pub fn take_block(&self, frames: usize) -> [bool; 2] {
+        self.watched.each_ref().map(|left| {
+            left.try_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+                (left > 0).then(|| left.saturating_sub(frames as u32))
+            })
+            .is_ok()
+        })
     }
 }

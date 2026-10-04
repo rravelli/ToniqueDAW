@@ -5,28 +5,145 @@
 use crate::{
     core::effect::Setting,
     ui::{
-        effects::{EditorContext, EffectEdit, EffectEditor, format_hz, graph_rect, track_drag},
+        effects::{
+            EditorContext, EffectEdit, EffectEditor, format_hz,
+            graph::{freq_x, paint_curve, paint_freq_grid, spectrum_points, x_freq},
+            graph_rect, track_drag,
+        },
         theme::{Theme, ThemeExt},
         widget::flat_button::FlatButton,
     },
 };
 use egui::{
-    Align, Align2, Color32, CursorIcon, FontId, Layout, Mesh, Painter, Pos2, Rect, Sense, Shape,
-    Stroke, Ui, pos2, vec2,
+    Align, Align2, CursorIcon, FontId, Layout, Painter, Pos2, Rect, Sense, Stroke, Ui, UiBuilder,
+    pos2, vec2,
 };
-use std::f32::consts::PI;
-use tonique_engine::{edit::PluginKind, nodes::FilterMode};
+use std::{f32::consts::PI, ops::RangeInclusive};
+use tonique_engine::{edit::PluginKind, nodes::FilterMode, spectrum::Spectrum};
 
-const MIN_HZ: f32 = 20.;
-const MAX_HZ: f32 = 20_000.;
 /// Gain range of the graph, in dB.
 const TOP_DB: f32 = 24.;
 const BOTTOM_DB: f32 = -36.;
-/// Quietest level of the spectrum shown, in dBFS.
-const SPECTRUM_FLOOR: f32 = -96.;
+/// Levels of the spectrum shown, in dBFS.
+const SPECTRUM_RANGE: RangeInclusive<f32> = -90.0..=0.;
 const HANDLE_RADIUS: f32 = 5.;
 
-pub struct FilterEditor;
+/// Which side of the filter the spectrum shows.
+#[derive(Clone, Copy, PartialEq)]
+enum Tap {
+    Input,
+    Output,
+}
+
+pub struct FilterEditor {
+    spectrum: Spectrum,
+    tap: Tap,
+    /// The response drawn last, a gain per pixel, and what it was for:
+    /// worked out again only when that changes.
+    response: (Option<ResponseKey>, Vec<f32>),
+}
+
+/// What a filter's drawn response depends on.
+#[derive(Clone, Copy, PartialEq)]
+struct ResponseKey {
+    mode: FilterMode,
+    cutoff: f32,
+    q: f32,
+    sample_rate: f32,
+    width: f32,
+}
+
+impl FilterEditor {
+    pub fn new() -> Self {
+        Self {
+            spectrum: Spectrum::new(),
+            tap: Tap::Input,
+            response: (None, Vec::new()),
+        }
+    }
+
+    /// The filter's gain at each pixel across `scale`, in dB.
+    fn response(&mut self, key: ResponseKey, scale: &Scale) -> &[f32] {
+        if self.response.0 != Some(key) {
+            let rect = scale.rect;
+            self.response = (
+                Some(key),
+                (0..=key.width.ceil() as usize)
+                    .map(|i| {
+                        let hz = scale.hz(rect.left() + i as f32);
+                        response_db(key.mode, key.cutoff, key.q, key.sample_rate, hz)
+                    })
+                    .collect(),
+            );
+        }
+        &self.response.1
+    }
+
+    /// The audio going into the filter, or coming out.
+    fn paint_spectrum(
+        &mut self,
+        ui: &mut Ui,
+        painter: &Painter,
+        scale: &Scale,
+        cx: &EditorContext,
+        theme: &Theme,
+    ) {
+        let tap = &cx.effect.plugin.tap;
+        // Keep it recording for half a second past the last frame shown.
+        let frames = (cx.sample_rate / 2.) as u32;
+        let meter = match self.tap {
+            Tap::Input => {
+                tap.watch_input_for(frames);
+                &tap.input
+            }
+            Tap::Output => {
+                tap.watch_output_for(frames);
+                &tap.output
+            }
+        };
+        self.spectrum
+            .update(meter, cx.sample_rate, ui.input(|i| i.stable_dt));
+
+        let rect = scale.rect;
+        let points = spectrum_points(&self.spectrum, rect, &SPECTRUM_RANGE);
+        paint_curve(
+            painter,
+            points,
+            rect.bottom(),
+            Stroke::new(1., theme.text_muted),
+            theme.text_disabled.gamma_multiply(0.3),
+        );
+    }
+
+    /// Buttons picking which side of the filter the spectrum shows.
+    fn tap_buttons(&mut self, ui: &mut Ui, rect: Rect) {
+        // Over the graph, out of the layout: `put` would move the controls
+        // below them.
+        let ui = &mut ui.new_child(UiBuilder::new().max_rect(rect));
+        let mut at = rect.left_top() + vec2(3., 3.);
+        for (tap, name, tooltip) in [
+            (Tap::Input, "Pre", "Show the audio going into the filter"),
+            (
+                Tap::Output,
+                "Post",
+                "Show the audio coming out of the filter",
+            ),
+        ] {
+            let button = FlatButton::new(name)
+                .size(vec2(26., 14.))
+                .font(FontId::proportional(9.))
+                .selected(self.tap == tap)
+                .tooltip(tooltip);
+            if ui
+                .put(Rect::from_min_size(at, vec2(26., 14.)), button)
+                .clicked()
+            {
+                self.tap = tap;
+            }
+            at.x += 28.;
+        }
+    }
+}
 
 /// Gain of the engine's filter at `hz`, in dB. Mirrors
 /// [`FilterNode`](tonique_engine::nodes::FilterNode)'s RBJ biquad, so the
@@ -60,10 +177,10 @@ struct Scale {
 
 impl Scale {
     fn x(&self, hz: f32) -> f32 {
-        self.rect.left() + (hz / MIN_HZ).ln() / (MAX_HZ / MIN_HZ).ln() * self.rect.width()
+        freq_x(self.rect, hz)
     }
     fn hz(&self, x: f32) -> f32 {
-        MIN_HZ * (MAX_HZ / MIN_HZ).powf((x - self.rect.left()) / self.rect.width())
+        x_freq(self.rect, x)
     }
     fn y(&self, db: f32) -> f32 {
         self.rect.top() + (TOP_DB - db) / (TOP_DB - BOTTOM_DB) * self.rect.height()
@@ -119,7 +236,7 @@ impl EffectEditor for FilterEditor {
         painter.rect_filled(rect, 2., theme.bg_deep);
         paint_grid(&painter, &scale, &theme);
         if cx.enabled() {
-            paint_spectrum(&painter, &scale, cx, &theme);
+            self.paint_spectrum(ui, &painter, &scale, cx, &theme);
         }
         let (cutoff, q) = (cutoff.get(), q.get());
         let color = if cx.enabled() {
@@ -127,19 +244,26 @@ impl EffectEditor for FilterEditor {
         } else {
             theme.text_disabled
         };
-        let points: Vec<Pos2> = (0..=rect.width().ceil() as usize)
-            .map(|i| {
-                let x = rect.left() + i as f32;
-                let db = response_db(mode, cutoff, q, cx.sample_rate, scale.hz(x));
-                pos2(x, scale.y(db))
-            })
+        let key = ResponseKey {
+            mode,
+            cutoff,
+            q,
+            sample_rate: cx.sample_rate,
+            width: rect.width(),
+        };
+        let points: Vec<Pos2> = self
+            .response(key, &scale)
+            .iter()
+            .enumerate()
+            .map(|(i, db)| pos2(rect.left() + i as f32, scale.y(*db)))
             .collect();
-        painter.add(fill_below(
-            &points,
+        paint_curve(
+            &painter,
+            points,
             rect.bottom(),
+            Stroke::new(1.5, color),
             color.gamma_multiply(0.15),
-        ));
-        painter.add(Shape::line(points, Stroke::new(1.5, color)));
+        );
 
         let handle = pos2(scale.x(cutoff), scale.y(20. * q.log10()));
         painter.circle(
@@ -158,6 +282,9 @@ impl EffectEditor for FilterEditor {
             );
         }
 
+        if cx.enabled() {
+            self.tap_buttons(ui, rect);
+        }
         ui.horizontal(|ui| {
             ui.with_layout(Layout::top_down(Align::Min), |ui| {
                 ui.spacing_mut().item_spacing.y = 2.;
@@ -189,35 +316,10 @@ impl EffectEditor for FilterEditor {
     }
 }
 
-/// Lines at 1-2-5 steps, labelled at the decades; the 0 dB line.
+/// The frequency grid; lines every 12 dB, stronger at 0 dB.
 fn paint_grid(painter: &Painter, scale: &Scale, theme: &Theme) {
     let rect = scale.rect;
-    let mut decade = 10.;
-    while decade < MAX_HZ {
-        for step in [1., 2., 5.] {
-            let hz = decade * step;
-            if !(MIN_HZ..=MAX_HZ).contains(&hz) {
-                continue;
-            }
-            let x = scale.x(hz);
-            let color = if step == 1. {
-                theme.grid_bar
-            } else {
-                theme.grid_beat
-            };
-            painter.vline(x, rect.y_range(), Stroke::new(1., color));
-            if step == 1. {
-                painter.text(
-                    pos2(x + 2., rect.bottom() - 2.),
-                    Align2::LEFT_BOTTOM,
-                    format_hz(hz).replace(' ', ""),
-                    FontId::proportional(8.),
-                    theme.text_muted,
-                );
-            }
-        }
-        decade *= 10.;
-    }
+    paint_freq_grid(painter, rect, theme);
     let mut db = (BOTTOM_DB / 12.).ceil() * 12.;
     while db < TOP_DB {
         let color = if db == 0. {
@@ -228,52 +330,6 @@ fn paint_grid(painter: &Painter, scale: &Scale, theme: &Theme) {
         painter.hline(rect.x_range(), scale.y(db), Stroke::new(1., color));
         db += 12.;
     }
-}
-
-/// The track's spectrum, its loudest bin per pixel column.
-fn paint_spectrum(painter: &Painter, scale: &Scale, cx: &EditorContext, theme: &Theme) {
-    let spectrum = cx.metrics.spectrum();
-    if spectrum.is_empty() {
-        return;
-    }
-    let rect = scale.rect;
-    let bin_hz = cx.sample_rate / (2 * spectrum.len()) as f32;
-    let y = |db: f32| {
-        rect.bottom() - ((db - SPECTRUM_FLOOR) / -SPECTRUM_FLOOR).clamp(0., 1.) * rect.height()
-    };
-    let mut points: Vec<Pos2> = Vec::new();
-    for (i, db) in spectrum.iter().enumerate().skip(1) {
-        let x = scale.x(i as f32 * bin_hz).round();
-        if x < rect.left() || x > rect.right() {
-            continue;
-        }
-        match points.last_mut() {
-            Some(last) if last.x == x => last.y = last.y.min(y(*db)),
-            _ => points.push(pos2(x, y(*db))),
-        }
-    }
-    painter.add(fill_below(
-        &points,
-        rect.bottom(),
-        theme.text_disabled.gamma_multiply(0.25),
-    ));
-    painter.add(Shape::line(points, Stroke::new(1., theme.text_disabled)));
-}
-
-/// Fill between a curve going left to right and `bottom`. Unlike a
-/// polygon fill, it can be any shape.
-fn fill_below(points: &[Pos2], bottom: f32, color: Color32) -> Shape {
-    let mut mesh = Mesh::default();
-    for (i, p) in points.iter().enumerate() {
-        mesh.colored_vertex(*p, color);
-        mesh.colored_vertex(pos2(p.x, bottom.max(p.y)), color);
-        if i > 0 {
-            let n = 2 * i as u32;
-            mesh.add_triangle(n - 2, n - 1, n);
-            mesh.add_triangle(n - 1, n, n + 1);
-        }
-    }
-    Shape::mesh(mesh)
 }
 
 #[cfg(test)]
@@ -304,7 +360,7 @@ mod tests {
         };
         assert!((scale.hz(scale.x(1234.)) - 1234.).abs() < 0.1);
         assert!((scale.db(scale.y(-7.)) + 7.).abs() < 1e-3);
-        assert_eq!(scale.x(MIN_HZ), 10.);
+        assert_eq!(scale.x(super::super::graph::MIN_HZ), 10.);
         assert_eq!(scale.y(TOP_DB), 20.);
     }
 }

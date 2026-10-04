@@ -19,6 +19,7 @@ crossbeam-queue = "0.3"
 hound = "3.5"
 libc = "0.2"
 rtrb = "0.4"
+rustfft = "6.4"
 cpal = { version = "0.18", optional = true }
 
 [[example]]

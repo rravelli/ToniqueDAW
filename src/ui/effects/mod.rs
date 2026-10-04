@@ -1,23 +1,29 @@
 //! Effect editors: the UI of each [`EffectKind`], in a frame with a header
-//! holding the power and remove buttons.
+//! holding the power, collapse and remove buttons. A collapsed effect is a
+//! strip with its name down it.
 
 use crate::{
-    core::{
-        effect::{Effect, EffectKind, Setting},
-        metrics::AudioMetrics,
-    },
+    core::effect::{Effect, EffectKind, Setting},
     ui::{
-        effects::{echo::EchoEditor, filter::FilterEditor},
+        effects::{echo::EchoEditor, filter::FilterEditor, spectrum::SpectrumEditor},
         font::PHOSPHOR_REGULAR,
         theme::ThemeExt,
-        widget::{flat_button::FlatButton, knob::Knob},
+        widget::{
+            context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
+            flat_button::FlatButton,
+            knob::Knob,
+        },
     },
 };
 use egui::{
-    Align, Align2, FontFamily, FontId, Layout, Rect, Response, Sense, Stroke, Ui, UiBuilder, Vec2,
-    vec2,
+    Align, Align2, FontFamily, FontId, Key, Layout, Margin, Rect, Response, Sense, Stroke,
+    TextEdit, Ui, UiBuilder, Vec2, epaint::TextShape, vec2,
 };
-use egui_phosphor::regular::{POWER, X};
+use egui_phosphor::{
+    fill::{COPY, TRASH},
+    regular::{CARET_DOWN, CARET_RIGHT, POWER, TEXT_T, X},
+};
+use std::f32::consts::FRAC_PI_2;
 use std::{collections::HashMap, ops::RangeInclusive};
 use tonique_engine::{
     edit::{Parameter, PluginId},
@@ -26,8 +32,12 @@ use tonique_engine::{
 
 pub mod echo;
 pub mod filter;
+pub mod graph;
+pub mod spectrum;
 
 const HEADER_HEIGHT: f32 = 20.;
+/// Width of a collapsed effect.
+pub const COLLAPSED_WIDTH: f32 = 24.;
 
 /// What an editor changed, for the panel to apply.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,7 +53,6 @@ pub struct EditorContext<'a> {
     pub effect: &'a Effect,
     /// The engine's, to draw responses as heard.
     pub sample_rate: f32,
-    pub metrics: &'a AudioMetrics,
     /// Filled by the editor.
     pub edits: Vec<EffectEdit>,
 }
@@ -152,19 +161,25 @@ pub trait EffectEditor {
 
 fn editor(kind: EffectKind) -> Box<dyn EffectEditor> {
     match kind {
-        EffectKind::Filter => Box::new(FilterEditor),
+        EffectKind::Filter => Box::new(FilterEditor::new()),
         EffectKind::Echo => Box::new(EchoEditor),
+        EffectKind::Spectrum => Box::new(SpectrumEditor::new()),
     }
 }
 
 /// What the user did to an effect's frame.
 pub struct EffectResponse {
-    /// The header: drag to move.
+    /// The header (the whole strip when collapsed): drag to move.
     pub header: Response,
     /// Power button clicked.
     pub toggled: bool,
     /// Remove button clicked.
     pub removed: bool,
+    pub duplicated: bool,
+    /// Collapse or expand it.
+    pub collapse: Option<bool>,
+    /// Name it this (`None` for its kind's).
+    pub renamed: Option<Option<String>>,
     pub edits: Vec<EffectEdit>,
     /// The whole frame.
     pub rect: Rect,
@@ -173,10 +188,36 @@ pub struct EffectResponse {
     pub overflows: bool,
 }
 
+impl EffectResponse {
+    fn new(header: Response) -> Self {
+        Self {
+            header,
+            toggled: false,
+            removed: false,
+            duplicated: false,
+            collapse: None,
+            renamed: None,
+            edits: Vec::new(),
+            rect: Rect::NOTHING,
+            #[cfg(test)]
+            overflows: false,
+        }
+    }
+}
+
+/// An effect's name being typed.
+struct Renaming {
+    plugin: PluginId,
+    text: String,
+    /// Focus was asked for: once it's gone, typing is over.
+    focused: bool,
+}
+
 /// The editors of the effects shown, made when first shown.
 #[derive(Default)]
 pub struct EffectRack {
     editors: HashMap<PluginId, Box<dyn EffectEditor>>,
+    renaming: Option<Renaming>,
 }
 
 impl EffectRack {
@@ -186,23 +227,41 @@ impl EffectRack {
         self.editors.len()
     }
 
+    /// Drop the editors of effects not in `shown`: an analyser's buffers
+    /// are large, and removed effects' would pile up.
+    pub fn retain(&mut self, shown: &[PluginId]) {
+        self.editors.retain(|id, _| shown.contains(id));
+    }
+
+    /// Start typing a new name for `effect`.
+    pub fn rename(&mut self, effect: &Effect) {
+        self.renaming = Some(Renaming {
+            plugin: effect.plugin.id,
+            text: effect.name().to_string(),
+            focused: false,
+        });
+    }
+
     /// The effect's frame, `height` tall: exactly, whatever its editor
-    /// draws.
+    /// draws. A strip when collapsed.
     pub fn effect_ui(
         &mut self,
         ui: &mut Ui,
         effect: &Effect,
         height: f32,
         sample_rate: f32,
-        metrics: &AudioMetrics,
         selected: bool,
     ) -> EffectResponse {
-        let editor = self
+        if effect.collapsed {
+            return self.strip_ui(ui, effect, height, selected);
+        }
+        let width = self
             .editors
             .entry(effect.plugin.id)
-            .or_insert_with(|| editor(effect.kind));
+            .or_insert_with(|| editor(effect.kind))
+            .width();
         let theme = ui.app_theme();
-        let (rect, _) = ui.allocate_exact_size(vec2(editor.width(), height), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         ui.painter().rect_filled(rect, 3., theme.bg_raised);
 
         let clip = rect.intersect(ui.clip_rect());
@@ -216,7 +275,7 @@ impl EffectRack {
         );
         frame.set_clip_rect(clip);
         frame.spacing_mut().item_spacing = vec2(0., 0.);
-        let mut response = header(&mut frame, effect, selected);
+        let mut response = self.header(&mut frame, effect, selected);
 
         let body = Rect::from_min_max(rect.min + vec2(0., HEADER_HEIGHT), rect.max).shrink(6.);
         let mut body_ui = ui.new_child(
@@ -230,96 +289,258 @@ impl EffectRack {
         let mut cx = EditorContext {
             effect,
             sample_rate,
-            metrics,
             edits: Vec::new(),
         };
-        editor.ui(&mut body_ui, &mut cx);
+        if let Some(editor) = self.editors.get_mut(&effect.plugin.id) {
+            editor.ui(&mut body_ui, &mut cx);
+        }
         response.edits = cx.edits;
         #[cfg(test)]
         {
             response.overflows = !body.expand(0.5).contains_rect(body_ui.min_rect());
         }
 
-        let stroke = if selected {
-            Stroke::new(1.5, theme.accent)
-        } else {
-            Stroke::new(1.0, theme.border)
-        };
-        ui.painter()
-            .rect_stroke(rect, 3., stroke, egui::StrokeKind::Inside);
+        paint_outline(ui, rect, selected);
         response.rect = rect;
         response
     }
-}
 
-fn header(ui: &mut Ui, effect: &Effect, selected: bool) -> EffectResponse {
-    let theme = ui.app_theme();
-    let enabled = effect.enabled();
-    let (rect, header) = ui.allocate_exact_size(
-        vec2(ui.available_width(), HEADER_HEIGHT),
-        Sense::click_and_drag(),
-    );
-    let fill = if selected {
-        theme.bg_control_hover
-    } else {
-        theme.bg_control
-    };
-    ui.painter().rect_filled(
-        rect,
-        egui::CornerRadius {
-            nw: 3,
-            ne: 3,
-            sw: 0,
-            se: 0,
-        },
-        fill,
-    );
-    let mut child = ui.new_child(
-        UiBuilder::new()
-            .max_rect(rect.shrink2(vec2(3., 0.)))
-            .layout(Layout::left_to_right(Align::Center)),
-    );
-    let font = FontId::new(10., FontFamily::Name(PHOSPHOR_REGULAR.into()));
-    let toggled = child
-        .add(
-            FlatButton::new(POWER)
-                .square(15.)
-                .font(font.clone())
-                .selected(enabled)
-                .tooltip(if enabled { "Bypass" } else { "Enable" }),
-        )
-        .clicked();
-    let removed = child
-        .with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.add(
-                FlatButton::ghost(X)
-                    .square(15.)
-                    .font(font)
-                    .tooltip("Remove"),
-            )
+    fn header(&mut self, ui: &mut Ui, effect: &Effect, selected: bool) -> EffectResponse {
+        let theme = ui.app_theme();
+        let enabled = effect.enabled();
+        let (rect, header) = ui.allocate_exact_size(
+            vec2(ui.available_width(), HEADER_HEIGHT),
+            Sense::click_and_drag(),
+        );
+        let fill = if selected {
+            theme.bg_control_hover
+        } else {
+            theme.bg_control
+        };
+        ui.painter().rect_filled(
+            rect,
+            egui::CornerRadius {
+                nw: 3,
+                ne: 3,
+                sw: 0,
+                se: 0,
+            },
+            fill,
+        );
+        let mut response = EffectResponse::new(header);
+        let mut child = ui.new_child(
+            UiBuilder::new()
+                .max_rect(rect.shrink2(vec2(3., 0.)))
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        child.spacing_mut().item_spacing.x = 2.;
+        response.toggled = child.add(power_button(enabled)).clicked();
+        if child
+            .add(icon_button(CARET_DOWN).tooltip("Collapse"))
             .clicked()
-        })
-        .inner;
-    ui.painter().text(
-        rect.left_center() + vec2(24., 0.),
-        Align2::LEFT_CENTER,
-        effect.kind.name(),
-        FontId::proportional(11.),
-        if enabled {
+        {
+            response.collapse = Some(true);
+        }
+        let name_left = child.cursor().left() + 2.;
+        response.removed = child
+            .with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add(
+                    FlatButton::ghost(X)
+                        .square(15.)
+                        .font(icon_font())
+                        .tooltip("Remove"),
+                )
+                .clicked()
+            })
+            .inner;
+
+        let name_rect = Rect::from_min_max(
+            egui::pos2(name_left, rect.top() + 2.),
+            egui::pos2(rect.right() - 22., rect.bottom() - 2.),
+        );
+        if !self.name_edit(ui, effect, name_rect, &mut response) {
+            ui.painter().with_clip_rect(name_rect).text(
+                name_rect.left_center(),
+                Align2::LEFT_CENTER,
+                effect.name(),
+                FontId::proportional(11.),
+                if enabled {
+                    theme.text
+                } else {
+                    theme.text_muted
+                },
+            );
+        }
+        if response.header.double_clicked() {
+            self.rename(effect);
+        }
+        self.context_menu(effect, &mut response);
+        response
+    }
+
+    /// A collapsed effect: its power and expand buttons, and its name down
+    /// the strip. Double-click to expand it.
+    fn strip_ui(
+        &mut self,
+        ui: &mut Ui,
+        effect: &Effect,
+        height: f32,
+        selected: bool,
+    ) -> EffectResponse {
+        let theme = ui.app_theme();
+        let (rect, _) = ui.allocate_exact_size(vec2(COLLAPSED_WIDTH, height), Sense::hover());
+        let header = ui.interact(
+            rect,
+            ui.id().with(("effect-strip", effect.plugin.id.0)),
+            Sense::click_and_drag(),
+        );
+        let fill = if selected {
+            theme.bg_control_hover
+        } else {
+            theme.bg_control
+        };
+        ui.painter().rect_filled(rect, 3., fill);
+        let mut response = EffectResponse::new(header);
+        let mut child = ui.new_child(
+            UiBuilder::new()
+                .id_salt(("effect-strip-buttons", effect.plugin.id.0))
+                .max_rect(rect.shrink2(vec2(0., 3.)))
+                .layout(Layout::top_down(Align::Center)),
+        );
+        child.spacing_mut().item_spacing.y = 2.;
+        response.toggled = child.add(power_button(effect.enabled())).clicked();
+        if child
+            .add(icon_button(CARET_RIGHT).tooltip("Expand"))
+            .clicked()
+        {
+            response.collapse = Some(false);
+        }
+
+        // Down the strip, reading top to bottom.
+        let top = child.cursor().top() + 4.;
+        let text_area = Rect::from_min_max(egui::pos2(rect.left(), top), rect.max);
+        let color = if effect.enabled() {
             theme.text
         } else {
             theme.text_muted
-        },
-    );
-    EffectResponse {
-        header,
-        toggled,
-        removed,
-        edits: Vec::new(),
-        rect: Rect::NOTHING,
-        #[cfg(test)]
-        overflows: false,
+        };
+        let galley = ui.painter().layout_no_wrap(
+            effect.name().to_string(),
+            FontId::proportional(11.),
+            color,
+        );
+        let at = egui::pos2(rect.center().x + galley.size().y / 2., top);
+        ui.painter()
+            .with_clip_rect(text_area.intersect(ui.clip_rect()))
+            .add(TextShape::new(at, galley, color).with_angle(FRAC_PI_2));
+
+        if response.header.double_clicked() {
+            response.collapse = Some(false);
+        }
+        self.context_menu(effect, &mut response);
+        paint_outline(ui, rect, selected);
+        response.rect = rect;
+        response
     }
+
+    /// The name being typed, over `rect`, if `effect` is being renamed.
+    /// Enter or clicking away keeps it; Escape drops it.
+    fn name_edit(
+        &mut self,
+        ui: &mut Ui,
+        effect: &Effect,
+        rect: Rect,
+        response: &mut EffectResponse,
+    ) -> bool {
+        let Some(renaming) = self
+            .renaming
+            .as_mut()
+            .filter(|r| r.plugin == effect.plugin.id)
+        else {
+            return false;
+        };
+        let theme = ui.app_theme();
+        let edit = ui.put(
+            rect,
+            TextEdit::singleline(&mut renaming.text)
+                .font(FontId::proportional(11.))
+                .background_color(theme.bg_deep)
+                .text_color(theme.text)
+                .margin(Margin::symmetric(2, 0)),
+        );
+        if !renaming.focused {
+            edit.request_focus();
+            renaming.focused = true;
+        } else if edit.lost_focus() || !edit.has_focus() {
+            if !ui.input(|i| i.key_pressed(Key::Escape)) {
+                response.renamed = Some(Some(renaming.text.clone()));
+            }
+            self.renaming = None;
+        }
+        true
+    }
+
+    fn context_menu(&mut self, effect: &Effect, response: &mut EffectResponse) {
+        let mut rename = false;
+        response.header.context_menu(|ui| {
+            ui.add(ContextMenuLabel::new(effect.name()));
+            if ui.add(ContextMenuButton::new(TEXT_T, "Rename")).clicked() {
+                rename = true;
+            }
+            let (icon, text) = if effect.collapsed {
+                (CARET_RIGHT, "Expand")
+            } else {
+                (CARET_DOWN, "Collapse")
+            };
+            if ui.add(ContextMenuButton::new(icon, text)).clicked() {
+                response.collapse = Some(!effect.collapsed);
+            }
+            if ui.add(ContextMenuButton::new(COPY, "Duplicate")).clicked() {
+                response.duplicated = true;
+            }
+            ui.add(ContextMenuSeparator::new());
+            if ui
+                .add(ContextMenuButton::new(TRASH, "Remove").text_color(ui.app_theme().danger))
+                .clicked()
+            {
+                response.removed = true;
+            }
+        });
+        if rename {
+            // Typed in the header: expand it first.
+            if effect.collapsed {
+                response.collapse = Some(false);
+            }
+            self.rename(effect);
+        }
+    }
+}
+
+fn icon_font() -> FontId {
+    FontId::new(10., FontFamily::Name(PHOSPHOR_REGULAR.into()))
+}
+
+fn icon_button(icon: &str) -> FlatButton {
+    FlatButton::ghost(icon).square(15.).font(icon_font())
+}
+
+fn power_button(enabled: bool) -> FlatButton {
+    FlatButton::new(POWER)
+        .square(15.)
+        .font(icon_font())
+        .selected(enabled)
+        .tooltip(if enabled { "Bypass" } else { "Enable" })
+}
+
+fn paint_outline(ui: &Ui, rect: Rect, selected: bool) {
+    let theme = ui.app_theme();
+    let stroke = if selected {
+        Stroke::new(1.5, theme.accent)
+    } else {
+        Stroke::new(1.0, theme.border)
+    };
+    ui.painter()
+        .rect_stroke(rect, 3., stroke, egui::StrokeKind::Inside);
 }
 
 /// `Hz` below a kilohertz, `kHz` above.

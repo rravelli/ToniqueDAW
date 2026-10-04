@@ -112,6 +112,7 @@ impl LeftPanel {
                         let icon = match kind {
                             EffectKind::Filter => egui_phosphor::fill::FUNNEL_SIMPLE,
                             EffectKind::Echo => egui_phosphor::fill::WAVES,
+                            EffectKind::Spectrum => egui_phosphor::fill::CHART_LINE,
                         };
                         let res = ui
                             .add(ListRow::new(format!("{icon} {}", kind.name())))

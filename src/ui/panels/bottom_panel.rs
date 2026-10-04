@@ -1,6 +1,6 @@
 use crate::{
     config::keymap::Action,
-    core::{metrics::AudioMetrics, state::ProjectState, track::TrackRow},
+    core::{state::ProjectState, track::TrackRow},
     ui::{
         commands::Commands,
         dnd::DragPayload,
@@ -81,6 +81,7 @@ impl BottomPanel {
                     Some(track) => self.ui(ui, track, state),
                     None => {
                         self.track = None;
+                        self.rack.retain(&[]);
                         hint(ui, panel, "Select a track to see its effects");
                     }
                 }
@@ -118,14 +119,10 @@ impl BottomPanel {
             self.selected.clear();
             self.track = Some(track.id);
         }
-        let metrics = state
-            .metrics
-            .tracks
-            .get(&track.id)
-            .cloned()
-            .unwrap_or_else(AudioMetrics::new);
         let sample_rate = state.engine_config().sample_rate as f32;
         let effects = state.effects(&track.id);
+        let shown: Vec<_> = effects.iter().map(|e| e.plugin.id).collect();
+        self.rack.retain(&shown);
 
         self.header(ui, &track);
         let area = ui.available_rect_before_wrap();
@@ -153,6 +150,9 @@ impl BottomPanel {
         let mut pressed_effect = None;
         let mut toggled = None;
         let mut removed = None;
+        let mut duplicated = None;
+        let mut collapse = Vec::new();
+        let mut renamed = Vec::new();
         let mut edits = Vec::new();
         // Exact heights: sizing from what's left would let the effects
         // push the panel.
@@ -168,14 +168,9 @@ impl BottomPanel {
                         ui.add_space(GAP);
                         for (i, effect) in effects.iter().enumerate() {
                             let selected = self.selected.contains(&i);
-                            let response = self.rack.effect_ui(
-                                ui,
-                                effect,
-                                height,
-                                sample_rate,
-                                &metrics,
-                                selected,
-                            );
+                            let response =
+                                self.rack
+                                    .effect_ui(ui, effect, height, sample_rate, selected);
                             response.header.dnd_set_drag_payload(MovedEffect(i));
                             response.header.on_hover_cursor(CursorIcon::Grab);
                             if pressed.is_some_and(|p| response.rect.contains(p)) {
@@ -186,6 +181,15 @@ impl BottomPanel {
                             }
                             if response.removed {
                                 removed = Some(i);
+                            }
+                            if response.duplicated {
+                                duplicated = Some(i);
+                            }
+                            if let Some(collapsed) = response.collapse {
+                                collapse.push((effect.plugin.id, collapsed));
+                            }
+                            if let Some(name) = response.renamed {
+                                renamed.push((effect.plugin.id, name));
                             }
                             if !response.edits.is_empty() {
                                 edits.push((effect.plugin.id, response.edits));
@@ -278,6 +282,15 @@ impl BottomPanel {
                     state.set_effect_setting(&track.id, *plugin, setting);
                 }
             }
+        }
+        for (plugin, collapsed) in collapse {
+            state.set_effect_collapsed(plugin, collapsed);
+        }
+        for (plugin, name) in renamed {
+            state.rename_effect(&track.id, plugin, name);
+        }
+        if let Some(index) = duplicated {
+            self.selected = state.duplicate_effects(&track.id, &[index]);
         }
         if let Some(index) = removed {
             state.remove_effects(&track.id, &[index]);
@@ -408,6 +421,9 @@ mod tests {
             let input = egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200., 800.))),
                 events,
+                // A second a frame: clicks a frame apart are never one
+                // double-click.
+                time: Some(ctx.input(|i| i.time) + 1.),
                 ..Default::default()
             };
             let mut output = ctx.run_ui(input, |ui| {
@@ -654,6 +670,7 @@ mod tests {
     fn effects_fit_the_panel() {
         let (ctx, mut panel, mut state, track) = setup();
         state.add_effect(&track, EffectKind::Filter, 2);
+        state.add_effect(&track, EffectKind::Spectrum, 3);
         let mut first = Vec::new();
         for _ in 0..4 {
             run(&ctx, &mut panel, &mut state, vec![], &[]);
@@ -661,7 +678,7 @@ mod tests {
                 first.clone_from(&panel.rects);
             }
         }
-        assert_eq!(panel.rects.len(), 3);
+        assert_eq!(panel.rects.len(), 4);
         assert_eq!(panel.rects, first, "stable across frames");
         // The default panel: 200 tall at the bottom of an 800 tall screen.
         for rect in &panel.rects {
@@ -670,5 +687,88 @@ mod tests {
             assert!(rect.left() >= GAP, "{rect:?}");
         }
         assert!(!panel.overflows, "the editors fit their frames");
+    }
+
+    /// Editors go with their effects: an analyser's buffers are large.
+    #[test]
+    fn removed_effects_editors_are_dropped() {
+        let (ctx, mut panel, mut state, track) = setup();
+        run(&ctx, &mut panel, &mut state, vec![], &[]);
+        assert_eq!(panel.rack.len(), 2);
+        state.remove_effects(&track, &[0]);
+        run(&ctx, &mut panel, &mut state, vec![], &[]);
+        assert_eq!(panel.rack.len(), 1);
+    }
+
+    /// Double-click a header to type a name; Enter keeps it. Collapsed, an
+    /// effect is a strip; double-click it to expand it.
+    #[test]
+    fn effects_are_renamed_and_collapsed_in_place() {
+        let (ctx, mut panel, mut state, track) = setup();
+        run(&ctx, &mut panel, &mut state, vec![], &[]);
+        let header = panel.rects[0].left_top() + vec2(100., 10.);
+        let double_click = || {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: header,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            vec![
+                egui::Event::PointerMoved(header),
+                button(true),
+                button(false),
+                button(true),
+                button(false),
+            ]
+        };
+        run(&ctx, &mut panel, &mut state, double_click(), &[]);
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        run(
+            &ctx,
+            &mut panel,
+            &mut state,
+            vec![
+                key(egui::Key::A, egui::Modifiers::COMMAND),
+                egui::Event::Text("Lows".into()),
+                key(egui::Key::Enter, Default::default()),
+            ],
+            &[],
+        );
+        run(&ctx, &mut panel, &mut state, vec![], &[]);
+        assert_eq!(state.effects(&track)[0].name(), "Lows");
+
+        let plugin = state.effects(&track)[0].plugin.id;
+        state.set_effect_collapsed(plugin, true);
+        run(&ctx, &mut panel, &mut state, vec![], &[]);
+        assert_eq!(panel.rects[0].width(), crate::ui::effects::COLLAPSED_WIDTH);
+        assert!(!panel.overflows);
+        let header = panel.rects[0].center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: header,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        run(
+            &ctx,
+            &mut panel,
+            &mut state,
+            vec![
+                egui::Event::PointerMoved(header),
+                button(true),
+                button(false),
+                button(true),
+                button(false),
+            ],
+            &[],
+        );
+        assert!(!state.effects(&track)[0].collapsed);
     }
 }

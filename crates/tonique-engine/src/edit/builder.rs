@@ -17,7 +17,8 @@ use crate::automation::AutomationCurve;
 use crate::graph::{GraphDescription, NodeId, NodeIdentity};
 use crate::nodes::{
     AudioClipNode, AutomationNode, ClipPlacement, DelayNode, EchoNode, FilterMode, FilterNode,
-    MetronomeNode, MidiClipNode, SumNode, SynthNode, TimelineNote, VolumePanNode,
+    MetronomeNode, MidiClipNode, SumNode, SynthNode, TappedNode, ThroughNode, TimelineNote,
+    VolumePanNode,
 };
 use crate::param::ParamId;
 use crate::time::{BeatPos, SamplePos};
@@ -200,22 +201,34 @@ impl Builder<'_> {
         for plugin in ch.plugins.iter().filter(|p| !p.bypassed) {
             let id = NodeIdentity::of(&("plugin", plugin.id.0));
             let param = |name| plugin.param(name).expect("plugin param").value.clone();
+            let tap = plugin.tap.clone();
             prev = match plugin.kind {
                 PluginKind::Synth(env) => self.d.add(
-                    SynthNode::new(env, param("gain")).with_identity(id),
+                    TappedNode::new(SynthNode::new(env, param("gain")).with_identity(id), tap),
                     &[prev],
                 ),
                 PluginKind::Filter(mode) => self.d.add(
-                    FilterNode::new(mode, param("cutoff"), param("q")).with_identity(id),
+                    TappedNode::new(
+                        FilterNode::new(mode, param("cutoff"), param("q")).with_identity(id),
+                        tap,
+                    ),
                     &[prev],
                 ),
                 PluginKind::Echo { time_s } => self.d.add(
-                    EchoNode::new(time_s, param("feedback"), param("mix")).with_identity(id),
+                    TappedNode::new(
+                        EchoNode::new(time_s, param("feedback"), param("mix")).with_identity(id),
+                        tap,
+                    ),
                     &[prev],
                 ),
-                PluginKind::Latency { samples } => {
-                    self.d.add(DelayNode::reporting(samples, 2), &[prev])
-                }
+                PluginKind::Analyzer => self.d.add(
+                    TappedNode::new(ThroughNode::new(2).with_identity(id), tap),
+                    &[prev],
+                ),
+                PluginKind::Latency { samples } => self.d.add(
+                    TappedNode::new(DelayNode::reporting(samples, 2), tap),
+                    &[prev],
+                ),
             };
             self.label(prev, format!("{name} · {}", plugin_label(plugin.kind)));
             for p in &plugin.params {
@@ -253,5 +266,6 @@ fn plugin_label(kind: PluginKind) -> &'static str {
         PluginKind::Filter(FilterMode::HighPass) => "high-pass",
         PluginKind::Echo { .. } => "echo",
         PluginKind::Latency { .. } => "latency",
+        PluginKind::Analyzer => "analyzer",
     }
 }

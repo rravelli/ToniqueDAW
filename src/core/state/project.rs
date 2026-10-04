@@ -43,6 +43,7 @@ impl ProjectState {
         let mut master = TrackView::new();
         master.name = "Master".into();
         self.views = HashMap::from([(MASTER_TRACK_ID, master)]);
+        self.collapsed_effects.clear();
         self.sources = SourceRegistry::new(self.session.engine().config().sample_rate);
         self.playhead = BeatPos::ZERO;
         self.edit_cursor = BeatPos::ZERO;
@@ -151,7 +152,9 @@ impl ProjectState {
                 .filter_map(|plugin| {
                     Some(EffectFile {
                         kind: EffectKind::of(&plugin.kind)?,
+                        name: plugin.name.clone(),
                         enabled: !plugin.bypassed,
+                        collapsed: self.collapsed_effects.contains(&plugin.id),
                         params: plugin
                             .params
                             .iter()
@@ -288,6 +291,10 @@ impl ProjectState {
             if !effect.enabled {
                 self.perform(SetBypass::new(self.channel_ref(id), plugin.id, true));
             }
+            if effect.name.is_some() {
+                self.rename_effect(&id, plugin.id, effect.name.clone());
+            }
+            self.set_effect_collapsed(plugin.id, effect.collapsed);
         }
     }
 }
