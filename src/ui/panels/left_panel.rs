@@ -9,7 +9,7 @@ use crate::{
         workspace::Workspace,
     },
 };
-use egui::{Frame, Margin, Ui};
+use egui::{Frame, Margin, RichText, Ui};
 
 /// Space around and between the tab bar and the search bar.
 const HEADER_SPACING: f32 = 4.;
@@ -25,7 +25,9 @@ pub struct LeftPanel {
     /// The last click was in the panel: the browser has the keyboard.
     focused: bool,
     tab: LeftPanelTab,
-    search: SearchBar,
+    /// Each tab its own, so searching one leaves the other's as it was.
+    file_search: SearchBar,
+    effect_search: SearchBar,
 }
 
 impl LeftPanel {
@@ -34,7 +36,8 @@ impl LeftPanel {
             file_browser: FileBrowser::new(),
             focused: false,
             tab: LeftPanelTab::Files,
-            search: SearchBar::new("Search"),
+            file_search: SearchBar::new("Search files"),
+            effect_search: SearchBar::new("Search effects"),
         }
     }
 
@@ -98,8 +101,19 @@ impl LeftPanel {
                         )
                         .height(25.),
                     );
-                    if let Some(query) = self.search.ui(ui) {
-                        self.file_browser.trigger_search(query);
+                    match self.tab {
+                        LeftPanelTab::Files => {
+                            if let Some(query) = ui
+                                .push_id("file-search", |ui| self.file_search.ui(ui))
+                                .inner
+                            {
+                                self.file_browser.trigger_search(query);
+                            }
+                        }
+                        // Filtered as typed, below.
+                        LeftPanelTab::Effects => {
+                            ui.push_id("effect-search", |ui| self.effect_search.ui(ui));
+                        }
                     }
                 });
 
@@ -108,7 +122,22 @@ impl LeftPanel {
                     self.file_browser.ui(ui, state, commands, self.focused);
                 }
                 LeftPanelTab::Effects => {
-                    for kind in EffectKind::ALL {
+                    let query = self.effect_search.query();
+                    let found: Vec<_> = EffectKind::ALL
+                        .into_iter()
+                        .filter(|k| k.matches(query))
+                        .collect();
+                    if found.is_empty() {
+                        ui.add_space(8.);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                RichText::new("No effects match")
+                                    .size(11.)
+                                    .color(ui.app_theme().text_muted),
+                            );
+                        });
+                    }
+                    for kind in found {
                         let icon = match kind {
                             EffectKind::Filter => egui_phosphor::fill::FUNNEL_SIMPLE,
                             EffectKind::Echo => egui_phosphor::fill::WAVES,
@@ -123,5 +152,61 @@ impl LeftPanel {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tonique_engine::engine::{Engine, EngineConfig};
+
+    /// On the effects tab, the bar searches effects, and leaves the files'
+    /// search as it was.
+    #[test]
+    fn each_tab_has_its_own_search() {
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let mut panel = LeftPanel::new();
+        panel.tab = LeftPanelTab::Effects;
+        let mut workspace = Workspace {
+            left_panel_open: true,
+            ..Default::default()
+        };
+        let mut frame = |panel: &mut LeftPanel, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200., 800.),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(ui, &mut state, &mut workspace, &mut Commands::default())
+            });
+            output.textures_delta.clear();
+        };
+        frame(&mut panel, vec![]);
+        // The bar, under the tabs.
+        let at = egui::pos2(100., HEADER_SPACING + 25. + HEADER_SPACING + 11.);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(
+            &mut panel,
+            vec![egui::Event::PointerMoved(at), button(true), button(false)],
+        );
+        frame(&mut panel, vec![egui::Event::Text("delay".into())]);
+        assert_eq!(panel.effect_search.query(), "delay");
+        assert_eq!(panel.file_search.query(), "");
+
+        panel.tab = LeftPanelTab::Files;
+        frame(&mut panel, vec![]);
+        assert_eq!(panel.effect_search.query(), "delay", "kept for later");
     }
 }
