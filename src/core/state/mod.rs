@@ -14,7 +14,7 @@ use crate::{
     config::settings::Settings,
     core::{
         clip::AudioClip,
-        effect::{Effect, EffectKind},
+        effect::{Effect, EffectKind, Setting},
         graph_monitor::GraphMonitor,
         grid::GridService,
         metrics::{AudioMetrics, GlobalMetrics},
@@ -48,6 +48,7 @@ use tonique_engine::{
         },
     },
     engine::Engine,
+    param::ParamId,
     time::BeatPos,
 };
 
@@ -837,21 +838,132 @@ impl ProjectState {
     }
 
     // Effects
-    /// Add an effect to a channel, at `index` among its effects.
+    /// Add an effect to a channel, at `index` among its effects; past the
+    /// last appends it.
     pub fn add_effect(&mut self, id: &TrackId, kind: EffectKind, index: usize) {
-        let plugin = self.session.create(|e| Plugin::new(e, kind.plugin_kind()));
+        self.add_effect_with(id, kind, None, index);
+    }
+    /// Add an effect made with `setting` rather than its default one.
+    pub fn add_effect_with(
+        &mut self,
+        id: &TrackId,
+        kind: EffectKind,
+        setting: Option<Setting>,
+        index: usize,
+    ) {
+        let plugin_kind = setting.map_or(kind.plugin_kind(), |s| s.apply(kind.plugin_kind()));
+        let plugin = self.session.create(|e| Plugin::new(e, plugin_kind));
         for (name, value) in kind.initial_params() {
             if let Some(param) = plugin.param(name) {
                 param.set(*value);
             }
         }
-        // Past the plugins that aren't effects.
-        let position = self
-            .effects(id)
+        let position = self.effect_position(id, index);
+        self.perform(AddPlugin::at(self.channel_ref(*id), plugin, position));
+    }
+    /// Change an effect's [`Setting`], as an undo step. The engine fixes it
+    /// when it makes the plugin, so this swaps in a plugin made with the new
+    /// setting; it keeps the ID and the parameters.
+    pub fn set_effect_setting(&mut self, id: &TrackId, plugin: PluginId, setting: Setting) {
+        let Some(old) = self.effect(id, plugin) else {
+            return;
+        };
+        let kind = setting.apply(old.plugin.kind);
+        if kind == old.plugin.kind {
+            return;
+        }
+        let Some(position) = self.plugin_position(id, plugin) else {
+            return;
+        };
+        let new = Plugin { kind, ..old.plugin };
+        self.transaction("Change effect", |s| {
+            let channel = s.channel_ref(*id);
+            s.perform(RemovePlugin::new(channel, plugin));
+            s.perform(AddPlugin::at(channel, new, position));
+        });
+    }
+    /// Move the effect at `from` to before the one at `to` (the end past
+    /// the last), as an undo step. Indexes as in [`Self::effects`].
+    pub fn move_effect(&mut self, id: &TrackId, from: usize, to: usize) {
+        let effects = self.effects(id);
+        let Some(effect) = effects.get(from) else {
+            return;
+        };
+        if to == from || to == from + 1 {
+            return;
+        }
+        let Some(source) = self.plugin_position(id, effect.plugin.id) else {
+            return;
+        };
+        let mut target = self.effect_position(id, to);
+        if target != usize::MAX && target > source {
+            // Shifted down by the removal.
+            target -= 1;
+        }
+        let plugin = effect.plugin.clone();
+        self.transaction("Move effect", |s| {
+            let channel = s.channel_ref(*id);
+            s.perform(RemovePlugin::new(channel, plugin.id));
+            s.perform(AddPlugin::at(channel, plugin, target));
+        });
+    }
+    /// Where the effect at `index` is among all of a channel's plugins,
+    /// past the plugins that aren't effects; `usize::MAX` for the end.
+    fn effect_position(&self, id: &TrackId, index: usize) -> usize {
+        self.effects(id)
             .get(index)
             .and_then(|e| self.plugin_position(id, e.plugin.id))
-            .unwrap_or(usize::MAX);
-        self.perform(AddPlugin::at(self.channel_ref(*id), plugin, position));
+            .unwrap_or(usize::MAX)
+    }
+    fn effect(&self, id: &TrackId, plugin: PluginId) -> Option<Effect> {
+        self.effects(id).into_iter().find(|e| e.plugin.id == plugin)
+    }
+    /// Set parameters, as one undo step: `(param, old, new)`, `old` being
+    /// its value before the user started changing it.
+    pub fn commit_params(&mut self, changes: &[(ParamId, f32, f32)]) {
+        self.transaction("Change parameter", |s| {
+            for &(param, old, new) in changes {
+                let Ok(p) = s.edit().param(param) else {
+                    continue;
+                };
+                // `SetParam` records the current value for undo: restore it
+                // first.
+                p.set(old);
+                s.perform(SetParam::new(param, new));
+            }
+        });
+    }
+    /// Copy the effects at `indexes` (see [`Self::effects`]), each right
+    /// after its original, as one undo step. Returns the copies' indexes.
+    pub fn duplicate_effects(&mut self, id: &TrackId, indexes: &[usize]) -> Vec<usize> {
+        let effects = self.effects(id);
+        let mut indexes: Vec<_> = indexes
+            .iter()
+            .copied()
+            .filter(|i| *i < effects.len())
+            .collect();
+        indexes.sort_unstable();
+        indexes.dedup();
+        let mut copies = Vec::with_capacity(indexes.len());
+        self.transaction("Duplicate effects", |s| {
+            for (shift, index) in indexes.into_iter().enumerate() {
+                let original = &effects[index].plugin;
+                let mut copy = s.session.create(|e| Plugin::new(e, original.kind));
+                copy.bypassed = original.bypassed;
+                for param in &mut copy.params {
+                    if let Some(from) = original.param(param.name) {
+                        param.set(from.get());
+                        param.automation.clone_from(&from.automation);
+                    }
+                }
+                // Past the copies made so far.
+                let at = index + shift + 1;
+                let position = s.effect_position(id, at);
+                s.perform(AddPlugin::at(s.channel_ref(*id), copy, position));
+                copies.push(at);
+            }
+        });
+        copies
     }
     /// Remove the effects at `indexes` (see [`Self::effects`]), as one undo
     /// step.

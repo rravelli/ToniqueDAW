@@ -108,12 +108,16 @@ impl LeftPanel {
                     self.file_browser.ui(ui, state, commands, self.focused);
                 }
                 LeftPanelTab::Effects => {
-                    let res = ui.add(ListRow::new(format!(
-                        "{} {}",
-                        egui_phosphor::fill::STAR_FOUR,
-                        EffectKind::Filter.name()
-                    )));
-                    res.dnd_set_drag_payload(DragPayload::Effect(EffectKind::Filter));
+                    for kind in EffectKind::ALL {
+                        let icon = match kind {
+                            EffectKind::Filter => egui_phosphor::fill::FUNNEL_SIMPLE,
+                            EffectKind::Echo => egui_phosphor::fill::WAVES,
+                        };
+                        let res = ui
+                            .add(ListRow::new(format!("{icon} {}", kind.name())))
+                            .on_hover_text("Drag onto a track or the effects panel");
+                        res.dnd_set_drag_payload(DragPayload::Effect(kind));
+                    }
                 }
             }
         });

@@ -4,7 +4,7 @@
 - <del>Fix artefacts in preview when resampling</del>
 - Fix bottom scrollbar behavior
 - <del>Fix waveform jittering</del>
-- Fix wrong curve for the equalizer effect
+- <del>Fix wrong curve for the equalizer effect</del>
 
 # Refactor
 

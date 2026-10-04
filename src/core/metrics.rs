@@ -40,8 +40,14 @@ impl AudioMetrics {
         }
     }
 
-    pub fn spectrum(&mut self) -> Vec<f32> {
-        let n = self.samples[0].len();
+    /// Magnitude spectrum of the latest samples (both channels mixed), in
+    /// dBFS. Bin `i` of the `n` returned is at `i * sample_rate / (2 * n)`
+    /// Hz.
+    pub fn spectrum(&self) -> Vec<f32> {
+        let n = self.samples[0].len().min(self.samples[1].len());
+        if n < 2 {
+            return Vec::new();
+        }
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(n);
 
@@ -49,23 +55,23 @@ impl AudioMetrics {
             .map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (n as f32 - 1.0)).cos()))
             .collect();
 
-        let mut buffer: Vec<Complex<f32>> = self.samples[0]
-            .iter()
-            .zip(hann.iter())
-            .map(|(&x, &w)| Complex::new(x * w, 0.0))
+        let mut buffer: Vec<Complex<f32>> = (0..n)
+            .map(|i| {
+                Complex::new(
+                    (self.samples[0][i] + self.samples[1][i]) * 0.5 * hann[i],
+                    0.0,
+                )
+            })
             .collect();
 
         fft.process(&mut buffer);
 
         let window_sum = hann.iter().sum::<f32>();
-
-        let spectrum: Vec<f32> = buffer
+        buffer
             .iter()
             .take(n / 2)
-            .map(|c| 20.0 * (c.norm() * 2.0 / window_sum).max(1e-9).log10() / 4. + 10.) // dBFS
-            .collect();
-
-        spectrum
+            .map(|c| 20.0 * (c.norm() * 2.0 / window_sum).max(1e-9).log10())
+            .collect()
     }
 
     pub fn rms(&self) -> [f32; 2] {

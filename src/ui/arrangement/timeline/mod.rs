@@ -270,7 +270,7 @@ impl Timeline {
             && let Some(payload) = DragAndDrop::payload::<DragPayload>(ui.ctx())
             && let DragPayload::Effect(id) = *payload
         {
-            state.add_effect(&track.id, id, 0);
+            state.add_effect(&track.id, id, usize::MAX);
             state.select_track(&track.id);
             workspace.bottom_panel_open = true;
             DragAndDrop::take_payload::<DragPayload>(ui.ctx());
