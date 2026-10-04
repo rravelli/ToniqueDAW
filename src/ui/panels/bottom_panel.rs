@@ -28,8 +28,8 @@ pub struct BottomPanel {
     /// Selected effects, by index, of `track`'s. Delete removes them.
     selected: Vec<usize>,
     track: Option<TrackId>,
-    /// The last click was in the panel: Delete and Duplicate are for the
-    /// effects, never for the timeline's selection.
+    /// The last click was in the panel: Delete, Duplicate and Rename are
+    /// for the effects, never for the timeline's selection.
     focused: bool,
     /// The effects' frames, as last drawn.
     #[cfg(test)]
@@ -99,12 +99,23 @@ impl BottomPanel {
         let delete = !commands.take(|a| a == Action::Delete).is_empty();
         let select_all = !commands.take(|a| a == Action::SelectAll).is_empty();
         let duplicate = !commands.take(|a| a == Action::Duplicate).is_empty();
+        let rename = !commands.take(|a| a == Action::Rename).is_empty();
         let Some(track) = self.track else {
             return;
         };
         if delete && !self.selected.is_empty() {
             state.remove_effects(&track, &self.selected);
             self.selected.clear();
+        }
+        // Typed in the header: expand it first.
+        if rename
+            && let Some(&index) = self.selected.first()
+            && let Some(effect) = state.effects(&track).get(index)
+        {
+            if effect.collapsed {
+                state.set_effect_collapsed(effect.plugin.id, false);
+            }
+            self.rack.rename(effect);
         }
         if duplicate && !self.selected.is_empty() {
             self.selected = state.duplicate_effects(&track, &self.selected);
@@ -671,6 +682,7 @@ mod tests {
         let (ctx, mut panel, mut state, track) = setup();
         state.add_effect(&track, EffectKind::Filter, 2);
         state.add_effect(&track, EffectKind::Spectrum, 3);
+        state.add_effect(&track, EffectKind::Utility, 4);
         let mut first = Vec::new();
         for _ in 0..4 {
             run(&ctx, &mut panel, &mut state, vec![], &[]);
@@ -678,7 +690,7 @@ mod tests {
                 first.clone_from(&panel.rects);
             }
         }
-        assert_eq!(panel.rects.len(), 4);
+        assert_eq!(panel.rects.len(), 5);
         assert_eq!(panel.rects, first, "stable across frames");
         // The default panel: 200 tall at the bottom of an 800 tall screen.
         for rect in &panel.rects {
@@ -700,29 +712,22 @@ mod tests {
         assert_eq!(panel.rack.len(), 1);
     }
 
-    /// Double-click a header to type a name; Enter keeps it. Collapsed, an
-    /// effect is a strip; double-click it to expand it.
+    /// The rename shortcut types a name in the selected effect's header;
+    /// Enter keeps it. Double-click the header to collapse an effect to a
+    /// strip, and the strip to expand it.
     #[test]
     fn effects_are_renamed_and_collapsed_in_place() {
         let (ctx, mut panel, mut state, track) = setup();
         run(&ctx, &mut panel, &mut state, vec![], &[]);
         let header = panel.rects[0].left_top() + vec2(100., 10.);
-        let double_click = || {
-            let button = |pressed| egui::Event::PointerButton {
-                pos: header,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: Default::default(),
-            };
-            vec![
-                egui::Event::PointerMoved(header),
-                button(true),
-                button(false),
-                button(true),
-                button(false),
-            ]
-        };
-        run(&ctx, &mut panel, &mut state, double_click(), &[]);
+        run(
+            &ctx,
+            &mut panel,
+            &mut state,
+            click(header),
+            &[Action::Rename],
+        );
+        run(&ctx, &mut panel, &mut state, vec![], &[]);
         let key = |key, modifiers| egui::Event::Key {
             key,
             physical_key: None,
@@ -744,31 +749,72 @@ mod tests {
         run(&ctx, &mut panel, &mut state, vec![], &[]);
         assert_eq!(state.effects(&track)[0].name(), "Lows");
 
+        let double_click = |pos| {
+            let button = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            vec![
+                egui::Event::PointerMoved(pos),
+                button(true),
+                button(false),
+                button(true),
+                button(false),
+            ]
+        };
+        run(&ctx, &mut panel, &mut state, double_click(header), &[]);
+        assert!(state.effects(&track)[0].collapsed);
+        run(&ctx, &mut panel, &mut state, vec![], &[]);
+        assert_eq!(panel.rects[0].width(), crate::ui::effects::STRIP_WIDTH);
+        assert!(!panel.overflows);
+        let strip = panel.rects[0].center();
+        run(&ctx, &mut panel, &mut state, double_click(strip), &[]);
+        assert!(!state.effects(&track)[0].collapsed);
+    }
+
+    /// Renaming a collapsed effect expands it, to type in its header.
+    #[test]
+    fn renaming_a_collapsed_effect_expands_it() {
+        let (ctx, mut panel, mut state, track) = setup();
         let plugin = state.effects(&track)[0].plugin.id;
         state.set_effect_collapsed(plugin, true);
         run(&ctx, &mut panel, &mut state, vec![], &[]);
-        assert_eq!(panel.rects[0].width(), crate::ui::effects::COLLAPSED_WIDTH);
-        assert!(!panel.overflows);
-        let header = panel.rects[0].center();
-        let button = |pressed| egui::Event::PointerButton {
-            pos: header,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Default::default(),
-        };
-        run(
+        let strip = panel.rects[0].center();
+        let left = run(
             &ctx,
             &mut panel,
             &mut state,
-            vec![
-                egui::Event::PointerMoved(header),
-                button(true),
-                button(false),
-                button(true),
-                button(false),
-            ],
-            &[],
+            click(strip),
+            &[Action::Rename],
         );
+        assert!(left.is_empty(), "the panel took it: {left:?}");
         assert!(!state.effects(&track)[0].collapsed);
+    }
+
+    /// The utility's switches set their parameter, as an undo step.
+    #[test]
+    fn utility_switches_are_undoable() {
+        let (ctx, mut panel, mut state, track) = setup();
+        state.remove_effects(&track, &[0, 1]);
+        state.add_effect(&track, EffectKind::Utility, 0);
+        run(&ctx, &mut panel, &mut state, vec![], &[]);
+        let mono =
+            |state: &ProjectState| state.effects(&track)[0].plugin.param("mono").unwrap().get();
+        assert_eq!(mono(&state), 0.);
+        // The first switch, under the knobs, centred left of the meter.
+        let frame = panel.rects[0];
+        let body = Rect::from_min_max(frame.min + vec2(6., 20. + 6.), frame.max - vec2(6., 6.));
+        let controls_centre = body.left() + (body.width() - 8. - 6.) / 2.;
+        let switches_top = body.center().y - (52. + 4. + 18.) / 2. + 52. + 4.;
+        let at = egui::pos2(
+            controls_centre - (3. * 28. + 2. * 2.) / 2. + 14.,
+            switches_top + 9.,
+        );
+        run(&ctx, &mut panel, &mut state, click(at), &[]);
+        assert_eq!(mono(&state), 1.);
+        state.undo();
+        assert_eq!(mono(&state), 0.);
     }
 }

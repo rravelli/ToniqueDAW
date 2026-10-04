@@ -1,11 +1,14 @@
 //! Effect editors: the UI of each [`EffectKind`], in a frame with a header
-//! holding the power, collapse and remove buttons. A collapsed effect is a
-//! strip with its name down it.
+//! holding the power and collapse buttons and its name. A collapsed effect
+//! is a strip with its name up it.
 
 use crate::{
     core::effect::{Effect, EffectKind, Setting},
     ui::{
-        effects::{echo::EchoEditor, filter::FilterEditor, spectrum::SpectrumEditor},
+        effects::{
+            echo::EchoEditor, filter::FilterEditor, spectrum::SpectrumEditor,
+            utility::UtilityEditor,
+        },
         font::PHOSPHOR_REGULAR,
         theme::ThemeExt,
         widget::{
@@ -17,11 +20,11 @@ use crate::{
 };
 use egui::{
     Align, Align2, FontFamily, FontId, Key, Layout, Margin, Rect, Response, Sense, Stroke,
-    TextEdit, Ui, UiBuilder, Vec2, epaint::TextShape, vec2,
+    TextEdit, Ui, UiBuilder, Vec2, epaint::TextShape, pos2, vec2,
 };
 use egui_phosphor::{
     fill::{COPY, TRASH},
-    regular::{CARET_DOWN, CARET_RIGHT, POWER, TEXT_T, X},
+    regular::{CARET_DOWN, CARET_RIGHT, POWER, TEXT_T},
 };
 use std::f32::consts::FRAC_PI_2;
 use std::{collections::HashMap, ops::RangeInclusive};
@@ -34,10 +37,13 @@ pub mod echo;
 pub mod filter;
 pub mod graph;
 pub mod spectrum;
+pub mod utility;
 
+/// Size of a parameter's switch.
+pub const TOGGLE_SIZE: Vec2 = vec2(30., 20.);
 const HEADER_HEIGHT: f32 = 20.;
-/// Width of a collapsed effect.
-pub const COLLAPSED_WIDTH: f32 = 24.;
+/// Width of a collapsed effect: a strip with its name up it.
+pub const STRIP_WIDTH: f32 = 24.;
 
 /// What an editor changed, for the panel to apply.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -98,6 +104,24 @@ impl EditorContext<'_> {
                 old,
                 new: p.get(),
             });
+        }
+    }
+
+    /// Button switching a 0/1 parameter, as an undo step.
+    pub fn param_toggle(&mut self, ui: &mut Ui, param: &str, name: &str, tooltip: &str) {
+        let Some(p) = self.param(param) else {
+            return;
+        };
+        let on = p.get() >= 0.5;
+        let button = FlatButton::new(name)
+            .size(TOGGLE_SIZE)
+            .font(FontId::proportional(10.))
+            .selected(on)
+            .tooltip(tooltip);
+        if ui.add(button).clicked() {
+            let (old, new) = (p.get(), if on { 0. } else { 1. });
+            p.set(new);
+            self.edits.push(EffectEdit::Param { id: p.id, old, new });
         }
     }
 
@@ -164,6 +188,7 @@ fn editor(kind: EffectKind) -> Box<dyn EffectEditor> {
         EffectKind::Filter => Box::new(FilterEditor::new()),
         EffectKind::Echo => Box::new(EchoEditor),
         EffectKind::Spectrum => Box::new(SpectrumEditor::new()),
+        EffectKind::Utility => Box::new(UtilityEditor::new()),
     }
 }
 
@@ -173,7 +198,7 @@ pub struct EffectResponse {
     pub header: Response,
     /// Power button clicked.
     pub toggled: bool,
-    /// Remove button clicked.
+    /// Remove picked in its menu.
     pub removed: bool,
     pub duplicated: bool,
     /// Collapse or expand it.
@@ -263,21 +288,13 @@ impl EffectRack {
         let theme = ui.app_theme();
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         ui.painter().rect_filled(rect, 3., theme.bg_raised);
-
         let clip = rect.intersect(ui.clip_rect());
-        // Salted by the plugin: what its controls keep in memory, like a
-        // dragged time, is its own, not shared with other effects.
-        let mut frame = ui.new_child(
-            UiBuilder::new()
-                .id_salt(("effect", effect.plugin.id.0))
-                .max_rect(rect)
-                .layout(Layout::top_down(Align::Min)),
-        );
-        frame.set_clip_rect(clip);
-        frame.spacing_mut().item_spacing = vec2(0., 0.);
-        let mut response = self.header(&mut frame, effect, selected);
+        let header = Rect::from_min_size(rect.min, vec2(width, HEADER_HEIGHT));
+        let mut response = self.header(ui, effect, header, clip, selected);
 
         let body = Rect::from_min_max(rect.min + vec2(0., HEADER_HEIGHT), rect.max).shrink(6.);
+        // Salted by the plugin: what its controls keep in memory, like a
+        // dragged time, is its own, not shared with other effects.
         let mut body_ui = ui.new_child(
             UiBuilder::new()
                 .id_salt(("effect-body", effect.plugin.id.0))
@@ -305,11 +322,20 @@ impl EffectRack {
         response
     }
 
-    fn header(&mut self, ui: &mut Ui, effect: &Effect, selected: bool) -> EffectResponse {
+    /// Power and collapse buttons, and the name (or the field typing it).
+    /// Drag it to move the effect; double-click it to collapse the effect.
+    fn header(
+        &mut self,
+        ui: &mut Ui,
+        effect: &Effect,
+        rect: Rect,
+        clip: Rect,
+        selected: bool,
+    ) -> EffectResponse {
         let theme = ui.app_theme();
-        let enabled = effect.enabled();
-        let (rect, header) = ui.allocate_exact_size(
-            vec2(ui.available_width(), HEADER_HEIGHT),
+        let header = ui.interact(
+            rect,
+            ui.id().with(("effect-header", effect.plugin.id.0)),
             Sense::click_and_drag(),
         );
         let fill = if selected {
@@ -328,58 +354,56 @@ impl EffectRack {
             fill,
         );
         let mut response = EffectResponse::new(header);
-        let mut child = ui.new_child(
+        let mut buttons = ui.new_child(
             UiBuilder::new()
+                .id_salt(("effect-header-buttons", effect.plugin.id.0))
                 .max_rect(rect.shrink2(vec2(3., 0.)))
                 .layout(Layout::left_to_right(Align::Center)),
         );
-        child.spacing_mut().item_spacing.x = 2.;
-        response.toggled = child.add(power_button(enabled)).clicked();
-        if child
+        buttons.set_clip_rect(clip);
+        buttons.spacing_mut().item_spacing.x = 2.;
+        response.toggled = buttons.add(power_button(effect.enabled())).clicked();
+        if buttons
             .add(icon_button(CARET_DOWN).tooltip("Collapse"))
             .clicked()
         {
             response.collapse = Some(true);
         }
-        let name_left = child.cursor().left() + 2.;
-        response.removed = child
-            .with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add(
-                    FlatButton::ghost(X)
-                        .square(15.)
-                        .font(icon_font())
-                        .tooltip("Remove"),
-                )
-                .clicked()
-            })
-            .inner;
 
-        let name_rect = Rect::from_min_max(
-            egui::pos2(name_left, rect.top() + 2.),
-            egui::pos2(rect.right() - 22., rect.bottom() - 2.),
+        let name = Rect::from_min_max(
+            pos2(buttons.cursor().left() + 2., rect.top() + 2.),
+            pos2(rect.right() - 4., rect.bottom() - 2.),
         );
-        if !self.name_edit(ui, effect, name_rect, &mut response) {
-            ui.painter().with_clip_rect(name_rect).text(
-                name_rect.left_center(),
+        let mut field = ui.new_child(
+            UiBuilder::new()
+                .id_salt(("effect-name", effect.plugin.id.0))
+                .max_rect(name),
+        );
+        field.set_clip_rect(name.intersect(clip));
+        if !self.name_edit(&mut field, effect, name, &mut response) {
+            let color = if effect.enabled() {
+                theme.text
+            } else {
+                theme.text_muted
+            };
+            ui.painter().with_clip_rect(name.intersect(clip)).text(
+                name.left_center(),
                 Align2::LEFT_CENTER,
                 effect.name(),
                 FontId::proportional(11.),
-                if enabled {
-                    theme.text
-                } else {
-                    theme.text_muted
-                },
+                color,
             );
         }
+
         if response.header.double_clicked() {
-            self.rename(effect);
+            response.collapse = Some(true);
         }
         self.context_menu(effect, &mut response);
         response
     }
 
-    /// A collapsed effect: its power and expand buttons, and its name down
-    /// the strip. Double-click to expand it.
+    /// A collapsed effect: its power and expand buttons, and its name up
+    /// the strip. Double-click it to expand the effect.
     fn strip_ui(
         &mut self,
         ui: &mut Ui,
@@ -388,7 +412,8 @@ impl EffectRack {
         selected: bool,
     ) -> EffectResponse {
         let theme = ui.app_theme();
-        let (rect, _) = ui.allocate_exact_size(vec2(COLLAPSED_WIDTH, height), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(STRIP_WIDTH, height), Sense::hover());
+        let clip = rect.intersect(ui.clip_rect());
         let header = ui.interact(
             rect,
             ui.id().with(("effect-strip", effect.plugin.id.0)),
@@ -401,24 +426,24 @@ impl EffectRack {
         };
         ui.painter().rect_filled(rect, 3., fill);
         let mut response = EffectResponse::new(header);
-        let mut child = ui.new_child(
+        let mut buttons = ui.new_child(
             UiBuilder::new()
                 .id_salt(("effect-strip-buttons", effect.plugin.id.0))
                 .max_rect(rect.shrink2(vec2(0., 3.)))
                 .layout(Layout::top_down(Align::Center)),
         );
-        child.spacing_mut().item_spacing.y = 2.;
-        response.toggled = child.add(power_button(effect.enabled())).clicked();
-        if child
+        buttons.set_clip_rect(clip);
+        buttons.spacing_mut().item_spacing.y = 2.;
+        response.toggled = buttons.add(power_button(effect.enabled())).clicked();
+        if buttons
             .add(icon_button(CARET_RIGHT).tooltip("Expand"))
             .clicked()
         {
             response.collapse = Some(false);
         }
 
-        // Down the strip, reading top to bottom.
-        let top = child.cursor().top() + 4.;
-        let text_area = Rect::from_min_max(egui::pos2(rect.left(), top), rect.max);
+        // Up the strip from its bottom, reading bottom to top.
+        let top = buttons.cursor().top() + 4.;
         let color = if effect.enabled() {
             theme.text
         } else {
@@ -429,10 +454,11 @@ impl EffectRack {
             FontId::proportional(11.),
             color,
         );
-        let at = egui::pos2(rect.center().x + galley.size().y / 2., top);
+        let at = pos2(rect.center().x - galley.size().y / 2., rect.bottom() - 6.);
+        let name = Rect::from_min_max(pos2(rect.left(), top), rect.max);
         ui.painter()
-            .with_clip_rect(text_area.intersect(ui.clip_rect()))
-            .add(TextShape::new(at, galley, color).with_angle(FRAC_PI_2));
+            .with_clip_rect(name.intersect(clip))
+            .add(TextShape::new(at, galley, color).with_angle(-FRAC_PI_2));
 
         if response.header.double_clicked() {
             response.collapse = Some(false);

@@ -34,6 +34,8 @@ pub struct TrackHeaders {
     pub width: f32,
     /// The row being dragged to a new place.
     dragging: Option<TrackId>,
+    /// The track to start renaming, next drawn.
+    rename: Option<TrackId>,
 }
 
 impl TrackHeaders {
@@ -41,7 +43,13 @@ impl TrackHeaders {
         Self {
             width: DEFAULT_TRACK_WIDTH,
             dragging: None,
+            rename: None,
         }
+    }
+
+    /// Start typing a new name for `track`, if it's on screen.
+    pub fn rename(&mut self, track: TrackId) {
+        self.rename = Some(track);
     }
 
     pub fn ui(
@@ -53,6 +61,7 @@ impl TrackHeaders {
         viewport: Rect,
     ) {
         let left = viewport.max.x - self.width;
+        let rename = self.rename.take();
 
         let dragger_rect = Rect::from_min_size(
             pos2(left, viewport.top()),
@@ -83,7 +92,7 @@ impl TrackHeaders {
                 ))
                 .id_salt("track-area"),
             |ui| {
-                self.track_panel(ui, state, workspace, layout, viewport);
+                self.track_panel(ui, state, workspace, layout, viewport, rename);
             },
         );
         let master_track = state.master_track();
@@ -97,7 +106,12 @@ impl TrackHeaders {
             )),
             |ui| {
                 ui.horizontal(|ui| {
-                    TrackHeader::new().ui(ui, &master_track, state);
+                    TrackHeader::new().ui(
+                        ui,
+                        &master_track,
+                        state,
+                        rename == Some(master_track.id),
+                    );
                 })
             },
         );
@@ -110,6 +124,7 @@ impl TrackHeaders {
         workspace: &mut Workspace,
         layout: &RowLayout,
         viewport: Rect,
+        rename: Option<TrackId>,
     ) {
         ui.vertical(|ui| {
             ui.set_width(ui.available_width());
@@ -127,7 +142,7 @@ impl TrackHeaders {
                     continue;
                 }
 
-                let response = TrackHeader::new().ui(ui, track, state);
+                let response = TrackHeader::new().ui(ui, track, state, rename == Some(track.id));
                 if response.drag_started() {
                     self.dragging = Some(track.id);
                 }

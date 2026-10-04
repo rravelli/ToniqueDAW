@@ -18,7 +18,7 @@ use crate::graph::{GraphDescription, NodeId, NodeIdentity};
 use crate::nodes::{
     AudioClipNode, AutomationNode, ClipPlacement, DelayNode, EchoNode, FilterMode, FilterNode,
     MetronomeNode, MidiClipNode, SumNode, SynthNode, TappedNode, ThroughNode, TimelineNote,
-    VolumePanNode,
+    UtilityNode, VolumePanNode,
 };
 use crate::param::ParamId;
 use crate::time::{BeatPos, SamplePos};
@@ -221,6 +221,21 @@ impl Builder<'_> {
                     ),
                     &[prev],
                 ),
+                PluginKind::Utility => self.d.add(
+                    TappedNode::new(
+                        UtilityNode::new(
+                            param("gain"),
+                            param("balance"),
+                            param("width"),
+                            param("mono"),
+                            param("invert_left"),
+                            param("invert_right"),
+                        )
+                        .with_identity(id),
+                        tap,
+                    ),
+                    &[prev],
+                ),
                 PluginKind::Analyzer => self.d.add(
                     TappedNode::new(ThroughNode::new(2).with_identity(id), tap),
                     &[prev],
@@ -267,5 +282,6 @@ fn plugin_label(kind: PluginKind) -> &'static str {
         PluginKind::Echo { .. } => "echo",
         PluginKind::Latency { .. } => "latency",
         PluginKind::Analyzer => "analyzer",
+        PluginKind::Utility => "utility",
     }
 }

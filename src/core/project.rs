@@ -15,8 +15,8 @@ use crate::core::effect::EffectKind;
 /// Extension of project files.
 pub const EXTENSION: &str = "tonique";
 /// Format version written; files from newer versions are refused.
-/// 2 added groups; 3 the echo and spectrum effects, and settings (filter `mode`, echo
-/// `time`) among effect parameters.
+/// 2 added groups; 3 the echo, spectrum and utility effects, settings
+/// (filter `mode`, echo `time`) among effect parameters, and effect names.
 pub const VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

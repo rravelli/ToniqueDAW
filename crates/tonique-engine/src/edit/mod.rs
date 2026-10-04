@@ -122,6 +122,9 @@ pub enum PluginKind {
     /// Passes audio through untouched: a point in the chain for its
     /// [`Plugin::tap`] to show, like a spectrum analyser.
     Analyzer,
+    /// Gain, balance, stereo width, mono and phase inversion: see
+    /// [`UtilityNode`](crate::nodes::UtilityNode).
+    Utility,
 }
 
 #[derive(Clone, Debug)]
@@ -147,6 +150,14 @@ impl Plugin {
                 vec![p("cutoff", 20.0, 20000.0, 2000.0), p("q", 0.1, 10.0, 0.707)]
             }
             PluginKind::Echo { .. } => vec![p("feedback", 0.0, 0.95, 0.4), p("mix", 0.0, 1.0, 0.3)],
+            PluginKind::Utility => vec![
+                p("gain", crate::nodes::UTILITY_SILENT_DB, 24.0, 0.0),
+                p("balance", -1.0, 1.0, 0.0),
+                p("width", 0.0, 2.0, 1.0),
+                p("mono", 0.0, 1.0, 0.0),
+                p("invert_left", 0.0, 1.0, 0.0),
+                p("invert_right", 0.0, 1.0, 0.0),
+            ],
             PluginKind::Latency { .. } | PluginKind::Analyzer => vec![],
         };
         Self {
