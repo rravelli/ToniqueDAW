@@ -47,6 +47,44 @@ impl EffectKind {
         }
     }
 
+    /// Other words to find it by: what it does, and what other DAWs call
+    /// it.
+    pub fn keywords(self) -> &'static [&'static str] {
+        match self {
+            EffectKind::Filter => &[
+                "eq",
+                "equalizer",
+                "low-pass",
+                "lowpass",
+                "high-pass",
+                "highpass",
+                "cutoff",
+                "resonance",
+            ],
+            EffectKind::Echo => &["delay", "feedback", "repeat"],
+            EffectKind::Spectrum => &["analyzer", "analyser", "fft", "frequency", "meter"],
+            EffectKind::Utility => &[
+                "gain", "volume", "pan", "balance", "width", "stereo", "mono", "phase", "invert",
+            ],
+        }
+    }
+
+    /// Whether a search for `query` finds it: each of its words starts the
+    /// name or a keyword (or a part of one, like "pass" in "low-pass"),
+    /// whatever the case. Only starts: "eq" shouldn't find "frequency". An
+    /// empty query finds all.
+    pub fn matches(self, query: &str) -> bool {
+        let words: Vec<String> = std::iter::once(self.name())
+            .chain(self.keywords().iter().copied())
+            .map(str::to_lowercase)
+            .collect();
+        query.to_lowercase().split_whitespace().all(|term| {
+            words.iter().any(|word| {
+                word.starts_with(term) || word.split('-').any(|part| part.starts_with(term))
+            })
+        })
+    }
+
     /// The engine plugin a new effect runs on.
     pub fn plugin_kind(self) -> PluginKind {
         match self {
@@ -175,6 +213,28 @@ mod tests {
             assert_eq!(EffectKind::of(&kind.plugin_kind()), Some(kind));
         }
         assert_eq!(EffectKind::of(&PluginKind::Latency { samples: 4 }), None);
+    }
+
+    #[test]
+    fn searches_find_effects_by_name_and_purpose() {
+        let found = |query| -> Vec<_> {
+            EffectKind::ALL
+                .into_iter()
+                .filter(|k| k.matches(query))
+                .collect()
+        };
+        assert_eq!(found(""), EffectKind::ALL);
+        assert_eq!(found("  "), EffectKind::ALL);
+        assert_eq!(found("FIL"), [EffectKind::Filter]);
+        assert_eq!(found("delay"), [EffectKind::Echo]);
+        assert_eq!(found("eq"), [EffectKind::Filter], "not \"frequency\"");
+        assert_eq!(found("pass"), [EffectKind::Filter]);
+        assert_eq!(found("pan"), [EffectKind::Utility]);
+        assert_eq!(found("analy"), [EffectKind::Spectrum]);
+        // Every word must match.
+        assert_eq!(found("stereo width"), [EffectKind::Utility]);
+        assert!(found("stereo delay").is_empty());
+        assert!(found("reverb").is_empty());
     }
 
     #[test]

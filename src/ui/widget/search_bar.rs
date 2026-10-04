@@ -38,6 +38,12 @@ impl SearchBar {
         }
     }
 
+    /// What's typed, as typed: for searches cheap enough to run at every
+    /// key, rather than once typing pauses.
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
     /// Draws the bar; returns the query when the search should (re)run.
     pub fn ui(&mut self, ui: &mut Ui) -> Option<&str> {
         let theme = ui.app_theme();
