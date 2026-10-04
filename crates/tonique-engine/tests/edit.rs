@@ -7,7 +7,7 @@ use tonique_engine::edit::{
     PluginKind, Send, Track, TrackId,
 };
 use tonique_engine::engine::{AudioProcessor, Engine, EngineConfig, render_offline};
-use tonique_engine::nodes::{Envelope, FilterMode};
+use tonique_engine::nodes::{Envelope, FilterMode, UTILITY_SILENT_DB};
 use tonique_engine::sample::SampleBuffer;
 use tonique_engine::time::BeatPos;
 
@@ -913,4 +913,84 @@ fn plugins_can_be_renamed_with_undo() {
     assert_eq!(name(&s), None);
     s.redo().unwrap();
     assert_eq!(name(&s).as_deref(), Some("Tops"));
+}
+
+#[test]
+fn utility_shapes_gain_balance_width_and_phase() {
+    // Left: a sine; right: silent. Mid is half the sine, side the other half.
+    let len = 48000 * 8;
+    let left: Vec<f32> = (0..len).map(|i| (i as f32 * 0.05).sin() * 0.5).collect();
+    let src_buf = Arc::new(SampleBuffer::new(vec![left, vec![0.0; len]], SR));
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(src_buf);
+    let mut track = Track::new(&mut edit, "t");
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 16.0, src);
+    track.clips.push(clip);
+    let utility = Plugin::new(&mut edit, PluginKind::Utility);
+    let params = utility.params.clone();
+    track.channel.plugins.push(utility);
+    edit.tracks.push(track);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    let set = |name: &str, value: f32| {
+        params.iter().find(|p| p.name == name).unwrap().set(value);
+    };
+    // Peaks of each side once ramps have settled; the sign of the left's
+    // first sample past them tells its phase against the source's.
+    let mut render = || {
+        let out = render_offline(&mut p, 4800, 2);
+        let tail = &out[2 * 2400..];
+        let side = |ch: usize| {
+            tail.iter()
+                .skip(ch)
+                .step_by(2)
+                .fold(0f32, |m, s| m.max(s.abs()))
+        };
+        (side(0), side(1))
+    };
+    let close = |(l, r): (f32, f32), (el, er): (f32, f32)| {
+        assert!(
+            (l - el).abs() < 0.01 && (r - er).abs() < 0.01,
+            "({l}, {r}), expected ({el}, {er})"
+        );
+    };
+
+    close(render(), (0.5, 0.0));
+    set("gain", -6.0206);
+    close(render(), (0.25, 0.0));
+    set("gain", 0.0);
+    set("width", 0.0);
+    close(render(), (0.25, 0.25));
+    set("width", 2.0);
+    // Side doubled: L = mid + 2·side, R = mid − 2·side.
+    close(render(), (0.75, 0.25));
+    set("mono", 1.0);
+    close(render(), (0.25, 0.25));
+    set("balance", -1.0);
+    close(render(), (0.25, 0.0));
+    set("gain", UTILITY_SILENT_DB);
+    close(render(), (0.0, 0.0));
+}
+
+#[test]
+fn utility_inverts_each_side() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000 * 4));
+    let mut track = Track::new(&mut edit, "t");
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 8.0, src);
+    track.clips.push(clip);
+    let utility = Plugin::new(&mut edit, PluginKind::Utility);
+    utility.param("invert_left").unwrap().set(1.0);
+    track.channel.plugins.push(utility);
+    edit.tracks.push(track);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    let out = render_offline(&mut p, 4800, 2);
+    // A mono source: the left now mirrors the right.
+    for frame in out.chunks(2).skip(100) {
+        assert!((frame[0] + frame[1]).abs() < 1e-5, "{frame:?}");
+    }
+    assert!(peak(&out) > 0.4);
 }

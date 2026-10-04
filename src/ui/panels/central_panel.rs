@@ -1,4 +1,5 @@
 use crate::{
+    config::keymap::Action,
     core::state::{PlaybackState, ProjectState},
     ui::{
         arrangement::{
@@ -67,6 +68,12 @@ impl CentralPanel {
         if workspace.main_view == MainView::Graph {
             self.graph.ui(ui, state);
             return;
+        }
+        // Rename the selected track, unless the effects panel took it.
+        if !commands.take(|a| a == Action::Rename).is_empty()
+            && let Some(track) = state.selected_track()
+        {
+            self.tracks.rename(track.id);
         }
         let available_rect = ui.available_rect_before_wrap();
         // Draw navigation bar on top
@@ -414,5 +421,63 @@ mod tests {
         frame(&mut state, vec![Event::PointerMoved(over_group)]);
         frame(&mut state, vec![Event::PointerMoved(far_below)]);
         assert!(!collapsed(&state), "stays expanded after a drop inside");
+    }
+
+    /// The rename shortcut types a name in the selected track's header;
+    /// Enter keeps it, as an undo step.
+    #[test]
+    fn rename_shortcut_renames_the_selected_track() {
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        state.add_track();
+        let track = state.add_track();
+        state.select_track(&track);
+
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let mut panel = CentralPanel::new();
+        let mut frame = |state: &mut ProjectState, events: Vec<egui::Event>, actions: &[Action]| {
+            let mut commands = Commands::default();
+            for action in actions {
+                commands.push(*action);
+            }
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200., 800.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(ui, state, &mut Workspace::default(), &mut commands)
+            });
+            output.textures_delta.clear();
+            commands.take_all()
+        };
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        frame(&mut state, vec![], &[]);
+        assert!(
+            frame(&mut state, vec![], &[Action::Rename]).is_empty(),
+            "taken"
+        );
+        frame(&mut state, vec![], &[]);
+        frame(
+            &mut state,
+            vec![
+                key(egui::Key::A, egui::Modifiers::COMMAND),
+                egui::Event::Text("Bass".into()),
+                key(egui::Key::Enter, Default::default()),
+            ],
+            &[],
+        );
+        frame(&mut state, vec![], &[]);
+        let name = |state: &ProjectState| state.selected_track().unwrap().name;
+        assert_eq!(name(&state), "Bass");
+        state.undo();
+        assert_ne!(name(&state), "Bass");
     }
 }

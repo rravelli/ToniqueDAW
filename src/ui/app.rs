@@ -179,6 +179,7 @@ impl ToniqueApp {
             Action::SaveProjectAs => self.project.request(ProjectAction::SaveAs, state),
             Action::SelectAll
             | Action::Duplicate
+            | Action::Rename
             | Action::Delete
             | Action::SplitAtCursor
             | Action::NudgeLeft

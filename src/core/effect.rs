@@ -19,6 +19,8 @@ pub enum EffectKind {
     Echo,
     /// Shows the spectrum at its place in the chain; leaves audio as is.
     Spectrum,
+    /// Gain, balance, stereo width, mono and phase inversion.
+    Utility,
 }
 
 /// Delay of a new echo, in seconds.
@@ -28,7 +30,12 @@ pub const ECHO_TIMES: RangeInclusive<f32> = 0.01..=2.;
 
 impl EffectKind {
     /// In the order the browser lists them.
-    pub const ALL: [EffectKind; 3] = [EffectKind::Filter, EffectKind::Echo, EffectKind::Spectrum];
+    pub const ALL: [EffectKind; 4] = [
+        EffectKind::Filter,
+        EffectKind::Echo,
+        EffectKind::Spectrum,
+        EffectKind::Utility,
+    ];
 
     /// Shown in the browser and on the effect's header.
     pub fn name(self) -> &'static str {
@@ -36,6 +43,7 @@ impl EffectKind {
             EffectKind::Filter => "Filter",
             EffectKind::Echo => "Echo",
             EffectKind::Spectrum => "Spectrum",
+            EffectKind::Utility => "Utility",
         }
     }
 
@@ -45,6 +53,7 @@ impl EffectKind {
             EffectKind::Filter => PluginKind::Filter(FilterMode::LowPass),
             EffectKind::Echo => PluginKind::Echo { time_s: ECHO_TIME },
             EffectKind::Spectrum => PluginKind::Analyzer,
+            EffectKind::Utility => PluginKind::Utility,
         }
     }
 
@@ -54,6 +63,7 @@ impl EffectKind {
             PluginKind::Filter(_) => Some(EffectKind::Filter),
             PluginKind::Echo { .. } => Some(EffectKind::Echo),
             PluginKind::Analyzer => Some(EffectKind::Spectrum),
+            PluginKind::Utility => Some(EffectKind::Utility),
             _ => None,
         }
     }
@@ -63,7 +73,7 @@ impl EffectKind {
     pub fn initial_params(self) -> &'static [(&'static str, f32)] {
         match self {
             EffectKind::Filter => &[("cutoff", 1300.), ("q", 0.5)],
-            EffectKind::Echo | EffectKind::Spectrum => &[],
+            EffectKind::Echo | EffectKind::Spectrum | EffectKind::Utility => &[],
         }
     }
 

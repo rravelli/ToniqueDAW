@@ -10,7 +10,7 @@ use std::{
 };
 
 const RADIUS: f32 = 11.;
-const SIZE: Vec2 = vec2(46., Knob::HEIGHT);
+const SIZE: Vec2 = vec2(Knob::WIDTH, Knob::HEIGHT);
 /// Drag distance covering the whole range, in points. Shift drags ten
 /// times finer.
 const DRAG_RANGE: f32 = 150.;
@@ -32,6 +32,8 @@ pub struct Knob<'a> {
 }
 
 impl<'a> Knob<'a> {
+    /// Room for its name and value.
+    pub const WIDTH: f32 = 46.;
     /// Name, knob and value.
     pub const HEIGHT: f32 = 52.;
 

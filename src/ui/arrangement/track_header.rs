@@ -66,13 +66,24 @@ impl TrackHeader {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) -> Response {
+    /// The header of `track`; `rename` starts typing its name.
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        track: &TrackRow,
+        state: &mut ProjectState,
+        rename: bool,
+    ) -> Response {
         // Create persistent id
         let id = ui.make_persistent_id(format!("ui_track_state_{:?}", track.id));
         // Get previous state
         if let Some(data) = ui.ctx().data(|r| r.get_temp::<Self>(id)) {
             *self = data;
         };
+        if rename {
+            self.edit = true;
+            self.focus_requested = false;
+        }
 
         let mut volume_changed = false;
         let is_group = track.kind == TrackKind::Group;

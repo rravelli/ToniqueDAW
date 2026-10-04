@@ -23,6 +23,7 @@ pub enum Action {
     Redo,
     SelectAll,
     Duplicate,
+    Rename,
     Delete,
     SplitAtCursor,
     AddTrack,
@@ -40,7 +41,7 @@ pub enum Action {
 
 impl Action {
     /// In the order shown in the settings.
-    pub const ALL: [Action; 24] = [
+    pub const ALL: [Action; 25] = [
         Action::NewProject,
         Action::OpenProject,
         Action::SaveProject,
@@ -53,6 +54,7 @@ impl Action {
         Action::Redo,
         Action::SelectAll,
         Action::Duplicate,
+        Action::Rename,
         Action::Delete,
         Action::SplitAtCursor,
         Action::AddTrack,
@@ -78,6 +80,7 @@ impl Action {
             Action::Redo => "redo",
             Action::SelectAll => "select_all",
             Action::Duplicate => "duplicate",
+            Action::Rename => "rename",
             Action::Delete => "delete",
             Action::SplitAtCursor => "split_at_cursor",
             Action::AddTrack => "add_track",
@@ -111,6 +114,7 @@ impl Action {
             Action::Redo => "Redo",
             Action::SelectAll => "Select all clips",
             Action::Duplicate => "Duplicate",
+            Action::Rename => "Rename",
             Action::Delete => "Delete",
             Action::SplitAtCursor => "Split clips at cursor",
             Action::AddTrack => "Add audio track",
@@ -190,6 +194,7 @@ impl Action {
             Action::Redo => vec![cmd(Key::Y), cmd_shift(Key::Z)],
             Action::SelectAll => vec![cmd(Key::A)],
             Action::Duplicate => vec![cmd(Key::D)],
+            Action::Rename => vec![cmd(Key::R)],
             Action::Delete => vec![none(Key::Delete), none(Key::Backspace)],
             Action::SplitAtCursor => vec![cmd(Key::K)],
             Action::AddTrack => vec![cmd(Key::T)],

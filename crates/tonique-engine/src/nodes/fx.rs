@@ -243,3 +243,94 @@ impl Node for EchoNode {
         Some(self)
     }
 }
+
+/// Gain below which a utility is silent, in dB: the bottom of its range.
+pub const UTILITY_SILENT_DB: f32 = -60.0;
+
+/// Stereo utility: width (0 mono, 1 as is, 2 twice as wide), a mono
+/// switch, per-side phase inversion, balance, then gain in dB (silent at
+/// [`UTILITY_SILENT_DB`]). Every control is ramped, switches included, so
+/// nothing clicks.
+pub struct UtilityNode {
+    params: [Arc<AtomicParam>; 6],
+    /// Gain (dB), balance, width, mono, invert left, invert right.
+    smoothers: [Smoother; 6],
+    identity: Option<NodeIdentity>,
+}
+
+impl UtilityNode {
+    pub fn new(
+        gain_db: Arc<AtomicParam>,
+        balance: Arc<AtomicParam>,
+        width: Arc<AtomicParam>,
+        mono: Arc<AtomicParam>,
+        invert_left: Arc<AtomicParam>,
+        invert_right: Arc<AtomicParam>,
+    ) -> Self {
+        let params = [gain_db, balance, width, mono, invert_left, invert_right];
+        Self {
+            smoothers: std::array::from_fn(|i| Smoother::new(params[i].get())),
+            params,
+            identity: None,
+        }
+    }
+
+    pub fn with_identity(mut self, id: NodeIdentity) -> Self {
+        self.identity = Some(id);
+        self
+    }
+}
+
+impl Node for UtilityNode {
+    fn properties(&self) -> NodeProperties {
+        let p = NodeProperties::audio(2);
+        match self.identity {
+            Some(id) => p.with_identity(id),
+            None => p,
+        }
+    }
+
+    fn prepare(&mut self, sample_rate: f64, _max_block: usize) {
+        for (s, p) in self.smoothers.iter_mut().zip(&self.params) {
+            s.set_sample_rate(sample_rate);
+            s.snap(p);
+        }
+    }
+
+    fn process(&mut self, ctx: &mut ProcessContext) {
+        ctx.sum_inputs_to_output();
+        for (s, p) in self.smoothers.iter_mut().zip(&self.params) {
+            s.retarget(p);
+        }
+        let (l, r) = ctx.audio_out.channel_pair_mut(0, 1);
+        for (l, r) in l.iter_mut().zip(r.iter_mut()) {
+            let [gain_db, balance, width, mono, invert_l, invert_r] =
+                self.smoothers.each_mut().map(|s| s.next());
+            let width = width * (1.0 - mono.clamp(0.0, 1.0));
+            let mid = (*l + *r) * 0.5;
+            let side = (*l - *r) * 0.5 * width;
+            let gain = if gain_db <= UTILITY_SILENT_DB {
+                0.0
+            } else {
+                10f32.powf(gain_db / 20.0)
+            };
+            // Balance: the far side fades out, the near one stays at unity.
+            let balance = balance.clamp(-1.0, 1.0);
+            let (gl, gr) = ((1.0 - balance).min(1.0), (1.0 + balance).min(1.0));
+            *l = (mid + side) * gl * gain * (1.0 - 2.0 * invert_l.clamp(0.0, 1.0));
+            *r = (mid - side) * gr * gain * (1.0 - 2.0 * invert_r.clamp(0.0, 1.0));
+        }
+    }
+
+    /// Continue the ramps from where they were.
+    fn take_state_from(&mut self, previous: &mut dyn Node) -> StateTransfer {
+        if let Some(prev) = previous.as_any_mut().and_then(|a| a.downcast_mut::<Self>()) {
+            self.smoothers = prev.smoothers.clone();
+        }
+        StateTransfer::KeepNew
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
+}
