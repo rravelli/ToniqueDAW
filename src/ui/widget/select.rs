@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use egui::{
     Align2, CursorIcon, FontFamily, FontId, Id, Popup, Response, ScrollArea, Sense, Stroke,
     StrokeKind, Ui, Vec2, Widget,
@@ -90,7 +91,11 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
             .iter()
             .find(|(v, _)| v == self.value)
             .map_or(self.placeholder.clone(), |(_, label)| label.clone());
-        let mut job = LayoutJob::simple_singleline(selected, FontId::proportional(12.), text_color);
+        let mut job = LayoutJob::simple_singleline(
+            selected,
+            FontId::proportional(font_size::BODY),
+            text_color,
+        );
         job.wrap = TextWrapping::truncate_at_width(rect.width() - 2. * PADDING - caret_width);
         let galley = painter.layout_job(job);
         painter.galley(

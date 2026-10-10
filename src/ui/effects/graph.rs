@@ -1,6 +1,7 @@
 //! Drawing shared by editors with a frequency axis: the axis, its grid,
 //! and spectrum curves.
 
+use crate::ui::theme::font_size;
 use crate::ui::{effects::format_hz, theme::Theme};
 use egui::{Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, pos2};
 use std::ops::RangeInclusive;
@@ -48,7 +49,7 @@ pub fn paint_freq_grid(painter: &Painter, rect: Rect, theme: &Theme) {
                     pos2(x + 2., rect.bottom() - 2.),
                     Align2::LEFT_BOTTOM,
                     format_hz(hz).replace(' ', ""),
-                    FontId::proportional(8.),
+                    FontId::proportional(font_size::SMALL),
                     theme.text_muted,
                 );
             }

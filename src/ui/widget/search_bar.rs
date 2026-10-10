@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use std::time::{Duration, Instant};
 
 use egui::{
@@ -12,7 +13,7 @@ const HEIGHT: f32 = 22.;
 const PADDING_X: f32 = 6.;
 const GAP: f32 = 4.;
 const ICON_SIZE: f32 = 12.;
-const FONT_SIZE: f32 = 11.;
+const FONT_SIZE: f32 = font_size::LABEL;
 /// How long typing must pause before the query is reported.
 const DEBOUNCE: Duration = Duration::from_millis(300);
 

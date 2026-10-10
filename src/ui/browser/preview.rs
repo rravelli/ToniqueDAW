@@ -1,6 +1,7 @@
 //! The selected file's preview, under the browser: waveform, play button
 //! and details.
 
+use crate::ui::theme::font_size;
 use egui::{FontFamily, FontId, Frame, Label, Pos2, RichText, Sense, Shape, Stroke, Ui, vec2};
 use egui_phosphor::fill::{PLAY, STOP};
 
@@ -35,13 +36,13 @@ pub fn preview_ui(ui: &mut Ui, state: &mut ProjectState, selected_audio: &AudioI
                 Label::new(
                     RichText::new(selected_audio.name.clone())
                         .strong()
-                        .size(12.),
+                        .size(font_size::BODY),
                 )
                 .selectable(false)
                 .wrap_mode(egui::TextWrapMode::Truncate),
             );
             ui.add(
-                Label::new(RichText::new(format!("Length: {length}")).size(9.))
+                Label::new(RichText::new(format!("Length: {length}")).size(font_size::SMALL))
                     .selectable(false)
                     .wrap_mode(egui::TextWrapMode::Truncate),
             );
@@ -52,7 +53,7 @@ pub fn preview_ui(ui: &mut Ui, state: &mut ProjectState, selected_audio: &AudioI
                         selected_audio.sample_rate as f32 / 1000.,
                         selected_audio.bit_depth.unwrap_or(16),
                     ))
-                    .size(9.),
+                    .size(font_size::SMALL),
                 )
                 .selectable(false)
                 .wrap_mode(egui::TextWrapMode::Truncate),

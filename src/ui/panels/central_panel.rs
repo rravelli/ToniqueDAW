@@ -7,15 +7,19 @@ use crate::{
         },
         commands::Commands,
         graph::GraphView,
-        theme::{ThemeExt, with_alpha},
-        widget::scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
+        theme::{ThemeExt, font_size, with_alpha},
+        widget::{
+            logo::logo,
+            scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
+        },
         workspace::{MainView, Workspace},
     },
 };
-use egui::{Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{Align2, Color32, FontId, Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
 /// Empty bars after the end of the arrangement.
 const TIMELINE_SLACK_BARS: f64 = 16.;
+const EMPTY_LOGO_SIZE: f32 = 80.;
 
 pub struct CentralPanel {
     timeline: Timeline,
@@ -98,6 +102,9 @@ impl CentralPanel {
         );
         // Draw tracks
         self.tracks.ui(ui, state, workspace, &layout, viewport);
+        if state.track_count() == 0 {
+            empty_project_ui(ui, state, timeline_viewport);
+        }
 
         // The timeline spans the content plus some room to add more, and
         // never shrinks under the part being looked at.
@@ -297,6 +304,42 @@ impl CentralPanel {
             state.seek(state.grid.x_to_beats(mouse_pos.x, rect));
         }
     }
+}
+
+/// What a project without tracks shows: the logo, faded, and how to start.
+fn empty_project_ui(ui: &Ui, state: &ProjectState, viewport: Rect) {
+    let theme = ui.app_theme();
+    let painter = ui.painter_at(viewport);
+    let logo_rect = Rect::from_center_size(
+        viewport.center() - vec2(0., EMPTY_LOGO_SIZE / 2.),
+        Vec2::splat(EMPTY_LOGO_SIZE),
+    );
+    logo()
+        .tint(Color32::WHITE.gamma_multiply(0.45))
+        .paint_at(ui, logo_rect);
+    let title = painter.text(
+        logo_rect.center_bottom() + vec2(0., 12.),
+        Align2::CENTER_TOP,
+        "Tonique",
+        FontId::proportional(font_size::HEADING),
+        theme.text_muted,
+    );
+    let add_track = state
+        .settings()
+        .keymap
+        .shortcut_text(ui.ctx(), Action::AddTrack);
+    let hint = if add_track.is_empty() {
+        "Drop audio files here to start".to_string()
+    } else {
+        format!("Drop audio files here, or press {add_track} to add a track")
+    };
+    painter.text(
+        title.center_bottom() + vec2(0., 6.),
+        Align2::CENTER_TOP,
+        hint,
+        FontId::proportional(font_size::LABEL),
+        theme.text_muted,
+    );
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 use crate::ui::{app::ToniqueApp, font::fonts, window::native_options};
 use crate::{audio::host::AudioHost, config::settings::Settings};
 use tonique_engine::engine::Engine;
+mod about;
 mod app;
 mod arrangement;
 mod browser;
@@ -31,6 +32,7 @@ pub fn run(
         native_options(),
         Box::new(|cc| {
             cc.egui_ctx.set_fonts(fonts());
+            egui_extras::install_image_loaders(&cc.egui_ctx);
             cc.egui_ctx.set_zoom_factor(settings.ui_scale);
             Ok(Box::new(ToniqueApp::new(engine, audio, settings, cc)))
         }),

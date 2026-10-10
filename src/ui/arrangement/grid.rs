@@ -1,5 +1,6 @@
 //! Painting the timeline grid and ruler labels for a [`GridService`].
 
+use crate::ui::theme::font_size;
 use egui::{Align2, Color32, FontId, Painter, Rect, Stroke, pos2};
 
 use crate::{
@@ -120,7 +121,7 @@ impl PaintGrid for GridService {
                     pos2(x + 3.0, rect.bottom() - 1.0),
                     Align2::LEFT_BOTTOM,
                     text,
-                    FontId::new(8., egui::FontFamily::Monospace),
+                    FontId::new(font_size::SMALL, egui::FontFamily::Monospace),
                     theme.text_muted,
                 );
                 painter.line_segment(
@@ -139,7 +140,7 @@ impl PaintGrid for GridService {
                     pos2(x + 3.0, rect.bottom() - 1.0),
                     Align2::LEFT_BOTTOM,
                     text,
-                    FontId::new(8., egui::FontFamily::Monospace),
+                    FontId::new(font_size::SMALL, egui::FontFamily::Monospace),
                     theme.text_muted,
                 );
                 painter.line_segment(
@@ -177,7 +178,7 @@ fn paint_time_labels(grid: &GridService, painter: &Painter, rect: Rect, bpm: f32
             pos2(x + 3.0, rect.top() + 1.0),
             Align2::LEFT_TOP,
             text,
-            FontId::new(8., egui::FontFamily::Monospace),
+            FontId::new(font_size::SMALL, egui::FontFamily::Monospace),
             theme.text_disabled,
         );
         painter.line_segment(

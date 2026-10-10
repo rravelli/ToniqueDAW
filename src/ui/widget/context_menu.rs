@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use crate::ui::{font::PHOSPHOR_REGULAR, theme::ThemeExt};
 use egui::{
     Align2, Color32, FontId, Label, PopupCloseBehavior, Response, RichText, Sense, Stroke, Ui,
@@ -6,7 +7,7 @@ use egui::{
 };
 use egui_phosphor::fill::CARET_RIGHT;
 
-const FONT_SIZE: f32 = 9.0;
+const FONT_SIZE: f32 = font_size::LABEL;
 
 pub struct ContextMenuButton {
     icon: String,

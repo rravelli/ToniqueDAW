@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use crate::{
     core::{
         state::{MASTER_TRACK_ID, MIN_EXPANDED_HEIGHT, ProjectState},
@@ -232,7 +233,10 @@ impl TrackHeader {
             let track_view_mut = state.track_view_mut(&track.id);
             let text_edit = ui.add(
                 TextEdit::singleline(&mut track_view_mut.name)
-                    .font(FontId::new(9., egui::FontFamily::Proportional))
+                    .font(FontId::new(
+                        font_size::SMALL,
+                        egui::FontFamily::Proportional,
+                    ))
                     .background_color(ui.app_theme().bg_deep)
                     .text_color(ui.app_theme().text)
                     .margin(Margin::ZERO),
@@ -255,7 +259,7 @@ impl TrackHeader {
                 Label::new(
                     RichText::new(formatted_name)
                         .color(ui.app_theme().text)
-                        .size(9.),
+                        .size(font_size::SMALL),
                 )
                 .truncate()
                 .selectable(false),
@@ -439,7 +443,7 @@ impl TrackHeader {
             rect.center(),
             Align2::CENTER_CENTER,
             text,
-            FontId::new(10., egui::FontFamily::Proportional),
+            FontId::new(font_size::SMALL, egui::FontFamily::Proportional),
             theme.text,
         );
 

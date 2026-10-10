@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use egui::{
     Align2, FontId, Margin, Painter, Pos2, Rangef, Rect, Response, Sense, Stroke, StrokeKind,
     TextEdit, UiBuilder, Vec2,
@@ -26,7 +27,7 @@ impl NumberInput {
     pub fn new(size: Vec2) -> Self {
         Self {
             size,
-            font: FontId::new(12., egui::FontFamily::Proportional),
+            font: FontId::new(font_size::BODY, egui::FontFamily::Proportional),
             edit_mode: false,
             buffer: "".into(),
             value: 0.,

@@ -2,6 +2,7 @@
 //! its response over the live spectrum, with a handle for cutoff and
 //! resonance, the mode, and cutoff and Q knobs.
 
+use crate::ui::theme::font_size;
 use crate::{
     core::effect::Setting,
     ui::{
@@ -131,7 +132,7 @@ impl FilterEditor {
         ] {
             let button = FlatButton::new(name)
                 .size(vec2(26., 14.))
-                .font(FontId::proportional(9.))
+                .font(FontId::proportional(font_size::SMALL))
                 .selected(self.tap == tap)
                 .tooltip(tooltip);
             if ui
@@ -277,7 +278,7 @@ impl EffectEditor for FilterEditor {
                 rect.right_top() + vec2(-4., 3.),
                 Align2::RIGHT_TOP,
                 format!("{} · Q {q:.2}", format_hz(cutoff)),
-                FontId::proportional(9.),
+                FontId::proportional(font_size::SMALL),
                 theme.text,
             );
         }
@@ -298,7 +299,7 @@ impl EffectEditor for FilterEditor {
                 ] {
                     let button = FlatButton::new(name)
                         .size(vec2(28., 18.))
-                        .font(FontId::proportional(10.))
+                        .font(FontId::proportional(font_size::SMALL))
                         .selected(mode == option)
                         .tooltip(tooltip);
                     if ui.add(button).clicked() && mode != option {

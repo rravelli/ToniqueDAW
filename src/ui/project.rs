@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use egui::{Id, Modal, RichText, Ui, ViewportCommand, vec2};
+use egui::{Align, Key, Layout, Ui, ViewportCommand, vec2};
 use rfd::FileDialog;
 
 use crate::{
@@ -16,10 +16,8 @@ use crate::{
         project::{EXTENSION, ProjectFile, project_name},
         state::ProjectState,
     },
-    ui::{theme::ThemeExt, widget::flat_button::FlatButton},
+    ui::widget::dialog,
 };
-
-const BUTTON_HEIGHT: f32 = 22.;
 
 /// What the user asked for.
 #[derive(Clone, Debug, PartialEq)]
@@ -272,26 +270,28 @@ impl ProjectManager {
     }
 
     fn prompt(&mut self, ui: &Ui, pending: Pending, state: &mut ProjectState) {
-        let theme = ui.app_theme();
         let mut answer = None;
-        let modal = Modal::new(Id::new("unsaved-changes")).show(ui.ctx(), |ui| {
-            ui.set_width(320.);
-            ui.spacing_mut().item_spacing = vec2(6., 8.);
-            ui.label(RichText::new(format!("Save changes to “{}”?", self.name())).strong());
-            ui.label(
-                RichText::new("Your changes will be lost if you don't save them.")
-                    .color(theme.text_muted),
-            );
+        let modal = dialog::modal(ui, "unsaved-changes").show(ui.ctx(), |ui| {
+            ui.set_width(340.);
+            ui.spacing_mut().item_spacing = vec2(8., 6.);
+            dialog::title(ui, format!("Save changes to “{}”?", self.name()));
+            dialog::body(ui, "Your changes will be lost if you don't save them.");
+            ui.add_space(12.);
+            // Saving on the right, where the eye ends; losing the changes
+            // apart on the left, so it isn't clicked by mistake.
             ui.horizontal(|ui| {
-                if ui.add(button("Save").selected(true)).clicked() {
-                    answer = Some(true);
-                }
-                if ui.add(button("Don't save")).clicked() {
+                if ui.add(dialog::button("Don't save")).clicked() {
                     answer = Some(false);
                 }
-                if ui.add(button("Cancel")).clicked() {
-                    self.pending = None;
-                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let save = ui.add(dialog::button("Save").selected(true));
+                    if save.clicked() || ui.input(|i| i.key_pressed(Key::Enter)) {
+                        answer = Some(true);
+                    }
+                    if ui.add(dialog::button("Cancel")).clicked() {
+                        self.pending = None;
+                    }
+                });
             });
         });
         if modal.should_close() {
@@ -312,20 +312,23 @@ impl ProjectManager {
         let Some(notice) = &self.notice else {
             return;
         };
-        let theme = ui.app_theme();
         let mut close = false;
-        let modal = Modal::new(Id::new("project-notice")).show(ui.ctx(), |ui| {
+        let modal = dialog::modal(ui, "project-notice").show(ui.ctx(), |ui| {
             ui.set_width(360.);
-            ui.spacing_mut().item_spacing = vec2(6., 6.);
-            ui.label(RichText::new(&notice.title).strong());
+            ui.spacing_mut().item_spacing = vec2(8., 6.);
+            dialog::title(ui, &notice.title);
             egui::ScrollArea::vertical()
                 .max_height(200.)
                 .show(ui, |ui| {
                     for line in &notice.lines {
-                        ui.label(RichText::new(line).color(theme.text_muted));
+                        dialog::body(ui, line);
                     }
                 });
-            close = ui.add(button("OK").selected(true)).clicked();
+            ui.add_space(12.);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let ok = ui.add(dialog::button("OK").selected(true));
+                close = ok.clicked() || ui.input(|i| i.key_pressed(Key::Enter));
+            });
         });
         if close || modal.should_close() {
             self.notice = None;
@@ -339,14 +342,6 @@ fn project_dialog(dir: Option<&Path>) -> FileDialog {
         Some(dir) => dialog.set_directory(dir),
         None => dialog,
     }
-}
-
-fn button(text: &str) -> FlatButton {
-    FlatButton::new(text)
-        .size(vec2(0., BUTTON_HEIGHT))
-        .padding(10.)
-        .font(egui::FontId::proportional(12.))
-        .border_radius(2.)
 }
 
 #[cfg(test)]

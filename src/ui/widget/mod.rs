@@ -1,10 +1,12 @@
 pub mod color_bar;
 pub mod color_select;
 pub mod context_menu;
+pub mod dialog;
 pub mod flat_button;
 pub mod input;
 pub mod knob;
 pub mod list_row;
+pub mod logo;
 pub mod meter;
 pub mod scroll_bar;
 pub mod search_bar;

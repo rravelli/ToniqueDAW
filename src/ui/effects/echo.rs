@@ -1,6 +1,7 @@
 //! Editor of [`EffectKind::Echo`](crate::core::effect::EffectKind::Echo):
 //! its repeats fading out, and time, feedback and mix knobs.
 
+use crate::ui::theme::font_size;
 use crate::{
     core::effect::{ECHO_TIME, ECHO_TIMES, Setting},
     ui::{
@@ -62,7 +63,7 @@ impl EffectEditor for EchoEditor {
             rect.right_top() + egui::vec2(-4., 3.),
             Align2::RIGHT_TOP,
             format!("{} per repeat", format_ms(time_s)),
-            FontId::proportional(9.),
+            FontId::proportional(font_size::SMALL),
             theme.text_muted,
         );
 

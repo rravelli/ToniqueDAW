@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use crate::{
     config::keymap::Action,
     core::{state::ProjectState, track::TrackRow},
@@ -325,7 +326,7 @@ impl BottomPanel {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(display_name(&track.name, track.first_track_index))
-                            .size(10.)
+                            .size(font_size::SMALL)
                             .color(theme.text_on(track.color)),
                     );
                 });
@@ -340,7 +341,7 @@ fn hint(ui: &Ui, rect: Rect, text: &str) {
         rect.center(),
         Align2::CENTER_CENTER,
         text,
-        FontId::proportional(11.),
+        FontId::proportional(font_size::LABEL),
         theme.text_muted,
     );
 }

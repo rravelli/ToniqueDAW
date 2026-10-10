@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use crate::{
     config::{Config, keymap::Action},
     core::state::{PlaybackState, ProjectState},
@@ -68,9 +69,11 @@ impl FileBrowser {
                 for path in paths {
                     let name = path.file_name().unwrap_or(OsStr::new("")).to_string_lossy();
 
-                    let res = Button::new(RichText::new(format!("{} {}", FOLDER, name)).size(10.))
-                        .selected(self.root.as_ref().is_some_and(|f| *f == path))
-                        .ui(ui);
+                    let res = Button::new(
+                        RichText::new(format!("{} {}", FOLDER, name)).size(font_size::SMALL),
+                    )
+                    .selected(self.root.as_ref().is_some_and(|f| *f == path))
+                    .ui(ui);
 
                     if res.clicked() {
                         self.set_dir(path.clone());

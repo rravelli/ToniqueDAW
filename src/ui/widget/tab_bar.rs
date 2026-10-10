@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use egui::{FontId, Response, Ui, Widget, vec2};
 
 use crate::ui::widget::flat_button::FlatButton;
@@ -42,7 +43,7 @@ impl<T: PartialEq + Copy> Widget for TabBar<'_, T> {
                     let selected = *self.value == tab;
                     let button = FlatButton::new(name)
                         .size(vec2(width, self.height))
-                        .font(FontId::proportional(12.))
+                        .font(FontId::proportional(font_size::BODY))
                         .border_radius(2.)
                         .selected(selected);
                     if ui.add(button).clicked() && !selected {

@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use egui::{
     FontFamily, FontId, Frame, Layout, Margin, Pos2, Rangef, Response, Sense, Stroke, Ui, Vec2,
 };
@@ -308,7 +309,10 @@ impl TransportBar {
         ui.add(
             FlatButton::new(format!("{:.0}%", (state.metrics.latency * 100.).round()))
                 .square(BUTTON_SIZE)
-                .font(FontId::new(10., egui::FontFamily::Proportional))
+                .font(FontId::new(
+                    font_size::SMALL,
+                    egui::FontFamily::Proportional,
+                ))
                 .color(ui.app_theme().text_muted)
                 .tooltip("CPU usage"),
         )
@@ -334,7 +338,10 @@ impl TransportBar {
                 1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
             ))
             .square(BUTTON_SIZE)
-            .font(FontId::new(10., egui::FontFamily::Proportional))
+            .font(FontId::new(
+                font_size::SMALL,
+                egui::FontFamily::Proportional,
+            ))
             .color(ui.app_theme().text_muted)
             .tooltip("FPS"),
         )

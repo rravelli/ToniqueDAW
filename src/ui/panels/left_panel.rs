@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use crate::{
     core::{effect::EffectKind, state::ProjectState},
     ui::{
@@ -132,7 +133,7 @@ impl LeftPanel {
                         ui.vertical_centered(|ui| {
                             ui.label(
                                 RichText::new("No effects match")
-                                    .size(11.)
+                                    .size(font_size::LABEL)
                                     .color(ui.app_theme().text_muted),
                             );
                         });

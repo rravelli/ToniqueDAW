@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use std::{
     ffi::OsStr,
     path::PathBuf,
@@ -134,7 +135,7 @@ impl FileList {
                         format!("Searching '{}'", self.query)
                     };
 
-                    Label::new(RichText::new(text).size(10.))
+                    Label::new(RichText::new(text).size(font_size::SMALL))
                         .selectable(false)
                         .truncate()
                         .ui(ui);

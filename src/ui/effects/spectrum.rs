@@ -2,6 +2,7 @@
 //! the spectrum of the audio where it sits in the chain, with a readout of
 //! the frequency and level under the pointer.
 
+use crate::ui::theme::font_size;
 use crate::ui::{
     effects::{
         EditorContext, EffectEditor, format_hz,
@@ -45,7 +46,7 @@ impl EffectEditor for SpectrumEditor {
                 pos2(rect.right() - 2., y - 1.),
                 Align2::RIGHT_BOTTOM,
                 format!("{db:.0}"),
-                FontId::proportional(8.),
+                FontId::proportional(font_size::SMALL),
                 theme.text_muted,
             );
             db -= LEVEL_STEP;
@@ -56,7 +57,7 @@ impl EffectEditor for SpectrumEditor {
                 rect.center(),
                 Align2::CENTER_CENTER,
                 "Bypassed",
-                FontId::proportional(10.),
+                FontId::proportional(font_size::SMALL),
                 theme.text_muted,
             );
             return;
@@ -84,7 +85,7 @@ impl EffectEditor for SpectrumEditor {
                 rect.left_top() + vec2(4., 3.),
                 Align2::LEFT_TOP,
                 format!("{}  {db:.1} dB", format_hz(hz)),
-                FontId::proportional(9.),
+                FontId::proportional(font_size::SMALL),
                 theme.text,
             );
         }

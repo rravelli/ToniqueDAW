@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use crate::{
     core::{clip::AudioClip, state::ProjectState, track::TRACK_COLLAPSED_HEIGHT},
     ui::arrangement::grid::PaintGrid,
@@ -138,7 +139,7 @@ impl ClipView<'_> {
             Pos2::new(pos.x + PADDING_TEXT, pos.y + 2.),
             Align2::LEFT_TOP,
             clip.audio.name.clone().to_string(),
-            FontId::new(10., FontFamily::Monospace),
+            FontId::new(font_size::SMALL, FontFamily::Monospace),
             ink,
         );
 

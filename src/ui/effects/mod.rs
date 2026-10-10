@@ -3,6 +3,7 @@
 //! low at its right, a meter of its output, as in Bitwig. A collapsed effect
 //! is a strip with its name up it.
 
+use crate::ui::theme::font_size;
 use crate::{
     core::{
         effect::{Effect, EffectKind, Setting},
@@ -125,7 +126,7 @@ impl EditorContext<'_> {
         let on = p.get() >= 0.5;
         let button = FlatButton::new(name)
             .size(TOGGLE_SIZE)
-            .font(FontId::proportional(10.))
+            .font(FontId::proportional(font_size::SMALL))
             .selected(on)
             .tooltip(tooltip);
         if ui.add(button).clicked() {
@@ -438,7 +439,7 @@ impl EffectRack {
                 name.left_center(),
                 Align2::LEFT_CENTER,
                 effect.name(),
-                FontId::proportional(11.),
+                FontId::proportional(font_size::LABEL),
                 color,
             );
         }
@@ -499,7 +500,7 @@ impl EffectRack {
         };
         let galley = ui.painter().layout_no_wrap(
             effect.name().to_string(),
-            FontId::proportional(11.),
+            FontId::proportional(font_size::LABEL),
             color,
         );
         let at = pos2(rect.center().x - galley.size().y / 2., rect.bottom() - 6.);
@@ -537,7 +538,7 @@ impl EffectRack {
         let edit = ui.put(
             rect,
             TextEdit::singleline(&mut renaming.text)
-                .font(FontId::proportional(11.))
+                .font(FontId::proportional(font_size::LABEL))
                 .background_color(theme.bg_deep)
                 .text_color(theme.text)
                 .margin(Margin::symmetric(2, 0)),
