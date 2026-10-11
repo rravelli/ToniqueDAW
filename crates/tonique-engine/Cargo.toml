@@ -8,6 +8,10 @@ license = "MIT OR Apache-2.0"
 [lints]
 workspace = true
 
+# Only the criterion targets: libtest rejects criterion's flags.
+[lib]
+bench = false
+
 [features]
 default = []
 # Real audio device output through cpal.
@@ -26,3 +30,16 @@ cpal = { version = "0.18", optional = true }
 [[example]]
 name = "play"
 required-features = ["device"]
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support", "html_reports"] }
+
+# `cargo bench -p tonique-engine`; compare branches with
+# `-- --save-baseline master` then `-- --baseline master`.
+[[bench]]
+name = "engine"
+harness = false
+
+[[bench]]
+name = "dsp"
+harness = false
