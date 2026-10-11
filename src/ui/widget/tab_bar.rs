@@ -5,6 +5,7 @@ use crate::ui::theme::ThemeExt;
 
 /// Thickness of the line under the current tab.
 const UNDERLINE: f32 = 2.;
+const HEIGHT: f32 = 24.;
 
 /// Row of equal-width tabs spanning the available width, the current one
 /// underlined. The response is marked changed when the user picks another
@@ -12,7 +13,6 @@ const UNDERLINE: f32 = 2.;
 pub struct TabBar<'a, T> {
     value: &'a mut T,
     tabs: Vec<(T, String)>,
-    height: f32,
 }
 
 impl<'a, T: PartialEq + Copy> TabBar<'a, T> {
@@ -23,13 +23,7 @@ impl<'a, T: PartialEq + Copy> TabBar<'a, T> {
                 .into_iter()
                 .map(|(tab, name)| (tab, name.to_string()))
                 .collect(),
-            height: 24.,
         }
-    }
-
-    pub fn height(mut self, height: f32) -> Self {
-        self.height = height;
-        self
     }
 }
 
@@ -43,8 +37,7 @@ impl<T: PartialEq + Copy> Widget for TabBar<'_, T> {
                 let width = ui.available_width() / self.tabs.len().max(1) as f32;
                 for (tab, name) in self.tabs {
                     let selected = *self.value == tab;
-                    let (rect, res) =
-                        ui.allocate_exact_size(vec2(width, self.height), Sense::click());
+                    let (rect, res) = ui.allocate_exact_size(vec2(width, HEIGHT), Sense::click());
                     let painter = ui.painter_at(rect);
                     if res.hovered() && !selected {
                         painter.rect_filled(rect, 2., theme.hover_overlay);
