@@ -115,8 +115,10 @@ impl CentralPanel {
             timeline_viewport,
         );
         // Draw tracks
+        // With the tracks a drop on the timeline would add.
+        let new_tracks = self.timeline.new_tracks();
         self.tracks
-            .ui(ui, state, workspace, &layout, viewport, footer);
+            .ui(ui, state, workspace, &layout, viewport, footer, new_tracks);
         if state.track_count() == 0 {
             empty_project_ui(ui, state, timeline_viewport);
         }
@@ -554,6 +556,61 @@ mod tests {
         frame(&mut state, vec![Event::PointerMoved(over_group)]);
         frame(&mut state, vec![Event::PointerMoved(far_below)]);
         assert!(!collapsed(&state), "stays expanded after a drop inside");
+    }
+
+    /// Dragging a file below the last track shows the track a drop would
+    /// add: a lane, and a header with the name it'll get.
+    #[test]
+    fn dragging_past_the_last_track_shows_a_ghost_track() {
+        use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
+        use egui::{Event, Pos2};
+
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        state.add_track();
+        state.add_track();
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let mut panel = CentralPanel::new();
+        let mut texts = |state: &mut ProjectState, events: Vec<Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(
+                    ui,
+                    state,
+                    &mut Workspace::default(),
+                    &mut Commands::default(),
+                )
+            });
+            output.textures_delta.clear();
+            output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        texts(&mut state, Vec::new()); // lay out once
+        egui::DragAndDrop::set_payload(&ctx, DragPayload::File(AudioInfo::silent(1.)));
+        let shown = texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
+        assert!(
+            shown.iter().any(|t| t == "+ New track"),
+            "the lane: {shown:?}"
+        );
+        assert!(
+            shown.iter().any(|t| t == "3 Audio Track"),
+            "the header: {shown:?}"
+        );
+
+        egui::DragAndDrop::clear_payload(&ctx);
+        let shown = texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
+        assert!(!shown.iter().any(|t| t == "3 Audio Track"), "gone after");
     }
 
     /// A rubber band starts where the button went down, between grid lines

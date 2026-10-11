@@ -1,14 +1,16 @@
-use egui::{FontId, Rangef, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{
+    Align2, Color32, FontId, Rangef, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2,
+};
 use egui_phosphor::regular::PLUS;
 use tonique_engine::edit::TrackId;
 
 use crate::{
     config::keymap::Action,
     core::{
-        state::{ProjectState, RowTarget},
-        track::TrackKind,
+        state::{ProjectState, RowTarget, TRACK_NAME},
+        track::{DEFAULT_TRACK_HEIGHT, TrackKind},
     },
-    ui::theme::{ThemeExt, font_size},
+    ui::theme::{ThemeExt, font_size, with_alpha},
     ui::{
         arrangement::row_layout::{Row, RowLayout},
         arrangement::track_header::{
@@ -20,6 +22,7 @@ use crate::{
         },
         workspace::{BottomView, Workspace},
     },
+    utils::display_name,
 };
 
 pub const SPLITTER_WIDTH: f32 = 2.0;
@@ -54,6 +57,9 @@ impl TrackHeaders {
         self.rename = Some(track);
     }
 
+    /// `new_tracks`: the colours of the tracks a drop on the timeline would
+    /// add, shown as ghost headers below the last.
+    #[allow(clippy::too_many_arguments)]
     pub fn ui(
         &mut self,
         ui: &mut Ui,
@@ -62,6 +68,7 @@ impl TrackHeaders {
         layout: &RowLayout,
         viewport: Rect,
         footer: Rect,
+        new_tracks: &[Color32],
     ) {
         let left = viewport.max.x - self.width;
         let rename = self.rename.take();
@@ -96,6 +103,7 @@ impl TrackHeaders {
                 .id_salt("track-area"),
             |ui| {
                 self.track_panel(ui, state, workspace, layout, viewport, rename);
+                paint_new_track_headers(ui, state, layout, new_tracks);
             },
         );
         // The master, in the footer below the tracks, under the headers.
@@ -302,5 +310,54 @@ fn paint_group_scopes(ui: &Ui, rows: &[Row], x: Rangef) {
             group.color
         };
         ui.painter().rect_filled(bar, 0., color);
+    }
+}
+
+/// A ghost header for each track a drop would add below the last: the name
+/// it'll get, its colour bar and a dashed outline in its colour. Opaque, over
+/// the "Add track" button.
+fn paint_new_track_headers(ui: &Ui, state: &ProjectState, layout: &RowLayout, colors: &[Color32]) {
+    let theme = ui.app_theme();
+    let x = ui.max_rect().x_range();
+    let painter = ui.painter();
+    for (i, color) in colors.iter().enumerate() {
+        let index = state.track_count() + i;
+        let top = layout.track_top(index);
+        let header = Rect::from_x_y_ranges(x, top..=top + DEFAULT_TRACK_HEIGHT);
+        painter.rect_filled(header, 2., theme.bg_raised);
+        let edge = header.shrink(0.5);
+        painter.extend(Shape::dashed_line(
+            &[
+                edge.left_top(),
+                edge.right_top(),
+                edge.right_bottom(),
+                edge.left_bottom(),
+                edge.left_top(),
+            ],
+            Stroke::new(1., with_alpha(*color, 150)),
+            5.,
+            3.,
+        ));
+        let bar_left = color_bar_x(header.left(), 0);
+        let bar = Rect::from_min_max(
+            pos2(bar_left, header.top() + HEADER_INSET),
+            pos2(bar_left + COLOR_BAR_WIDTH, header.bottom() - HEADER_INSET),
+        );
+        painter.rect_filled(bar, 1., with_alpha(*color, 170));
+        let text_left = bar.right() + 6.;
+        painter.text(
+            pos2(text_left, header.top() + HEADER_INSET + 2.),
+            Align2::LEFT_TOP,
+            display_name(TRACK_NAME, index),
+            FontId::proportional(font_size::SMALL),
+            theme.text_muted,
+        );
+        painter.text(
+            pos2(text_left, header.bottom() - HEADER_INSET - 2.),
+            Align2::LEFT_BOTTOM,
+            "New track",
+            FontId::proportional(font_size::SMALL),
+            with_alpha(theme.text_muted, 150),
+        );
     }
 }

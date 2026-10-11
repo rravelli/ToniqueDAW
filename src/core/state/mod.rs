@@ -60,7 +60,8 @@ pub const MASTER_TRACK_ID: TrackId = TrackId(0);
 const DEFAULT_BPM: f64 = 120.;
 /// Length of the loop region in a new project.
 const DEFAULT_LOOP_BARS: f64 = 4.;
-const TRACK_NAME: &str = "# Audio Track";
+/// A new track's name; `#` is its number.
+pub const TRACK_NAME: &str = "# Audio Track";
 /// How often to try opening an output again while there's none.
 const AUDIO_RETRY: Duration = Duration::from_secs(2);
 /// Smallest height of an expanded row (its controls must fit).

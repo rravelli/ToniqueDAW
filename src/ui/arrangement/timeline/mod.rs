@@ -41,6 +41,9 @@ pub struct Timeline {
     /// Collapsed groups expanded by dragging over them, to collapse again once
     /// left.
     hover_expanded: Vec<TrackId>,
+    /// The colours of the tracks a drop would add, this frame: shown as
+    /// lanes here, and as headers by the track headers.
+    new_tracks: Vec<Color32>,
 }
 
 impl Timeline {
@@ -49,6 +52,7 @@ impl Timeline {
             clip_drag: None,
             rubber_band: None,
             hover_expanded: Vec::new(),
+            new_tracks: Vec::new(),
         }
     }
 
@@ -61,6 +65,7 @@ impl Timeline {
         layout: &mut RowLayout,
         viewport: Rect,
     ) {
+        self.new_tracks.clear();
         // First the actions on the selection
         self.run_actions(ui, state, commands, viewport);
         // Create timeline area
@@ -421,7 +426,8 @@ impl Timeline {
             // colour it will get.
             let color = match &track {
                 Some(t) => t.color,
-                None => paint_new_track_lanes(ui, state, layout, viewport, 1)
+                None => self
+                    .new_track_lanes(ui, state, layout, viewport, 1)
                     .first()
                     .copied()
                     .unwrap_or(ui.app_theme().text_muted),
@@ -517,10 +523,34 @@ fn dragged_audio(response: &Response) -> Option<AudioDrag> {
     None
 }
 
-/// Where `count` tracks will be added below the last one (by a drop): a
-/// faint lane each, in the colour it will get, with a dashed outline and
-/// a label. Returns their colours.
-pub(super) fn paint_new_track_lanes(
+impl Timeline {
+    /// The colours of the tracks a drop would add past the last one, this
+    /// frame (none when not dragging there).
+    pub fn new_tracks(&self) -> &[Color32] {
+        &self.new_tracks
+    }
+
+    /// Where `count` tracks will be added below the last one (by a drop),
+    /// remembered for the headers: a faint lane each, in the colour it will
+    /// get. Returns their colours.
+    fn new_track_lanes(
+        &mut self,
+        ui: &Ui,
+        state: &ProjectState,
+        layout: &RowLayout,
+        viewport: Rect,
+        count: usize,
+    ) -> Vec<Color32> {
+        let colors = paint_new_track_lanes(ui, state, layout, viewport, count);
+        self.new_tracks.clone_from(&colors);
+        colors
+    }
+}
+
+/// A faint lane for each of `count` tracks a drop will add below the last
+/// one, in the colour it will get, with a dashed outline and a label.
+/// Returns their colours.
+fn paint_new_track_lanes(
     ui: &Ui,
     state: &ProjectState,
     layout: &RowLayout,

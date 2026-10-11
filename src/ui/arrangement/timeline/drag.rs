@@ -10,8 +10,6 @@ use crate::{
     },
 };
 use egui::{Rect, Stroke, Ui, pos2, vec2};
-
-use super::paint_new_track_lanes;
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 #[derive(Clone)]
@@ -182,7 +180,7 @@ impl Timeline {
                 .max()
                 .unwrap_or(0)
                 .saturating_sub(state.track_count());
-            let new_colors = paint_new_track_lanes(ui, state, layout, viewport, added);
+            let new_colors = self.new_track_lanes(ui, state, layout, viewport, added);
             let mut track_indexes = Vec::new();
             for dragged in clip_drag.clips.iter_mut() {
                 {
