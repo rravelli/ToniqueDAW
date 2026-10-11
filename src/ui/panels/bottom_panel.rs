@@ -7,20 +7,20 @@ use crate::{
         commands::Commands,
         dnd::DragPayload,
         effects::{EffectEdit, EffectRack},
-        font::PHOSPHOR_REGULAR,
-        theme::ThemeExt,
+        theme::{ThemeExt, with_alpha},
         widget::flat_button::FlatButton,
         workspace::{BottomView, Workspace},
     },
     utils::display_name,
 };
 use egui::{
-    Align, Align2, CursorIcon, DragAndDrop, FontFamily, FontId, Frame, Layout, Margin, Pos2,
+    Align, Align2, Color32, CursorIcon, DragAndDrop, FontId, Frame, Label, Layout, Margin, Pos2,
     Rangef, Rect, RichText, ScrollArea, Stroke, Ui, vec2,
 };
-use egui_phosphor::regular::X;
-use tonique_engine::edit::TrackId;
+use tonique_engine::edit::{ClipId, TrackId};
 
+/// Height of the header's row: the track's name, and tabs.
+const HEADER_ROW: f32 = 14.;
 /// Between effects, and around them.
 const GAP: f32 = 8.;
 
@@ -84,6 +84,7 @@ impl BottomPanel {
                 }) {
                     self.focused = panel.contains(pos);
                 }
+                workspace.follow_clip_selection(state);
                 let clip = match workspace.bottom_view {
                     BottomView::Clip(id) => state.clip_with_track(id),
                     BottomView::Effects => None,
@@ -91,14 +92,19 @@ impl BottomPanel {
                 if let Some((track, clip)) = clip {
                     self.track = None;
                     self.selected.clear();
-                    if self.header(ui, &track, Some(&clip.audio.name)) {
-                        workspace.bottom_view = BottomView::Effects;
+                    let tabs = Some((BottomView::Clip(clip.id), clip.id));
+                    if let Some(view) = self.header(ui, &track, Some(&clip.audio.name), tabs) {
+                        workspace.bottom_view = view;
                     }
                     self.clip_details.ui(ui, &clip, &track, state);
                     return;
                 }
                 match state.selected_track() {
-                    Some(track) => self.ui(ui, track, state),
+                    Some(track) => {
+                        if let Some(view) = self.ui(ui, track, state) {
+                            workspace.show_view(state, view);
+                        }
+                    }
                     None => {
                         self.track = None;
                         self.rack.retain(&[]);
@@ -116,13 +122,14 @@ impl BottomPanel {
             self.selected.clear();
             return;
         }
+        // Without effects shown (a clip is), they're for the timeline.
+        let Some(track) = self.track else {
+            return;
+        };
         let delete = !commands.take(|a| a == Action::Delete).is_empty();
         let select_all = !commands.take(|a| a == Action::SelectAll).is_empty();
         let duplicate = !commands.take(|a| a == Action::Duplicate).is_empty();
         let rename = !commands.take(|a| a == Action::Rename).is_empty();
-        let Some(track) = self.track else {
-            return;
-        };
         if delete && !self.selected.is_empty() {
             state.remove_effects(&track, &self.selected);
             self.selected.clear();
@@ -145,7 +152,14 @@ impl BottomPanel {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, track: TrackRow, state: &mut ProjectState) {
+    /// The effects of `track`. Returns the view picked in the header, if
+    /// any.
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        track: TrackRow,
+        state: &mut ProjectState,
+    ) -> Option<BottomView> {
         if self.track != Some(track.id) {
             self.selected.clear();
             self.track = Some(track.id);
@@ -155,7 +169,12 @@ impl BottomPanel {
         let shown: Vec<_> = effects.iter().map(|e| e.plugin.id).collect();
         self.rack.retain(&shown);
 
-        self.header(ui, &track, None);
+        // A tab to the clip selected on this track, if one is.
+        let clip = match state.selected_clips() {
+            [id] if state.find_clip(*id).is_some_and(|(t, _)| t == track.id) => Some(*id),
+            _ => None,
+        };
+        let picked = self.header(ui, &track, None, clip.map(|c| (BottomView::Effects, c)));
         let area = ui.available_rect_before_wrap();
 
         // An effect dragged from the browser, or one of these being moved.
@@ -327,14 +346,22 @@ impl BottomPanel {
             state.remove_effects(&track.id, &[index]);
             self.selected.clear();
         }
+        picked
     }
 
-    /// Track name, and the clip's when showing one, with a button back to
-    /// the effects. Returns whether it was clicked.
-    fn header(&mut self, ui: &mut Ui, track: &TrackRow, clip: Option<&str>) -> bool {
+    /// Track name, and the clip's when showing one. With `tabs` (the view
+    /// shown, and a clip of the track), Clip and Effects tabs on the right
+    /// switch between them: returns the one picked.
+    fn header(
+        &mut self,
+        ui: &mut Ui,
+        track: &TrackRow,
+        clip: Option<&str>,
+        tabs: Option<(BottomView, ClipId)>,
+    ) -> Option<BottomView> {
         let theme = ui.app_theme();
         let ink = theme.text_on(track.color);
-        let mut back = false;
+        let mut picked = None;
         Frame::new()
             .fill(track.color)
             .stroke(Stroke::new(1.0, theme.border))
@@ -346,28 +373,46 @@ impl BottomPanel {
             })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    let mut title = display_name(&track.name, track.first_track_index);
-                    if let Some(clip) = clip {
-                        title = format!("{title}  ›  {clip}");
-                    }
-                    ui.label(RichText::new(title).size(font_size::SMALL).color(ink));
-                    if clip.is_some() {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let close = FlatButton::ghost(X)
-                                .square(14.)
+                let row = vec2(ui.available_width(), HEADER_ROW);
+                ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 2.;
+                    if let Some((shown, clip)) = tabs {
+                        // Right to left: Effects, then Clip.
+                        for (view, name) in [
+                            (BottomView::Effects, "Effects"),
+                            (BottomView::Clip(clip), "Clip"),
+                        ] {
+                            let selected = view == shown;
+                            let tab = FlatButton::ghost(name)
+                                .size(vec2(0., HEADER_ROW))
+                                .padding(6.)
+                                .font(FontId::proportional(font_size::SMALL))
                                 .color(ink)
-                                .font(FontId::new(
-                                    font_size::SMALL,
-                                    FontFamily::Name(PHOSPHOR_REGULAR.into()),
-                                ))
-                                .tooltip("Back to the track's effects");
-                            back = ui.add(close).clicked();
-                        });
+                                .fill(if selected {
+                                    with_alpha(ink, 40)
+                                } else {
+                                    Color32::TRANSPARENT
+                                })
+                                .border_radius(2.);
+                            if ui.add(tab).clicked() && !selected {
+                                picked = Some(view);
+                            }
+                        }
                     }
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        let mut title = display_name(&track.name, track.first_track_index);
+                        if let Some(clip) = clip {
+                            title = format!("{title}  ›  {clip}");
+                        }
+                        ui.add(
+                            Label::new(RichText::new(title).size(font_size::SMALL).color(ink))
+                                .truncate()
+                                .selectable(false),
+                        );
+                    });
                 });
             });
-        back
+        picked
     }
 }
 
@@ -461,6 +506,18 @@ mod tests {
             bottom_panel_open: true,
             ..Default::default()
         };
+        run_in(ctx, panel, state, &mut workspace, events, actions)
+    }
+
+    /// [`run`] with the panel laid out as in `workspace`.
+    fn run_in(
+        ctx: &egui::Context,
+        panel: &mut BottomPanel,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        events: Vec<egui::Event>,
+        actions: &[Action],
+    ) -> Vec<Action> {
         let mut left = Vec::new();
         for (events, actions) in [(vec![], &[][..]), (events, actions)] {
             let mut commands = Commands::default();
@@ -475,9 +532,8 @@ mod tests {
                 time: Some(ctx.input(|i| i.time) + 1.),
                 ..Default::default()
             };
-            let mut output = ctx.run_ui(input, |ui| {
-                panel.show(ui, state, &mut workspace, &mut commands)
-            });
+            let mut output =
+                ctx.run_ui(input, |ui| panel.show(ui, state, workspace, &mut commands));
             output.textures_delta.clear();
             left = commands.take_all();
         }
@@ -504,6 +560,36 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::ui::font::fonts());
         (ctx, BottomPanel::new(), state, track)
+    }
+
+    /// Showing a clip, the panel has no use for Delete and the like: they
+    /// go on to the timeline, even after a click in it.
+    #[test]
+    fn shortcuts_in_the_clip_view_are_for_the_timeline() {
+        let (ctx, mut panel, mut state, track) = setup();
+        let clip = state.new_clip_id();
+        state.add_clips(
+            &track,
+            vec![crate::core::clip::AudioClip::new(
+                clip,
+                crate::analysis::AudioInfo::silent(1.),
+                tonique_engine::time::BeatPos(0.),
+            )],
+        );
+        let mut workspace = Workspace::default();
+        workspace.show_clip_details(&mut state, clip);
+        let actions = [Action::Delete, Action::SelectAll, Action::Duplicate];
+        let left = run_in(
+            &ctx,
+            &mut panel,
+            &mut state,
+            &mut workspace,
+            click(egui::pos2(600., 760.)),
+            &actions,
+        );
+        assert_eq!(left, actions);
+        assert_eq!(workspace.bottom_view, BottomView::Clip(clip));
+        assert_eq!(state.effects(&track).len(), 2, "effects untouched");
     }
 
     /// Delete removes the selected effects; it's left for the timeline

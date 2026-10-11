@@ -23,19 +23,7 @@ fn setup_state() -> ProjectState {
 
 /// A decoded (silent) file of `seconds`. At 120 bpm that's `2 * seconds` beats.
 fn audio(seconds: f32) -> AudioInfo {
-    AudioInfo {
-        name: "test.wav".into(),
-        duration: Some(Duration::from_secs_f32(seconds)),
-        data: Arc::new(AudioData::from_samples(SampleBuffer::new(
-            vec![vec![0.; 480], vec![0.; 480]],
-            48000.,
-        ))),
-        sample_rate: 48000,
-        channels: 2,
-        bit_depth: None,
-        num_samples: None,
-        path: PathBuf::from(format!("test-{seconds}.wav")),
-    }
+    AudioInfo::silent(seconds)
 }
 
 fn add_clip(state: &mut ProjectState, track: TrackId, position: f64, seconds: f32) -> ClipId {

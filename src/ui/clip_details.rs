@@ -1,13 +1,13 @@
 //! The bottom panel's view of one clip.
 
-use egui::{CursorIcon, Grid, Rect, RichText, Sense, Stroke, Ui, pos2};
+use egui::{CursorIcon, Grid, Label, Rect, RichText, Sense, Stroke, Ui, pos2};
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 use crate::{
     core::{clip::AudioClip, grid::GridService, state::ProjectState, track::TrackRow},
     ui::{
         arrangement::grid::PaintGrid,
-        theme::{Theme, ThemeExt, with_alpha},
+        theme::{Theme, ThemeExt, font_size, with_alpha},
         waveform::paint_waveform,
     },
     utils::{format_bars, format_time},
@@ -362,8 +362,16 @@ fn details_grid(ui: &mut Ui, clip: &AudioClip, state: &ProjectState) {
     let position = clip.position.0;
     let audio = &clip.audio;
 
-    ui.label(RichText::new(&audio.name).strong())
-        .on_hover_text(audio.path.display().to_string());
+    ui.add(
+        Label::new(
+            RichText::new(&audio.name)
+                .size(font_size::BODY)
+                .strong()
+                .color(theme.text),
+        )
+        .truncate(),
+    )
+    .on_hover_text(audio.path.display().to_string());
     ui.add_space(4.);
     Grid::new(("clip-details", clip.id))
         .num_columns(2)
@@ -371,8 +379,19 @@ fn details_grid(ui: &mut Ui, clip: &AudioClip, state: &ProjectState) {
         .spacing([8., 3.])
         .show(ui, |ui| {
             let mut row = |label: &str, value: String| {
-                ui.label(RichText::new(label).color(theme.text_muted));
-                ui.label(RichText::new(value).color(theme.text));
+                ui.label(
+                    RichText::new(label)
+                        .size(font_size::LABEL)
+                        .color(theme.text_muted),
+                );
+                ui.add(
+                    Label::new(
+                        RichText::new(value)
+                            .size(font_size::LABEL)
+                            .color(theme.text),
+                    )
+                    .truncate(),
+                );
                 ui.end_row();
             };
             row(
