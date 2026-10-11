@@ -121,7 +121,7 @@ impl CentralPanel {
 
         // The timeline spans the content plus some room to add more, and
         // never shrinks under the part being looked at.
-        let slack = TIMELINE_SLACK_BARS * state.grid.beats_per_bar() as f64;
+        let slack = TIMELINE_SLACK_BARS * state.grid.beats_per_bar();
         let visible_end = state
             .grid
             .width_to_beats(state.grid.offset.x + timeline_viewport.width());
