@@ -957,6 +957,55 @@ fn only_the_clip_being_trimmed_is_resizing() {
 }
 
 #[test]
+fn undo_brings_the_selection_back_and_redo_its_successor() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let track = state.add_track();
+    let clip = add_clip(&mut state, track, 0., 2.); // beats 0..4
+    let zone = SelectionBounds::between((0, BeatPos(1.)), (0, BeatPos(3.)));
+    state.select_in_bounds(zone);
+    let range = |s: &ProjectState| s.selection_bounds().map(|b| (b.start_pos.0, b.end_pos.0));
+
+    // Duplicating moves the zone onto the copies...
+    state.duplicate_selected_clips();
+    assert_eq!(range(&state), Some((3., 5.)));
+    let copies = state.selected_clips().to_vec();
+    // ...and undoing brings it back where it was, on the original.
+    state.undo();
+    assert_eq!(range(&state), Some((1., 3.)));
+    assert_eq!(state.selected_clips(), &[clip]);
+    // Redoing moves it onto the copies again.
+    state.redo();
+    assert_eq!(range(&state), Some((3., 5.)));
+    assert_eq!(state.selected_clips(), &copies[..]);
+
+    // Nudging, then deleting: each undo brings its own selection back.
+    state.nudge_selection(1.);
+    assert_eq!(range(&state), Some((4., 6.)));
+    state.delete_selected_clips();
+    assert_eq!(range(&state), None);
+    state.undo();
+    assert_eq!(range(&state), Some((4., 6.)), "before the delete");
+    state.undo();
+    assert_eq!(range(&state), Some((3., 5.)), "before the nudge");
+}
+
+#[test]
+fn a_new_edit_forgets_the_selections_to_redo() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let a = add_clip(&mut state, track, 0., 1.);
+    state.select_clips(vec![a]);
+    state.duplicate_selected_clips();
+    state.undo();
+    // Another edit: nothing to redo, so the duplicate's selection is gone.
+    state.add_track();
+    state.redo();
+    assert_eq!(state.selected_clips(), &[a]);
+}
+
+#[test]
 fn select_all_selects_every_clip() {
     let mut state = setup_state();
     let (t0, t1) = (state.add_track(), state.add_track());

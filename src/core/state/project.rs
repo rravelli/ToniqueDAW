@@ -49,6 +49,7 @@ impl ProjectState {
         self.edit_cursor = BeatPos::ZERO;
         self.selected_tracks.clear();
         self.clip_selection = Default::default();
+        self.clear_selection_history();
         self.pending_actions.clear();
         self.batching = false;
         self.resized_clip = None;
@@ -241,6 +242,7 @@ impl ProjectState {
         self.normalize();
         self.remove_empty_groups();
         self.session.clear_history();
+        self.clear_selection_history();
         problems
     }
 

@@ -131,6 +131,14 @@ pub struct ProjectState {
 
     pending_actions: Vec<ProjectStatePendingAction>,
     batching: bool,
+    /// For each step of the edit's undo history, in step with it: the clip
+    /// selection before it, when the step moved the selection (a duplicate
+    /// selects the copies). Undoing it brings that selection back.
+    selection_undo: Vec<Option<ClipSelection>>,
+    /// The same for the undone steps: the selection they left, for redoing.
+    selection_redo: Vec<Option<ClipSelection>>,
+    /// The steps recorded when the open batch began.
+    batch_steps: Option<u64>,
 
     pub grid: GridService,
     metronome: bool,
@@ -179,6 +187,9 @@ impl ProjectState {
             clipboard: Clipboard::default(),
             pending_actions: Vec::new(),
             batching: false,
+            selection_undo: Vec::new(),
+            selection_redo: Vec::new(),
+            batch_steps: None,
             resized_clip: None,
             grid: GridService::new(),
             loop_range: (
@@ -360,8 +371,10 @@ impl ProjectState {
     }
 
     fn perform(&mut self, cmd: impl EditCommand + 'static) {
+        let steps = self.steps_recorded();
         let result = self.session.perform(cmd);
         report(result);
+        self.track_steps(steps);
     }
 
     /// Run `f` as one undo step (or as part of the open batch).
@@ -369,9 +382,51 @@ impl ProjectState {
         if self.batching {
             return f(self);
         }
+        let steps = self.steps_recorded();
         self.session.begin_transaction(label);
         f(self);
         self.session.commit_transaction();
+        self.track_steps(steps);
+    }
+
+    fn steps_recorded(&self) -> u64 {
+        self.session.undo_manager().steps_recorded()
+    }
+
+    /// If a step was recorded since `steps` were, keep `selection_undo` in
+    /// step with it (see [`Self::selection_step`]).
+    fn track_steps(&mut self, steps: u64) {
+        if self.steps_recorded() == steps {
+            return;
+        }
+        self.selection_undo.push(None);
+        self.selection_redo.clear();
+        // The history forgets its oldest steps past its depth.
+        let excess = self
+            .selection_undo
+            .len()
+            .saturating_sub(self.session.undo_manager().undo_len());
+        self.selection_undo.drain(..excess);
+    }
+
+    /// Run `f`, an edit that moves the clip selection: undoing it brings the
+    /// selection from before it back (redoing, the one it left).
+    pub(super) fn selection_step(&mut self, f: impl FnOnce(&mut Self)) {
+        let (before, steps) = (self.clip_selection.clone(), self.steps_recorded());
+        f(self);
+        if self.steps_recorded() != steps
+            && self.clip_selection != before
+            && let Some(last) = self.selection_undo.last_mut()
+        {
+            *last = Some(before);
+        }
+    }
+
+    /// Forget the selections of the history, along with it.
+    fn clear_selection_history(&mut self) {
+        self.selection_undo.clear();
+        self.selection_redo.clear();
+        self.batch_steps = None;
     }
 
     /// The channel of a track, a group (addressed by its bus's ID) or the
@@ -1356,22 +1411,40 @@ impl ProjectState {
     /// Group the following changes into one undo step, until `commit_batch`.
     pub fn begin_batch(&mut self) {
         self.batching = true;
+        self.batch_steps = Some(self.steps_recorded());
         self.session.begin_transaction("Edit");
     }
     /// Close the undo step opened by `begin_batch`.
     pub fn commit_batch(&mut self) {
         self.batching = false;
         self.session.commit_transaction();
+        if let Some(steps) = self.batch_steps.take() {
+            self.track_steps(steps);
+        }
     }
-    /// Undo last action. Does nothing if there is no action.
+    /// Undo last action, and bring back the clip selection from before it.
+    /// Does nothing if there is no action.
     pub fn undo(&mut self) {
         let result = self.session.undo();
+        if matches!(result, Ok(true))
+            && let Some(entry) = self.selection_undo.pop()
+        {
+            let after = entry.map(|before| std::mem::replace(&mut self.clip_selection, before));
+            self.selection_redo.push(after);
+        }
         report(result);
         self.after_history_change();
     }
-    /// Redo last action. Does nothing if there is no action.
+    /// Redo last action, and its clip selection. Does nothing if there is no
+    /// action.
     pub fn redo(&mut self) {
         let result = self.session.redo();
+        if matches!(result, Ok(true))
+            && let Some(entry) = self.selection_redo.pop()
+        {
+            let before = entry.map(|after| std::mem::replace(&mut self.clip_selection, after));
+            self.selection_undo.push(before);
+        }
         report(result);
         self.after_history_change();
     }
