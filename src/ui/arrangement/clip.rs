@@ -14,6 +14,7 @@ use egui::{
 };
 use egui_phosphor::fill::TRASH;
 use std::time::Duration;
+use tonique_engine::time::BeatPos;
 
 const PADDING_TEXT: f32 = 4.;
 const BORDER_WIDTH: f32 = 2.;
@@ -28,6 +29,10 @@ const MIN_TRIM_HANDLE_WIDTH: f32 = 2.;
 const BODY_TINT: f32 = 0.4;
 /// A selected clip's body: a little more, its header carrying the selection.
 const SELECTED_BODY_TINT: f32 = 0.5;
+/// The part of a clip's body in a selection zone: more of its colour, and
+/// some of the selection's.
+const ZONE_BODY_TINT: f32 = 0.6;
+const ZONE_TOWARDS_SELECTED: f32 = 0.3;
 /// How much of its track's colour a silenced clip's body, header and
 /// outline have: a faint wash of it.
 const SILENCED_BODY_TINT: f32 = 0.16;
@@ -50,6 +55,9 @@ pub struct ClipView<'a> {
     /// Its track's.
     pub color: Color32,
     pub selected: bool,
+    /// The part of a selection zone over it (start and end, in beats): its
+    /// body is highlighted there.
+    pub zone: Option<(BeatPos, BeatPos)>,
     /// False in a collapsed row: only the header shows.
     pub show_waveform: bool,
     /// Its track is muted or soloed out: drawn faded, in muted ink.
@@ -200,6 +208,20 @@ impl ClipView<'_> {
                 pos2(pos.x, pos.y + HEADER_HEIGHT - BORDER_WIDTH),
                 vec2(size.x, size.y - HEADER_HEIGHT),
             );
+            // The selected part: its background lit, inside the border.
+            if let Some((start, end)) = self.zone {
+                let x = |beats: BeatPos| state.grid.beats_to_x(beats, viewport);
+                let lit = Rect::from_x_y_ranges(
+                    x(start.max(clip.position))..=x(end.min(clip.end(state.bpm()))),
+                    rect.top()..=pos.y + size.y,
+                )
+                .intersect(Rect::from_min_size(pos, size).shrink(stroke.width));
+                let fill = tint(
+                    color.lerp_to_gamma(theme.clip_selected, ZONE_TOWARDS_SELECTED),
+                    ZONE_BODY_TINT,
+                );
+                painter.rect_filled(lit, 0., fill);
+            }
             state
                 .grid
                 .paint_clip_grid(&painter, viewport, rect, with_alpha(wave, 30));
@@ -400,6 +422,7 @@ mod tests {
                     viewport: Rect::from_min_size(Pos2::ZERO, vec2(800., 200.)),
                     color: crate::ui::theme::Theme::dark().accent,
                     selected: false,
+                    zone: None,
                     show_waveform: true,
                     silenced: false,
                 }
@@ -438,6 +461,7 @@ mod tests {
             viewport,
             color: crate::ui::theme::Theme::dark().accent,
             selected: false,
+            zone: None,
             show_waveform: true,
             silenced: false,
         };

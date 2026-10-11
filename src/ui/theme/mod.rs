@@ -109,7 +109,7 @@ theme_colors! {
     "Timeline" {
         playhead: "Playhead", "Playhead line and handle.",
         edit_cursor: "Edit cursor", "Edit cursor.",
-        selection_fill: "Selection fill", "Inside a rubber-band selection: a faint veil.",
+        selection_fill: "Selection fill", "Inside a rubber-band selection: a light veil.",
         selection_stroke: "Selection outline", "Dashed outline of a rubber-band selection.",
         clip_selected: "Selected clip", "Outline and tint of selected clips: neutral, so it goes with any clip colour.",
         loop_region: "Loop", "Loop bounds.",

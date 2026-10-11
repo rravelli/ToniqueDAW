@@ -556,6 +556,65 @@ mod tests {
         assert!(!collapsed(&state), "stays expanded after a drop inside");
     }
 
+    /// A rubber band starts where the button went down, between grid lines
+    /// as much as on them.
+    #[test]
+    fn rubber_bands_start_where_pressed() {
+        use crate::ui::arrangement::ruler::RULER_HEIGHT;
+        use egui::{Event, PointerButton, Pos2};
+
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        state.add_track();
+        state.add_track();
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let mut panel = CentralPanel::new();
+        let mut time = 0.;
+        let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
+            time += 0.05;
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(
+                    ui,
+                    state,
+                    &mut Workspace::default(),
+                    &mut Commands::default(),
+                )
+            });
+            output.textures_delta.clear();
+        };
+        let button = |pos, pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut state, Vec::new()); // lay out once
+        // Halfway between two beats, in the first lane.
+        let ppb = state.grid.pixels_per_beat();
+        let from = Pos2::new(2.5 * ppb, RULER_HEIGHT + 20.);
+        frame(
+            &mut state,
+            vec![Event::PointerMoved(from), button(from, true)],
+        );
+        for step in 1..=5 {
+            let at = from + vec2(step as f32 * 30., 40.);
+            frame(&mut state, vec![Event::PointerMoved(at)]);
+        }
+        let bounds = state.selection_bounds().expect("a zone");
+        assert!(
+            (bounds.start_pos.0 - 2.5).abs() < 1e-3,
+            "starts at {:?}",
+            bounds.start_pos
+        );
+    }
+
     /// The rename shortcut types a name in the selected track's header;
     /// Enter keeps it, as an undo step.
     #[test]

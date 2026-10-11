@@ -20,7 +20,7 @@ use crate::{
         workspace::Workspace,
     },
 };
-use egui::{DragAndDrop, Pos2, Rangef, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{DragAndDrop, Rangef, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use tonique_engine::edit::{ClipId, TrackId};
 mod drag;
 mod keys;
@@ -34,7 +34,6 @@ const SILENCED_PREVIEW_ALPHA: u8 = 30;
 
 pub struct Timeline {
     clip_drag: Option<ClipDrag>,
-    press_pos: Option<Pos2>,
     rubber_band: Option<RubberBand>,
     /// Collapsed groups expanded by dragging over them, to collapse again once
     /// left.
@@ -45,7 +44,6 @@ impl Timeline {
     pub fn new() -> Self {
         Self {
             clip_drag: None,
-            press_pos: None,
             rubber_band: None,
             hover_expanded: Vec::new(),
         }
@@ -71,10 +69,13 @@ impl Timeline {
         // Rendering
         // First render the grid
         state.grid.paint_grid(&painter, viewport, &ui.app_theme());
-        // Render all clips (except dragged clips)
         if self.expand_on_hover(ui, state, layout, viewport) {
             layout.rebuild(state);
         }
+        // The multiselect zone: drawn, and its veil under the clips, which
+        // light up their own part of it.
+        self.rubber_band_ui(ui, state, layout, &timeline_res);
+        // Render all clips (except dragged clips)
         self.clips_ui(ui, state, workspace, layout, viewport);
 
         if let Some(drag) = dragged_audio(&timeline_res) {
@@ -83,8 +84,8 @@ impl Timeline {
 
         self.handle_dropped_audio(ui, viewport, state);
 
-        // Draw multiselect zone
-        self.rubber_band_ui(ui, state, layout, &timeline_res);
+        // The zone's outline, over the clips.
+        self.paint_zone_outline(ui, state, layout, viewport);
 
         let hovered_files = ui.input(|i| i.raw.hovered_files.clone());
         if !hovered_files.is_empty() {
@@ -309,10 +310,14 @@ impl Timeline {
             rect: Rect::from_min_size(pos, size),
             viewport,
             color,
-            // With a zone, only its part is selected: the zone shows it.
+            // With a zone, only its part is selected: lit inside the clip.
             selected: !dragged
                 && state.selection_bounds().is_none()
                 && state.is_clip_selected(clip.id),
+            zone: state
+                .selection_bounds()
+                .filter(|_| !dragged && state.is_clip_selected(clip.id))
+                .map(|b| (b.start_pos, b.end_pos)),
             show_waveform: !track.collapsed,
             silenced: track.is_silenced(),
         }
@@ -422,6 +427,7 @@ impl Timeline {
                 viewport,
                 color,
                 selected: false,
+                zone: None,
                 show_waveform,
                 silenced,
             }

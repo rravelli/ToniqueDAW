@@ -210,6 +210,7 @@ impl Timeline {
                         viewport,
                         color,
                         selected: true,
+                        zone: None,
                         show_waveform,
                         silenced,
                     }
