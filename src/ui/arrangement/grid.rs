@@ -37,7 +37,7 @@ impl PaintGrid for GridService {
         let right = rect.right().min(viewport.right());
         while x < right {
             // Skip if out of bounds
-            if step_index < 0 {
+            if step_index < 0 && !self.allows_negative() {
                 step_index += 1;
                 x += step;
                 continue;
@@ -66,7 +66,7 @@ impl PaintGrid for GridService {
 
         while x < right {
             // Skip if out of bounds
-            if step_index < 0 {
+            if step_index < 0 && !self.allows_negative() {
                 step_index += 1;
                 x += step;
                 continue;
@@ -108,7 +108,7 @@ impl PaintGrid for GridService {
 
         while x < right {
             // Skip if out of bounds
-            if step_index < 0 {
+            if step_index < 0 && !self.allows_negative() {
                 step_index += 1;
                 x += step;
                 continue;
@@ -117,7 +117,7 @@ impl PaintGrid for GridService {
             let is_bar = step_index % lines_per_bar == 0;
             let is_major_beat = step_index % lines_per_beat == 0;
 
-            let bar_index = step_index.div_euclid(lines_per_bar) + 1;
+            let bar_index = bar_number(step_index.div_euclid(lines_per_bar));
             if is_bar {
                 let text = format!("{}", bar_index);
                 painter.text(
@@ -132,8 +132,10 @@ impl PaintGrid for GridService {
                     Stroke::new(2.0, theme.text_disabled),
                 );
             }
-            let beat_index =
-                step_index.div_euclid(lines_per_beat) % (self.beats_per_bar() as i32) + 1;
+            let beat_index = step_index
+                .div_euclid(lines_per_beat)
+                .rem_euclid(self.beats_per_bar() as i32)
+                + 1;
             if divisions_per_beat
                 >= GridResolution::Quarter.divisions_per_beat(self.beats_per_bar())
                 && is_major_beat
@@ -168,15 +170,17 @@ fn paint_time_labels(grid: &GridService, painter: &Painter, rect: Rect, bpm: f32
 
     while x < rect.right() {
         // Skip if out of bounds
-        if step_index < 0 {
+        if step_index < 0 && !grid.allows_negative() {
             step_index += 1;
             x += step;
             continue;
         }
         let time = (step_index as f32 * seconds_step).floor() as i32;
+        let sign = if time < 0 { "-" } else { "" };
+        let time = time.abs();
         let seconds = time % 60;
         let minutes = (time / 60) % 60;
-        let text = format!("{}:{:0>2}", minutes, seconds);
+        let text = format!("{sign}{}:{:0>2}", minutes, seconds);
         painter.text(
             pos2(x + 3.0, rect.center().y),
             Align2::LEFT_CENTER,
@@ -190,5 +194,24 @@ fn paint_time_labels(grid: &GridService, painter: &Painter, rect: Rect, bpm: f32
         );
         step_index += 1;
         x += step;
+    }
+}
+
+/// The number shown for the bar at `index` from beat 0: from 1, and before
+/// beat 0 from -1 down (there's no bar 0).
+fn bar_number(index: i32) -> i32 {
+    if index >= 0 { index + 1 } else { index }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bars_before_the_start_count_down_from_minus_one() {
+        assert_eq!(bar_number(0), 1);
+        assert_eq!(bar_number(3), 4);
+        assert_eq!(bar_number(-1), -1);
+        assert_eq!(bar_number(-2), -2);
     }
 }

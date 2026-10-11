@@ -50,8 +50,8 @@ pub struct GridService {
     min_pixels_per_beat: f32,
     max_pixels_per_beat: f32,
     pub offset: Vec2,
-    /// Whether the view may scroll before beat 0 (grid lines and labels
-    /// still start at 0).
+    /// Whether the view may scroll before beat 0, with grid lines and
+    /// labels there too (bars count down from -1).
     negative_offset: bool,
 }
 
@@ -143,10 +143,17 @@ impl GridService {
     }
 
     /// Let the view scroll before beat 0, e.g. to show what's before a
-    /// clip in a grid counted from its start.
+    /// clip in a grid counted from its start. The grid and its labels go
+    /// on there.
     pub fn with_negative_offset(mut self) -> Self {
         self.negative_offset = true;
         self
+    }
+
+    /// Whether the view may show beats before 0 (see
+    /// [`Self::with_negative_offset`]).
+    pub fn allows_negative(&self) -> bool {
+        self.negative_offset
     }
 
     fn bound_offset(&self, offset: f32) -> f32 {
