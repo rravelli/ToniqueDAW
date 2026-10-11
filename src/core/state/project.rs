@@ -126,6 +126,7 @@ impl ProjectState {
                             trim_start: clip.trim_start,
                             trim_end: clip.trim_end,
                             gain: clip.gain,
+                            pan: clip.pan,
                         })
                         .collect(),
                 }
@@ -261,6 +262,7 @@ impl ProjectState {
             trim_start: clip.trim_start,
             trim_end: clip.trim_end,
             gain: clip.gain,
+            pan: clip.pan,
         })
     }
 

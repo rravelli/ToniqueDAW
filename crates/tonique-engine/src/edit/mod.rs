@@ -207,6 +207,9 @@ pub enum ClipContent {
         source_offset_s: f64,
         /// Linear: heard as soon as it's set, like a fader.
         gain: Parameter,
+        /// Balance, -1 (left only) to 1 (right only): turning to a side
+        /// lowers the other, keeping a stereo file's image.
+        pan: Parameter,
     },
     Midi {
         notes: Vec<Note>,
@@ -248,6 +251,7 @@ impl Clip {
                 source,
                 source_offset_s: 0.0,
                 gain: Parameter::new(ParamId(edit.next_id()), "gain", 0.0, CLIP_GAIN_MAX, 1.0),
+                pan: Parameter::new(ParamId(edit.next_id()), "pan", -1.0, 1.0, 0.0),
             },
         }
     }
@@ -264,21 +268,35 @@ impl Clip {
         }
     }
 
-    fn gain_mut(&mut self) -> Option<&mut Parameter> {
-        match &mut self.content {
-            ClipContent::Audio { gain, .. } => Some(gain),
+    /// The audio clip's pan (balance), if it is one.
+    pub fn pan(&self) -> Option<&Parameter> {
+        match &self.content {
+            ClipContent::Audio { pan, .. } => Some(pan),
             ClipContent::Midi { .. } => None,
         }
     }
 
-    /// Copy with fresh IDs (the clip's and its gain's).
+    /// Its parameters: an audio clip's gain and pan.
+    fn params(&self) -> impl Iterator<Item = &Parameter> {
+        self.gain().into_iter().chain(self.pan())
+    }
+
+    fn params_mut(&mut self) -> impl Iterator<Item = &mut Parameter> {
+        match &mut self.content {
+            ClipContent::Audio { gain, pan, .. } => vec![gain, pan],
+            ClipContent::Midi { .. } => Vec::new(),
+        }
+        .into_iter()
+    }
+
+    /// Copy with fresh IDs (the clip's and its parameters').
     pub fn duplicate(&self, edit: &mut Edit) -> Self {
         let mut copy = Self {
             id: ClipId(edit.next_id()),
             ..self.clone()
         };
-        if let Some(gain) = copy.gain_mut() {
-            *gain = gain.duplicate(edit);
+        for param in copy.params_mut() {
+            *param = param.duplicate(edit);
         }
         copy
     }
@@ -576,7 +594,7 @@ impl Edit {
                 t.channel
                     .params()
                     .chain(t.sends.iter().map(|s| &s.level))
-                    .chain(t.clips.iter().filter_map(Clip::gain))
+                    .chain(t.clips.iter().flat_map(Clip::params))
             })
             .chain(self.buses.iter().flat_map(|b| b.channel.params()))
             .chain(self.master.params())
@@ -595,7 +613,7 @@ impl Edit {
                 t.channel
                     .params_mut()
                     .chain(t.sends.iter_mut().map(|s| &mut s.level))
-                    .chain(t.clips.iter_mut().filter_map(Clip::gain_mut))
+                    .chain(t.clips.iter_mut().flat_map(Clip::params_mut))
             })
             .chain(self.buses.iter_mut().flat_map(|b| b.channel.params_mut()))
             .chain(self.master.params_mut())

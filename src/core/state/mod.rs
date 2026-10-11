@@ -40,8 +40,8 @@ pub use groups::RowTarget;
 pub use selection::SelectionBounds;
 use tonique_engine::{
     edit::{
-        BusId, CLIP_GAIN_MAX, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, EditSession,
-        Output, Parameter, Plugin, PluginId, Track, TrackId,
+        BusId, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, EditSession, Output,
+        Parameter, Plugin, PluginId, Track, TrackId,
         commands::{
             AddClip, AddPlugin, AddTrack, EditCommand, MoveClip, RemoveClip, RemovePlugin,
             RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetMute, SetParam,
@@ -69,6 +69,15 @@ pub const MIN_EXPANDED_HEIGHT: f32 = TRACK_COLLAPSED_HEIGHT + 25.;
 #[derive(Clone, Debug)]
 enum ProjectStatePendingAction {
     DeleteTrack { id: TrackId },
+}
+
+/// An audio clip's parameter: heard as it's set, like a fader's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipParam {
+    /// Linear.
+    Gain,
+    /// Balance, -1 (left only) to 1 (right only).
+    Pan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -748,17 +757,17 @@ impl ProjectState {
             ops.push(ClipOp::Resize(track, resized));
         });
     }
-    /// Set an audio clip's gain (linear), heard at once. Not an undo step:
-    /// see [`Self::commit_clip_gain`].
-    pub fn set_clip_gain(&mut self, id: ClipId, gain: f32) {
-        if let Some(param) = self.clip_gain(id) {
-            param.set(gain);
+    /// Set an audio clip's gain (linear) or pan, heard at once. Not an
+    /// undo step: see [`Self::commit_clip_param`].
+    pub fn set_clip_param(&mut self, id: ClipId, which: ClipParam, value: f32) {
+        if let Some(param) = self.clip_param(id, which) {
+            param.set(value);
         }
     }
-    /// Set an audio clip's gain as an undo step from `old`, its value before
-    /// the user started changing it.
-    pub fn commit_clip_gain(&mut self, id: ClipId, old: f32, new: f32) {
-        let Some(param) = self.clip_gain(id) else {
+    /// Set an audio clip's gain or pan as an undo step from `old`, its value
+    /// before the user started changing it.
+    pub fn commit_clip_param(&mut self, id: ClipId, which: ClipParam, old: f32, new: f32) {
+        let Some(param) = self.clip_param(id, which) else {
             return;
         };
         if old == new {
@@ -769,13 +778,13 @@ impl ProjectState {
         let id = param.id;
         self.perform(SetParam::new(id, new));
     }
-    fn clip_gain(&self, id: ClipId) -> Option<Parameter> {
-        self.edit()
-            .tracks
-            .iter()
-            .find_map(|t| t.clip(id))
-            .and_then(|c| c.gain())
-            .cloned()
+    fn clip_param(&self, id: ClipId, which: ClipParam) -> Option<Parameter> {
+        let clip = self.edit().tracks.iter().find_map(|t| t.clip(id))?;
+        match which {
+            ClipParam::Gain => clip.gain(),
+            ClipParam::Pan => clip.pan(),
+        }
+        .cloned()
     }
     /// `clip` as shown: as being trimmed, if it is.
     pub fn shown_clip(&self, clip: &AudioClip) -> AudioClip {
@@ -825,22 +834,23 @@ impl ProjectState {
         let source = self
             .sources
             .get_or_insert(&clip.audio, || session.create(|e| e.new_source()));
-        let gain = self
+        let length = clip.end(bpm) - clip.position;
+        let mut engine_clip = self
             .session
-            .create(|e| Parameter::new(ParamId(e.next_id()), "gain", 0., CLIP_GAIN_MAX, 1.));
-        gain.value.set(clip.gain, 0.);
-        Clip {
-            id: clip.id,
-            start: clip.position,
-            length: clip.end(bpm) - clip.position,
-            fade_in_s: 0.005,
-            fade_out_s: 0.005,
-            content: ClipContent::Audio {
-                source,
-                source_offset_s: (clip.trim_start * clip.source_seconds()) as f64,
-                gain,
-            },
+            .create(|e| Clip::audio(e, clip.position, length, source));
+        engine_clip.id = clip.id;
+        if let ClipContent::Audio {
+            source_offset_s,
+            gain,
+            pan,
+            ..
+        } = &mut engine_clip.content
+        {
+            *source_offset_s = (clip.trim_start * clip.source_seconds()) as f64;
+            gain.value.set(clip.gain, 0.);
+            pan.value.set(clip.pan, 0.);
         }
+        engine_clip
     }
 
     /// The UI view of an engine clip. `None` for MIDI clips, which the UI
@@ -850,6 +860,7 @@ impl ProjectState {
             source,
             source_offset_s,
             ref gain,
+            ref pan,
         } = clip.content
         else {
             return None;
@@ -865,6 +876,7 @@ impl ProjectState {
             trim_start,
             trim_end,
             gain: gain.get(),
+            pan: pan.get(),
         })
     }
 

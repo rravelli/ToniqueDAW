@@ -17,6 +17,8 @@ pub struct AudioClip {
     pub trim_end: f32,
     /// Linear, 1 to play the file as is.
     pub gain: f32,
+    /// Balance, -1 (left only) to 1 (right only).
+    pub pan: f32,
 }
 
 impl AudioClip {
@@ -29,6 +31,7 @@ impl AudioClip {
             trim_start: 0.,
             trim_end: 1.,
             gain: 1.,
+            pan: 0.,
         }
     }
 

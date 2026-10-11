@@ -28,16 +28,26 @@ pub struct AudioClipNode {
     /// Linear, shared with the clip's parameter: changes are heard at once.
     gain: Arc<AtomicParam>,
     gain_s: Smoother,
+    /// Balance, -1 to 1, shared with the clip's parameter too.
+    pan: Arc<AtomicParam>,
+    pan_s: Smoother,
     identity: Option<NodeIdentity>,
 }
 
 impl AudioClipNode {
-    pub fn new(source: Arc<SampleBuffer>, place: ClipPlacement, gain: Arc<AtomicParam>) -> Self {
+    pub fn new(
+        source: Arc<SampleBuffer>,
+        place: ClipPlacement,
+        gain: Arc<AtomicParam>,
+        pan: Arc<AtomicParam>,
+    ) -> Self {
         Self {
             source,
             place,
             gain_s: Smoother::new(gain.get()),
             gain,
+            pan_s: Smoother::new(pan.get()),
+            pan,
             identity: None,
         }
     }
@@ -65,12 +75,13 @@ impl AudioClipNode {
 impl Node for AudioClipNode {
     fn properties(&self) -> NodeProperties {
         // Same source data + placement + gain => same output: dedupable.
-        // The gain changes live, so it's the same only if it's the same
-        // parameter.
+        // The gain and pan change live, so they're the same only if they're
+        // the same parameters.
         let content = ContentId::of(&(
             Arc::as_ptr(&self.source) as usize,
             self.place,
             Arc::as_ptr(&self.gain) as usize,
+            Arc::as_ptr(&self.pan) as usize,
         ));
         let p = NodeProperties::audio(2).with_content(content);
         match self.identity {
@@ -80,12 +91,15 @@ impl Node for AudioClipNode {
     }
 
     fn prepare(&mut self, sample_rate: f64, _max_block: usize) {
-        self.gain_s.set_sample_rate(sample_rate);
-        self.gain_s.snap(&self.gain);
+        for (s, p) in [(&mut self.gain_s, &self.gain), (&mut self.pan_s, &self.pan)] {
+            s.set_sample_rate(sample_rate);
+            s.snap(p);
+        }
     }
 
     fn process(&mut self, ctx: &mut ProcessContext) {
         self.gain_s.retarget(&self.gain);
+        self.pan_s.retarget(&self.pan);
         if !ctx.playing {
             return;
         }
@@ -106,6 +120,7 @@ impl Node for AudioClipNode {
         );
         for t in a..b {
             let gain = self.gain_s.next();
+            let (gain_l, gain_r) = balance(self.pan_s.next());
             let rel = t - p.start;
             let si = rel + p.source_offset;
             if si < 0 || si >= src_len {
@@ -113,10 +128,19 @@ impl Node for AudioClipNode {
             }
             let g = gain * self.fade(rel);
             let at = (t - block_start) as usize;
-            left[at] = src_l[si as usize] * g;
-            right[at] = src_r[si as usize] * g;
+            left[at] = src_l[si as usize] * g * gain_l;
+            right[at] = src_r[si as usize] * g * gain_r;
         }
     }
+}
+
+/// Left and right gains of a balance from -1 (left only) to 1 (right
+/// only): the side turned away from is lowered, the other stays as is, so
+/// the centre is unity and a stereo image stays whole.
+#[inline]
+fn balance(pan: f32) -> (f32, f32) {
+    let pan = pan.clamp(-1.0, 1.0);
+    ((1.0 - pan).min(1.0), (1.0 + pan).min(1.0))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

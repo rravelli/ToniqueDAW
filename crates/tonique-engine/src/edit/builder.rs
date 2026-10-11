@@ -133,6 +133,7 @@ impl Builder<'_> {
                     source,
                     source_offset_s,
                     gain,
+                    pan,
                 } => {
                     // Not loaded yet: silent until the source is set.
                     let Some(source) = self.edit.source(*source) else {
@@ -147,7 +148,12 @@ impl Builder<'_> {
                     };
                     // Stateless: no identity needed, and dedupable by content.
                     self.d.add(
-                        AudioClipNode::new(source.clone(), place, gain.value.clone()),
+                        AudioClipNode::new(
+                            source.clone(),
+                            place,
+                            gain.value.clone(),
+                            pan.value.clone(),
+                        ),
                         &[],
                     )
                 }

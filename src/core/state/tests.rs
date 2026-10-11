@@ -4,7 +4,7 @@ use crate::{
     core::{
         clip::AudioClip,
         effect::{EffectKind, Setting},
-        state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+        state::{ClipParam, MASTER_TRACK_ID, PlaybackState, ProjectState},
     },
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -868,7 +868,7 @@ fn trimming_a_clip_of_unknown_length_does_nothing() {
 }
 
 #[test]
-fn clip_gain_is_live_one_undo_step_and_survives_edits() {
+fn clip_gain_and_pan_are_live_one_undo_step_and_survive_edits() {
     let mut state = setup_state();
     let track = state.add_track();
     let clip = add_clip(&mut state, track, 0., 2.); // beats 0..4
@@ -876,10 +876,10 @@ fn clip_gain_is_live_one_undo_step_and_survives_edits() {
     assert_eq!(gain(&state, clip), 1.);
 
     // Set live while dragged, then recorded from where it started.
-    state.set_clip_gain(clip, 0.5);
+    state.set_clip_param(clip, ClipParam::Gain, 0.5);
     assert_eq!(gain(&state, clip), 0.5, "heard at once");
-    state.set_clip_gain(clip, 0.25);
-    state.commit_clip_gain(clip, 1., 0.25);
+    state.set_clip_param(clip, ClipParam::Gain, 0.25);
+    state.commit_clip_param(clip, ClipParam::Gain, 1., 0.25);
     assert_eq!(gain(&state, clip), 0.25);
 
     // Splitting keeps it on both parts.
@@ -897,6 +897,16 @@ fn clip_gain_is_live_one_undo_step_and_survives_edits() {
     state.undo();
     state.undo();
     assert_eq!(gain(&state, clip), 1., "one step");
+
+    // Pan likewise.
+    let pan = |state: &ProjectState| state.find_clip(clip).unwrap().1.pan;
+    state.set_clip_param(clip, ClipParam::Pan, -0.5);
+    assert_eq!(pan(&state), -0.5, "heard at once");
+    state.commit_clip_param(clip, ClipParam::Pan, 0., -0.5);
+    state.undo();
+    assert_eq!(pan(&state), 0.);
+    state.redo();
+    assert_eq!(pan(&state), -0.5);
 }
 
 #[test]
@@ -1059,6 +1069,7 @@ mod projects {
         clip.trim_start = 0.25;
         clip.trim_end = 0.75;
         clip.gain = 0.5;
+        clip.pan = 0.75;
         state.add_clips(&track, vec![clip]);
         state.commit_volume(track, 1.0, 0.5);
         state.commit_volume(MASTER_TRACK_ID, 1.0, 0.8);
@@ -1127,6 +1138,7 @@ mod projects {
                 trim_start: 0.,
                 trim_end: 1.,
                 gain: 1.,
+                pan: 0.,
             }],
         });
         let mut state = setup_state();

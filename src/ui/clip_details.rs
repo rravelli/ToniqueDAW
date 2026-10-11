@@ -7,14 +7,19 @@ use egui::{
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 use crate::{
-    core::{clip::AudioClip, grid::GridService, state::ProjectState, track::TrackRow},
+    core::{
+        clip::AudioClip,
+        grid::GridService,
+        state::{ClipParam, ProjectState},
+        track::TrackRow,
+    },
     ui::{
         arrangement::grid::PaintGrid,
         theme::{Theme, ThemeExt, font_size, with_alpha},
         waveform::paint_waveform,
         widget::scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
     },
-    utils::{format_bars, format_time},
+    utils::{format_bars, format_pan, format_time, parse_pan, snap_to_centre},
 };
 
 /// The clip's properties, left of the editor.
@@ -533,23 +538,42 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, state: &mut ProjectState) {
                 .custom_formatter(|db, _| format_gain(db as f32))
                 .custom_parser(parse_gain),
         );
-        // Heard as it moves; one undo step from where it started.
-        let started = ui.id().with("gain-start");
-        if response.drag_started() {
-            ui.data_mut(|d| d.insert_temp(started, shown.gain));
-        }
-        if response.changed() {
-            state.set_clip_gain(clip.id, db_to_gain(db));
-            if !response.dragged() {
-                state.commit_clip_gain(clip.id, shown.gain, db_to_gain(db));
-            }
-        }
-        if response.drag_stopped() {
-            let old = ui
-                .data_mut(|d| d.remove_temp(started))
-                .unwrap_or(shown.gain);
-            state.commit_clip_gain(clip.id, old, db_to_gain(db));
-        }
+        live_param(
+            ui,
+            state,
+            clip.id,
+            ClipParam::Gain,
+            &response,
+            shown.gain,
+            db_to_gain(db),
+        );
+        ui.end_row();
+
+        label(ui, "Pan");
+        let raw = ui.id().with("pan-raw");
+        let mut percent = ui
+            .data(|d| d.get_temp(raw))
+            .unwrap_or(shown.pan as f64 * 100.);
+        let response = field(
+            ui,
+            DragValue::new(&mut percent)
+                .speed(0.5)
+                .range(-100.0..=100.0)
+                .custom_formatter(|p, _| format_pan(p as f32 / 100.))
+                .custom_parser(|text| parse_pan(text).map(|p| p as f64 * 100.)),
+        )
+        .on_hover_text("Balance: turning to a side lowers the other");
+        keep_raw(ui, raw, &response, percent);
+        let pan = snap_to_centre(percent as f32 / 100.);
+        live_param(
+            ui,
+            state,
+            clip.id,
+            ClipParam::Pan,
+            &response,
+            shown.pan,
+            pan,
+        );
         ui.end_row();
     });
 
@@ -634,6 +658,34 @@ fn slipped(clip: &AudioClip, offset: f64) -> AudioClip {
     clip.trim_start = start as f32;
     clip.trim_end = (start + span) as f32;
     clip
+}
+
+/// Drive a clip parameter from a drag value: heard as it moves, and one
+/// undo step from where it started once released (or typed). `current` is
+/// its value as shown, `new` the drag value's.
+fn live_param(
+    ui: &Ui,
+    state: &mut ProjectState,
+    clip: ClipId,
+    which: ClipParam,
+    response: &egui::Response,
+    current: f32,
+    new: f32,
+) {
+    let started = response.id.with("start");
+    if response.drag_started() {
+        ui.data_mut(|d| d.insert_temp(started, current));
+    }
+    if response.changed() {
+        state.set_clip_param(clip, which, new);
+        if !response.dragged() {
+            state.commit_clip_param(clip, which, current, new);
+        }
+    }
+    if response.drag_stopped() {
+        let old = ui.data_mut(|d| d.remove_temp(started)).unwrap_or(current);
+        state.commit_clip_param(clip, which, old, new);
+    }
 }
 
 /// Keep a dragged value as it is, before snapping, so that snapping what's

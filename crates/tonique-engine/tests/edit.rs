@@ -461,6 +461,51 @@ fn clip_gain_is_heard_at_once_and_undone() {
 }
 
 #[test]
+fn clip_pan_balances_live_and_is_undone() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000 * 8)); // mono: the same on both sides
+    let mut track = Track::new(&mut edit, "t");
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 8.0, src);
+    let pan = clip.pan().expect("an audio clip has a pan").clone();
+    track.clips.push(clip);
+    edit.tracks.push(track);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    let mut sides = || {
+        render_offline(&mut p, 4800, 2); // through the ramp
+        let out = render_offline(&mut p, 4800, 2);
+        let side = |ch: usize| {
+            out.iter()
+                .skip(ch)
+                .step_by(2)
+                .fold(0f32, |m, x| m.max(x.abs()))
+        };
+        (side(0), side(1))
+    };
+    let (l, r) = sides();
+    assert!((l - r).abs() < 1e-3 && l > 0.4, "centred: ({l}, {r})");
+
+    // Halfway right: the left at half, the right as it was.
+    pan.set(0.5);
+    let (l2, r2) = sides();
+    assert!(
+        (l2 - l / 2.).abs() < 0.01 && (r2 - r).abs() < 0.01,
+        "({l2}, {r2})"
+    );
+    // All the way left: the right is silent.
+    pan.set(-1.0);
+    let (l3, r3) = sides();
+    assert!((l3 - l).abs() < 0.01 && r3 < 1e-3, "({l3}, {r3})");
+    assert_eq!(s.engine().graphs_adopted(), 1, "no rebuild");
+
+    pan.set(0.0);
+    s.perform(SetParam::new(pan.id, 0.5)).unwrap();
+    s.undo().unwrap();
+    assert_eq!(pan.get(), 0.0);
+}
+
+#[test]
 fn tracks_can_be_reordered_renamed_and_duplicated() {
     let mut edit = Edit::new(120.0);
     let t = synth_track(&mut edit, vec![note(0.0, 1.0, 60)], 4.0);

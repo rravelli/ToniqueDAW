@@ -16,7 +16,7 @@ use crate::{
             meter::LevelMeter,
         },
     },
-    utils::display_name,
+    utils::{display_name, format_pan, snap_to_centre},
 };
 use egui::{
     Align2, Color32, FontId, Frame, Label, Margin, Rect, Response, RichText, Sense, Stroke,
@@ -44,8 +44,6 @@ const FINE_DRAG: f32 = 0.1;
 /// Volume slider range, in dB.
 const GAIN_RANGE: RangeInclusive<f32> = -40.0..=5.0;
 const PAN_RANGE: RangeInclusive<f32> = -1.0..=1.0;
-/// Pan closer to the centre than this snaps to it while dragging.
-const PAN_SNAP: f32 = 0.02;
 const SLIDER_WIDTH: f32 = 2. * BUTTON_SIZE + 1.;
 const SLIDER_HEIGHT: f32 = 20.;
 /// Gap between the rows of controls.
@@ -616,21 +614,6 @@ fn format_gain(gain: f32) -> String {
     }
 }
 
-/// `C` for centre, else `L`/`R` and a percentage: `L35`.
-fn format_pan(pan: f32) -> String {
-    let percent = (pan.abs() * 100.).round();
-    match percent as u32 {
-        0 => "C".into(),
-        n if pan < 0. => format!("L{n}"),
-        n => format!("R{n}"),
-    }
-}
-
-/// Close enough to the centre to be meant as the centre.
-fn snap_to_centre(pan: f32) -> f32 {
-    if pan.abs() < PAN_SNAP { 0. } else { pan }
-}
-
 /// Track header toggle: `fill` when on, the default control colour when off.
 fn toggle_button(text: &str, fill: Option<Color32>, theme: &Theme) -> FlatButton {
     let button = FlatButton::new(text).square(BUTTON_SIZE);
@@ -675,12 +658,6 @@ mod tests {
 
     #[test]
     fn pan_formats_and_snaps_to_centre() {
-        assert_eq!(format_pan(0.), "C");
-        assert_eq!(format_pan(0.004), "C");
-        assert_eq!(format_pan(-0.35), "L35");
-        assert_eq!(format_pan(1.), "R100");
-        assert_eq!(snap_to_centre(0.01), 0.);
-        assert_eq!(snap_to_centre(-0.2), -0.2);
         // Pan drags over -1..1 like any slider.
         assert_eq!(dragged_value(&drag(false), 145., WIDTH, &PAN_RANGE), 1.);
     }

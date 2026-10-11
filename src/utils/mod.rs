@@ -27,6 +27,41 @@ pub fn format_time(seconds: f64) -> String {
     )
 }
 
+/// Pan closer to the centre than this snaps to it while dragging.
+const PAN_SNAP: f32 = 0.02;
+
+/// A pan (-1 left to 1 right): `C` for centre, else `L`/`R` and a
+/// percentage, `L35`.
+pub fn format_pan(pan: f32) -> String {
+    let percent = (pan.abs() * 100.).round();
+    match percent as u32 {
+        0 => "C".into(),
+        n if pan < 0. => format!("L{n}"),
+        n => format!("R{n}"),
+    }
+}
+
+/// A pan as typed: `C`, `L35`, `R100`, or a number from -100 (left) to
+/// 100 (right).
+pub fn parse_pan(text: &str) -> Option<f32> {
+    let text = text.trim().to_uppercase();
+    let percent: f32 = if text == "C" {
+        0.
+    } else if let Some(n) = text.strip_prefix('L') {
+        -n.trim().parse::<f32>().ok()?
+    } else if let Some(n) = text.strip_prefix('R') {
+        n.trim().parse().ok()?
+    } else {
+        text.parse().ok()?
+    };
+    Some((percent / 100.).clamp(-1., 1.))
+}
+
+/// Close enough to the centre to be meant as the centre.
+pub fn snap_to_centre(pan: f32) -> f32 {
+    if pan.abs() < PAN_SNAP { 0. } else { pan }
+}
+
 pub fn display_name(name: &str, index: usize) -> String {
     name.replace("#", &format!("{}", index + 1))
 }
