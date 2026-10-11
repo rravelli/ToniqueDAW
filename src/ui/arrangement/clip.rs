@@ -190,6 +190,7 @@ impl ClipView<'_> {
                 0.0..frames,
                 clip.audio.channels >= 2,
                 ink,
+                clip.gain,
             );
         }
         // Draw an overlay when audio not ready

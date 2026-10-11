@@ -319,6 +319,7 @@ impl ClipDetails {
                 0.0..frames,
                 clip.audio.channels >= 2,
                 track.color,
+                clip.gain,
             );
         }
 

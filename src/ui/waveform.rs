@@ -27,7 +27,10 @@ const RAW_MAX_SPP: f64 = (4 * BASE_BUCKET) as f64;
 /// values are cached in tiles, so frames where only the position changes
 /// (scrolling, playback) don't touch the audio data.
 /// With `stereo`, each channel gets its own lane; otherwise channels are
-/// merged into one.
+/// merged into one. Sample values are drawn multiplied by `gain` (linear),
+/// so the waveform shows what's heard; past full scale, they're cut at the
+/// lane's edges.
+#[allow(clippy::too_many_arguments)]
 pub fn paint_waveform(
     painter: &Painter,
     rect: Rect,
@@ -36,6 +39,7 @@ pub fn paint_waveform(
     samples: std::ops::Range<f64>,
     stereo: bool,
     color: Color32,
+    gain: f32,
 ) {
     let (sample_start, sample_end) = (samples.start, samples.end);
     let peaks = data.peaks();
@@ -65,6 +69,7 @@ pub fn paint_waveform(
                 channels: ch..ch + 1,
                 top: rect.top() + ch as f32 * height,
                 height,
+                gain,
             })
             .collect()
     } else {
@@ -72,6 +77,7 @@ pub fn paint_waveform(
             channels: 0..num_channels,
             top: rect.top(),
             height: rect.height(),
+            gain,
         }]
     };
     let raw = data.samples().map(|s| s.as_ref());
@@ -133,6 +139,7 @@ pub fn paint_waveform(
         visible: [visible.min.x, visible.min.y, visible.max.x, visible.max.y].map(f32::to_bits),
         ppp: ppp.to_bits(),
         color,
+        gain: gain.to_bits(),
     };
     if let Some(mesh) = cache.mesh(&mesh_key) {
         painter.add(Shape::Mesh(mesh));
@@ -151,6 +158,7 @@ pub fn paint_waveform(
             channels: lane.channels.clone(),
             top: lane.top - rect.top(),
             height: lane.height,
+            gain,
         };
         for tile in first / TILE..last.div_ceil(TILE) {
             let tile_mesh_key = TileMeshKey {
@@ -159,6 +167,7 @@ pub fn paint_waveform(
                 lane_rect: [local_lane.top, local_lane.height].map(f32::to_bits),
                 ppp: ppp.to_bits(),
                 color,
+                gain: gain.to_bits(),
             };
             let tile_mesh = match cache.tile_mesh(&tile_mesh_key) {
                 Some(tile_mesh) => tile_mesh,
@@ -207,12 +216,15 @@ struct Lane {
     channels: std::ops::Range<usize>,
     top: f32,
     height: f32,
+    /// Sample values are drawn multiplied by it.
+    gain: f32,
 }
 
 impl Lane {
-    /// Screen y of a sample value, positive values going up.
+    /// Screen y of a sample value (times the gain), positive values going
+    /// up, cut at full scale.
     fn y(&self, v: f32) -> f32 {
-        self.top + self.height / 2. * (1. - v.clamp(-1., 1.))
+        self.top + self.height / 2. * (1. - (v * self.gain).clamp(-1., 1.))
     }
 }
 
@@ -314,6 +326,8 @@ struct MeshKey {
     visible: [u32; 4],
     ppp: u64,
     color: Color32,
+    /// `f32` bits.
+    gain: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -324,6 +338,8 @@ struct TileMeshKey {
     lane_rect: [u32; 2],
     ppp: u64,
     color: Color32,
+    /// `f32` bits.
+    gain: u32,
 }
 
 struct Tile {
@@ -395,4 +411,26 @@ fn touch<K: Eq + std::hash::Hash>(
     let (mesh, last_used) = map.get_mut(key)?;
     *last_used = frame;
     Some(mesh.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gain_scales_the_waveform_and_full_scale_cuts_it() {
+        let lane = |gain| Lane {
+            channels: 0..1,
+            top: 0.,
+            height: 100.,
+            gain,
+        };
+        // Half a full-scale sample: a quarter of the lane above the middle.
+        assert_eq!(lane(1.).y(0.5), 25.);
+        assert_eq!(lane(0.5).y(0.5), 37.5, "half as loud, half as tall");
+        assert_eq!(lane(0.).y(0.5), 50., "silent: flat");
+        // Louder than full scale: cut at the lane's edges.
+        assert_eq!(lane(4.).y(0.5), 0.);
+        assert_eq!(lane(4.).y(-0.5), 100.);
+    }
 }
