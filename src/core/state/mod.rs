@@ -861,6 +861,7 @@ impl ProjectState {
             source_offset_s,
             ref gain,
             ref pan,
+            ..
         } = clip.content
         else {
             return None;

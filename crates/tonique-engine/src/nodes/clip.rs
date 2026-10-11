@@ -17,6 +17,49 @@ pub struct ClipPlacement {
     pub source_offset: SamplePos,
     pub fade_in: SamplePos,
     pub fade_out: SamplePos,
+    /// Reading reaches the loop's end, then goes on from its start.
+    pub looped: Option<LoopPlacement>,
+}
+
+/// A clip's loop, in source samples.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LoopPlacement {
+    pub start: SamplePos,
+    pub end: SamplePos,
+    /// How long before the end the source starts crossfading into what's
+    /// just before the loop's start, so the seam is continuous.
+    pub crossfade: SamplePos,
+}
+
+impl LoopPlacement {
+    /// The loop over `start..end`, crossfading over up to `crossfade` (less
+    /// on short loops, or with little before the start).
+    pub fn new(start: SamplePos, end: SamplePos, crossfade: SamplePos) -> Self {
+        let crossfade = crossfade.min((end - start) / 2).min(start).max(0);
+        Self {
+            start,
+            end,
+            crossfade,
+        }
+    }
+
+    /// Where `at` (in the source, going on past the end) reads, and when
+    /// crossfading, from where too and how much of it (0 to 1).
+    #[inline]
+    fn read(&self, at: SamplePos) -> (SamplePos, Option<(SamplePos, f32)>) {
+        let len = self.end - self.start;
+        let at = if at >= self.end && len > 0 {
+            self.start + (at - self.start).rem_euclid(len)
+        } else {
+            at
+        };
+        let into = at - (self.end - self.crossfade);
+        if self.crossfade > 0 && into >= 0 && at < self.end {
+            let t = (into as f32 + 0.5) / self.crossfade as f32;
+            return (at, Some((at - len, t)));
+        }
+        (at, None)
+    }
 }
 
 /// Reads a region of shared, pre-converted sample data at the transport
@@ -118,18 +161,30 @@ impl Node for AudioClipNode {
             self.source.channel(0),
             self.source.channel(1.min(src_chans - 1)),
         );
+        let in_source = |i: SamplePos| i >= 0 && i < src_len;
         for t in a..b {
             let gain = self.gain_s.next();
             let (gain_l, gain_r) = balance(self.pan_s.next());
             let rel = t - p.start;
-            let si = rel + p.source_offset;
-            if si < 0 || si >= src_len {
+            let (si, blend) = match p.looped {
+                Some(looped) => looped.read(rel + p.source_offset),
+                None => (rel + p.source_offset, None),
+            };
+            if !in_source(si) {
                 continue;
             }
             let g = gain * self.fade(rel);
+            let (mut l, mut r) = (src_l[si as usize], src_r[si as usize]);
+            if let Some((from, mix)) = blend
+                && in_source(from)
+            {
+                let from = from as usize;
+                l += (src_l[from] - l) * mix;
+                r += (src_r[from] - r) * mix;
+            }
             let at = (t - block_start) as usize;
-            left[at] = src_l[si as usize] * g * gain_l;
-            right[at] = src_r[si as usize] * g * gain_r;
+            left[at] = l * g * gain_l;
+            right[at] = r * g * gain_r;
         }
     }
 }

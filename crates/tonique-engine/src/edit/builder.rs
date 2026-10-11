@@ -12,15 +12,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::{Bus, BusId, Channel, ClipContent, Edit, Output, Parameter, PluginKind, Track};
+use super::{
+    Bus, BusId, Channel, ClipContent, ClipLoop, Edit, Output, Parameter, PluginKind, Track,
+};
 use crate::automation::AutomationCurve;
 use crate::graph::{GraphDescription, NodeId, NodeIdentity};
 use crate::nodes::{
     AudioClipNode, AutomationNode, ClipPlacement, DelayNode, EchoNode, FilterMode, FilterNode,
-    MetronomeNode, MidiClipNode, SumNode, SynthNode, TappedNode, ThroughNode, TimelineNote,
-    UtilityNode, VolumePanNode,
+    LoopPlacement, MetronomeNode, MidiClipNode, SumNode, SynthNode, TappedNode, ThroughNode,
+    TimelineNote, UtilityNode, VolumePanNode,
 };
 use crate::param::ParamId;
+
+/// Crossfade at a clip loop's seam: long enough not to click, short enough
+/// not to smear its attack.
+const LOOP_CROSSFADE_S: f64 = 0.004;
 use crate::time::{BeatPos, SamplePos};
 
 /// Identity of the automation writer for a parameter; used to address it
@@ -134,6 +140,7 @@ impl Builder<'_> {
                     source_offset_s,
                     gain,
                     pan,
+                    looped,
                 } => {
                     // Not loaded yet: silent until the source is set.
                     let Some(source) = self.edit.source(*source) else {
@@ -145,6 +152,13 @@ impl Builder<'_> {
                         source_offset: (source_offset_s * self.sr).round() as SamplePos,
                         fade_in: (clip.fade_in_s * self.sr) as SamplePos,
                         fade_out: (clip.fade_out_s * self.sr) as SamplePos,
+                        looped: looped.filter(ClipLoop::is_valid).map(|l| {
+                            LoopPlacement::new(
+                                (l.start_s * self.sr).round() as SamplePos,
+                                (l.end_s * self.sr).round() as SamplePos,
+                                (LOOP_CROSSFADE_S * self.sr) as SamplePos,
+                            )
+                        }),
                     };
                     // Stateless: no identity needed, and dedupable by content.
                     self.d.add(

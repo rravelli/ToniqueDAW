@@ -3,8 +3,8 @@ use std::sync::Arc;
 use tonique_engine::automation::{BeatPoint, CurveShape};
 use tonique_engine::edit::commands::*;
 use tonique_engine::edit::{
-    Bus, BusId, ChannelRef, Clip, ClipContent, Edit, EditError, EditSession, Note, Output, Plugin,
-    PluginKind, Send, Track, TrackId,
+    Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, ClipLoop, Edit, EditError, EditSession,
+    Note, Output, Plugin, PluginKind, Send, Track, TrackId,
 };
 use tonique_engine::engine::{AudioProcessor, Engine, EngineConfig, render_offline};
 use tonique_engine::nodes::{Envelope, FilterMode, UTILITY_SILENT_DB};
@@ -503,6 +503,113 @@ fn clip_pan_balances_live_and_is_undone() {
     s.perform(SetParam::new(pan.id, 0.5)).unwrap();
     s.undo().unwrap();
     assert_eq!(pan.get(), 0.0);
+}
+
+/// A session playing, from its start, one track with `clip` on a source of
+/// `samples`, and the clip's ID.
+fn playing_clip(
+    samples: Arc<SampleBuffer>,
+    looped: Option<ClipLoop>,
+    seconds: f64,
+) -> (EditSession, AudioProcessor, TrackId, ClipId) {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(samples);
+    let mut track = Track::new(&mut edit, "t");
+    // 120 bpm: two beats a second.
+    let mut clip = Clip::audio(&mut edit, BeatPos(0.0), seconds * 2., src);
+    clip.fade_in_s = 0.0;
+    clip.fade_out_s = 0.0;
+    if let ClipContent::Audio { looped: l, .. } = &mut clip.content {
+        *l = looped;
+    }
+    let (tid, cid) = (track.id, clip.id);
+    track.clips.push(clip);
+    edit.tracks.push(track);
+    let (e, p) = engine(0);
+    let mut s = EditSession::new(edit, e).expect("session");
+    s.play().expect("play");
+    (s, p, tid, cid)
+}
+
+#[test]
+fn looped_clips_go_on_from_the_loop_start() {
+    // Each sample its own value, to tell where reading is.
+    let len = 48000;
+    let ramp: Vec<f32> = (0..len).map(|i| i as f32 / len as f32).collect();
+    let source = Arc::new(SampleBuffer::new(vec![ramp.clone()], SR));
+    // Loop 0.25 s to 0.5 s of a 1 s file, over 1 s of clip.
+    let looped = ClipLoop {
+        start_s: 0.25,
+        end_s: 0.5,
+    };
+    let (_s, mut p, _, _) = playing_clip(source, Some(looped), 1.0);
+    let out = render_offline(&mut p, 48000, 2);
+    let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+    // The intro plays once, then the loop over and over.
+    for t in [100, 12_000, 23_000, 24_000 + 100, 30_000, 47_000] {
+        let expected = if t < 24_000 {
+            ramp[t]
+        } else {
+            ramp[12_000 + (t - 12_000) % 12_000]
+        };
+        assert!(
+            (left[t] - expected).abs() < 1e-5,
+            "at {t}: {} vs {expected}",
+            left[t]
+        );
+    }
+}
+
+#[test]
+fn loop_seams_are_crossfaded() {
+    // A sine whose loop doesn't hold a whole number of periods: cut
+    // straight, the seam would jump.
+    let source = sine(48000 * 2);
+    let looped = ClipLoop {
+        start_s: 0.5,
+        end_s: 0.5 + 0.1003,
+    };
+    let (_s, mut p, _, _) = playing_clip(source, Some(looped), 1.0);
+    let out = render_offline(&mut p, 48000, 2);
+    let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+    // A 0.5 sine moving 0.05 rad a sample changes by less than 0.025 per
+    // sample; a seam would jump much more.
+    let jump = left
+        .windows(2)
+        .skip(100)
+        .take(47_000)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0f32, f32::max);
+    assert!(jump < 0.03, "a sample jumps by {jump}");
+}
+
+#[test]
+fn clip_loops_are_set_and_undone() {
+    let (mut s, mut p, tid, cid) = playing_clip(sine(48000 * 2), None, 4.0);
+    let looped = ClipLoop {
+        start_s: 0.0,
+        end_s: 0.5,
+    };
+    s.perform(SetClipLoop::new(tid, cid, Some(looped))).unwrap();
+    let content = |s: &EditSession| match &s.edit().track(tid).unwrap().clip(cid).unwrap().content {
+        ClipContent::Audio { looped, .. } => *looped,
+        ClipContent::Midi { .. } => unreachable!(),
+    };
+    assert_eq!(content(&s), Some(looped));
+    // Past the 2 s file: still playing, looped.
+    render_offline(&mut p, 48000 * 3, 2);
+    assert!(peak(&render_offline(&mut p, 4800, 2)) > 0.4);
+    s.undo().unwrap();
+    assert_eq!(content(&s), None);
+
+    let backwards = ClipLoop {
+        start_s: 1.0,
+        end_s: 0.5,
+    };
+    assert!(
+        s.perform(SetClipLoop::new(tid, cid, Some(backwards)))
+            .is_err()
+    );
 }
 
 #[test]

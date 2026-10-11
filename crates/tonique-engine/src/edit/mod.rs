@@ -210,11 +210,27 @@ pub enum ClipContent {
         /// Balance, -1 (left only) to 1 (right only): turning to a side
         /// lowers the other, keeping a stereo file's image.
         pan: Parameter,
+        /// Once reading reaches the loop's end, it goes on from its start,
+        /// for as long as the clip lasts.
+        looped: Option<ClipLoop>,
     },
     Midi {
         notes: Vec<Note>,
         channel: u8,
     },
+}
+
+/// The part of an audio clip's source that loops, in seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClipLoop {
+    pub start_s: f64,
+    pub end_s: f64,
+}
+
+impl ClipLoop {
+    pub fn is_valid(&self) -> bool {
+        self.start_s >= 0.0 && self.end_s > self.start_s && self.end_s.is_finite()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -252,6 +268,7 @@ impl Clip {
                 source_offset_s: 0.0,
                 gain: Parameter::new(ParamId(edit.next_id()), "gain", 0.0, CLIP_GAIN_MAX, 1.0),
                 pan: Parameter::new(ParamId(edit.next_id()), "pan", -1.0, 1.0, 0.0),
+                looped: None,
             },
         }
     }
