@@ -97,7 +97,9 @@ impl BottomPanel {
                     self.track = None;
                     self.selected.clear();
                     let tabs = Some((BottomView::Clip(clip.id), clip.id));
-                    if let Some(view) = self.header(ui, &track, Some(&clip.audio.name), tabs) {
+                    if let Some(view) =
+                        self.header(ui, &track, Some((&clip.audio.name, &clip.audio.path)), tabs)
+                    {
                         workspace.bottom_view = view;
                     }
                     self.clip_details.ui(ui, &clip, &track, state);
@@ -360,7 +362,7 @@ impl BottomPanel {
         &mut self,
         ui: &mut Ui,
         track: &TrackRow,
-        clip: Option<&str>,
+        clip: Option<(&str, &std::path::Path)>,
         tabs: Option<(BottomView, ClipId)>,
     ) -> Option<BottomView> {
         let theme = ui.app_theme();
@@ -405,14 +407,17 @@ impl BottomPanel {
                     }
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                         let mut title = display_name(&track.name, track.first_track_index);
-                        if let Some(clip) = clip {
-                            title = format!("{title}  ›  {clip}");
+                        if let Some((name, _)) = clip {
+                            title = format!("{title}  ›  {name}");
                         }
-                        ui.add(
+                        let label = ui.add(
                             Label::new(RichText::new(title).size(font_size::SMALL).color(ink))
                                 .truncate()
                                 .selectable(false),
                         );
+                        if let Some((_, path)) = clip {
+                            label.on_hover_text(path.display().to_string());
+                        }
                     });
                 });
             });

@@ -1,7 +1,7 @@
 //! The bottom panel's view of one clip.
 
 use egui::{
-    Align2, Color32, CursorIcon, DragValue, FontId, Grid, Label, Rect, RichText, ScrollArea, Sense,
+    Align2, Color32, CursorIcon, DragValue, FontId, Label, Rect, RichText, ScrollArea, Sense,
     Shape, Stroke, Ui, UiBuilder, pos2, vec2,
 };
 use tonique_engine::{
@@ -31,8 +31,12 @@ use crate::{
 
 /// The clip's properties, left of the editor.
 const INSPECTOR_WIDTH: f32 = 210.;
-/// The inspector's labels.
-const LABEL_WIDTH: f32 = 56.;
+/// Between the inspector's cells, side by side.
+const CELL_GAP: f32 = 4.;
+/// Above each section of the inspector.
+const SECTION_GAP: f32 = 4.;
+/// The loop's on/off switch, on its section's title row.
+const LOOP_SWITCH_WIDTH: f32 = 28.;
 const PADDING: f32 = 8.;
 /// The ruler: the loop's bracket along its top, the bars, and the markers'
 /// flags along its bottom.
@@ -613,7 +617,6 @@ fn trimmed(clip: &AudioClip, edge: TrimEdge, at: BeatPos, bpm: f32) -> AudioClip
 /// dragged and apply as one undo step once released (or typed). Gain and
 /// pan are sliders like a track's, heard as they're dragged.
 fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut ProjectState) {
-    let theme = ui.app_theme();
     let bpm = state.bpm();
     let bpb = state.grid.beats_per_bar();
     let shown = state.shown_clip(clip);
@@ -622,7 +625,6 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
     let length = end - start;
     let source = shown.source_seconds() as f64;
     let offset = shown.offset;
-    let audio = &shown.audio;
     let free = ui.input(|i| i.modifiers.alt);
     // Positions and lengths snap to sixteenths, unless Alt is held.
     let snap = |beats: f64| {
@@ -637,25 +639,15 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
     let mut change: Option<(AudioClip, bool)> = None;
 
     ui.style_mut().override_font_id = Some(FontId::proportional(font_size::LABEL));
-    ui.spacing_mut().item_spacing.y = 2.;
-    ui.add(
-        Label::new(
-            RichText::new(&audio.name)
-                .size(font_size::BODY)
-                .strong()
-                .color(theme.text),
-        )
-        .truncate(),
-    )
-    .on_hover_text(audio.path.display().to_string());
+    ui.spacing_mut().item_spacing = vec2(CELL_GAP, 1.);
 
-    section(ui, "Clip");
-    rows(ui, "clip", |ui| {
-        label(ui, "Start");
-        let raw = ui.id().with("start-raw");
-        let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(start);
-        let response = field(
-            ui,
+    section(ui, "Clip", 0.);
+    ui.columns(3, |cells| {
+        let raw = cells[0].id().with("start-raw");
+        let mut beats = cells[0].data(|d| d.get_temp(raw)).unwrap_or(start);
+        let response = cell(
+            &mut cells[0],
+            "Start",
             DragValue::new(&mut beats)
                 .speed(1. / 16.)
                 .range(0.0..=f64::MAX)
@@ -663,19 +655,18 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
                 .custom_parser(|text| parse_bars(text, bpb)),
         )
         .on_hover_text(format!("{} · bar.beat.sixteenth", seconds(start)));
-        keep_raw(ui, raw, &response, beats);
+        keep_raw(&cells[0], raw, &response, beats);
         if let Some(done) = gesture(&response) {
             let mut moved = shown.clone();
             moved.position = BeatPos(snap(beats).max(0.));
             change = Some((moved, done));
         }
-        ui.end_row();
 
-        label(ui, "End");
-        let raw = ui.id().with("end-raw");
-        let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(end);
-        let response = field(
-            ui,
+        let raw = cells[1].id().with("end-raw");
+        let mut beats = cells[1].data(|d| d.get_temp(raw)).unwrap_or(end);
+        let response = cell(
+            &mut cells[1],
+            "End",
             DragValue::new(&mut beats)
                 .speed(1. / 16.)
                 .range(start + MIN_LENGTH..=f64::MAX)
@@ -683,18 +674,17 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
                 .custom_parser(|text| parse_bars(text, bpb)),
         )
         .on_hover_text(format!("{} · bar.beat.sixteenth", seconds(end)));
-        keep_raw(ui, raw, &response, beats);
+        keep_raw(&cells[1], raw, &response, beats);
         if let Some(done) = gesture(&response) {
             let at = BeatPos(snap(beats).max(start + MIN_LENGTH));
             change = Some((trimmed(&shown, TrimEdge::End, at, bpm), done));
         }
-        ui.end_row();
 
-        label(ui, "Length");
-        let raw = ui.id().with("length-raw");
-        let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(length);
-        let response = field(
-            ui,
+        let raw = cells[2].id().with("length-raw");
+        let mut beats = cells[2].data(|d| d.get_temp(raw)).unwrap_or(length);
+        let response = cell(
+            &mut cells[2],
+            "Length",
             DragValue::new(&mut beats)
                 .speed(1. / 16.)
                 .range(MIN_LENGTH..=f64::MAX)
@@ -702,20 +692,19 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
                 .custom_parser(|text| parse_length(text, bpb)),
         )
         .on_hover_text(format!("{} · bars.beats.sixteenths", seconds(length)));
-        keep_raw(ui, raw, &response, beats);
+        keep_raw(&cells[2], raw, &response, beats);
         if let Some(done) = gesture(&response) {
             let at = shown.position + snap(beats).max(MIN_LENGTH);
             change = Some((trimmed(&shown, TrimEdge::End, at, bpm), done));
         }
-        ui.end_row();
     });
 
-    section(ui, "Audio");
-    rows(ui, "audio", |ui| {
-        label(ui, "Offset");
+    section(ui, "Audio", 0.);
+    ui.columns(3, |cells| {
         let mut seconds = offset;
-        let response = field(
-            ui,
+        let response = cell(
+            &mut cells[0],
+            "Offset",
             DragValue::new(&mut seconds)
                 .speed(0.005)
                 .range(0.0..=f64::MAX)
@@ -728,89 +717,85 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
             slipped.slip_to(seconds, bpm);
             change = Some((slipped, done));
         }
-        ui.end_row();
 
-        // As on tracks: a level filled in the clip's colour, reset by a
+        // As on tracks: a level in the clip's colour, reset by a
         // double-click; heard as it moves, one undo step once released.
-        let size = vec2(ui.available_width(), FIELD_HEIGHT);
-        label(ui, "Gain");
+        cell_label(&mut cells[1], "Gain");
+        let size = vec2(cells[1].available_width(), FIELD_HEIGHT);
         let gain = ParamSlider::gain(shown.gain, CLIP_GAIN_RANGE)
             .field()
             .color(color)
             .size(size)
             .suffix(" dB");
-        apply_param(state, clip.id, ClipParam::Gain, gain.show(ui).1);
-        ui.end_row();
+        apply_param(state, clip.id, ClipParam::Gain, gain.show(&mut cells[1]).1);
 
-        label(ui, "Pan");
+        cell_label(&mut cells[2], "Pan");
         let (response, edit) = ParamSlider::pan(shown.pan)
             .field()
             .color(color)
             .size(size)
-            .show(ui);
+            .show(&mut cells[2]);
         response.on_hover_text("Balance: turning to a side lowers the other");
         apply_param(state, clip.id, ClipParam::Pan, edit);
-        ui.end_row();
     });
 
-    section(ui, "Loop");
-    rows(ui, "loop", |ui| {
-        label(ui, "Loop");
-        let looped = shown.active_loop();
-        let toggle = FlatButton::new(if looped.is_some() { "On" } else { "Off" })
-            .size(vec2(ui.available_width(), FIELD_HEIGHT))
-            .font(FontId::proportional(font_size::LABEL))
-            .selected(looped.is_some())
-            .tooltip("Play the loop over and over, for as long as the clip lasts");
-        if ui.add(toggle).clicked() {
-            let mut toggled = shown.clone();
-            match looped {
-                Some(_) => toggled.set_loop(None, bpm),
-                None => toggled.set_loop(Some(default_loop(&shown, bpm)), bpm),
+    // Its switch on the title's row.
+    let looped = shown.active_loop();
+    let header = section(ui, "Loop", LOOP_SWITCH_WIDTH + CELL_GAP);
+    let switch = Rect::from_min_max(
+        pos2(header.right() - LOOP_SWITCH_WIDTH, header.top()),
+        header.max,
+    );
+    let toggle = FlatButton::new(if looped.is_some() { "On" } else { "Off" })
+        .size(switch.size())
+        .font(FontId::proportional(font_size::SMALL))
+        .selected(looped.is_some())
+        .tooltip("Play the loop over and over, for as long as the clip lasts");
+    if ui.put(switch, toggle).clicked() {
+        let mut toggled = shown.clone();
+        match looped {
+            Some(_) => toggled.set_loop(None, bpm),
+            None => toggled.set_loop(Some(default_loop(&shown, bpm)), bpm),
+        }
+        change = Some((toggled, true));
+    }
+    if let Some(l) = looped {
+        ui.columns(3, |cells| {
+            let mut start = l.start_s;
+            let response = cell(
+                &mut cells[0],
+                "Start",
+                DragValue::new(&mut start)
+                    .speed(0.005)
+                    .range(0.0..=source)
+                    .custom_formatter(|v, _| format_time(v))
+                    .custom_parser(parse_time),
+            )
+            .on_hover_text("Where in the file the loop starts");
+            if let Some(done) = gesture(&response) {
+                change = Some((with_loop(&shown, start, l.end_s, bpm), done));
             }
-            change = Some((toggled, true));
-        }
-        ui.end_row();
-        let Some(l) = looped else {
-            return;
-        };
 
-        label(ui, "Start");
-        let mut start = l.start_s;
-        let response = field(
-            ui,
-            DragValue::new(&mut start)
-                .speed(0.005)
-                .range(0.0..=source)
-                .custom_formatter(|v, _| format_time(v))
-                .custom_parser(parse_time),
-        )
-        .on_hover_text("Where in the file the loop starts");
-        if let Some(done) = gesture(&response) {
-            change = Some((with_loop(&shown, start, l.end_s, bpm), done));
-        }
-        ui.end_row();
-
-        label(ui, "Length");
-        let raw = ui.id().with("loop-length-raw");
-        let loop_length = to_beats(l.end_s - l.start_s, bpm);
-        let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(loop_length);
-        let response = field(
-            ui,
-            DragValue::new(&mut beats)
-                .speed(1. / 16.)
-                .range(MIN_LENGTH..=f64::MAX)
-                .custom_formatter(|v, _| format_length(v, bpb))
-                .custom_parser(|text| parse_length(text, bpb)),
-        )
-        .on_hover_text(format!("{} · bars.beats.sixteenths", seconds(loop_length)));
-        keep_raw(ui, raw, &response, beats);
-        if let Some(done) = gesture(&response) {
-            let end = l.start_s + to_seconds(snap(beats).max(MIN_LENGTH), bpm);
-            change = Some((with_loop(&shown, l.start_s, end, bpm), done));
-        }
-        ui.end_row();
-    });
+            let raw = cells[1].id().with("loop-length-raw");
+            let loop_length = to_beats(l.end_s - l.start_s, bpm);
+            let mut beats = cells[1].data(|d| d.get_temp(raw)).unwrap_or(loop_length);
+            let response = cell(
+                &mut cells[1],
+                "Length",
+                DragValue::new(&mut beats)
+                    .speed(1. / 16.)
+                    .range(MIN_LENGTH..=f64::MAX)
+                    .custom_formatter(|v, _| format_length(v, bpb))
+                    .custom_parser(|text| parse_length(text, bpb)),
+            )
+            .on_hover_text(format!("{} · bars.beats.sixteenths", seconds(loop_length)));
+            keep_raw(&cells[1], raw, &response, beats);
+            if let Some(done) = gesture(&response) {
+                let end = l.start_s + to_seconds(snap(beats).max(MIN_LENGTH), bpm);
+                change = Some((with_loop(&shown, l.start_s, end, bpm), done));
+            }
+        });
+    }
 
     match change {
         Some((edited, false)) => state.resize_clip(edited),
@@ -819,9 +804,10 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
     }
 }
 
-/// A section's title, small and muted, with a rule after it.
-fn section(ui: &mut Ui, title: &str) {
-    ui.add_space(6.);
+/// A section's title, small and muted, with a rule after it up to
+/// `reserve` from the right (for something on its row). Returns its row.
+fn section(ui: &mut Ui, title: &str, reserve: f32) -> Rect {
+    ui.add_space(SECTION_GAP);
     let theme = ui.app_theme();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 14.), Sense::hover());
     let painter = ui.painter();
@@ -832,30 +818,33 @@ fn section(ui: &mut Ui, title: &str) {
         FontId::proportional(font_size::SMALL),
         theme.text_muted,
     );
-    if text.right() + 6. < rect.right() {
+    let rule_end = rect.right() - reserve;
+    if text.right() + 6. < rule_end {
         painter.hline(
-            text.right() + 6.0..=rect.right(),
+            text.right() + 6.0..=rule_end,
             rect.center().y,
             Stroke::new(1., theme.separator),
         );
     }
+    ui.add_space(2.);
+    rect
 }
 
-/// A section's rows: a label, and a value filling the rest.
-fn rows(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
-    Grid::new(("clip-inspector", id))
-        .num_columns(2)
-        .min_col_width(LABEL_WIDTH)
-        .spacing([6., 3.])
-        .show(ui, add);
+/// A cell's label, small and muted, above its value.
+fn cell_label(ui: &mut Ui, text: &str) {
+    ui.add(
+        Label::new(
+            RichText::new(text)
+                .size(font_size::SMALL)
+                .color(ui.app_theme().text_muted),
+        )
+        .truncate(),
+    );
 }
 
-fn label(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).color(ui.app_theme().text_muted));
-}
-
-/// A value field filling the row.
-fn field(ui: &mut Ui, value: DragValue) -> egui::Response {
+/// A cell: its label above a value field filling its width.
+fn cell(ui: &mut Ui, label: &str, value: DragValue) -> egui::Response {
+    cell_label(ui, label);
     let width = ui.available_width();
     ui.add_sized(vec2(width, FIELD_HEIGHT), value)
 }
