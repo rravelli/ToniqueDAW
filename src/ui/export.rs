@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use egui::{
-    Align, Align2, Color32, FontFamily, FontId, Id, Layout, Modal, Painter, Rect, RichText, Sense,
-    Shape, Stroke, StrokeKind, Ui, pos2, vec2,
+    Align, Align2, Color32, FontFamily, FontId, Layout, Painter, Rect, RichText, Sense, Shape,
+    Stroke, StrokeKind, Ui, pos2, vec2,
 };
 use egui_phosphor::regular::{CHECK_CIRCLE, EXPORT, WARNING, WAVEFORM, X_CIRCLE};
 use rfd::FileDialog;
@@ -21,9 +21,14 @@ use crate::{
     ui::{
         font::PHOSPHOR_REGULAR,
         project::ProjectManager,
+        taskbar::TaskbarProgress,
         theme::{Theme, ThemeExt, with_alpha},
         waveform::paint_waveform,
-        widget::{dialog::button, flat_button::FlatButton, section::SectionHeader},
+        widget::{
+            dialog::{self, button},
+            flat_button::FlatButton,
+            section::SectionHeader,
+        },
     },
 };
 
@@ -62,6 +67,7 @@ pub struct ExportWindow {
     step: Step,
     /// Kept between exports.
     options: ExportOptions,
+    taskbar: TaskbarProgress,
 }
 
 impl ExportWindow {
@@ -69,6 +75,7 @@ impl ExportWindow {
         Self {
             step: Step::Closed,
             options: ExportOptions::default(),
+            taskbar: TaskbarProgress::new(),
         }
     }
 
@@ -101,6 +108,10 @@ impl ExportWindow {
         if let Some(next) = next {
             self.step = next;
         }
+        self.taskbar.set(match &self.step {
+            Step::Running(export) => Some(export.progress()),
+            _ => None,
+        });
     }
 }
 
@@ -113,7 +124,7 @@ fn options_ui(
 ) -> Option<Step> {
     let theme = ui.app_theme();
     let mut next = None;
-    let modal = modal("export-options").show(ui.ctx(), |ui| {
+    let modal = dialog::modal(ui, "export-options").show(ui.ctx(), |ui| {
         ui.set_width(WIDTH);
         ui.spacing_mut().item_spacing = vec2(6., 8.);
         header(ui, EXPORT, theme.accent, "Export audio", file_name);
@@ -234,7 +245,7 @@ fn running_ui(ui: &Ui, export: &mut Export, format: WavFormat) -> Option<Step> {
     }
     let theme = ui.app_theme();
     let progress = export.progress();
-    modal("export-progress").show(ui.ctx(), |ui| {
+    dialog::modal(ui, "export-progress").show(ui.ctx(), |ui| {
         ui.set_width(WIDTH);
         ui.spacing_mut().item_spacing = vec2(6., 8.);
         header(ui, WAVEFORM, theme.accent, "Exporting…", &name);
@@ -271,7 +282,7 @@ fn done_ui(
 ) -> Option<Step> {
     let theme = ui.app_theme();
     let mut close = false;
-    let modal = modal("export-done").show(ui.ctx(), |ui| {
+    let modal = dialog::modal(ui, "export-done").show(ui.ctx(), |ui| {
         ui.set_width(WIDTH);
         ui.spacing_mut().item_spacing = vec2(6., 8.);
         header(
@@ -319,7 +330,7 @@ fn done_ui(
 fn failed_ui(ui: &Ui, title: &str, detail: &str) -> Option<Step> {
     let theme = ui.app_theme();
     let mut close = false;
-    let modal = modal("export-failed").show(ui.ctx(), |ui| {
+    let modal = dialog::modal(ui, "export-failed").show(ui.ctx(), |ui| {
         ui.set_width(WIDTH);
         ui.spacing_mut().item_spacing = vec2(6., 8.);
         header(ui, X_CIRCLE, theme.danger, title, "");
@@ -329,10 +340,6 @@ fn failed_ui(ui: &Ui, title: &str, detail: &str) -> Option<Step> {
         });
     });
     (close || modal.should_close()).then_some(Step::Closed)
-}
-
-fn modal(id: &str) -> Modal {
-    Modal::new(Id::new(id))
 }
 
 /// An icon in a tinted badge, a title and a muted subtitle.

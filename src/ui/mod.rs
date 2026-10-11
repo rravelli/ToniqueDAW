@@ -15,6 +15,7 @@ mod graph;
 mod panels;
 mod project;
 mod settings;
+mod taskbar;
 mod theme;
 mod waveform;
 mod widget;
