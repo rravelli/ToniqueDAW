@@ -10,6 +10,8 @@ use crate::{
     },
 };
 use egui::{Rect, Stroke, Ui, pos2, vec2};
+
+use super::paint_new_track_lanes;
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 #[derive(Clone)]
@@ -171,6 +173,16 @@ impl Timeline {
                 );
             }
 
+            // Tracks a drop will add past the last one, with the colours
+            // they'll get: the clips going there are shown on them.
+            let added = clip_drag
+                .clips
+                .iter()
+                .map(|d| (mouse_track_index + d.track_index_delta).max(0) as usize + 1)
+                .max()
+                .unwrap_or(0)
+                .saturating_sub(state.track_count());
+            let new_colors = paint_new_track_lanes(ui, state, layout, viewport, added);
             let mut track_indexes = Vec::new();
             for dragged in clip_drag.clips.iter_mut() {
                 {
@@ -192,7 +204,10 @@ impl Timeline {
                     let x = state.grid.beats_to_x(new_position, viewport);
 
                     let mut show_waveform = true;
-                    let mut color = ui.app_theme().text_muted;
+                    let mut color = track_index
+                        .checked_sub(state.track_count())
+                        .and_then(|new| new_colors.get(new).copied())
+                        .unwrap_or(ui.app_theme().text_muted);
                     let mut height = DEFAULT_TRACK_HEIGHT;
                     let mut silenced = false;
                     if let Some(t) = state.track_from_index(track_index) {

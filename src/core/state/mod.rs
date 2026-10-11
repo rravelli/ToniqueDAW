@@ -625,17 +625,35 @@ impl ProjectState {
     /// The palette colour the fewest tracks use, the first one on ties, so
     /// new tracks go through the palette before repeating a colour.
     fn next_track_color(&self) -> Color32 {
-        let uses = |color: Color32| {
-            self.views
-                .iter()
-                .filter(|(id, view)| **id != MASTER_TRACK_ID && view.color == color)
-                .count()
-        };
-        self.track_palette
-            .iter()
+        self.new_track_colors(1)
+            .first()
             .copied()
-            .min_by_key(|color| uses(*color))
             .unwrap_or(Color32::GRAY)
+    }
+    /// The colours the next `count` new tracks will get, in order: each the
+    /// palette's least used one so far. Grey without a palette.
+    pub fn new_track_colors(&self, count: usize) -> Vec<Color32> {
+        let mut uses: Vec<usize> = self
+            .track_palette
+            .iter()
+            .map(|color| {
+                self.views
+                    .iter()
+                    .filter(|(id, view)| **id != MASTER_TRACK_ID && view.color == *color)
+                    .count()
+            })
+            .collect();
+        (0..count)
+            .map(|_| {
+                // The first of the least used, as `min_by_key` picks.
+                let Some((index, _)) = uses.iter().enumerate().min_by_key(|(_, uses)| **uses)
+                else {
+                    return Color32::GRAY;
+                };
+                uses[index] += 1;
+                self.track_palette[index]
+            })
+            .collect()
     }
 
     /// Colours for new tracks; the UI passes the installed theme's.

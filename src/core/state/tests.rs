@@ -1006,6 +1006,24 @@ fn a_new_edit_forgets_the_selections_to_redo() {
 }
 
 #[test]
+fn new_track_colors_are_foretold() {
+    use egui::Color32;
+    let mut state = setup_state();
+    let palette = [Color32::RED, Color32::GREEN, Color32::BLUE];
+    state.set_track_palette(&palette);
+    state.add_track(); // red
+    let foretold = state.new_track_colors(3);
+    assert_eq!(foretold, [Color32::GREEN, Color32::BLUE, Color32::RED]);
+    let added: Vec<_> = (0..3)
+        .map(|_| {
+            let id = state.add_track();
+            state.tracks().find(|t| t.id == id).unwrap().color
+        })
+        .collect();
+    assert_eq!(added, foretold, "as they come");
+}
+
+#[test]
 fn select_all_selects_every_clip() {
     let mut state = setup_state();
     let (t0, t1) = (state.add_track(), state.add_track());

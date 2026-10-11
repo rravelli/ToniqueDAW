@@ -16,11 +16,14 @@ use crate::{
         },
         commands::Commands,
         dnd::DragPayload,
-        theme::{ThemeExt, with_alpha},
+        theme::{ThemeExt, font_size, with_alpha},
         workspace::Workspace,
     },
 };
-use egui::{DragAndDrop, Rangef, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{
+    Align2, Color32, DragAndDrop, FontId, Rangef, Rect, Response, Sense, Shape, Stroke, Ui, Vec2,
+    pos2, vec2,
+};
 use tonique_engine::edit::{ClipId, TrackId};
 mod drag;
 mod keys;
@@ -414,9 +417,15 @@ impl Timeline {
             let height = track.as_ref().map_or(DEFAULT_TRACK_HEIGHT, |t| t.height);
             let show_waveform = track.as_ref().is_none_or(|t| !t.collapsed);
             let silenced = track.as_ref().is_some_and(|t| t.is_silenced());
-            let color = track
-                .as_ref()
-                .map_or(ui.app_theme().text_muted, |t| t.color);
+            // Past the last track: on the one dropping it will add, in the
+            // colour it will get.
+            let color = match &track {
+                Some(t) => t.color,
+                None => paint_new_track_lanes(ui, state, layout, viewport, 1)
+                    .first()
+                    .copied()
+                    .unwrap_or(ui.app_theme().text_muted),
+            };
             let width = state.grid.duration_to_width(duration, state.bpm());
 
             let pos = pos2(x, y);
@@ -506,4 +515,45 @@ fn dragged_audio(response: &Response) -> Option<AudioDrag> {
         return Some(AudioDrag::Over(audio.clone()));
     }
     None
+}
+
+/// Where `count` tracks will be added below the last one (by a drop): a
+/// faint lane each, in the colour it will get, with a dashed outline and
+/// a label. Returns their colours.
+pub(super) fn paint_new_track_lanes(
+    ui: &Ui,
+    state: &ProjectState,
+    layout: &RowLayout,
+    viewport: Rect,
+    count: usize,
+) -> Vec<Color32> {
+    let colors = state.new_track_colors(count);
+    let theme = ui.app_theme();
+    let painter = ui.painter_at(viewport);
+    for (i, color) in colors.iter().enumerate() {
+        let top = layout.track_top(state.track_count() + i);
+        let lane = Rect::from_x_y_ranges(viewport.x_range(), top..=top + DEFAULT_TRACK_HEIGHT);
+        painter.rect_filled(lane, 2., with_alpha(*color, 20));
+        let edge = lane.shrink(0.5);
+        painter.extend(Shape::dashed_line(
+            &[
+                edge.left_top(),
+                edge.right_top(),
+                edge.right_bottom(),
+                edge.left_bottom(),
+                edge.left_top(),
+            ],
+            Stroke::new(1., with_alpha(*color, 150)),
+            5.,
+            3.,
+        ));
+        painter.text(
+            lane.left_top() + vec2(6., 4.),
+            Align2::LEFT_TOP,
+            "+ New track",
+            FontId::proportional(font_size::SMALL),
+            theme.text_muted,
+        );
+    }
+    colors
 }
