@@ -735,6 +735,7 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
         let size = vec2(ui.available_width(), FIELD_HEIGHT);
         label(ui, "Gain");
         let gain = ParamSlider::gain(shown.gain, CLIP_GAIN_RANGE)
+            .field()
             .color(color)
             .size(size)
             .suffix(" dB");
@@ -742,7 +743,11 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
         ui.end_row();
 
         label(ui, "Pan");
-        let (response, edit) = ParamSlider::pan(shown.pan).color(color).size(size).show(ui);
+        let (response, edit) = ParamSlider::pan(shown.pan)
+            .field()
+            .color(color)
+            .size(size)
+            .show(ui);
         response.on_hover_text("Balance: turning to a side lowers the other");
         apply_param(state, clip.id, ClipParam::Pan, edit);
         ui.end_row();

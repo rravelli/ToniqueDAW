@@ -7,9 +7,14 @@ use crate::{
     ui::theme::{ThemeExt, font_size},
     utils::{format_pan, snap_to_centre},
 };
-use egui::{Align2, Color32, CursorIcon, FontId, Rect, Response, Sense, Ui, Vec2, pos2, vec2};
+use egui::{
+    Align2, Color32, CursorIcon, FontId, Rect, Response, Sense, StrokeKind, Ui, Vec2, pos2, vec2,
+};
 use std::ops::RangeInclusive;
 
+/// How much of the colour a field's level has, mixed into its background:
+/// enough to read as a level, little enough for the value on it to read.
+const FIELD_LEVEL: f32 = 0.45;
 /// Shift-dragging moves this much slower.
 const FINE_DRAG: f32 = 0.1;
 const PAN_RANGE: RangeInclusive<f32> = -1.0..=1.0;
@@ -49,6 +54,8 @@ pub struct ParamSlider {
     color: Color32,
     size: Vec2,
     suffix: &'static str,
+    /// Drawn as a field like egui's (see [`Self::field`]).
+    field: bool,
 }
 
 impl ParamSlider {
@@ -69,6 +76,7 @@ impl ParamSlider {
             color: Color32::GRAY,
             size: vec2(31., 20.),
             suffix: "",
+            field: false,
         }
     }
 
@@ -80,6 +88,15 @@ impl ParamSlider {
 
     pub fn size(mut self, size: Vec2) -> Self {
         self.size = size;
+        self
+    }
+
+    /// Look like egui's fields (number fields, text edits) beside it: their
+    /// background, border and text, the level a mix of the colour into the
+    /// background. A plain well with a solid level otherwise, as in track
+    /// headers.
+    pub fn field(mut self) -> Self {
+        self.field = true;
         self
     }
 
@@ -148,15 +165,37 @@ impl ParamSlider {
         };
         let theme = ui.app_theme();
         let painter = ui.painter();
-        painter.rect_filled(rect, 1.0, theme.bg_deep);
-        painter.rect_filled(fill, 1.0, self.color);
-        painter.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            text,
-            FontId::proportional(font_size::SMALL),
-            theme.text,
-        );
+        if self.field {
+            // As the fields beside it, hovered or dragged alike.
+            let visuals = ui.style().interact(&response);
+            let radius = visuals.corner_radius;
+            painter.rect_filled(rect, radius, visuals.bg_fill);
+            let level = visuals.bg_fill.lerp_to_gamma(self.color, FIELD_LEVEL);
+            painter.rect_filled(fill.intersect(rect), radius, level);
+            painter.rect_stroke(rect, radius, visuals.bg_stroke, StrokeKind::Inside);
+            let font = ui
+                .style()
+                .override_font_id
+                .clone()
+                .unwrap_or(FontId::proportional(font_size::LABEL));
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                text,
+                font,
+                visuals.text_color(),
+            );
+        } else {
+            painter.rect_filled(rect, 1.0, theme.bg_deep);
+            painter.rect_filled(fill, 1.0, self.color);
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                text,
+                FontId::proportional(font_size::SMALL),
+                theme.text,
+            );
+        }
         (response, edit)
     }
 
