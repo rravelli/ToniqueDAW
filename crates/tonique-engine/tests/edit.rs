@@ -246,12 +246,13 @@ fn automation_curves_swap_without_rebuild() {
 fn identical_clips_are_deduplicated_and_latency_is_compensated() {
     let mut edit = Edit::new(120.0);
     let src = edit.add_source(impulse());
+    let mut clip = Clip::audio(&mut edit, BeatPos(0.0), 4.0, src);
+    clip.fade_in_s = 0.0;
+    clip.fade_out_s = 0.0;
     for latency in [0, 100] {
         let mut t = Track::new(&mut edit, "t");
-        let mut clip = Clip::audio(&mut edit, BeatPos(0.0), 4.0, src);
-        clip.fade_in_s = 0.0;
-        clip.fade_out_s = 0.0;
-        t.clips.push(clip);
+        // The same clip on both tracks, gain included: the same output.
+        t.clips.push(clip.clone());
         if latency > 0 {
             let lat = Plugin::new(&mut edit, PluginKind::Latency { samples: latency });
             t.channel.plugins.push(lat);
@@ -431,28 +432,32 @@ fn resize_and_move_clips_across_tracks_undo() {
 }
 
 #[test]
-fn clip_gain_is_heard_and_undone() {
+fn clip_gain_is_heard_at_once_and_undone() {
     let mut edit = Edit::new(120.0);
     let src = edit.add_source(sine(48000 * 8));
     let mut track = Track::new(&mut edit, "t");
     let clip = Clip::audio(&mut edit, BeatPos(0.0), 8.0, src);
-    let cid = clip.id;
+    let gain = clip.gain().expect("an audio clip has a gain").clone();
     track.clips.push(clip);
-    let tid = track.id;
     edit.tracks.push(track);
     let (e, mut p) = engine(0);
     let mut s = EditSession::new(edit, e).unwrap();
     s.play().unwrap();
     let before = peak(&render_offline(&mut p, 4800, 2));
 
-    s.perform(SetClipGain::new(tid, cid, 0.5)).unwrap();
+    // Set live, as while dragging: heard without rebuilding the graph.
+    gain.set(0.5);
+    render_offline(&mut p, 4800, 2); // through the ramp
     let half = peak(&render_offline(&mut p, 4800, 2));
     assert!((half - before / 2.).abs() < 0.01, "{before} then {half}");
-    s.undo().unwrap();
-    assert!((peak(&render_offline(&mut p, 4800, 2)) - before).abs() < 0.01);
+    assert_eq!(s.engine().graphs_adopted(), 1, "no rebuild");
 
-    assert!(s.perform(SetClipGain::new(tid, cid, -1.)).is_err());
-    assert!(s.perform(SetClipGain::new(tid, cid, f32::NAN)).is_err());
+    // Recorded as a parameter change, and undone.
+    gain.set(1.0);
+    s.perform(SetParam::new(gain.id, 0.5)).unwrap();
+    assert_eq!(gain.get(), 0.5);
+    s.undo().unwrap();
+    assert_eq!(gain.get(), 1.0);
 }
 
 #[test]

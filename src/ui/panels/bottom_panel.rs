@@ -72,7 +72,11 @@ impl BottomPanel {
             .size_range(Rangef::new(160., 400.))
             .default_size(200.)
             .resizable(true)
-            .frame(Frame::new().inner_margin(Margin::ZERO))
+            .frame(
+                Frame::new()
+                    .inner_margin(Margin::ZERO)
+                    .fill(ui.app_theme().bg_panel),
+            )
             .show_collapsible(ui, &mut open, |ui| {
                 ui.set_height(ui.available_height());
                 let panel = ui.max_rect();

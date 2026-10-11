@@ -40,12 +40,12 @@ pub use groups::RowTarget;
 pub use selection::SelectionBounds;
 use tonique_engine::{
     edit::{
-        BusId, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, EditSession, Output, Plugin,
-        PluginId, Track, TrackId,
+        BusId, CLIP_GAIN_MAX, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, EditSession,
+        Output, Parameter, Plugin, PluginId, Track, TrackId,
         commands::{
             AddClip, AddPlugin, AddTrack, EditCommand, MoveClip, RemoveClip, RemovePlugin,
-            RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetClipGain, SetMute,
-            SetParam, SetSolo, SetTempoMap,
+            RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetMute, SetParam,
+            SetSolo, SetTempoMap,
         },
     },
     engine::Engine,
@@ -748,16 +748,34 @@ impl ProjectState {
             ops.push(ClipOp::Resize(track, resized));
         });
     }
-    /// Set an audio clip's gain (linear), as an undo step. Ends the preview
-    /// of a gain being dragged (see [`Self::resize_clip`]).
-    pub fn commit_clip_gain(&mut self, id: ClipId, gain: f32) {
-        self.resized_clip = None;
-        let Some((track, clip)) = self.find_clip(id) else {
+    /// Set an audio clip's gain (linear), heard at once. Not an undo step:
+    /// see [`Self::commit_clip_gain`].
+    pub fn set_clip_gain(&mut self, id: ClipId, gain: f32) {
+        if let Some(param) = self.clip_gain(id) {
+            param.set(gain);
+        }
+    }
+    /// Set an audio clip's gain as an undo step from `old`, its value before
+    /// the user started changing it.
+    pub fn commit_clip_gain(&mut self, id: ClipId, old: f32, new: f32) {
+        let Some(param) = self.clip_gain(id) else {
             return;
         };
-        if clip.gain != gain {
-            self.perform(SetClipGain::new(track, id, gain));
+        if old == new {
+            return param.set(new);
         }
+        // `SetParam` records the current value for undo: restore it first.
+        param.set(old);
+        let id = param.id;
+        self.perform(SetParam::new(id, new));
+    }
+    fn clip_gain(&self, id: ClipId) -> Option<Parameter> {
+        self.edit()
+            .tracks
+            .iter()
+            .find_map(|t| t.clip(id))
+            .and_then(|c| c.gain())
+            .cloned()
     }
     /// `clip` as shown: as being trimmed, if it is.
     pub fn shown_clip(&self, clip: &AudioClip) -> AudioClip {
@@ -807,6 +825,10 @@ impl ProjectState {
         let source = self
             .sources
             .get_or_insert(&clip.audio, || session.create(|e| e.new_source()));
+        let gain = self
+            .session
+            .create(|e| Parameter::new(ParamId(e.next_id()), "gain", 0., CLIP_GAIN_MAX, 1.));
+        gain.value.set(clip.gain, 0.);
         Clip {
             id: clip.id,
             start: clip.position,
@@ -816,7 +838,7 @@ impl ProjectState {
             content: ClipContent::Audio {
                 source,
                 source_offset_s: (clip.trim_start * clip.source_seconds()) as f64,
-                gain: clip.gain,
+                gain,
             },
         }
     }
@@ -827,7 +849,7 @@ impl ProjectState {
         let ClipContent::Audio {
             source,
             source_offset_s,
-            gain,
+            ref gain,
         } = clip.content
         else {
             return None;
@@ -842,7 +864,7 @@ impl ProjectState {
             position: clip.start,
             trim_start,
             trim_end,
-            gain,
+            gain: gain.get(),
         })
     }
 

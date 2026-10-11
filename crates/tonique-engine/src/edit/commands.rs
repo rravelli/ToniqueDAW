@@ -297,48 +297,6 @@ impl EditCommand for ResizeClip {
     }
 }
 
-/// Change an audio clip's gain (linear).
-pub struct SetClipGain {
-    track: TrackId,
-    id: ClipId,
-    gain: f32,
-}
-
-impl SetClipGain {
-    pub fn new(track: TrackId, id: ClipId, gain: f32) -> Self {
-        Self { track, id, gain }
-    }
-
-    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
-        if !self.gain.is_finite() || self.gain < 0.0 {
-            return Err(EditError::Invalid("clip gain must be positive"));
-        }
-        let c = edit
-            .track_mut(self.track)?
-            .clips
-            .iter_mut()
-            .find(|c| c.id == self.id)
-            .ok_or(EditError::ClipNotFound(self.id))?;
-        let ClipContent::Audio { gain, .. } = &mut c.content else {
-            return Err(EditError::Invalid("not an audio clip"));
-        };
-        std::mem::swap(gain, &mut self.gain);
-        Ok(Effects::rebuild())
-    }
-}
-
-impl EditCommand for SetClipGain {
-    fn label(&self) -> &'static str {
-        "Clip gain"
-    }
-    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
-        self.swap(edit)
-    }
-    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
-        self.swap(edit)
-    }
-}
-
 /// Reorder a track. Moving tracks never changes the sound.
 pub struct MoveTrack {
     id: TrackId,

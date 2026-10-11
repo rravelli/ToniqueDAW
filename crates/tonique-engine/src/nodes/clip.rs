@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::graph::{ContentId, Node, NodeIdentity, NodeProperties, ProcessContext, StateTransfer};
 use crate::midi::{ActiveNotes, MidiMessage};
+use crate::param::{AtomicParam, Smoother};
 use crate::sample::SampleBuffer;
 use crate::time::SamplePos;
 
@@ -24,15 +25,18 @@ pub struct ClipPlacement {
 pub struct AudioClipNode {
     source: Arc<SampleBuffer>,
     place: ClipPlacement,
-    gain: f32,
+    /// Linear, shared with the clip's parameter: changes are heard at once.
+    gain: Arc<AtomicParam>,
+    gain_s: Smoother,
     identity: Option<NodeIdentity>,
 }
 
 impl AudioClipNode {
-    pub fn new(source: Arc<SampleBuffer>, place: ClipPlacement, gain: f32) -> Self {
+    pub fn new(source: Arc<SampleBuffer>, place: ClipPlacement, gain: Arc<AtomicParam>) -> Self {
         Self {
             source,
             place,
+            gain_s: Smoother::new(gain.get()),
             gain,
             identity: None,
         }
@@ -61,10 +65,12 @@ impl AudioClipNode {
 impl Node for AudioClipNode {
     fn properties(&self) -> NodeProperties {
         // Same source data + placement + gain => same output: dedupable.
+        // The gain changes live, so it's the same only if it's the same
+        // parameter.
         let content = ContentId::of(&(
             Arc::as_ptr(&self.source) as usize,
             self.place,
-            self.gain.to_bits(),
+            Arc::as_ptr(&self.gain) as usize,
         ));
         let p = NodeProperties::audio(2).with_content(content);
         match self.identity {
@@ -73,7 +79,13 @@ impl Node for AudioClipNode {
         }
     }
 
+    fn prepare(&mut self, sample_rate: f64, _max_block: usize) {
+        self.gain_s.set_sample_rate(sample_rate);
+        self.gain_s.snap(&self.gain);
+    }
+
     fn process(&mut self, ctx: &mut ProcessContext) {
+        self.gain_s.retarget(&self.gain);
         if !ctx.playing {
             return;
         }
@@ -87,17 +99,22 @@ impl Node for AudioClipNode {
         }
         let src_len = self.source.len() as SamplePos;
         let src_chans = self.source.num_channels();
-        for ch in 0..2 {
-            let src = self.source.channel(ch.min(src_chans - 1));
-            let out = ctx.audio_out.channel_mut(ch);
-            for t in a..b {
-                let rel = t - p.start;
-                let si = rel + p.source_offset;
-                if si < 0 || si >= src_len {
-                    continue;
-                }
-                out[(t - block_start) as usize] = src[si as usize] * self.gain * self.fade(rel);
+        let (left, right) = ctx.audio_out.channel_pair_mut(0, 1);
+        let (src_l, src_r) = (
+            self.source.channel(0),
+            self.source.channel(1.min(src_chans - 1)),
+        );
+        for t in a..b {
+            let gain = self.gain_s.next();
+            let rel = t - p.start;
+            let si = rel + p.source_offset;
+            if si < 0 || si >= src_len {
+                continue;
             }
+            let g = gain * self.fade(rel);
+            let at = (t - block_start) as usize;
+            left[at] = src_l[si as usize] * g;
+            right[at] = src_r[si as usize] * g;
         }
     }
 }

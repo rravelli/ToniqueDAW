@@ -868,20 +868,18 @@ fn trimming_a_clip_of_unknown_length_does_nothing() {
 }
 
 #[test]
-fn clip_gain_is_one_undo_step_and_survives_edits() {
+fn clip_gain_is_live_one_undo_step_and_survives_edits() {
     let mut state = setup_state();
     let track = state.add_track();
     let clip = add_clip(&mut state, track, 0., 2.); // beats 0..4
     let gain = |state: &ProjectState, id| state.find_clip(id).unwrap().1.gain;
     assert_eq!(gain(&state, clip), 1.);
 
-    // Previewed while dragged, then applied.
-    let mut dragged = state.find_clip(clip).unwrap().1;
-    dragged.gain = 0.25;
-    state.resize_clip(dragged.clone());
-    assert_eq!(state.shown_clip(&dragged).gain, 0.25);
-    assert_eq!(gain(&state, clip), 1., "not in the edit yet");
-    state.commit_clip_gain(clip, 0.25);
+    // Set live while dragged, then recorded from where it started.
+    state.set_clip_gain(clip, 0.5);
+    assert_eq!(gain(&state, clip), 0.5, "heard at once");
+    state.set_clip_gain(clip, 0.25);
+    state.commit_clip_gain(clip, 1., 0.25);
     assert_eq!(gain(&state, clip), 0.25);
 
     // Splitting keeps it on both parts.
@@ -898,7 +896,7 @@ fn clip_gain_is_one_undo_step_and_survives_edits() {
 
     state.undo();
     state.undo();
-    assert_eq!(gain(&state, clip), 1.);
+    assert_eq!(gain(&state, clip), 1., "one step");
 }
 
 #[test]

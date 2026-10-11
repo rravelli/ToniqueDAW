@@ -1,6 +1,9 @@
 //! The bottom panel's view of one clip.
 
-use egui::{CursorIcon, DragValue, FontId, Grid, Label, Rect, RichText, Sense, Stroke, Ui, pos2};
+use egui::{
+    Align, Align2, CursorIcon, DragValue, FontId, Grid, Label, Layout, Rect, RichText, ScrollArea,
+    Sense, Stroke, Ui, UiBuilder, pos2, vec2,
+};
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 use crate::{
@@ -9,14 +12,19 @@ use crate::{
         arrangement::grid::PaintGrid,
         theme::{Theme, ThemeExt, font_size, with_alpha},
         waveform::paint_waveform,
+        widget::scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
     },
     utils::{format_bars, format_time},
 };
 
-const DETAILS_WIDTH: f32 = 260.;
-const LABEL_WIDTH: f32 = 60.;
+/// The clip's properties, left of the editor.
+const INSPECTOR_WIDTH: f32 = 210.;
+/// The inspector's labels.
+const LABEL_WIDTH: f32 = 56.;
 const PADDING: f32 = 8.;
-const RULER_HEIGHT: f32 = 24.;
+const RULER_HEIGHT: f32 = 18.;
+/// Between the lane and its scrollbar.
+const SCROLLBAR_GAP: f32 = 3.;
 /// Room left around the clip when fitting it, as a share of its length.
 const FIT_MARGIN: f64 = 0.02;
 /// Half the width of the area grabbing a trim edge.
@@ -33,10 +41,11 @@ enum TrimEdge {
     End,
 }
 
-/// Bottom panel view of one clip: its whole source file (the untrimmed
-/// clip) on a grid counted from the clip's start (bar 1), zoomable and
-/// scrollable, with the part the clip plays between two edges that can be
-/// dragged to trim it; and the clip's position, length and format.
+/// Bottom panel view of one clip, as in other DAWs: an inspector of its
+/// properties on the left, and on the right its whole source file (the
+/// untrimmed clip) on a grid counted from the clip's start (bar 1),
+/// zoomable and scrollable, with the part the clip plays between two edges
+/// that can be dragged to trim it.
 pub struct ClipDetails {
     /// The view's zoom and scroll, in beats from [`Self::origin`].
     grid: GridService,
@@ -70,18 +79,20 @@ impl ClipDetails {
         state: &mut ProjectState,
     ) {
         let rect = ui.available_rect_before_wrap().shrink(PADDING);
-        let details_width = DETAILS_WIDTH.min(rect.width() / 2.);
-        let view = Rect::from_min_max(
-            rect.min,
-            pos2(rect.right() - details_width - PADDING, rect.bottom()),
-        );
+        let inspector_width = INSPECTOR_WIDTH.min(rect.width() / 2.);
+        let inspector = Rect::from_min_size(rect.min, vec2(inspector_width, rect.height()));
+        let view = Rect::from_min_max(pos2(inspector.right() + PADDING, rect.top()), rect.max);
         let ruler = Rect::from_min_max(view.min, pos2(view.right(), view.top() + RULER_HEIGHT));
-        let lane = Rect::from_min_max(pos2(view.left(), ruler.bottom()), view.max);
+        let scrollbar =
+            Rect::from_min_max(pos2(view.left(), view.bottom() - SCROLLBAR_WIDTH), view.max);
+        let lane = Rect::from_min_max(
+            pos2(view.left(), ruler.bottom()),
+            pos2(view.right(), scrollbar.top() - SCROLLBAR_GAP),
+        );
         #[cfg(test)]
         {
             self.lane = lane;
         }
-        let details = Rect::from_min_max(pos2(view.right() + PADDING, rect.top()), rect.max);
 
         let bpm = state.bpm();
         if self.fitted == Some(clip.id) && clip.position != self.origin {
@@ -97,6 +108,7 @@ impl ClipDetails {
         if let Some(at) = self.navigate(ui, ruler, lane, clip, bpm) {
             state.seek(at);
         }
+        self.scrollbar_ui(ui, scrollbar, lane, clip, bpm);
         self.trim_handles(ui, ruler, lane, clip, state);
         // Show the trim being dragged, here or in the timeline.
         let shown = state.shown_clip(clip);
@@ -107,12 +119,15 @@ impl ClipDetails {
         ui.painter_at(ruler).rect_filled(ruler, 0., theme.bg_raised);
         let labels = ruler.intersect(Rect::from_x_y_ranges(file, ruler.y_range()));
         self.grid
-            .paint_labels(&ui.painter_at(labels), ruler, bpm, &theme);
+            .paint_bar_labels(&ui.painter_at(labels), ruler, &theme);
         self.paint_lane(ui, lane, &shown, track, state, &theme);
         self.paint_edges(ui, ruler, lane, &shown, bpm, &theme);
 
-        ui.scope_builder(egui::UiBuilder::new().max_rect(details), |ui| {
-            details_grid(ui, clip, state);
+        ui.scope_builder(UiBuilder::new().max_rect(inspector), |ui| {
+            ScrollArea::vertical()
+                .id_salt("clip-inspector")
+                .auto_shrink(false)
+                .show(ui, |ui| inspector_ui(ui, clip, state));
         });
         ui.allocate_rect(rect, Sense::hover());
     }
@@ -191,7 +206,13 @@ impl ClipDetails {
             .flatten()
             .map(|p| self.at(p.x, lane));
 
-        // Keep part of the file in view.
+        let (min, max) = self.scroll_range(clip, bpm, lane);
+        self.grid.offset.x = self.grid.offset.x.clamp(min, max);
+        seek
+    }
+
+    /// How far the view scrolls: always keeping part of the file in view.
+    fn scroll_range(&self, clip: &AudioClip, bpm: f32, lane: Rect) -> (f32, f32) {
         let file_start = clip.file_start(bpm) - self.origin;
         let half = lane.width() / 2.;
         let min = self.grid.beats_to_width(file_start) - half;
@@ -199,8 +220,26 @@ impl ClipDetails {
             .grid
             .beats_to_width(file_start + clip.source_beats(bpm))
             - half;
-        self.grid.offset.x = self.grid.offset.x.clamp(min, max.max(min));
-        seek
+        (min, max.max(min))
+    }
+
+    /// Under the lane: the file's extent, and the part of it in view.
+    fn scrollbar_ui(&mut self, ui: &mut Ui, track: Rect, lane: Rect, clip: &AudioClip, bpm: f32) {
+        let (min, max) = self.scroll_range(clip, bpm, lane);
+        let range = max - min;
+        if range <= 0. {
+            return;
+        }
+        let mut scroll = self.grid.offset.x - min;
+        ui.add(ScrollBar::new(
+            "clip-hscroll",
+            Axis::Horizontal,
+            track,
+            &mut scroll,
+            range,
+            lane.width() / (range + lane.width()),
+        ));
+        self.grid.offset.x = scroll + min;
     }
 
     /// Drag the edges of the played part, in the lane or by their flags in
@@ -362,20 +401,24 @@ fn trimmed(clip: &AudioClip, edge: TrimEdge, at: BeatPos, bpm: f32) -> AudioClip
     clip
 }
 
-/// The clip's name; its position, length and gain, to drag or click and
-/// type; what of the file it plays, and the file's format. Edits show while
-/// dragged and apply as one undo step once released (or typed).
-fn details_grid(ui: &mut Ui, clip: &AudioClip, state: &mut ProjectState) {
+/// The clip's properties, in sections as in other DAWs' inspectors: where
+/// it is (start, end, length), what it plays (offset in the file, gain),
+/// and the file. Values can be dragged, or clicked and typed; edits show
+/// while dragged and apply as one undo step once released (or typed). Gain
+/// is heard as it's dragged.
+fn inspector_ui(ui: &mut Ui, clip: &AudioClip, state: &mut ProjectState) {
     let theme = ui.app_theme();
     let bpm = state.bpm();
     let bpb = state.grid.beats_per_bar();
     let shown = state.shown_clip(clip);
-    let source = shown.source_seconds();
-    let position = shown.position.0;
-    let length = shown.end(bpm) - shown.position;
+    let start = shown.position.0;
+    let end = shown.end(bpm).0;
+    let length = end - start;
+    let source = shown.source_seconds() as f64;
+    let offset = shown.trim_start as f64 * source;
     let audio = &shown.audio;
-    // Positions and lengths snap to sixteenths, unless Alt is held.
     let free = ui.input(|i| i.modifiers.alt);
+    // Positions and lengths snap to sixteenths, unless Alt is held.
     let snap = |beats: f64| {
         if free {
             beats
@@ -387,6 +430,8 @@ fn details_grid(ui: &mut Ui, clip: &AudioClip, state: &mut ProjectState) {
     // The clip as edited, and whether the edit is done.
     let mut change: Option<(AudioClip, bool)> = None;
 
+    ui.style_mut().override_font_id = Some(FontId::proportional(font_size::LABEL));
+    ui.spacing_mut().item_spacing.y = 2.;
     ui.add(
         Label::new(
             RichText::new(&audio.name)
@@ -397,112 +442,197 @@ fn details_grid(ui: &mut Ui, clip: &AudioClip, state: &mut ProjectState) {
         .truncate(),
     )
     .on_hover_text(audio.path.display().to_string());
-    ui.add_space(4.);
-    Grid::new(("clip-details", clip.id))
-        .num_columns(2)
-        .min_col_width(LABEL_WIDTH)
-        .spacing([8., 3.])
-        .show(ui, |ui| {
-            ui.style_mut().override_font_id = Some(FontId::proportional(font_size::LABEL));
-            let label = |ui: &mut Ui, text: &str| {
-                ui.label(RichText::new(text).color(theme.text_muted));
-            };
-            let muted = |ui: &mut Ui, text: String| {
-                ui.add(Label::new(RichText::new(text).color(theme.text_muted)).truncate());
-            };
 
-            label(ui, "Position");
-            ui.horizontal(|ui| {
-                let raw = ui.id().with("position-raw");
-                let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(position);
-                let response = ui
-                    .add(
-                        DragValue::new(&mut beats)
-                            .speed(1. / 16.)
-                            .range(0.0..=f64::MAX)
-                            .custom_formatter(|v, _| format_bars(v, bpb))
-                            .custom_parser(|text| parse_bars(text, bpb)),
-                    )
-                    .on_hover_text("Drag, or click and type bar.beat.sixteenth");
-                keep_raw(ui, raw, &response, beats);
-                if let Some(done) = gesture(&response) {
-                    let mut moved = shown.clone();
-                    moved.position = BeatPos(snap(beats).max(0.));
-                    change = Some((moved, done));
-                }
-                muted(ui, seconds(position));
-            });
-            ui.end_row();
+    section(ui, "Clip");
+    rows(ui, "clip", |ui| {
+        label(ui, "Start");
+        let raw = ui.id().with("start-raw");
+        let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(start);
+        let response = field(
+            ui,
+            DragValue::new(&mut beats)
+                .speed(1. / 16.)
+                .range(0.0..=f64::MAX)
+                .custom_formatter(|v, _| format_bars(v, bpb))
+                .custom_parser(|text| parse_bars(text, bpb)),
+        )
+        .on_hover_text(format!("{} · bar.beat.sixteenth", seconds(start)));
+        keep_raw(ui, raw, &response, beats);
+        if let Some(done) = gesture(&response) {
+            let mut moved = shown.clone();
+            moved.position = BeatPos(snap(beats).max(0.));
+            change = Some((moved, done));
+        }
+        ui.end_row();
 
-            label(ui, "Length");
-            ui.horizontal(|ui| {
-                let raw = ui.id().with("length-raw");
-                let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(length);
-                let response = ui
-                    .add(
-                        DragValue::new(&mut beats)
-                            .speed(1. / 16.)
-                            .range(MIN_LENGTH..=f64::MAX)
-                            .custom_formatter(|v, _| format_length(v, bpb))
-                            .custom_parser(|text| parse_length(text, bpb)),
-                    )
-                    .on_hover_text("Drag, or click and type bars.beats.sixteenths");
-                keep_raw(ui, raw, &response, beats);
-                if let Some(done) = gesture(&response) {
-                    let mut trimmed = shown.clone();
-                    let beats = snap(beats).max(MIN_LENGTH);
-                    trimmed.trim_end_at(trimmed.position + beats, bpm);
-                    change = Some((trimmed, done));
-                }
-                muted(ui, seconds(length));
-            });
-            ui.end_row();
+        label(ui, "End");
+        let raw = ui.id().with("end-raw");
+        let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(end);
+        let response = field(
+            ui,
+            DragValue::new(&mut beats)
+                .speed(1. / 16.)
+                .range(start + MIN_LENGTH..=f64::MAX)
+                .custom_formatter(|v, _| format_bars(v, bpb))
+                .custom_parser(|text| parse_bars(text, bpb)),
+        )
+        .on_hover_text(format!("{} · bar.beat.sixteenth", seconds(end)));
+        keep_raw(ui, raw, &response, beats);
+        if let Some(done) = gesture(&response) {
+            let at = BeatPos(snap(beats).max(start + MIN_LENGTH));
+            change = Some((trimmed(&shown, TrimEdge::End, at, bpm), done));
+        }
+        ui.end_row();
 
-            label(ui, "Gain");
-            let mut db = gain_to_db(shown.gain);
-            let response = ui.add(
-                DragValue::new(&mut db)
-                    .speed(0.1)
-                    .range(SILENT_DB..=MAX_GAIN_DB)
-                    .custom_formatter(|db, _| format_gain(db as f32))
-                    .custom_parser(parse_gain),
-            );
-            if let Some(done) = gesture(&response) {
-                let mut louder = shown.clone();
-                louder.gain = db_to_gain(db);
-                change = Some((louder, done));
+        label(ui, "Length");
+        let raw = ui.id().with("length-raw");
+        let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(length);
+        let response = field(
+            ui,
+            DragValue::new(&mut beats)
+                .speed(1. / 16.)
+                .range(MIN_LENGTH..=f64::MAX)
+                .custom_formatter(|v, _| format_length(v, bpb))
+                .custom_parser(|text| parse_length(text, bpb)),
+        )
+        .on_hover_text(format!("{} · bars.beats.sixteenths", seconds(length)));
+        keep_raw(ui, raw, &response, beats);
+        if let Some(done) = gesture(&response) {
+            let at = shown.position + snap(beats).max(MIN_LENGTH);
+            change = Some((trimmed(&shown, TrimEdge::End, at, bpm), done));
+        }
+        ui.end_row();
+    });
+
+    section(ui, "Audio");
+    rows(ui, "audio", |ui| {
+        label(ui, "Offset");
+        let mut seconds = offset;
+        let response = field(
+            ui,
+            DragValue::new(&mut seconds)
+                .speed(0.005)
+                .range(0.0..=f64::MAX)
+                .custom_formatter(|v, _| format_time(v))
+                .custom_parser(parse_time),
+        )
+        .on_hover_text("Where in the file the clip starts playing");
+        if let Some(done) = gesture(&response) {
+            change = Some((slipped(&shown, seconds), done));
+        }
+        ui.end_row();
+
+        label(ui, "Gain");
+        let mut db = gain_to_db(shown.gain);
+        let response = field(
+            ui,
+            DragValue::new(&mut db)
+                .speed(0.1)
+                .range(SILENT_DB..=MAX_GAIN_DB)
+                .custom_formatter(|db, _| format_gain(db as f32))
+                .custom_parser(parse_gain),
+        );
+        // Heard as it moves; one undo step from where it started.
+        let started = ui.id().with("gain-start");
+        if response.drag_started() {
+            ui.data_mut(|d| d.insert_temp(started, shown.gain));
+        }
+        if response.changed() {
+            state.set_clip_gain(clip.id, db_to_gain(db));
+            if !response.dragged() {
+                state.commit_clip_gain(clip.id, shown.gain, db_to_gain(db));
             }
-            ui.end_row();
+        }
+        if response.drag_stopped() {
+            let old = ui
+                .data_mut(|d| d.remove_temp(started))
+                .unwrap_or(shown.gain);
+            state.commit_clip_gain(clip.id, old, db_to_gain(db));
+        }
+        ui.end_row();
+    });
 
-            label(ui, "Plays");
-            muted(
-                ui,
-                format!(
-                    "{} – {} of {}",
-                    format_time((shown.trim_start * source) as f64),
-                    format_time((shown.trim_end * source) as f64),
-                    format_time(source as f64)
-                ),
-            );
-            ui.end_row();
-
-            label(ui, "Format");
-            muted(
-                ui,
-                format_audio(audio.sample_rate, audio.bit_depth, audio.channels),
-            );
-            ui.end_row();
-        });
+    section(ui, "File");
+    rows(ui, "file", |ui| {
+        label(ui, "Format");
+        value(
+            ui,
+            format_audio(audio.sample_rate, audio.bit_depth, audio.channels),
+        );
+        ui.end_row();
+        label(ui, "Duration");
+        value(ui, format_time(source));
+        ui.end_row();
+    });
 
     match change {
         Some((edited, false)) => state.resize_clip(edited),
-        Some((edited, true)) => {
-            let gain = edited.gain;
-            state.commit_resize_clip(edited);
-            state.commit_clip_gain(clip.id, gain);
-        }
+        Some((edited, true)) => state.commit_resize_clip(edited),
         None => {}
     }
+}
+
+/// A section's title, small and muted, with a rule after it.
+fn section(ui: &mut Ui, title: &str) {
+    ui.add_space(6.);
+    let theme = ui.app_theme();
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 14.), Sense::hover());
+    let painter = ui.painter();
+    let text = painter.text(
+        rect.left_center(),
+        Align2::LEFT_CENTER,
+        title.to_uppercase(),
+        FontId::proportional(font_size::SMALL),
+        theme.text_muted,
+    );
+    if text.right() + 6. < rect.right() {
+        painter.hline(
+            text.right() + 6.0..=rect.right(),
+            rect.center().y,
+            Stroke::new(1., theme.separator),
+        );
+    }
+}
+
+/// A section's rows: a label, and a value filling the rest.
+fn rows(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
+    Grid::new(("clip-inspector", id))
+        .num_columns(2)
+        .min_col_width(LABEL_WIDTH)
+        .spacing([6., 3.])
+        .show(ui, add);
+}
+
+fn label(ui: &mut Ui, text: &str) {
+    ui.label(RichText::new(text).color(ui.app_theme().text_muted));
+}
+
+/// A value field filling the row.
+fn field(ui: &mut Ui, value: DragValue) -> egui::Response {
+    let width = ui.available_width();
+    ui.add_sized(vec2(width, 18.), value)
+}
+
+/// A value that can't be changed, right of its label.
+fn value(ui: &mut Ui, text: String) {
+    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+        ui.add(Label::new(RichText::new(text).color(ui.app_theme().text)).truncate());
+    });
+}
+
+/// `clip` playing from `offset` seconds into its file, as long as before
+/// and where it was: slipped within the file (no further than its ends).
+fn slipped(clip: &AudioClip, offset: f64) -> AudioClip {
+    let mut clip = clip.clone();
+    let source = clip.source_seconds() as f64;
+    if source <= 0. {
+        return clip;
+    }
+    let span = (clip.trim_end - clip.trim_start) as f64;
+    let start = (offset / source).clamp(0., (1. - span).max(0.));
+    clip.trim_start = start as f32;
+    clip.trim_end = (start + span) as f32;
+    clip
 }
 
 /// Keep a dragged value as it is, before snapping, so that snapping what's
@@ -601,24 +731,29 @@ fn parse_parts(text: &str) -> Option<Vec<f64>> {
     (parts.len() <= 3).then_some(parts)
 }
 
-/// Length as bars, beats and sixteenths: `1 bar 2 beats`, `3 beats`.
+/// A length as `bars.beats.sixteenths`, counting from 0: one bar and two
+/// beats is `1.2.0`.
 fn format_length(beats: f64, beats_per_bar: usize) -> String {
     let sixteenths = (beats * 4.).round().max(0.) as usize;
     let per_bar = beats_per_bar.max(1) * 4;
-    let plural = |n: usize, word: &str| format!("{n} {word}{}", if n == 1 { "" } else { "s" });
-    let parts: Vec<String> = [
-        (sixteenths / per_bar, "bar"),
-        (sixteenths % per_bar / 4, "beat"),
-        (sixteenths % 4, "sixteenth"),
-    ]
-    .into_iter()
-    .filter(|(n, _)| *n > 0)
-    .map(|(n, word)| plural(n, word))
-    .collect();
-    if parts.is_empty() {
-        "0 beats".into()
-    } else {
-        parts.join(" ")
+    format!(
+        "{}.{}.{}",
+        sixteenths / per_bar,
+        sixteenths % per_bar / 4,
+        sixteenths % 4
+    )
+}
+
+/// A time as typed: `1:23.250`, `83.25` (seconds) or `0:05`.
+fn parse_time(text: &str) -> Option<f64> {
+    let text = text.trim();
+    match text.split_once(':') {
+        Some((minutes, seconds)) => {
+            let minutes: f64 = minutes.trim().parse().ok()?;
+            let seconds: f64 = seconds.trim().parse().ok()?;
+            (minutes >= 0. && seconds >= 0.).then_some(minutes * 60. + seconds)
+        }
+        None => text.parse().ok().filter(|s: &f64| *s >= 0.),
     }
 }
 
@@ -737,11 +872,27 @@ mod tests {
     }
 
     #[test]
-    fn lengths_read_naturally() {
-        assert_eq!(format_length(4., 4), "1 bar");
-        assert_eq!(format_length(6.25, 4), "1 bar 2 beats 1 sixteenth");
-        assert_eq!(format_length(3., 4), "3 beats");
-        assert_eq!(format_length(0., 4), "0 beats");
+    fn lengths_count_bars_beats_and_sixteenths_from_zero() {
+        assert_eq!(format_length(4., 4), "1.0.0");
+        assert_eq!(format_length(6.25, 4), "1.2.1");
+        assert_eq!(format_length(3., 4), "0.3.0");
+        for beats in [0.25, 6.25, 12.] {
+            assert_eq!(parse_length(&format_length(beats, 4), 4), Some(beats));
+        }
+    }
+
+    #[test]
+    fn typed_times_and_slips() {
+        assert_eq!(parse_time("1:23.25"), Some(83.25));
+        assert_eq!(parse_time("2.5"), Some(2.5));
+        assert_eq!(parse_time("-1"), None);
+        // The clip plays the file's middle half (1 to 3 s of 4): slip it.
+        let c = slipped(&clip(), 0.5);
+        assert_eq!((c.trim_start, c.trim_end), (0.125, 0.625));
+        assert_eq!(c.position, clip().position, "it stays where it is");
+        // No further than the file's ends.
+        let c = slipped(&clip(), 10.);
+        assert_eq!((c.trim_start, c.trim_end), (0.5, 1.));
     }
 
     #[test]

@@ -15,6 +15,8 @@ pub trait PaintGrid {
     fn paint_grid(&self, painter: &Painter, viewport: Rect, theme: &Theme);
     /// Bar and beat numbers along the ruler's bottom, times along its top.
     fn paint_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme);
+    /// Bar and beat numbers only, over all of `rect`.
+    fn paint_bar_labels(&self, painter: &Painter, rect: Rect, theme: &Theme);
 }
 
 impl PaintGrid for GridService {
@@ -95,7 +97,11 @@ impl PaintGrid for GridService {
     fn paint_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
         // Bars on the upper half, time on the lower.
         let (bars, times) = rect.split_top_bottom_at_fraction(0.5);
-        let rect = bars;
+        self.paint_bar_labels(painter, bars, theme);
+        paint_time_labels(self, painter, times, bpm, theme);
+    }
+
+    fn paint_bar_labels(&self, painter: &Painter, rect: Rect, theme: &Theme) {
         let divisions_per_beat = self.resolution().divisions_per_beat(self.beats_per_bar());
         let step = self.pixels_per_beat() / divisions_per_beat; // pixel spacing between grid lines
 
@@ -157,8 +163,6 @@ impl PaintGrid for GridService {
             step_index += 1;
             x += step;
         }
-
-        paint_time_labels(self, painter, times, bpm, theme);
     }
 }
 

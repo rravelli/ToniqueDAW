@@ -146,8 +146,10 @@ impl Builder<'_> {
                         fade_out: (clip.fade_out_s * self.sr) as SamplePos,
                     };
                     // Stateless: no identity needed, and dedupable by content.
-                    self.d
-                        .add(AudioClipNode::new(source.clone(), place, *gain), &[])
+                    self.d.add(
+                        AudioClipNode::new(source.clone(), place, gain.value.clone()),
+                        &[],
+                    )
                 }
                 ClipContent::Midi { notes, channel } => {
                     let tl: Vec<TimelineNote> = notes
