@@ -942,6 +942,21 @@ fn looped_clips_split_and_undo_as_one() {
 }
 
 #[test]
+fn only_the_clip_being_trimmed_is_resizing() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let a = add_clip(&mut state, track, 0., 1.);
+    let b = add_clip(&mut state, track, 4., 1.);
+    assert!(!state.is_resizing(a));
+    let mut trimmed = state.find_clip(a).unwrap().1;
+    trimmed.trim_end_at(BeatPos(1.), state.bpm());
+    state.resize_clip(trimmed.clone());
+    assert!(state.is_resizing(a) && !state.is_resizing(b));
+    state.commit_resize_clip(trimmed);
+    assert!(!state.is_resizing(a), "done once applied");
+}
+
+#[test]
 fn select_all_selects_every_clip() {
     let mut state = setup_state();
     let (t0, t1) = (state.add_track(), state.add_track());

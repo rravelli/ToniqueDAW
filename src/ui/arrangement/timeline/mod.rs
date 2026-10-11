@@ -207,12 +207,15 @@ impl Timeline {
             }
 
             // A group's lane: an overview of everything inside.
-            let clips = if track.kind == TrackKind::Group {
+            let mut clips = if track.kind == TrackKind::Group {
                 paint_group_overview(ui, state, track, track_rect);
                 Vec::new()
             } else {
                 track.clips.clone()
             };
+            // A clip being trimmed goes on top of its neighbours, so what it
+            // grows over shows (applying the trim cuts them there).
+            clips.sort_by_key(|c| state.is_resizing(c.id));
             for clip in clips {
                 let clip = state.shown_clip(&clip);
                 let dragged = self.clip_ui(

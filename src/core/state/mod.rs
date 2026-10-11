@@ -790,6 +790,10 @@ impl ProjectState {
         }
         .cloned()
     }
+    /// Whether clip `id` is being trimmed (see [`Self::resize_clip`]).
+    pub fn is_resizing(&self, id: ClipId) -> bool {
+        self.resized_clip.as_ref().is_some_and(|r| r.id == id)
+    }
     /// `clip` as shown: as being trimmed, if it is.
     pub fn shown_clip(&self, clip: &AudioClip) -> AudioClip {
         self.resized_clip
