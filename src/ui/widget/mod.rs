@@ -9,6 +9,7 @@ pub mod knob;
 pub mod list_row;
 pub mod logo;
 pub mod meter;
+pub mod param_slider;
 pub mod scroll_bar;
 pub mod search_bar;
 pub mod section;

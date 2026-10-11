@@ -1,8 +1,8 @@
 //! The bottom panel's view of one clip.
 
 use egui::{
-    Align, Align2, CursorIcon, DragValue, FontId, Grid, Label, Layout, Rect, RichText, ScrollArea,
-    Sense, Stroke, Ui, UiBuilder, pos2, vec2,
+    Align, Align2, Color32, CursorIcon, DragValue, FontId, Grid, Label, Layout, Rect, RichText,
+    ScrollArea, Sense, Stroke, Ui, UiBuilder, pos2, vec2,
 };
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
@@ -17,9 +17,12 @@ use crate::{
         arrangement::grid::PaintGrid,
         theme::{Theme, ThemeExt, font_size, with_alpha},
         waveform::paint_waveform,
-        widget::scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
+        widget::{
+            param_slider::{ParamSlider, SliderEdit},
+            scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
+        },
     },
-    utils::{format_bars, format_pan, format_time, parse_pan, snap_to_centre},
+    utils::{format_bars, format_time},
 };
 
 /// The clip's properties, left of the editor.
@@ -28,6 +31,8 @@ const INSPECTOR_WIDTH: f32 = 210.;
 const LABEL_WIDTH: f32 = 56.;
 const PADDING: f32 = 8.;
 const RULER_HEIGHT: f32 = 18.;
+/// The inspector's values.
+const FIELD_HEIGHT: f32 = 18.;
 /// Between the lane and its scrollbar.
 const SCROLLBAR_GAP: f32 = 3.;
 /// Room left around the clip when fitting it, as a share of its length.
@@ -132,7 +137,7 @@ impl ClipDetails {
             ScrollArea::vertical()
                 .id_salt("clip-inspector")
                 .auto_shrink(false)
-                .show(ui, |ui| inspector_ui(ui, clip, state));
+                .show(ui, |ui| inspector_ui(ui, clip, track.color, state));
         });
         ui.allocate_rect(rect, Sense::hover());
     }
@@ -412,7 +417,7 @@ fn trimmed(clip: &AudioClip, edge: TrimEdge, at: BeatPos, bpm: f32) -> AudioClip
 /// and the file. Values can be dragged, or clicked and typed; edits show
 /// while dragged and apply as one undo step once released (or typed). Gain
 /// is heard as it's dragged.
-fn inspector_ui(ui: &mut Ui, clip: &AudioClip, state: &mut ProjectState) {
+fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut ProjectState) {
     let theme = ui.app_theme();
     let bpm = state.bpm();
     let bpb = state.grid.beats_per_bar();
@@ -528,52 +533,21 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, state: &mut ProjectState) {
         }
         ui.end_row();
 
+        // As on tracks: a level filled in the clip's colour, reset by a
+        // double-click; heard as it moves, one undo step once released.
+        let size = vec2(ui.available_width(), FIELD_HEIGHT);
         label(ui, "Gain");
-        let mut db = gain_to_db(shown.gain);
-        let response = field(
-            ui,
-            DragValue::new(&mut db)
-                .speed(0.1)
-                .range(SILENT_DB..=MAX_GAIN_DB)
-                .custom_formatter(|db, _| format_gain(db as f32))
-                .custom_parser(parse_gain),
-        );
-        live_param(
-            ui,
-            state,
-            clip.id,
-            ClipParam::Gain,
-            &response,
-            shown.gain,
-            db_to_gain(db),
-        );
+        let gain = ParamSlider::gain(shown.gain, CLIP_GAIN_RANGE)
+            .color(color)
+            .size(size)
+            .suffix(" dB");
+        apply_param(state, clip.id, ClipParam::Gain, gain.show(ui).1);
         ui.end_row();
 
         label(ui, "Pan");
-        let raw = ui.id().with("pan-raw");
-        let mut percent = ui
-            .data(|d| d.get_temp(raw))
-            .unwrap_or(shown.pan as f64 * 100.);
-        let response = field(
-            ui,
-            DragValue::new(&mut percent)
-                .speed(0.5)
-                .range(-100.0..=100.0)
-                .custom_formatter(|p, _| format_pan(p as f32 / 100.))
-                .custom_parser(|text| parse_pan(text).map(|p| p as f64 * 100.)),
-        )
-        .on_hover_text("Balance: turning to a side lowers the other");
-        keep_raw(ui, raw, &response, percent);
-        let pan = snap_to_centre(percent as f32 / 100.);
-        live_param(
-            ui,
-            state,
-            clip.id,
-            ClipParam::Pan,
-            &response,
-            shown.pan,
-            pan,
-        );
+        let (response, edit) = ParamSlider::pan(shown.pan).color(color).size(size).show(ui);
+        response.on_hover_text("Balance: turning to a side lowers the other");
+        apply_param(state, clip.id, ClipParam::Pan, edit);
         ui.end_row();
     });
 
@@ -635,7 +609,7 @@ fn label(ui: &mut Ui, text: &str) {
 /// A value field filling the row.
 fn field(ui: &mut Ui, value: DragValue) -> egui::Response {
     let width = ui.available_width();
-    ui.add_sized(vec2(width, 18.), value)
+    ui.add_sized(vec2(width, FIELD_HEIGHT), value)
 }
 
 /// A value that can't be changed, right of its label.
@@ -660,31 +634,13 @@ fn slipped(clip: &AudioClip, offset: f64) -> AudioClip {
     clip
 }
 
-/// Drive a clip parameter from a drag value: heard as it moves, and one
-/// undo step from where it started once released (or typed). `current` is
-/// its value as shown, `new` the drag value's.
-fn live_param(
-    ui: &Ui,
-    state: &mut ProjectState,
-    clip: ClipId,
-    which: ClipParam,
-    response: &egui::Response,
-    current: f32,
-    new: f32,
-) {
-    let started = response.id.with("start");
-    if response.drag_started() {
-        ui.data_mut(|d| d.insert_temp(started, current));
-    }
-    if response.changed() {
-        state.set_clip_param(clip, which, new);
-        if !response.dragged() {
-            state.commit_clip_param(clip, which, current, new);
-        }
-    }
-    if response.drag_stopped() {
-        let old = ui.data_mut(|d| d.remove_temp(started)).unwrap_or(current);
-        state.commit_clip_param(clip, which, old, new);
+/// Apply a gain or pan slider's edit to the clip's parameter.
+fn apply_param(state: &mut ProjectState, clip: ClipId, which: ClipParam, edit: SliderEdit) {
+    match edit {
+        SliderEdit::Moved(value) => state.set_clip_param(clip, which, value),
+        SliderEdit::Released { start, value } => state.commit_clip_param(clip, which, start, value),
+        SliderEdit::Reset { from, to } => state.commit_clip_param(clip, which, from, to),
+        SliderEdit::None => {}
     }
 }
 
@@ -710,47 +666,9 @@ fn gesture(response: &egui::Response) -> Option<bool> {
     }
 }
 
-/// Gain at the bottom of the range: silence.
-const SILENT_DB: f32 = -60.;
-const MAX_GAIN_DB: f32 = 12.;
-
-fn gain_to_db(gain: f32) -> f32 {
-    if gain <= 0. {
-        SILENT_DB
-    } else {
-        (20. * gain.log10()).max(SILENT_DB)
-    }
-}
-
-fn db_to_gain(db: f32) -> f32 {
-    if db <= SILENT_DB {
-        0.
-    } else {
-        10f32.powf(db / 20.)
-    }
-}
-
-/// `+3.0 dB`, or `-inf dB` for silence.
-fn format_gain(db: f32) -> String {
-    if db <= SILENT_DB {
-        "-inf dB".into()
-    } else {
-        format!("{db:+.1} dB")
-    }
-}
-
-/// A gain as typed: `-6`, `+3 dB`, `-inf`.
-fn parse_gain(text: &str) -> Option<f64> {
-    let text = text
-        .trim()
-        .trim_end_matches("dB")
-        .trim_end_matches("db")
-        .trim();
-    if text.eq_ignore_ascii_case("-inf") {
-        return Some(SILENT_DB as f64);
-    }
-    text.parse().ok()
-}
+/// The gain slider's range, in dB: its bottom is silence, its top the
+/// engine's limit (+12 dB).
+const CLIP_GAIN_RANGE: std::ops::RangeInclusive<f32> = -40.0..=12.0;
 
 /// A position as typed, `bar.beat.sixteenth` from 1 (`3.2.1`; missing
 /// parts are the first), in beats.
@@ -911,17 +829,6 @@ mod tests {
         for beats in [0., 6.25, 9.5] {
             assert_eq!(parse_bars(&format_bars(beats, 4), 4), Some(beats));
         }
-    }
-
-    #[test]
-    fn gains_read_in_decibels() {
-        assert_eq!(format_gain(gain_to_db(1.)), "+0.0 dB");
-        assert_eq!(format_gain(gain_to_db(0.)), "-inf dB");
-        assert_eq!(db_to_gain(SILENT_DB), 0.);
-        assert!((db_to_gain(-6.0206) - 0.5).abs() < 1e-4);
-        assert_eq!(parse_gain("-6 dB"), Some(-6.));
-        assert_eq!(parse_gain("+3"), Some(3.));
-        assert_eq!(parse_gain("-inf"), Some(SILENT_DB as f64));
     }
 
     #[test]

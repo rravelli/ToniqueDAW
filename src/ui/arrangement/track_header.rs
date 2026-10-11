@@ -14,13 +14,14 @@ use crate::{
             context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
             flat_button::FlatButton,
             meter::LevelMeter,
+            param_slider::{ParamSlider, SliderEdit},
         },
     },
-    utils::{display_name, format_pan, snap_to_centre},
+    utils::display_name,
 };
 use egui::{
-    Align2, Color32, FontId, Frame, Label, Margin, Rect, Response, RichText, Sense, Stroke,
-    TextEdit, Ui, Vec2, epaint::MarginF32, pos2, vec2,
+    Color32, FontId, Frame, Label, Margin, Rect, Response, RichText, Sense, Stroke, TextEdit, Ui,
+    Vec2, epaint::MarginF32, vec2,
 };
 use egui_phosphor::{
     fill::{COPY, FOLDER_MINUS, FOLDER_PLUS, PALETTE, PLUS, TRASH},
@@ -39,13 +40,9 @@ const INDENT: f32 = 8.;
 const MAX_INDENT_LEVELS: usize = 6;
 /// Width of the coloured bar on the left of each header.
 pub const COLOR_BAR_WIDTH: f32 = 4.;
-/// Shift-dragging a slider moves it this much slower.
-const FINE_DRAG: f32 = 0.1;
-/// Volume slider range, in dB.
-const GAIN_RANGE: RangeInclusive<f32> = -40.0..=5.0;
-const PAN_RANGE: RangeInclusive<f32> = -1.0..=1.0;
-const SLIDER_WIDTH: f32 = 2. * BUTTON_SIZE + 1.;
-const SLIDER_HEIGHT: f32 = 20.;
+/// Volume slider range, in dB: its bottom is silence.
+pub const VOLUME_RANGE: RangeInclusive<f32> = -40.0..=5.0;
+const SLIDER_SIZE: Vec2 = vec2(2. * BUTTON_SIZE + 1., 20.);
 /// Gap between the rows of controls.
 const CONTROLS_GAP: f32 = 4.;
 
@@ -60,10 +57,6 @@ pub const HEADER_INSET: f32 = STROKE_WIDTH + PADDING;
 
 #[derive(Debug, Clone)]
 pub struct TrackHeader {
-    gain_db: f32,
-    /// The volume or pan drag in progress.
-    gain_drag: Option<ParamDrag>,
-    pan_drag: Option<ParamDrag>,
     edit: bool,
     focus_requested: bool,
 }
@@ -73,9 +66,6 @@ impl TrackHeader {
         Self {
             focus_requested: false,
             edit: false,
-            gain_db: 0.,
-            gain_drag: None,
-            pan_drag: None,
         }
     }
 
@@ -204,8 +194,8 @@ impl TrackHeader {
                         // Volume and pan
                         if !track.collapsed {
                             ui.horizontal(|ui| {
-                                self.volume_slider(ui, SLIDER_WIDTH, track, state);
-                                self.pan_slider(ui, SLIDER_WIDTH, track, state);
+                                volume_slider(ui, track, state);
+                                pan_slider(ui, track, state);
                             });
                         };
                     });
@@ -393,95 +383,6 @@ impl TrackHeader {
         response
     }
 
-    /// Volume in dB, filled from the left.
-    fn volume_slider(
-        &mut self,
-        ui: &mut Ui,
-        width: f32,
-        track: &TrackRow,
-        state: &mut ProjectState,
-    ) -> Response {
-        let (rect, mut response) = slider_rect(ui, width);
-        let range = GAIN_RANGE;
-        self.gain_db = 20. * track.volume.log10();
-
-        match anchored_drag(
-            ui,
-            &response,
-            &mut self.gain_drag,
-            self.gain_db,
-            track.volume,
-            &range,
-        ) {
-            SliderDrag::Moved(gain) => {
-                self.gain_db = gain;
-                state.set_volume(track.id, db_to_volume(gain));
-                response.mark_changed();
-            }
-            SliderDrag::Released { start } => {
-                let volume = db_to_volume(self.gain_db);
-                if volume != start {
-                    state.commit_volume(track.id, start, volume);
-                }
-            }
-            SliderDrag::None => {}
-        }
-        if response.double_clicked() && track.volume != 1. {
-            self.gain_db = 0.;
-            state.commit_volume(track.id, track.volume, 1.0);
-            response.mark_changed();
-        }
-
-        let t = ((self.gain_db - range.start()) / (range.end() - range.start())).clamp(0., 1.);
-        let fill = Rect::from_min_max(rect.min, pos2(rect.lerp_inside(vec2(t, 0.)).x, rect.max.y));
-        paint_slider(ui, rect, fill, track.color, &format_gain(self.gain_db));
-        response
-    }
-
-    /// Pan, filled from the centre towards the side it leans to.
-    fn pan_slider(
-        &mut self,
-        ui: &mut Ui,
-        width: f32,
-        track: &TrackRow,
-        state: &mut ProjectState,
-    ) -> Response {
-        let (rect, mut response) = slider_rect(ui, width);
-        let mut pan = track.pan;
-
-        match anchored_drag(
-            ui,
-            &response,
-            &mut self.pan_drag,
-            pan,
-            track.pan,
-            &PAN_RANGE,
-        ) {
-            SliderDrag::Moved(value) => {
-                pan = snap_to_centre(value);
-                state.set_pan(track.id, pan);
-                response.mark_changed();
-            }
-            SliderDrag::Released { start } => {
-                if pan != start {
-                    state.commit_pan(track.id, start, pan);
-                }
-            }
-            SliderDrag::None => {}
-        }
-        if response.double_clicked() && track.pan != 0. {
-            pan = 0.;
-            state.commit_pan(track.id, track.pan, 0.);
-            response.mark_changed();
-        }
-
-        let centre = rect.center().x;
-        let x = rect.lerp_inside(vec2((pan + 1.) / 2., 0.)).x;
-        let fill = Rect::from_x_y_ranges(centre.min(x)..=centre.max(x), rect.y_range());
-        paint_slider(ui, rect, fill, track.color, &format_pan(pan));
-        response
-    }
-
     fn resize_handle(&mut self, ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
         let track_view_mut = state.track_view_mut(&track.id);
         let (_, mut response) =
@@ -497,120 +398,33 @@ impl TrackHeader {
     }
 }
 
-/// A slider drag: the value follows the pointer's distance from where it
-/// was anchored, so going past an end and back lands where it left.
-#[derive(Debug, Clone, Copy)]
-struct ParamDrag {
-    /// The parameter's value when the drag started, for undo.
-    start: f32,
-    anchor_x: f32,
-    /// Slider value at `anchor_x`.
-    anchor_value: f32,
-    /// Shift held: slower, for fine adjustment.
-    fine: bool,
-}
-
-enum SliderDrag {
-    None,
-    /// Dragged to this slider value.
-    Moved(f32),
-    /// Released: commit the change from the parameter's `start` value.
-    Released {
-        start: f32,
-    },
-}
-
-/// Drive `drag` from `response`. `value` is the slider's current value in
-/// `range`, `param` the parameter's (they differ for volume: dB vs gain).
-fn anchored_drag(
-    ui: &Ui,
-    response: &Response,
-    drag: &mut Option<ParamDrag>,
-    value: f32,
-    param: f32,
-    range: &RangeInclusive<f32>,
-) -> SliderDrag {
-    let fine = ui.input(|i| i.modifiers.shift);
-    let pointer_x = response.interact_pointer_pos().map(|p| p.x);
-    let value = value.clamp(*range.start(), *range.end());
-
-    if response.drag_started()
-        && let Some(x) = pointer_x
-    {
-        *drag = Some(ParamDrag {
-            start: param,
-            anchor_x: x,
-            anchor_value: value,
-            fine,
-        });
-    }
-    if response.drag_stopped()
-        && let Some(drag) = drag.take()
-    {
-        return SliderDrag::Released { start: drag.start };
-    }
-    if response.dragged()
-        && let (Some(drag), Some(x)) = (drag.as_mut(), pointer_x)
-    {
-        // Toggling Shift re-anchors, so the value doesn't jump.
-        if drag.fine != fine {
-            *drag = ParamDrag {
-                anchor_x: x,
-                anchor_value: value,
-                fine,
-                ..*drag
-            };
+/// Volume in dB, filled from the left.
+fn volume_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
+    let slider = ParamSlider::gain(track.volume, VOLUME_RANGE)
+        .color(track.color)
+        .size(SLIDER_SIZE);
+    match slider.show(ui).1 {
+        SliderEdit::Moved(volume) => state.set_volume(track.id, volume),
+        SliderEdit::Released { start, value } if value != start => {
+            state.commit_volume(track.id, start, value)
         }
-        let dragged = dragged_value(drag, x, response.rect.width(), range);
-        if dragged != value {
-            return SliderDrag::Moved(dragged);
-        }
+        SliderEdit::Reset { from, to } => state.commit_volume(track.id, from, to),
+        _ => {}
     }
-    SliderDrag::None
 }
 
-/// Slider value with the pointer at `x`, on a slider `width` wide.
-fn dragged_value(drag: &ParamDrag, x: f32, width: f32, range: &RangeInclusive<f32>) -> f32 {
-    let speed = if drag.fine { FINE_DRAG } else { 1. };
-    let per_px = (range.end() - range.start()) / width * speed;
-    (drag.anchor_value + (x - drag.anchor_x) * per_px).clamp(*range.start(), *range.end())
-}
-
-/// A volume or pan slider's area.
-fn slider_rect(ui: &mut Ui, width: f32) -> (Rect, Response) {
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(width, SLIDER_HEIGHT), Sense::click_and_drag());
-    (
-        rect,
-        response.on_hover_and_drag_cursor(egui::CursorIcon::ResizeHorizontal),
-    )
-}
-
-/// Well, `fill` in the track colour, and the value on top.
-fn paint_slider(ui: &Ui, rect: Rect, fill: Rect, color: Color32, text: &str) {
-    let theme = ui.app_theme();
-    let painter = ui.painter();
-    painter.rect_filled(rect, 1.0, theme.bg_deep);
-    painter.rect_filled(fill, 1.0, color);
-    painter.text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        text,
-        FontId::new(font_size::SMALL, egui::FontFamily::Proportional),
-        theme.text,
-    );
-}
-
-fn db_to_volume(gain: f32) -> f32 {
-    10f32.powf(gain / 20.)
-}
-
-/// `-3.2`, or `-inf` for silence.
-fn format_gain(gain: f32) -> String {
-    if gain.is_finite() {
-        format!("{gain:.1}")
-    } else {
-        "-inf".into()
+/// Pan, filled from the centre towards the side it leans to.
+fn pan_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
+    let slider = ParamSlider::pan(track.pan)
+        .color(track.color)
+        .size(SLIDER_SIZE);
+    match slider.show(ui).1 {
+        SliderEdit::Moved(pan) => state.set_pan(track.id, pan),
+        SliderEdit::Released { start, value } if value != start => {
+            state.commit_pan(track.id, start, value)
+        }
+        SliderEdit::Reset { from, to } => state.commit_pan(track.id, from, to),
+        _ => {}
     }
 }
 
@@ -620,52 +434,5 @@ fn toggle_button(text: &str, fill: Option<Color32>, theme: &Theme) -> FlatButton
     match fill {
         Some(fill) => button.fill(fill).color(theme.text_on(fill)),
         None => button,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 45 dB over 90 px: 0.5 dB per pixel.
-    const WIDTH: f32 = 90.;
-
-    fn drag(fine: bool) -> ParamDrag {
-        ParamDrag {
-            start: 1.,
-            anchor_x: 100.,
-            anchor_value: 0.,
-            fine,
-        }
-    }
-
-    #[test]
-    fn value_follows_the_pointer_past_the_ends() {
-        let drag = drag(false);
-        assert_eq!(dragged_value(&drag, 104., WIDTH, &GAIN_RANGE), 2.);
-        // Past the top it stays at the top...
-        assert_eq!(dragged_value(&drag, 150., WIDTH, &GAIN_RANGE), 5.);
-        // ...and coming back gives the same value as on the way out.
-        assert_eq!(dragged_value(&drag, 104., WIDTH, &GAIN_RANGE), 2.);
-        assert_eq!(dragged_value(&drag, -500., WIDTH, &GAIN_RANGE), -40.);
-        assert_eq!(dragged_value(&drag, 100., WIDTH, &GAIN_RANGE), 0.);
-    }
-
-    #[test]
-    fn shift_drags_ten_times_slower() {
-        assert_eq!(dragged_value(&drag(true), 120., WIDTH, &GAIN_RANGE), 1.);
-    }
-
-    #[test]
-    fn pan_formats_and_snaps_to_centre() {
-        // Pan drags over -1..1 like any slider.
-        assert_eq!(dragged_value(&drag(false), 145., WIDTH, &PAN_RANGE), 1.);
-    }
-
-    #[test]
-    fn gains_format_with_silence() {
-        assert_eq!(format_gain(-3.25), "-3.2");
-        assert_eq!(format_gain(20. * 0f32.log10()), "-inf");
-        assert_eq!(db_to_volume(0.), 1.);
     }
 }

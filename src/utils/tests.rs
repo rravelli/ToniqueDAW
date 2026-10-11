@@ -1,4 +1,4 @@
-use crate::utils::{display_name, format_bars, format_pan, format_time, parse_pan, snap_to_centre};
+use crate::utils::{display_name, format_bars, format_pan, format_time, snap_to_centre};
 
 #[test]
 fn test_parse_name() {
@@ -33,11 +33,4 @@ fn pans_read_as_sides_and_snap_to_centre() {
     assert_eq!(format_pan(1.), "R100");
     assert_eq!(snap_to_centre(0.01), 0.);
     assert_eq!(snap_to_centre(-0.2), -0.2);
-    for pan in [-1., -0.35, 0., 0.2] {
-        assert_eq!(parse_pan(&format_pan(pan)), Some(pan));
-    }
-    assert_eq!(parse_pan("c"), Some(0.));
-    assert_eq!(parse_pan("-50"), Some(-0.5));
-    assert_eq!(parse_pan("R300"), Some(1.), "no further than a side");
-    assert_eq!(parse_pan("up"), None);
 }
