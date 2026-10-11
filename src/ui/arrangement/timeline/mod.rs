@@ -425,7 +425,7 @@ impl Timeline {
                 show_waveform,
                 silenced,
             }
-            .ui(ui, state);
+            .preview(ui, state);
 
             if dropped {
                 state.begin_batch();

@@ -213,7 +213,7 @@ impl Timeline {
                         show_waveform,
                         silenced,
                     }
-                    .ui(ui, state);
+                    .preview(ui, state);
                 }
             }
 

@@ -9,8 +9,8 @@ use crate::{
     },
 };
 use egui::{
-    Align2, Color32, CursorIcon, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Stroke,
-    Ui, Vec2, pos2, vec2,
+    Align2, Color32, CursorIcon, FontFamily, FontId, Id, Painter, Pos2, Rect, Response, Sense,
+    Stroke, Ui, pos2, vec2,
 };
 use egui_phosphor::fill::TRASH;
 use std::time::Duration;
@@ -57,19 +57,98 @@ pub struct ClipView<'a> {
 }
 
 impl ClipView<'_> {
+    /// The clip, to select, move and trim: its header and trim handles are
+    /// widgets, identified by the clip (so only the clip in the edit should
+    /// be shown this way; see [`Self::preview`]).
     pub fn ui(&self, ui: &mut Ui, state: &mut ProjectState) -> Response {
-        let (clip, viewport, color, selected, show_waveform) = (
-            self.clip,
-            self.viewport,
-            self.color,
-            self.selected,
-            self.show_waveform,
+        let (clip, viewport) = (self.clip, self.viewport);
+        let (pos, size) = (self.rect.min, self.rect.size());
+        let response = ui.interact(
+            self.header_rect(),
+            Id::new(("clip-header", clip.id)),
+            Sense::all(),
         );
+        // Trim handles just inside each edge, registered after the header so
+        // they win where they overlap it. Narrow clips get narrower handles,
+        // leaving the middle to grab the clip.
+        let handle_width = self.handle_width();
+        let mut clip_copy = clip.clone();
+        let left = Rect::from_min_size(pos, vec2(handle_width, size.y));
+        let right = Rect::from_min_size(
+            pos2(pos.x + size.x - handle_width, pos.y),
+            vec2(handle_width, size.y),
+        );
+        let left_resize = self.trim_handle(ui, state, left, &mut clip_copy, Edge::Start);
+        let right_resize = self.trim_handle(ui, state, right, &mut clip_copy, Edge::End);
+
+        // Lights up under the pointer, like a button.
+        self.paint(ui, state, response.hovered() || response.dragged());
+        let theme = ui.app_theme();
+        for (handle, rect) in [(&left_resize, left), (&right_resize, right)] {
+            if handle.hovered() || handle.dragged() {
+                ui.painter_at(rect.intersect(viewport))
+                    .rect_filled(rect, 1.0, theme.hover_overlay);
+            }
+        }
+        if self.show_waveform {
+            // Between the trim handles, the body is the timeline's: show
+            // where a click places the edit cursor.
+            let body = Rect::from_min_max(
+                pos2(pos.x + handle_width, pos.y + HEADER_HEIGHT),
+                pos2(pos.x + size.x - handle_width, pos.y + size.y),
+            )
+            .intersect(viewport);
+            self.body_hover(ui, state, body);
+        }
+
+        response.context_menu(|ui| self.context_menu(ui, clip, state));
+        if response.dragged() {
+            ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+        } else if response.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::Grab);
+        };
+
+        if left_resize.dragged() || right_resize.dragged() {
+            state.resize_clip(clip_copy.clone());
+        }
+        if left_resize.drag_stopped() || right_resize.drag_stopped() {
+            state.commit_resize_clip(clip_copy);
+        }
+        response
+    }
+
+    /// The clip drawn without being a widget: for the copies following a
+    /// drag, which share the dragged clip's ID.
+    pub fn preview(&self, ui: &Ui, state: &ProjectState) {
+        self.paint(ui, state, false);
+    }
+
+    /// Where the header is, clipped to the viewport.
+    fn header_rect(&self) -> Rect {
+        let (pos, size) = (self.rect.min, self.rect.size());
+        let height = if self.show_waveform {
+            HEADER_HEIGHT
+        } else {
+            TRACK_COLLAPSED_HEIGHT
+        };
+        Rect::from_min_size(
+            pos2(pos.x + BORDER_WIDTH, pos.y + BORDER_WIDTH),
+            vec2(size.x - 2. * BORDER_WIDTH, height - 2. * BORDER_WIDTH),
+        )
+        .intersect(self.viewport)
+    }
+
+    fn handle_width(&self) -> f32 {
+        (self.rect.width() / 4.).clamp(MIN_TRIM_HANDLE_WIDTH, TRIM_HANDLE_WIDTH)
+    }
+
+    /// Body, header (`lit` under the pointer), name and waveform.
+    fn paint(&self, ui: &Ui, state: &ProjectState, lit: bool) {
+        let (clip, viewport, color, selected) =
+            (self.clip, self.viewport, self.color, self.selected);
         let (pos, size) = (self.rect.min, self.rect.size());
         let sample_rect = Rect::from_min_max(viewport.clamp(pos), viewport.clamp(pos + size));
-        // let response = ui.allocate_rect(sample_rect, Sense::all());
         let painter = ui.painter_at(sample_rect);
-        let mut clip_copy = clip.clone();
         let theme = ui.app_theme();
         // The header is the clip, to select and move: solid in its track's
         // colour, lit up when selected (towards a neutral colour that can't
@@ -109,7 +188,6 @@ impl ClipView<'_> {
         } else {
             Stroke::new(1., outline)
         };
-        // Main rect
         painter.rect(
             Rect::from_min_size(pos, size),
             2.0,
@@ -117,8 +195,7 @@ impl ClipView<'_> {
             stroke,
             egui::StrokeKind::Inside,
         );
-        // Grid
-        if show_waveform {
+        if self.show_waveform {
             let rect = Rect::from_min_size(
                 pos2(pos.x, pos.y + HEADER_HEIGHT - BORDER_WIDTH),
                 vec2(size.x, size.y - HEADER_HEIGHT),
@@ -127,65 +204,26 @@ impl ClipView<'_> {
                 .grid
                 .paint_clip_grid(&painter, viewport, rect, with_alpha(wave, 30));
         }
-        // Header area
-        let hitbox = Rect::from_min_size(
-            Pos2::new(pos.x + BORDER_WIDTH, pos.y + BORDER_WIDTH),
-            Vec2::new(
-                size.x - 2. * BORDER_WIDTH,
-                if show_waveform {
-                    HEADER_HEIGHT
-                } else {
-                    TRACK_COLLAPSED_HEIGHT
-                } - 2. * BORDER_WIDTH,
-            ),
-        )
-        .intersect(viewport);
-        let response = ui.interact(
-            hitbox,
-            format!("{:?}{}", clip.id, clip.position.0).into(),
-            Sense::all(),
-        );
-        // Lights up under the pointer, like a button.
-        let header = if response.hovered() || response.dragged() {
+        let header = if lit {
             header.blend(theme.hover_overlay)
         } else {
             header
         };
-        painter.rect(hitbox, 2.0, header, Stroke::NONE, egui::StrokeKind::Inside);
-        // Trim handles just inside each edge, registered after the header so
-        // they win where they overlap it. Narrow clips get narrower handles,
-        // leaving the middle to grab the clip.
-        let handle_width = (size.x / 4.).clamp(MIN_TRIM_HANDLE_WIDTH, TRIM_HANDLE_WIDTH);
-        let left_resize = self.trim_handle(
-            ui,
-            state,
-            Rect::from_min_size(pos, vec2(handle_width, size.y)),
-            viewport,
-            &mut clip_copy,
-            Edge::Start,
+        painter.rect(
+            self.header_rect(),
+            2.0,
+            header,
+            Stroke::NONE,
+            egui::StrokeKind::Inside,
         );
-        let right_resize = self.trim_handle(
-            ui,
-            state,
-            Rect::from_min_size(
-                pos2(pos.x + size.x - handle_width, pos.y),
-                vec2(handle_width, size.y),
-            ),
-            viewport,
-            &mut clip_copy,
-            Edge::End,
-        );
-        let resized = left_resize.dragged() || right_resize.dragged();
-        let drag_stopped = left_resize.drag_stopped() || right_resize.drag_stopped();
         painter.text(
             Pos2::new(pos.x + PADDING_TEXT, pos.y + 2.),
             Align2::LEFT_TOP,
-            clip.audio.name.clone().to_string(),
+            clip.audio.name.clone(),
             FontId::new(font_size::SMALL, FontFamily::Monospace),
             header_ink,
         );
-        // Waveform
-        if show_waveform {
+        if self.show_waveform {
             let waveform_rect = Rect::from_min_max(
                 pos2(pos.x, pos.y + HEADER_HEIGHT),
                 pos2(pos.x + size.x, pos.y + size.y),
@@ -199,14 +237,6 @@ impl ClipView<'_> {
                 state.bpm(),
                 wave,
             );
-            // Between the trim handles, the body is the timeline's: show
-            // where a click places the edit cursor.
-            let body = Rect::from_min_max(
-                pos2(pos.x + handle_width, waveform_rect.top()),
-                pos2(pos.x + size.x - handle_width, waveform_rect.bottom()),
-            )
-            .intersect(viewport);
-            self.body_hover(ui, state, body);
         }
         // Draw an overlay when audio not ready
         if !clip.audio.data.is_ready() {
@@ -214,23 +244,6 @@ impl ClipView<'_> {
             // Show the waveform growing while the file decodes.
             ui.ctx().request_repaint_after(LOADING_REPAINT);
         }
-
-        response.context_menu(|ui| self.context_menu(ui, clip, state));
-        // Update cursor icon
-        if response.dragged() {
-            ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-        } else if response.hovered() {
-            ui.ctx().set_cursor_icon(CursorIcon::Grab);
-        };
-
-        if resized {
-            state.resize_clip(clip_copy.clone());
-        }
-        if drag_stopped {
-            state.commit_resize_clip(clip_copy);
-        }
-
-        response
     }
 
     /// Over `body`, while nothing's dragged: a text cursor, and a line where
@@ -264,16 +277,18 @@ impl ClipView<'_> {
         ui: &mut Ui,
         state: &ProjectState,
         rect: Rect,
-        viewport: Rect,
         clip: &mut AudioClip,
         edge: Edge,
     ) -> Response {
-        let response = ui.allocate_rect(rect, Sense::drag());
+        let id = Id::new(("clip-trim", clip.id, edge as u8));
+        let response = ui
+            .interact(rect.intersect(self.viewport), id, Sense::drag())
+            .on_hover_and_drag_cursor(CursorIcon::ResizeHorizontal);
 
         if response.dragged()
             && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
         {
-            let beats = state.grid.x_to_beats(mouse_pos.x, viewport);
+            let beats = state.grid.x_to_beats(mouse_pos.x, self.viewport);
             let beats = if ui.input(|i| i.modifiers.alt) {
                 beats
             } else {
@@ -288,13 +303,6 @@ impl ClipView<'_> {
                 Edge::End => clip.trim_end_at(beats, state.bpm()),
             }
         }
-
-        if response.hovered() {
-            let painter = ui.painter_at(rect);
-            painter.rect_filled(rect, 1.0, ui.app_theme().hover_overlay);
-            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ResizeHorizontal);
-        }
-
         response
     }
 
@@ -412,5 +420,49 @@ mod tests {
             CursorIcon::ResizeHorizontal,
             "a trim handle"
         );
+    }
+
+    /// Whether egui warned of two widgets with one ID, drawing `clip` with
+    /// `ui`, then again (as its drag does) on another track at the same
+    /// time with `ui` or as a preview.
+    fn id_clash(as_preview: bool) -> bool {
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        let clip = AudioClip::new(ClipId(1), AudioInfo::silent(4.), BeatPos(0.), 120.);
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let viewport = Rect::from_min_size(Pos2::ZERO, vec2(800., 200.));
+        let view = |top: f32| ClipView {
+            clip: &clip,
+            rect: Rect::from_min_size(pos2(0., top), vec2(400., 60.)),
+            viewport,
+            color: crate::ui::theme::Theme::dark().accent,
+            selected: false,
+            show_waveform: true,
+            silenced: false,
+        };
+        let input = egui::RawInput {
+            screen_rect: Some(viewport),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            view(0.).ui(ui, &mut state);
+            if as_preview {
+                view(80.).preview(ui, &state);
+            } else {
+                view(80.).ui(ui, &mut state);
+            }
+        });
+        output.textures_delta.clear();
+        output.shapes.iter().any(|s| match &s.shape {
+            egui::Shape::Text(t) => t.galley.text().contains("use of"),
+            _ => false,
+        })
+    }
+
+    #[test]
+    fn dragged_copies_are_previews_with_no_ids_of_their_own() {
+        assert!(id_clash(false), "drawn twice as the clip: the IDs clash");
+        assert!(!id_clash(true), "as a preview: no clash");
     }
 }
