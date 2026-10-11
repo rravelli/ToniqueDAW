@@ -803,6 +803,17 @@ fn splitting_at_a_zone_keeps_the_ids_inside_for_a_drop() {
 }
 
 #[test]
+fn deleting_clicked_clips_removes_them_whole() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let a = add_clip(&mut state, track, 0., 2.); // beats 0..4
+    add_clip(&mut state, track, 6., 1.); // beats 6..8
+    state.select_clips(vec![a]);
+    state.delete_selected_clips();
+    assert_eq!(spans(&state, track), vec![(6., 8.)]);
+}
+
+#[test]
 fn nudging_moves_the_selection_as_a_block() {
     let mut state = setup_state();
     let track = state.add_track();

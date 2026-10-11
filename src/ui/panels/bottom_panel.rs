@@ -3,18 +3,22 @@ use crate::{
     config::keymap::Action,
     core::{state::ProjectState, track::TrackRow},
     ui::{
+        clip_details::ClipDetails,
         commands::Commands,
         dnd::DragPayload,
         effects::{EffectEdit, EffectRack},
+        font::PHOSPHOR_REGULAR,
         theme::ThemeExt,
-        workspace::Workspace,
+        widget::flat_button::FlatButton,
+        workspace::{BottomView, Workspace},
     },
     utils::display_name,
 };
 use egui::{
-    Align, Align2, CursorIcon, DragAndDrop, FontId, Frame, Layout, Margin, Pos2, Rangef, Rect,
-    RichText, ScrollArea, Stroke, Ui, vec2,
+    Align, Align2, CursorIcon, DragAndDrop, FontFamily, FontId, Frame, Layout, Margin, Pos2,
+    Rangef, Rect, RichText, ScrollArea, Stroke, Ui, vec2,
 };
+use egui_phosphor::regular::X;
 use tonique_engine::edit::TrackId;
 
 /// Between effects, and around them.
@@ -26,6 +30,7 @@ struct MovedEffect(usize);
 
 pub struct BottomPanel {
     rack: EffectRack,
+    clip_details: ClipDetails,
     /// Selected effects, by index, of `track`'s. Delete removes them.
     selected: Vec<usize>,
     track: Option<TrackId>,
@@ -44,6 +49,7 @@ impl BottomPanel {
     pub fn new() -> Self {
         Self {
             rack: EffectRack::default(),
+            clip_details: ClipDetails::new(),
             selected: vec![],
             track: None,
             focused: false,
@@ -77,6 +83,19 @@ impl BottomPanel {
                         .flatten()
                 }) {
                     self.focused = panel.contains(pos);
+                }
+                let clip = match workspace.bottom_view {
+                    BottomView::Clip(id) => state.clip_with_track(id),
+                    BottomView::Effects => None,
+                };
+                if let Some((track, clip)) = clip {
+                    self.track = None;
+                    self.selected.clear();
+                    if self.header(ui, &track, Some(&clip.audio.name)) {
+                        workspace.bottom_view = BottomView::Effects;
+                    }
+                    self.clip_details.ui(ui, &clip, &track, state);
+                    return;
                 }
                 match state.selected_track() {
                     Some(track) => self.ui(ui, track, state),
@@ -136,7 +155,7 @@ impl BottomPanel {
         let shown: Vec<_> = effects.iter().map(|e| e.plugin.id).collect();
         self.rack.retain(&shown);
 
-        self.header(ui, &track);
+        self.header(ui, &track, None);
         let area = ui.available_rect_before_wrap();
 
         // An effect dragged from the browser, or one of these being moved.
@@ -310,8 +329,12 @@ impl BottomPanel {
         }
     }
 
-    fn header(&mut self, ui: &mut Ui, track: &TrackRow) {
+    /// Track name, and the clip's when showing one, with a button back to
+    /// the effects. Returns whether it was clicked.
+    fn header(&mut self, ui: &mut Ui, track: &TrackRow, clip: Option<&str>) -> bool {
         let theme = ui.app_theme();
+        let ink = theme.text_on(track.color);
+        let mut back = false;
         Frame::new()
             .fill(track.color)
             .stroke(Stroke::new(1.0, theme.border))
@@ -324,13 +347,27 @@ impl BottomPanel {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(display_name(&track.name, track.first_track_index))
-                            .size(font_size::SMALL)
-                            .color(theme.text_on(track.color)),
-                    );
+                    let mut title = display_name(&track.name, track.first_track_index);
+                    if let Some(clip) = clip {
+                        title = format!("{title}  ›  {clip}");
+                    }
+                    ui.label(RichText::new(title).size(font_size::SMALL).color(ink));
+                    if clip.is_some() {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let close = FlatButton::ghost(X)
+                                .square(14.)
+                                .color(ink)
+                                .font(FontId::new(
+                                    font_size::SMALL,
+                                    FontFamily::Name(PHOSPHOR_REGULAR.into()),
+                                ))
+                                .tooltip("Back to the track's effects");
+                            back = ui.add(close).clicked();
+                        });
+                    }
                 });
             });
+        back
     }
 }
 

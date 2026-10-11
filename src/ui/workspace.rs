@@ -1,6 +1,10 @@
 //! How the window is laid out: which panels are open and what the main
 //! area shows. Not part of the project.
 
+use tonique_engine::edit::ClipId;
+
+use crate::core::state::ProjectState;
+
 /// What the main area shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MainView {
@@ -9,11 +13,22 @@ pub enum MainView {
     Graph,
 }
 
+/// What the bottom panel shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BottomView {
+    /// The selected track's effects.
+    #[default]
+    Effects,
+    /// Details of this clip, while it exists.
+    Clip(ClipId),
+}
+
 pub struct Workspace {
     /// The browser, on the left.
     pub left_panel_open: bool,
     /// The selected track's effects, at the bottom.
     pub bottom_panel_open: bool,
+    pub bottom_view: BottomView,
     pub main_view: MainView,
 }
 
@@ -22,6 +37,7 @@ impl Default for Workspace {
         Self {
             left_panel_open: true,
             bottom_panel_open: false,
+            bottom_view: BottomView::Effects,
             main_view: MainView::Timeline,
         }
     }
@@ -34,5 +50,15 @@ impl Workspace {
             MainView::Graph => MainView::Timeline,
             MainView::Timeline => MainView::Graph,
         };
+    }
+
+    /// Open the bottom panel on the details of clip `id`, and select its
+    /// track.
+    pub fn show_clip_details(&mut self, state: &mut ProjectState, id: ClipId) {
+        if let Some((track, _)) = state.find_clip(id) {
+            state.select_track(&track);
+            self.bottom_view = BottomView::Clip(id);
+            self.bottom_panel_open = true;
+        }
     }
 }

@@ -5,6 +5,7 @@ mod about;
 mod app;
 mod arrangement;
 mod browser;
+mod clip_details;
 mod commands;
 mod dnd;
 mod effects;

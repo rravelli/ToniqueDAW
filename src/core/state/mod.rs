@@ -836,7 +836,14 @@ impl ProjectState {
             .unwrap_or_default()
     }
 
-    fn find_clip(&self, id: ClipId) -> Option<(TrackId, AudioClip)> {
+    /// Clip `id` and the row of its track, if it exists.
+    pub fn clip_with_track(&self, id: ClipId) -> Option<(TrackRow, AudioClip)> {
+        let (track, clip) = self.find_clip(id)?;
+        let track = self.track_from_index(self.track_index(track)?)?;
+        Some((track, clip))
+    }
+
+    pub(crate) fn find_clip(&self, id: ClipId) -> Option<(TrackId, AudioClip)> {
         let track = self.edit().tracks.iter().find(|t| t.clip(id).is_some())?;
         let clip = self.clip_view(track.clip(id)?, self.bpm())?;
         Some((track.id, clip))

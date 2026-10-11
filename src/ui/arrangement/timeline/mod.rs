@@ -225,6 +225,7 @@ impl Timeline {
                     &clip,
                     ui,
                     state,
+                    workspace,
                     viewport,
                     row.y.min,
                     dragged_ids.contains(&clip.id),
@@ -286,6 +287,7 @@ impl Timeline {
         clip: &AudioClip,
         ui: &mut Ui,
         state: &mut ProjectState,
+        workspace: &mut Workspace,
         viewport: Rect,
         top: f32,
         dragged: bool,
@@ -332,6 +334,9 @@ impl Timeline {
                 state.select_clips(vec![clip.id]);
             }
             state.select_track(&track.id);
+        }
+        if response.double_clicked() {
+            workspace.show_clip_details(state, clip.id);
         }
 
         response.dragged()

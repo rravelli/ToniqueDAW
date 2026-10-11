@@ -14,7 +14,7 @@ use crate::{
         project::{ProjectAction, ProjectManager},
         settings::SettingsWindow,
         theme::{ThemeExt, ThemeLibrary},
-        workspace::{MainView, Workspace},
+        workspace::{BottomView, MainView, Workspace},
     },
 };
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -124,6 +124,9 @@ impl ToniqueApp {
         }
         self.setting_window.show(ui, &mut self.state);
         self.project.ui(ui, &mut self.state);
+        if self.project.take_replaced() {
+            self.workspace.bottom_view = BottomView::Effects;
+        }
     }
 
     /// Queue this frame's shortcuts.

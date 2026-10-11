@@ -50,6 +50,9 @@ pub struct GridService {
     min_pixels_per_beat: f32,
     max_pixels_per_beat: f32,
     pub offset: Vec2,
+    /// Whether the view may scroll before beat 0 (grid lines and labels
+    /// still start at 0).
+    negative_offset: bool,
 }
 
 impl GridService {
@@ -61,6 +64,7 @@ impl GridService {
             min_pixels_per_beat: 0.5,
             max_pixels_per_beat: 5000.,
             offset: Vec2::ZERO,
+            negative_offset: false,
         }
     }
     pub fn beats_per_bar(&self) -> usize {
@@ -125,7 +129,32 @@ impl GridService {
         let new_ppb = self.pixels_per_beat;
         let new_offset_x = beat_under_cursor * new_ppb - (cursor_x - viewport.left());
 
-        self.offset.x = new_offset_x.max(0.);
+        self.offset.x = self.bound_offset(new_offset_x);
+    }
+
+    /// Zoom and scroll so `start..end` (in beats) spans `width` points.
+    pub fn fit(&mut self, start: BeatPos, end: BeatPos, width: f32) {
+        if end > start && width > 0. {
+            self.pixels_per_beat = (width / (end - start) as f32)
+                .clamp(self.min_pixels_per_beat, self.max_pixels_per_beat);
+            self.update_resolution();
+        }
+        self.offset.x = self.bound_offset(self.beats_to_width(start.0));
+    }
+
+    /// Let the view scroll before beat 0, e.g. to show what's before a
+    /// clip in a grid counted from its start.
+    pub fn with_negative_offset(mut self) -> Self {
+        self.negative_offset = true;
+        self
+    }
+
+    fn bound_offset(&self, offset: f32) -> f32 {
+        if self.negative_offset {
+            offset
+        } else {
+            offset.max(0.)
+        }
     }
 
     /// Snap `beats` to the nearest of `targets` within [`TARGET_REACH`]
@@ -178,5 +207,28 @@ impl GridService {
             GridResolution::Height
         };
         self.resolution = new_resolution;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fitting_shows_exactly_the_range() {
+        let mut grid = GridService::new();
+        let viewport = Rect::from_min_size(egui::pos2(100., 0.), egui::vec2(400., 50.));
+        grid.fit(BeatPos(8.), BeatPos(16.), 400.);
+        assert_eq!(grid.pixels_per_beat(), 50.);
+        assert_eq!(grid.beats_to_x(BeatPos(8.), viewport), 100.);
+        assert_eq!(grid.beats_to_x(BeatPos(16.), viewport), 500.);
+        assert_eq!(grid.step_beats(), 1.); // resolution follows the zoom
+
+        // Before beat 0 only when allowed.
+        grid.fit(BeatPos(-2.), BeatPos(6.), 400.);
+        assert_eq!(grid.offset.x, 0.);
+        let mut grid = GridService::new().with_negative_offset();
+        grid.fit(BeatPos(-2.), BeatPos(6.), 400.);
+        assert_eq!(grid.beats_to_x(BeatPos(-2.), viewport), 100.);
     }
 }

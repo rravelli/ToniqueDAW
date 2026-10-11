@@ -18,7 +18,7 @@ use crate::{
         widget::{
             context_menu::ContextMenuButton, flat_button::FlatButton, scroll_bar::SCROLLBAR_WIDTH,
         },
-        workspace::Workspace,
+        workspace::{BottomView, Workspace},
     },
 };
 
@@ -154,11 +154,13 @@ impl TrackHeaders {
                 }
                 // Open bottom panel
                 if response.double_clicked() {
-                    if track.selected {
+                    let showing_effects = workspace.bottom_view == BottomView::Effects;
+                    if track.selected && showing_effects {
                         workspace.bottom_panel_open = !workspace.bottom_panel_open;
                     } else {
                         workspace.bottom_panel_open = true;
                     }
+                    workspace.bottom_view = BottomView::Effects;
                 }
                 // Insert effects
                 if let Some(payload) = response.dnd_release_payload::<DragPayload>()
