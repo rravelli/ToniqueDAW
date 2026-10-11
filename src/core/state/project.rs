@@ -21,7 +21,7 @@ use crate::{
     cache::AUDIO_ANALYSIS_CACHE,
     core::{
         clip::AudioClip,
-        effect::EffectKind,
+        effect::{EffectKind, Setting},
         project::{
             ChannelFile, ClipFile, EffectFile, GroupFile, ProjectFile, TrackFile, VERSION,
             resolve_path, store_path,
@@ -43,6 +43,7 @@ impl ProjectState {
         let mut master = TrackView::new();
         master.name = "Master".into();
         self.views = HashMap::from([(MASTER_TRACK_ID, master)]);
+        self.collapsed_effects.clear();
         self.sources = SourceRegistry::new(self.session.engine().config().sample_rate);
         self.playhead = BeatPos::ZERO;
         self.edit_cursor = BeatPos::ZERO;
@@ -151,11 +152,15 @@ impl ProjectState {
                 .filter_map(|plugin| {
                     Some(EffectFile {
                         kind: EffectKind::of(&plugin.kind)?,
+                        name: plugin.name.clone(),
                         enabled: !plugin.bypassed,
+                        collapsed: self.collapsed_effects.contains(&plugin.id),
                         params: plugin
                             .params
                             .iter()
-                            .map(|p| (p.name.to_string(), p.get()))
+                            .map(|p| (p.name, p.get()))
+                            .chain(Setting::of(&plugin.kind).map(Setting::saved))
+                            .map(|(name, value)| (name.to_string(), value))
                             .collect(),
                     })
                 })
@@ -266,11 +271,18 @@ impl ProjectState {
             self.set_mute(id, true);
         }
         for (index, effect) in channel.effects.iter().enumerate() {
-            self.add_effect(&id, effect.kind, index);
+            let setting = effect
+                .params
+                .iter()
+                .find_map(|(name, value)| Setting::parse(effect.kind, name, *value));
+            self.add_effect_with(&id, effect.kind, setting, index);
             let Some(plugin) = self.effects(&id).get(index).map(|e| e.plugin.clone()) else {
                 continue;
             };
             for (name, value) in &effect.params {
+                if Setting::parse(effect.kind, name, *value).is_some() {
+                    continue;
+                }
                 match plugin.params.iter().find(|p| p.name == name) {
                     Some(param) => param.set(*value),
                     None => problems.push(format!("Unknown effect parameter: {name}")),
@@ -279,6 +291,10 @@ impl ProjectState {
             if !effect.enabled {
                 self.perform(SetBypass::new(self.channel_ref(id), plugin.id, true));
             }
+            if effect.name.is_some() {
+                self.rename_effect(&id, plugin.id, effect.name.clone());
+            }
+            self.set_effect_collapsed(plugin.id, effect.collapsed);
         }
     }
 }

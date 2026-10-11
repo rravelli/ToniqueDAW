@@ -15,7 +15,7 @@ pub use session::EditSession;
 pub use undo::{Effects, UndoManager};
 
 use crate::automation::BeatPoint;
-use crate::meter::ChannelMeter;
+use crate::meter::{ChannelMeter, PluginTap};
 use crate::nodes::{Envelope, FilterMode};
 use crate::param::{AtomicParam, ParamId};
 use crate::sample::SampleBuffer;
@@ -119,6 +119,12 @@ pub enum PluginKind {
     Latency {
         samples: usize,
     },
+    /// Passes audio through untouched: a point in the chain for its
+    /// [`Plugin::tap`] to show, like a spectrum analyser.
+    Analyzer,
+    /// Gain, balance, stereo width, mono and phase inversion: see
+    /// [`UtilityNode`](crate::nodes::UtilityNode).
+    Utility,
 }
 
 #[derive(Clone, Debug)]
@@ -127,6 +133,10 @@ pub struct Plugin {
     pub kind: PluginKind,
     pub params: Vec<Parameter>,
     pub bypassed: bool,
+    /// Given by the user; `None` to go by its kind.
+    pub name: Option<String>,
+    /// Its input and output, recorded while watched.
+    pub tap: Arc<PluginTap>,
 }
 
 impl Plugin {
@@ -140,13 +150,23 @@ impl Plugin {
                 vec![p("cutoff", 20.0, 20000.0, 2000.0), p("q", 0.1, 10.0, 0.707)]
             }
             PluginKind::Echo { .. } => vec![p("feedback", 0.0, 0.95, 0.4), p("mix", 0.0, 1.0, 0.3)],
-            PluginKind::Latency { .. } => vec![],
+            PluginKind::Utility => vec![
+                p("gain", crate::nodes::UTILITY_SILENT_DB, 24.0, 0.0),
+                p("balance", -1.0, 1.0, 0.0),
+                p("width", 0.0, 2.0, 1.0),
+                p("mono", 0.0, 1.0, 0.0),
+                p("invert_left", 0.0, 1.0, 0.0),
+                p("invert_right", 0.0, 1.0, 0.0),
+            ],
+            PluginKind::Latency { .. } | PluginKind::Analyzer => vec![],
         };
         Self {
             id: PluginId(edit.next_id()),
             kind,
             params,
             bypassed: false,
+            name: None,
+            tap: Arc::default(),
         }
     }
 
@@ -161,6 +181,8 @@ impl Plugin {
             kind: self.kind,
             params,
             bypassed: self.bypassed,
+            name: self.name.clone(),
+            tap: Arc::default(),
         }
     }
 }
