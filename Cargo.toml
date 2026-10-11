@@ -3,6 +3,7 @@ name = "tonique_daw"
 version = "0.1.0"
 authors = ["Rémi Ravelli <remi.ravelli@gmail.com>"]
 edition = "2024"
+license = "MIT OR Apache-2.0"
 publish = false
 
 [workspace]
@@ -39,6 +40,10 @@ toml = "1"
 egui_extras = { version = "0.36", features = ["svg"] }
 
 # Profiles only take effect at the workspace root.
+# Debug info isn't shipped with releases.
+[profile.release]
+strip = true
+
 [profile.test]
 opt-level = 1
 
