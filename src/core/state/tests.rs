@@ -192,6 +192,13 @@ fn mixer_changes_undo() {
     state.undo();
     assert_eq!(state.tracks().next().unwrap().volume, 1.0);
 
+    state.set_pan(a, 0.8); // live drag
+    assert_eq!(state.tracks().next().unwrap().pan, 0.8);
+    state.commit_pan(a, 0.0, -0.5);
+    assert_eq!(state.tracks().next().unwrap().pan, -0.5);
+    state.undo();
+    assert_eq!(state.tracks().next().unwrap().pan, 0.0);
+
     state.set_mute(b, true);
     assert!(state.tracks().nth(1).unwrap().muted);
 

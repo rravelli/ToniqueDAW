@@ -216,6 +216,7 @@ impl ProjectState {
             clips,
             muted: group.channel.muted,
             volume: group.channel.volume.get(),
+            pan: group.channel.pan.get(),
             armed: false,
             name: group.name.clone(),
             height: view.height,

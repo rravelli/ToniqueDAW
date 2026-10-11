@@ -28,6 +28,8 @@ pub struct TrackRow {
     pub clips: Vec<AudioClip>,
     pub muted: bool,
     pub volume: f32,
+    /// -1 (left) to 1 (right).
+    pub pan: f32,
     /// Armed for recording.
     pub armed: bool,
     pub name: String,

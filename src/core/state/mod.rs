@@ -1056,6 +1056,23 @@ impl ProjectState {
         let param = c.volume.id;
         self.perform(SetParam::new(param, new_volume));
     }
+    /// Set track pan (-1 left to 1 right). Changes are not saved in undo
+    /// stack.
+    pub fn set_pan(&mut self, id: TrackId, pan: f32) {
+        if let Ok(c) = self.edit().channel(self.channel_ref(id)) {
+            c.pan.set(pan);
+        }
+    }
+    /// Set track pan and save in undo stack given `old_pan`.
+    pub fn commit_pan(&mut self, id: TrackId, old_pan: f32, new_pan: f32) {
+        let Ok(c) = self.edit().channel(self.channel_ref(id)) else {
+            return;
+        };
+        // `SetParam` records the current value for undo: restore it first.
+        c.pan.set(old_pan);
+        let param = c.pan.id;
+        self.perform(SetParam::new(param, new_pan));
+    }
     /// Mute or unmute this track
     pub fn set_mute(&mut self, id: TrackId, mute: bool) {
         self.perform(SetMute::new(self.channel_ref(id), mute));
@@ -1154,6 +1171,7 @@ impl ProjectState {
             clips: Vec::new(),
             muted: master.muted,
             volume: master.volume.get(),
+            pan: master.pan.get(),
             armed: false,
             name: view.name.clone(),
             height: view.height,
@@ -1240,6 +1258,7 @@ impl ProjectState {
                 .collect(),
             muted: track.channel.muted,
             volume: track.channel.volume.get(),
+            pan: track.channel.pan.get(),
             armed: view.armed,
             name: track.name.clone(),
             height: view.height,
