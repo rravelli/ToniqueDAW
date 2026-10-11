@@ -125,6 +125,7 @@ impl ProjectState {
                             position: clip.position.0,
                             trim_start: clip.trim_start,
                             trim_end: clip.trim_end,
+                            gain: clip.gain,
                         })
                         .collect(),
                 }
@@ -259,6 +260,7 @@ impl ProjectState {
             position: BeatPos(clip.position),
             trim_start: clip.trim_start,
             trim_end: clip.trim_end,
+            gain: clip.gain,
         })
     }
 

@@ -16,8 +16,9 @@ use crate::core::effect::EffectKind;
 pub const EXTENSION: &str = "tonique";
 /// Format version written; files from newer versions are refused.
 /// 2 added groups; 3 the echo, spectrum and utility effects, settings
-/// (filter `mode`, echo `time`) among effect parameters, and effect names.
-pub const VERSION: u32 = 3;
+/// (filter `mode`, echo `time`) among effect parameters, and effect names;
+/// 4 clip gain.
+pub const VERSION: u32 = 4;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
@@ -89,6 +90,17 @@ pub struct ClipFile {
     /// Part of the file played, as ratios of its length.
     pub trim_start: f32,
     pub trim_end: f32,
+    /// Linear; older projects have none (1).
+    #[serde(default = "unity", skip_serializing_if = "is_unity")]
+    pub gain: f32,
+}
+
+fn unity() -> f32 {
+    1.
+}
+
+fn is_unity(gain: &f32) -> bool {
+    *gain == 1.
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -245,6 +257,7 @@ mod tests {
                     position: 2.,
                     trim_start: 0.1,
                     trim_end: 0.9,
+                    gain: 0.5,
                 }],
             }],
         };

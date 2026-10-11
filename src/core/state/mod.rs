@@ -44,8 +44,8 @@ use tonique_engine::{
         PluginId, Track, TrackId,
         commands::{
             AddClip, AddPlugin, AddTrack, EditCommand, MoveClip, RemoveClip, RemovePlugin,
-            RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetMute, SetParam,
-            SetSolo, SetTempoMap,
+            RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetClipGain, SetMute,
+            SetParam, SetSolo, SetTempoMap,
         },
     },
     engine::Engine,
@@ -748,6 +748,17 @@ impl ProjectState {
             ops.push(ClipOp::Resize(track, resized));
         });
     }
+    /// Set an audio clip's gain (linear), as an undo step. Ends the preview
+    /// of a gain being dragged (see [`Self::resize_clip`]).
+    pub fn commit_clip_gain(&mut self, id: ClipId, gain: f32) {
+        self.resized_clip = None;
+        let Some((track, clip)) = self.find_clip(id) else {
+            return;
+        };
+        if clip.gain != gain {
+            self.perform(SetClipGain::new(track, id, gain));
+        }
+    }
     /// `clip` as shown: as being trimmed, if it is.
     pub fn shown_clip(&self, clip: &AudioClip) -> AudioClip {
         self.resized_clip
@@ -805,7 +816,7 @@ impl ProjectState {
             content: ClipContent::Audio {
                 source,
                 source_offset_s: (clip.trim_start * clip.source_seconds()) as f64,
-                gain: 1.,
+                gain: clip.gain,
             },
         }
     }
@@ -816,7 +827,7 @@ impl ProjectState {
         let ClipContent::Audio {
             source,
             source_offset_s,
-            ..
+            gain,
         } = clip.content
         else {
             return None;
@@ -831,6 +842,7 @@ impl ProjectState {
             position: clip.start,
             trim_start,
             trim_end,
+            gain,
         })
     }
 

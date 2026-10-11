@@ -431,6 +431,31 @@ fn resize_and_move_clips_across_tracks_undo() {
 }
 
 #[test]
+fn clip_gain_is_heard_and_undone() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000 * 8));
+    let mut track = Track::new(&mut edit, "t");
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 8.0, src);
+    let cid = clip.id;
+    track.clips.push(clip);
+    let tid = track.id;
+    edit.tracks.push(track);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    let before = peak(&render_offline(&mut p, 4800, 2));
+
+    s.perform(SetClipGain::new(tid, cid, 0.5)).unwrap();
+    let half = peak(&render_offline(&mut p, 4800, 2));
+    assert!((half - before / 2.).abs() < 0.01, "{before} then {half}");
+    s.undo().unwrap();
+    assert!((peak(&render_offline(&mut p, 4800, 2)) - before).abs() < 0.01);
+
+    assert!(s.perform(SetClipGain::new(tid, cid, -1.)).is_err());
+    assert!(s.perform(SetClipGain::new(tid, cid, f32::NAN)).is_err());
+}
+
+#[test]
 fn tracks_can_be_reordered_renamed_and_duplicated() {
     let mut edit = Edit::new(120.0);
     let t = synth_track(&mut edit, vec![note(0.0, 1.0, 60)], 4.0);

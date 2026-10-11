@@ -15,6 +15,8 @@ pub struct AudioClip {
     /// Ratio of the trimmed end length over the original length
     /// Between 0 and 1
     pub trim_end: f32,
+    /// Linear, 1 to play the file as is.
+    pub gain: f32,
 }
 
 impl AudioClip {
@@ -26,6 +28,7 @@ impl AudioClip {
             position,
             trim_start: 0.,
             trim_end: 1.,
+            gain: 1.,
         }
     }
 

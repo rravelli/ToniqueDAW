@@ -1,6 +1,6 @@
 //! The bottom panel's view of one clip.
 
-use egui::{CursorIcon, Grid, Label, Rect, RichText, Sense, Stroke, Ui, pos2};
+use egui::{CursorIcon, DragValue, FontId, Grid, Label, Rect, RichText, Sense, Stroke, Ui, pos2};
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 use crate::{
@@ -45,6 +45,9 @@ pub struct ClipDetails {
     /// Where bar 1 is in the arrangement: the clip's start, as in the edit
     /// (so it holds still while a trim is dragged).
     origin: BeatPos,
+    /// The waveform's lane, as last drawn.
+    #[cfg(test)]
+    lane: Rect,
 }
 
 impl ClipDetails {
@@ -54,6 +57,8 @@ impl ClipDetails {
             grid: GridService::new().with_negative_offset(),
             fitted: None,
             origin: BeatPos::ZERO,
+            #[cfg(test)]
+            lane: Rect::NOTHING,
         }
     }
 
@@ -72,6 +77,10 @@ impl ClipDetails {
         );
         let ruler = Rect::from_min_max(view.min, pos2(view.right(), view.top() + RULER_HEIGHT));
         let lane = Rect::from_min_max(pos2(view.left(), ruler.bottom()), view.max);
+        #[cfg(test)]
+        {
+            self.lane = lane;
+        }
         let details = Rect::from_min_max(pos2(view.right() + PADDING, rect.top()), rect.max);
 
         let bpm = state.bpm();
@@ -103,7 +112,7 @@ impl ClipDetails {
         self.paint_edges(ui, ruler, lane, &shown, bpm, &theme);
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(details), |ui| {
-            details_grid(ui, &shown, state);
+            details_grid(ui, clip, state);
         });
         ui.allocate_rect(rect, Sense::hover());
     }
@@ -353,14 +362,30 @@ fn trimmed(clip: &AudioClip, edge: TrimEdge, at: BeatPos, bpm: f32) -> AudioClip
     clip
 }
 
-fn details_grid(ui: &mut Ui, clip: &AudioClip, state: &ProjectState) {
+/// The clip's name; its position, length and gain, to drag or click and
+/// type; what of the file it plays, and the file's format. Edits show while
+/// dragged and apply as one undo step once released (or typed).
+fn details_grid(ui: &mut Ui, clip: &AudioClip, state: &mut ProjectState) {
     let theme = ui.app_theme();
     let bpm = state.bpm();
-    let beats_per_bar = state.grid.beats_per_bar();
-    let source = clip.source_seconds();
-    let length_beats = clip.end(bpm) - clip.position;
-    let position = clip.position.0;
-    let audio = &clip.audio;
+    let bpb = state.grid.beats_per_bar();
+    let shown = state.shown_clip(clip);
+    let source = shown.source_seconds();
+    let position = shown.position.0;
+    let length = shown.end(bpm) - shown.position;
+    let audio = &shown.audio;
+    // Positions and lengths snap to sixteenths, unless Alt is held.
+    let free = ui.input(|i| i.modifiers.alt);
+    let snap = |beats: f64| {
+        if free {
+            beats
+        } else {
+            (beats * 4.).round() / 4.
+        }
+    };
+    let seconds = |beats: f64| format_time(beats * 60. / bpm as f64);
+    // The clip as edited, and whether the edit is done.
+    let mut change: Option<(AudioClip, bool)> = None;
 
     ui.add(
         Label::new(
@@ -378,52 +403,202 @@ fn details_grid(ui: &mut Ui, clip: &AudioClip, state: &ProjectState) {
         .min_col_width(LABEL_WIDTH)
         .spacing([8., 3.])
         .show(ui, |ui| {
-            let mut row = |label: &str, value: String| {
-                ui.label(
-                    RichText::new(label)
-                        .size(font_size::LABEL)
-                        .color(theme.text_muted),
-                );
-                ui.add(
-                    Label::new(
-                        RichText::new(value)
-                            .size(font_size::LABEL)
-                            .color(theme.text),
-                    )
-                    .truncate(),
-                );
-                ui.end_row();
+            ui.style_mut().override_font_id = Some(FontId::proportional(font_size::LABEL));
+            let label = |ui: &mut Ui, text: &str| {
+                ui.label(RichText::new(text).color(theme.text_muted));
             };
-            row(
-                "Position",
-                format!(
-                    "{}  ·  {}",
-                    format_bars(position, beats_per_bar),
-                    format_time(position * 60. / bpm as f64)
-                ),
+            let muted = |ui: &mut Ui, text: String| {
+                ui.add(Label::new(RichText::new(text).color(theme.text_muted)).truncate());
+            };
+
+            label(ui, "Position");
+            ui.horizontal(|ui| {
+                let raw = ui.id().with("position-raw");
+                let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(position);
+                let response = ui
+                    .add(
+                        DragValue::new(&mut beats)
+                            .speed(1. / 16.)
+                            .range(0.0..=f64::MAX)
+                            .custom_formatter(|v, _| format_bars(v, bpb))
+                            .custom_parser(|text| parse_bars(text, bpb)),
+                    )
+                    .on_hover_text("Drag, or click and type bar.beat.sixteenth");
+                keep_raw(ui, raw, &response, beats);
+                if let Some(done) = gesture(&response) {
+                    let mut moved = shown.clone();
+                    moved.position = BeatPos(snap(beats).max(0.));
+                    change = Some((moved, done));
+                }
+                muted(ui, seconds(position));
+            });
+            ui.end_row();
+
+            label(ui, "Length");
+            ui.horizontal(|ui| {
+                let raw = ui.id().with("length-raw");
+                let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(length);
+                let response = ui
+                    .add(
+                        DragValue::new(&mut beats)
+                            .speed(1. / 16.)
+                            .range(MIN_LENGTH..=f64::MAX)
+                            .custom_formatter(|v, _| format_length(v, bpb))
+                            .custom_parser(|text| parse_length(text, bpb)),
+                    )
+                    .on_hover_text("Drag, or click and type bars.beats.sixteenths");
+                keep_raw(ui, raw, &response, beats);
+                if let Some(done) = gesture(&response) {
+                    let mut trimmed = shown.clone();
+                    let beats = snap(beats).max(MIN_LENGTH);
+                    trimmed.trim_end_at(trimmed.position + beats, bpm);
+                    change = Some((trimmed, done));
+                }
+                muted(ui, seconds(length));
+            });
+            ui.end_row();
+
+            label(ui, "Gain");
+            let mut db = gain_to_db(shown.gain);
+            let response = ui.add(
+                DragValue::new(&mut db)
+                    .speed(0.1)
+                    .range(SILENT_DB..=MAX_GAIN_DB)
+                    .custom_formatter(|db, _| format_gain(db as f32))
+                    .custom_parser(parse_gain),
             );
-            row(
-                "Length",
-                format!(
-                    "{}  ·  {}",
-                    format_length(length_beats, beats_per_bar),
-                    format_time(length_beats * 60. / bpm as f64)
-                ),
-            );
-            row(
-                "Plays",
+            if let Some(done) = gesture(&response) {
+                let mut louder = shown.clone();
+                louder.gain = db_to_gain(db);
+                change = Some((louder, done));
+            }
+            ui.end_row();
+
+            label(ui, "Plays");
+            muted(
+                ui,
                 format!(
                     "{} – {} of {}",
-                    format_time((clip.trim_start * source) as f64),
-                    format_time((clip.trim_end * source) as f64),
+                    format_time((shown.trim_start * source) as f64),
+                    format_time((shown.trim_end * source) as f64),
                     format_time(source as f64)
                 ),
             );
-            row(
-                "Format",
+            ui.end_row();
+
+            label(ui, "Format");
+            muted(
+                ui,
                 format_audio(audio.sample_rate, audio.bit_depth, audio.channels),
             );
+            ui.end_row();
         });
+
+    match change {
+        Some((edited, false)) => state.resize_clip(edited),
+        Some((edited, true)) => {
+            let gain = edited.gain;
+            state.commit_resize_clip(edited);
+            state.commit_clip_gain(clip.id, gain);
+        }
+        None => {}
+    }
+}
+
+/// Keep a dragged value as it is, before snapping, so that snapping what's
+/// shown doesn't hold back small drags.
+fn keep_raw(ui: &Ui, id: egui::Id, response: &egui::Response, value: f64) {
+    if response.dragged() {
+        ui.data_mut(|d| d.insert_temp(id, value));
+    } else {
+        ui.data_mut(|d| d.remove::<f64>(id));
+    }
+}
+
+/// Where a drag value's edit is at: `Some(false)` while dragged,
+/// `Some(true)` once released or typed, `None` when untouched.
+fn gesture(response: &egui::Response) -> Option<bool> {
+    if response.drag_stopped() {
+        Some(true)
+    } else if response.changed() {
+        Some(!response.dragged())
+    } else {
+        None
+    }
+}
+
+/// Gain at the bottom of the range: silence.
+const SILENT_DB: f32 = -60.;
+const MAX_GAIN_DB: f32 = 12.;
+
+fn gain_to_db(gain: f32) -> f32 {
+    if gain <= 0. {
+        SILENT_DB
+    } else {
+        (20. * gain.log10()).max(SILENT_DB)
+    }
+}
+
+fn db_to_gain(db: f32) -> f32 {
+    if db <= SILENT_DB {
+        0.
+    } else {
+        10f32.powf(db / 20.)
+    }
+}
+
+/// `+3.0 dB`, or `-inf dB` for silence.
+fn format_gain(db: f32) -> String {
+    if db <= SILENT_DB {
+        "-inf dB".into()
+    } else {
+        format!("{db:+.1} dB")
+    }
+}
+
+/// A gain as typed: `-6`, `+3 dB`, `-inf`.
+fn parse_gain(text: &str) -> Option<f64> {
+    let text = text
+        .trim()
+        .trim_end_matches("dB")
+        .trim_end_matches("db")
+        .trim();
+    if text.eq_ignore_ascii_case("-inf") {
+        return Some(SILENT_DB as f64);
+    }
+    text.parse().ok()
+}
+
+/// A position as typed, `bar.beat.sixteenth` from 1 (`3.2.1`; missing
+/// parts are the first), in beats.
+fn parse_bars(text: &str, beats_per_bar: usize) -> Option<f64> {
+    let parts = parse_parts(text)?;
+    let part = |i: usize| parts.get(i).copied().unwrap_or(1.);
+    if parts.is_empty() || parts.iter().any(|p| *p < 1.) {
+        return None;
+    }
+    Some((part(0) - 1.) * beats_per_bar as f64 + (part(1) - 1.) + (part(2) - 1.) / 4.)
+}
+
+/// A length as typed, `bars.beats.sixteenths` (`1.2.0`; missing parts are
+/// none), in beats.
+fn parse_length(text: &str, beats_per_bar: usize) -> Option<f64> {
+    let parts = parse_parts(text)?;
+    let part = |i: usize| parts.get(i).copied().unwrap_or(0.);
+    if parts.is_empty() || parts.iter().any(|p| *p < 0.) {
+        return None;
+    }
+    Some(part(0) * beats_per_bar as f64 + part(1) + part(2) / 4.)
+}
+
+/// Up to three numbers separated by dots.
+fn parse_parts(text: &str) -> Option<Vec<f64>> {
+    let parts: Vec<f64> = text
+        .trim()
+        .split('.')
+        .map(|p| p.trim().parse().ok())
+        .collect::<Option<_>>()?;
+    (parts.len() <= 3).then_some(parts)
 }
 
 /// Length as bars, beats and sixteenths: `1 bar 2 beats`, `3 beats`.
@@ -535,6 +710,33 @@ mod tests {
     }
 
     #[test]
+    fn typed_positions_and_lengths_read_as_shown() {
+        assert_eq!(parse_bars("3.2.3", 4), Some(9.5));
+        assert_eq!(parse_bars("1.1.1", 4), Some(0.));
+        assert_eq!(parse_bars("2", 4), Some(4.), "missing parts are the first");
+        assert_eq!(parse_bars("0.1.1", 4), None, "bars count from 1");
+        assert_eq!(parse_bars("1.2.3.4", 4), None);
+        assert_eq!(parse_bars("x", 4), None);
+        assert_eq!(parse_length("1.2.1", 4), Some(6.25));
+        assert_eq!(parse_length("3", 4), Some(12.), "bars first");
+        assert_eq!(parse_length("0.0.2", 4), Some(0.5));
+        for beats in [0., 6.25, 9.5] {
+            assert_eq!(parse_bars(&format_bars(beats, 4), 4), Some(beats));
+        }
+    }
+
+    #[test]
+    fn gains_read_in_decibels() {
+        assert_eq!(format_gain(gain_to_db(1.)), "+0.0 dB");
+        assert_eq!(format_gain(gain_to_db(0.)), "-inf dB");
+        assert_eq!(db_to_gain(SILENT_DB), 0.);
+        assert!((db_to_gain(-6.0206) - 0.5).abs() < 1e-4);
+        assert_eq!(parse_gain("-6 dB"), Some(-6.));
+        assert_eq!(parse_gain("+3"), Some(3.));
+        assert_eq!(parse_gain("-inf"), Some(SILENT_DB as f64));
+    }
+
+    #[test]
     fn lengths_read_naturally() {
         assert_eq!(format_length(4., 4), "1 bar");
         assert_eq!(format_length(6.25, 4), "1 bar 2 beats 1 sixteenth");
@@ -549,5 +751,114 @@ mod tests {
             "44.1 kHz · 16-bit · stereo"
         );
         assert_eq!(format_audio(48000, None, 1), "48 kHz · mono");
+    }
+
+    /// Drives the view of one clip headless, with real pointer events.
+    struct Harness {
+        ctx: egui::Context,
+        details: ClipDetails,
+        state: ProjectState,
+        clip: ClipId,
+    }
+
+    impl Harness {
+        /// A 4-beat file at beat 4, its first and last beat trimmed away.
+        fn new() -> Self {
+            use crate::analysis::AudioInfo;
+            use tonique_engine::engine::{Engine, EngineConfig};
+            let (engine, _processor) = Engine::new(EngineConfig::default());
+            let mut state = ProjectState::new(engine);
+            let track = state.add_track();
+            let clip = state.new_clip_id();
+            let mut audio = AudioClip::new(clip, AudioInfo::silent(2.), BeatPos(4.));
+            audio.trim_start = 0.25;
+            audio.trim_end = 0.75;
+            audio.position = BeatPos(5.);
+            state.add_clips(&track, vec![audio]);
+            let ctx = egui::Context::default();
+            ctx.set_fonts(crate::ui::font::fonts());
+            let mut harness = Self {
+                ctx,
+                details: ClipDetails::new(),
+                state,
+                clip,
+            };
+            harness.frame(Vec::new());
+            harness
+        }
+
+        fn clip(&self) -> AudioClip {
+            self.state.find_clip(self.clip).unwrap().1
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000., 200.),
+                )),
+                time: Some(self.ctx.input(|i| i.time) + 1.),
+                events,
+                ..Default::default()
+            };
+            let clip = self.clip();
+            let (details, state) = (&mut self.details, &mut self.state);
+            let mut output = self.ctx.run_ui(input, |ui| {
+                let track = state.tracks().next().unwrap();
+                details.ui(ui, &clip, &track, state);
+            });
+            output.textures_delta.clear();
+        }
+
+        fn drag(&mut self, from: egui::Pos2, to: egui::Pos2) {
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            self.frame(vec![egui::Event::PointerMoved(from), button(from, true)]);
+            for step in 1..=4 {
+                let at = from.lerp(to, step as f32 / 4.);
+                self.frame(vec![egui::Event::PointerMoved(at)]);
+            }
+            self.frame(vec![button(to, false)]);
+            self.frame(Vec::new());
+        }
+
+        /// The middle of the lane at `at` in the arrangement.
+        fn at(&self, at: BeatPos) -> egui::Pos2 {
+            let lane = self.details.lane;
+            egui::pos2(self.details.x(at, lane), lane.center().y)
+        }
+    }
+
+    #[test]
+    fn dragging_an_edge_trims_the_clip_in_one_step() {
+        let mut h = Harness::new();
+        let end = h.clip().end(120.);
+        assert_eq!(end, BeatPos(7.));
+        // Out past the file's end: it stops there, at beat 8.
+        let (from, to) = (h.at(end), h.at(BeatPos(9.)));
+        h.drag(from, to);
+        assert_eq!(h.clip().end(120.), BeatPos(8.));
+        h.state.undo();
+        assert_eq!(h.clip().end(120.), end, "one step");
+    }
+
+    #[test]
+    fn trimming_the_start_moves_bar_one_but_not_the_audio() {
+        let mut h = Harness::new();
+        let file_start = h.clip().file_start(120.);
+        let before = h.at(file_start).x;
+        assert_eq!(h.details.origin, BeatPos(5.));
+        let (from, to) = (h.at(BeatPos(5.)), h.at(BeatPos(6.)));
+        h.drag(from, to);
+        assert_eq!(h.clip().position, BeatPos(6.));
+        assert_eq!(h.details.origin, BeatPos(6.), "bar 1 is the new start");
+        assert!(
+            (h.at(file_start).x - before).abs() < 0.01,
+            "the audio stayed"
+        );
     }
 }

@@ -868,6 +868,40 @@ fn trimming_a_clip_of_unknown_length_does_nothing() {
 }
 
 #[test]
+fn clip_gain_is_one_undo_step_and_survives_edits() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let clip = add_clip(&mut state, track, 0., 2.); // beats 0..4
+    let gain = |state: &ProjectState, id| state.find_clip(id).unwrap().1.gain;
+    assert_eq!(gain(&state, clip), 1.);
+
+    // Previewed while dragged, then applied.
+    let mut dragged = state.find_clip(clip).unwrap().1;
+    dragged.gain = 0.25;
+    state.resize_clip(dragged.clone());
+    assert_eq!(state.shown_clip(&dragged).gain, 0.25);
+    assert_eq!(gain(&state, clip), 1., "not in the edit yet");
+    state.commit_clip_gain(clip, 0.25);
+    assert_eq!(gain(&state, clip), 0.25);
+
+    // Splitting keeps it on both parts.
+    state.cut_clip_at(&track, BeatPos(2.));
+    let gains: Vec<_> = state
+        .tracks()
+        .next()
+        .unwrap()
+        .clips
+        .iter()
+        .map(|c| c.gain)
+        .collect();
+    assert_eq!(gains, [0.25, 0.25]);
+
+    state.undo();
+    state.undo();
+    assert_eq!(gain(&state, clip), 1.);
+}
+
+#[test]
 fn select_all_selects_every_clip() {
     let mut state = setup_state();
     let (t0, t1) = (state.add_track(), state.add_track());
@@ -1026,6 +1060,7 @@ mod projects {
         let mut clip = AudioClip::new(state.new_clip_id(), audio, BeatPos(2.));
         clip.trim_start = 0.25;
         clip.trim_end = 0.75;
+        clip.gain = 0.5;
         state.add_clips(&track, vec![clip]);
         state.commit_volume(track, 1.0, 0.5);
         state.commit_volume(MASTER_TRACK_ID, 1.0, 0.8);
@@ -1093,6 +1128,7 @@ mod projects {
                 position: 0.,
                 trim_start: 0.,
                 trim_end: 1.,
+                gain: 1.,
             }],
         });
         let mut state = setup_state();
