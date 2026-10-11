@@ -21,6 +21,12 @@ const HEADER_HEIGHT: f32 = 16.;
 /// Width of the trim handles inside each edge of a clip.
 const TRIM_HANDLE_WIDTH: f32 = 7.;
 const MIN_TRIM_HANDLE_WIDTH: f32 = 2.;
+/// Opacity of a clip's body over the lane: a tint of its track's colour,
+/// unlike its solid header, so the header reads as the clip to grab and the
+/// body as time.
+const BODY_ALPHA: u8 = 100;
+/// A selected clip's body: a little more, its header carrying the selection.
+const SELECTED_BODY_ALPHA: u8 = 130;
 /// Opacity of a silenced clip's body, header and outline over the lane: a
 /// faint wash of its track's colour.
 const SILENCED_BODY_ALPHA: u8 = 40;
@@ -64,36 +70,47 @@ impl ClipView<'_> {
         let painter = ui.painter_at(sample_rect);
         let mut clip_copy = clip.clone();
         let theme = ui.app_theme();
-        // Selected clips light up and get a neutral outline, rather than a
-        // UI colour that could clash with the clip's own.
-        let fill = if selected {
-            color.lerp_to_gamma(theme.clip_selected, 0.2)
+        // The header is the clip, to select and move: solid in its track's
+        // colour, lit up when selected (towards a neutral colour that can't
+        // clash with the clip's). The body is time, a click there places
+        // the edit cursor: a tint of the colour, the waveform on it.
+        let header = if selected {
+            color.lerp_to_gamma(theme.clip_selected, 0.35)
         } else {
             color
         };
-        // Name and waveform are drawn on the clip's colour; a silenced clip
-        // only keeps a trace of it, so it recedes without losing its track.
-        let (fill, header, ink, outline) = if self.silenced {
+        let (body, header, header_ink, wave, outline) = if self.silenced {
             (
-                with_alpha(fill, SILENCED_BODY_ALPHA),
+                with_alpha(color, SILENCED_BODY_ALPHA),
                 with_alpha(color, SILENCED_HEADER_ALPHA),
+                theme.text_muted,
                 theme.text_muted,
                 with_alpha(color, SILENCED_BORDER_ALPHA),
             )
         } else {
-            (fill, color, theme.text_on(fill), fill)
+            let alpha = if selected {
+                SELECTED_BODY_ALPHA
+            } else {
+                BODY_ALPHA
+            };
+            (
+                with_alpha(header, alpha),
+                header,
+                theme.text_on(header),
+                color,
+                with_alpha(color, 170),
+            )
         };
-
         let stroke = if selected {
             Stroke::new(BORDER_WIDTH, theme.clip_selected)
         } else {
-            Stroke::new(BORDER_WIDTH, outline)
+            Stroke::new(1., outline)
         };
         // Main rect
         painter.rect(
             Rect::from_min_size(pos, size),
             2.0,
-            fill,
+            body,
             stroke,
             egui::StrokeKind::Inside,
         );
@@ -105,7 +122,7 @@ impl ClipView<'_> {
             );
             state
                 .grid
-                .paint_clip_grid(&painter, viewport, rect, with_alpha(ink, 25));
+                .paint_clip_grid(&painter, viewport, rect, with_alpha(wave, 30));
         }
         // Header area
         let hitbox = Rect::from_min_size(
@@ -120,13 +137,18 @@ impl ClipView<'_> {
             ),
         )
         .intersect(viewport);
-        painter.rect(hitbox, 2.0, header, Stroke::NONE, egui::StrokeKind::Inside);
-
         let response = ui.interact(
             hitbox,
             format!("{:?}{}", clip.id, clip.position.0).into(),
             Sense::all(),
         );
+        // Lights up under the pointer, like a button.
+        let header = if response.hovered() || response.dragged() {
+            header.blend(theme.hover_overlay)
+        } else {
+            header
+        };
+        painter.rect(hitbox, 2.0, header, Stroke::NONE, egui::StrokeKind::Inside);
         // Trim handles just inside each edge, registered after the header so
         // they win where they overlap it. Narrow clips get narrower handles,
         // leaving the middle to grab the clip.
@@ -157,12 +179,7 @@ impl ClipView<'_> {
             Align2::LEFT_TOP,
             clip.audio.name.clone().to_string(),
             FontId::new(font_size::SMALL, FontFamily::Monospace),
-            ink,
-        );
-
-        painter.line(
-            vec![hitbox.left_bottom(), hitbox.right_bottom()],
-            Stroke::new(1.0, with_alpha(ink, 60)),
+            header_ink,
         );
         // Waveform
         if show_waveform {
@@ -177,8 +194,16 @@ impl ClipView<'_> {
                 viewport,
                 state.grid.pixels_per_beat(),
                 state.bpm(),
-                ink,
+                wave,
             );
+            // Between the trim handles, the body is the timeline's: show
+            // where a click places the edit cursor.
+            let body = Rect::from_min_max(
+                pos2(pos.x + handle_width, waveform_rect.top()),
+                pos2(pos.x + size.x - handle_width, waveform_rect.bottom()),
+            )
+            .intersect(viewport);
+            self.body_hover(ui, state, body);
         }
         // Draw an overlay when audio not ready
         if !clip.audio.data.is_ready() {
@@ -203,6 +228,29 @@ impl ClipView<'_> {
         }
 
         response
+    }
+
+    /// Over `body`, while nothing's dragged: a text cursor, and a line where
+    /// a click places the edit cursor (snapped as it would be).
+    fn body_hover(&self, ui: &Ui, state: &ProjectState, body: Rect) {
+        let idle = ui.ctx().dragged_id().is_none() && !ui.input(|i| i.pointer.any_down());
+        let Some(pointer) = ui.input(|i| i.pointer.hover_pos()) else {
+            return;
+        };
+        if !idle || !body.contains(pointer) || !ui.rect_contains_pointer(body) {
+            return;
+        }
+        ui.ctx().set_cursor_icon(CursorIcon::Text);
+        let beats = state.grid.x_to_beats(pointer.x, self.viewport);
+        let x = state
+            .grid
+            .beats_to_x(state.grid.snap_at_grid(beats), self.viewport);
+        let theme = ui.app_theme();
+        ui.painter_at(body).vline(
+            x,
+            body.y_range(),
+            Stroke::new(1., with_alpha(theme.text, 170)),
+        );
     }
 
     /// A trim handle: dragging it moves that edge of `clip`, snapping to
@@ -307,5 +355,59 @@ pub fn paint_clip_waveform(
                 Stroke::new(1., with_alpha(color, 110)),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::AudioInfo;
+    use tonique_engine::{
+        edit::ClipId,
+        engine::{Engine, EngineConfig},
+        time::BeatPos,
+    };
+
+    /// The cursor over `at`, with a clip drawn over (0, 0)–(400, 60).
+    fn cursor_at(at: Pos2) -> CursorIcon {
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        let clip = AudioClip::new(ClipId(1), AudioInfo::silent(4.), BeatPos(0.), 120.);
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let mut cursor = CursorIcon::Default;
+        for events in [vec![], vec![egui::Event::PointerMoved(at)]] {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800., 200.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                ClipView {
+                    clip: &clip,
+                    rect: Rect::from_min_size(Pos2::ZERO, vec2(400., 60.)),
+                    viewport: Rect::from_min_size(Pos2::ZERO, vec2(800., 200.)),
+                    color: crate::ui::theme::Theme::dark().accent,
+                    selected: false,
+                    show_waveform: true,
+                    silenced: false,
+                }
+                .ui(ui, &mut state);
+            });
+            output.textures_delta.clear();
+            cursor = output.platform_output.cursor_icon;
+        }
+        cursor
+    }
+
+    #[test]
+    fn the_header_grabs_the_clip_and_the_body_places_the_cursor() {
+        assert_eq!(cursor_at(pos2(200., 8.)), CursorIcon::Grab, "header");
+        assert_eq!(cursor_at(pos2(200., 40.)), CursorIcon::Text, "body");
+        assert_eq!(
+            cursor_at(pos2(398., 40.)),
+            CursorIcon::ResizeHorizontal,
+            "a trim handle"
+        );
     }
 }
