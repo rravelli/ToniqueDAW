@@ -1,9 +1,12 @@
 use crate::{
     config::keymap::Action,
-    core::state::{PlaybackState, ProjectState},
+    core::state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
     ui::{
         arrangement::{
-            row_layout::RowLayout, ruler::Ruler, timeline::Timeline, track_headers::TrackHeaders,
+            row_layout::RowLayout,
+            ruler::Ruler,
+            timeline::Timeline,
+            track_headers::{FOOTER_PADDING, TrackHeaders},
         },
         commands::Commands,
         graph::GraphView,
@@ -20,6 +23,10 @@ use egui::{Align2, Color32, FontId, Frame, Margin, Rect, Sense, Stroke, Ui, Vec2
 /// Empty bars after the end of the arrangement.
 const TIMELINE_SLACK_BARS: f64 = 16.;
 const EMPTY_LOGO_SIZE: f32 = 80.;
+/// Half the width of the edit cursor's caps.
+const EDIT_CURSOR_CAP: f32 = 3.;
+/// The master's output scope, in the footer.
+const SCOPE_WIDTH: f32 = 120.;
 
 pub struct CentralPanel {
     timeline: Timeline,
@@ -83,7 +90,12 @@ impl CentralPanel {
         // Draw navigation bar on top
         self.ruler.ui(ui, state, self.tracks.width);
 
-        let (viewport, _) = ui.allocate_exact_size(ui.available_size(), Sense::all());
+        let (area, _) = ui.allocate_exact_size(ui.available_size(), Sense::all());
+        // The tracks scroll above a footer holding the master.
+        let footer_height = (state.master_track().height + FOOTER_PADDING).min(area.height());
+        let viewport = Rect::from_min_max(area.min, pos2(area.max.x, area.max.y - footer_height));
+        let footer = Rect::from_min_max(pos2(area.min.x, viewport.max.y), area.max);
+        master_lane_ui(ui, state, footer, footer.max.x - self.tracks.width);
         ui.set_clip_rect(viewport);
 
         let timeline_viewport = Rect::from_min_max(
@@ -101,7 +113,8 @@ impl CentralPanel {
             timeline_viewport,
         );
         // Draw tracks
-        self.tracks.ui(ui, state, workspace, &layout, viewport);
+        self.tracks
+            .ui(ui, state, workspace, &layout, viewport, footer);
         if state.track_count() == 0 {
             empty_project_ui(ui, state, timeline_viewport);
         }
@@ -114,7 +127,8 @@ impl CentralPanel {
             .width_to_beats(state.grid.offset.x + timeline_viewport.width());
         let end = (state.arrangement_end() + slack).0.max(visible_end);
         ui.set_width(state.grid.beats_to_width(end));
-        let content_size = ui.min_size();
+        // The footer isn't content to scroll to.
+        let content_size = ui.min_size() - vec2(0., footer_height);
 
         let mut scrolled_x = false;
         if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
@@ -135,17 +149,12 @@ impl CentralPanel {
         }
         scrolled_x |= self.scrollbars_ui(ui, viewport, content_size, &mut state.grid.offset);
         self.follow_playhead(ui, state, timeline_viewport, scrolled_x);
-        self.cursors_ui(
-            ui,
-            state,
-            Rect::from_min_size(
-                available_rect.min,
-                vec2(
-                    available_rect.width() - self.tracks.width,
-                    available_rect.height(),
-                ),
-            ),
+        // From the ruler's top, for the playhead's handle, to the footer.
+        let cursors = Rect::from_min_max(
+            available_rect.min,
+            pos2(timeline_viewport.right(), timeline_viewport.bottom()),
         );
+        self.cursors_ui(ui, state, &layout, cursors, timeline_viewport);
     }
 
     /// Keep the playhead in the middle of the view during playback. Near the
@@ -222,9 +231,17 @@ impl CentralPanel {
     }
 
     /// Loop bounds (while looping), edit cursor (only while it differs from
-    /// the playhead) and playhead
-    /// with its draggable handle.
-    fn cursors_ui(&self, ui: &mut Ui, state: &mut ProjectState, rect: Rect) {
+    /// the playhead, over the selected tracks) and playhead with its
+    /// draggable handle. `rect` spans the ruler and the timeline, `lanes`
+    /// the timeline alone.
+    fn cursors_ui(
+        &self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        layout: &RowLayout,
+        rect: Rect,
+        lanes: Rect,
+    ) {
         ui.set_clip_rect(rect);
         let theme = ui.app_theme();
         let painter = ui.painter();
@@ -237,10 +254,16 @@ impl CentralPanel {
         }
         if state.edit_cursor() != state.playhead() {
             let x = state.grid.beats_to_x(state.edit_cursor(), rect);
-            painter.line_segment(
-                [pos2(x, rect.top()), pos2(x, rect.bottom())],
-                Stroke::new(1.0, theme.edit_cursor),
-            );
+            let stroke = Stroke::new(1.0, theme.edit_cursor);
+            let lane_painter = painter.with_clip_rect(lanes);
+            for row in layout.rows().iter().filter(|r| r.track.selected) {
+                // An I-beam: the caps tell it from the playhead.
+                let y = row.y.shrink(1.);
+                lane_painter.vline(x, y, stroke);
+                for cap in [y.min, y.max] {
+                    lane_painter.hline((x - EDIT_CURSOR_CAP)..=(x + EDIT_CURSOR_CAP), cap, stroke);
+                }
+            }
         }
         let playhead_x = state.grid.beats_to_x(state.playhead(), rect);
         let line_stroke = Stroke::new(2.0, with_alpha(theme.playhead, 160));
@@ -304,6 +327,67 @@ impl CentralPanel {
             state.seek(state.grid.x_to_beats(mouse_pos.x, rect));
         }
     }
+}
+
+/// The footer's background, and the master's output scope at the end of
+/// its timeline part (up to `timeline_right`), next to the master's header.
+fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect, timeline_right: f32) {
+    let theme = ui.app_theme();
+    let painter = ui.painter_at(footer);
+    painter.rect_filled(footer, 0., theme.bg_panel);
+    painter.hline(
+        footer.x_range(),
+        footer.top() + 0.5,
+        Stroke::new(1.0, theme.border),
+    );
+    let lane = Rect::from_min_max(footer.min, pos2(timeline_right, footer.max.y));
+
+    let scope = Rect::from_min_max(
+        pos2(
+            lane.right() - SCOPE_WIDTH - 4.,
+            lane.top() + FOOTER_PADDING + 2.,
+        ),
+        pos2(lane.right() - 4., lane.bottom() - 4.),
+    );
+    if scope.width() <= 0. || scope.height() <= 0. || lane.width() < 2. * SCOPE_WIDTH {
+        return;
+    }
+    painter.rect_filled(scope, 2., theme.bg_deep);
+    painter.text(
+        scope.left_top() + vec2(4., 2.),
+        Align2::LEFT_TOP,
+        "OUT",
+        FontId::proportional(font_size::SMALL),
+        theme.text_disabled,
+    );
+    let samples = state
+        .metrics
+        .tracks
+        .get(&MASTER_TRACK_ID)
+        .filter(|m| m.samples.len() >= 2 && m.samples[0].len() > 3);
+    let Some(m) = samples else {
+        painter.hline(
+            scope.x_range(),
+            scope.center().y,
+            Stroke::new(1.0, theme.separator),
+        );
+        return;
+    };
+    let len = m.samples[0].len() as f32;
+    let points: Vec<_> = m.samples[0]
+        .iter()
+        .zip(m.samples[1].iter())
+        .enumerate()
+        .map(|(i, (l, r))| {
+            pos2(
+                scope.left() + i as f32 * scope.width() / len,
+                scope.center().y - scope.height() * ((l + r) / 4.).clamp(-0.5, 0.5),
+            )
+        })
+        .collect();
+    painter.add(egui::Shape::line(points, Stroke::new(1.0, theme.accent)));
+    ui.interact(scope, ui.id().with("master-scope"), Sense::hover())
+        .on_hover_text("Master output");
 }
 
 /// What a project without tracks shows: the logo, faded, and how to start.

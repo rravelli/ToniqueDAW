@@ -140,13 +140,13 @@ impl LeftPanel {
                     }
                     for kind in found {
                         let icon = match kind {
-                            EffectKind::Filter => egui_phosphor::fill::FUNNEL_SIMPLE,
-                            EffectKind::Echo => egui_phosphor::fill::WAVES,
-                            EffectKind::Spectrum => egui_phosphor::fill::CHART_LINE,
-                            EffectKind::Utility => egui_phosphor::fill::SLIDERS,
+                            EffectKind::Filter => egui_phosphor::regular::FUNNEL_SIMPLE,
+                            EffectKind::Echo => egui_phosphor::regular::WAVES,
+                            EffectKind::Spectrum => egui_phosphor::regular::CHART_LINE,
+                            EffectKind::Utility => egui_phosphor::regular::SLIDERS,
                         };
                         let res = ui
-                            .add(ListRow::new(format!("{icon} {}", kind.name())))
+                            .add(ListRow::new(kind.name()).icon(icon))
                             .on_hover_text("Drag onto a track or the effects panel");
                         res.dnd_set_drag_payload(DragPayload::Effect(kind));
                     }

@@ -1,5 +1,5 @@
 use egui::{FontId, Rangef, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use egui_phosphor::fill::PLUS;
+use egui_phosphor::regular::PLUS;
 use tonique_engine::edit::TrackId;
 
 use crate::{
@@ -8,14 +8,13 @@ use crate::{
         state::{ProjectState, RowTarget},
         track::TrackKind,
     },
-    ui::theme::ThemeExt,
+    ui::theme::{ThemeExt, font_size},
     ui::{
         arrangement::row_layout::{Row, RowLayout},
         arrangement::track_header::{
             COLOR_BAR_WIDTH, HEADER_INSET, ROW_GAP, TrackHeader, color_bar_x,
         },
         dnd::DragPayload,
-        font::PHOSPHOR_REGULAR,
         widget::{
             context_menu::ContextMenuButton, flat_button::FlatButton, scroll_bar::SCROLLBAR_WIDTH,
         },
@@ -25,6 +24,9 @@ use crate::{
 
 pub const SPLITTER_WIDTH: f32 = 2.0;
 const DEFAULT_TRACK_WIDTH: f32 = 150.;
+const ADD_TRACK_HEIGHT: f32 = 24.;
+/// Above the master's header, below the footer's top line.
+pub const FOOTER_PADDING: f32 = 3.;
 
 /// Share of a group header's height, from the top, where a drop goes above
 /// the group rather than into it.
@@ -59,6 +61,7 @@ impl TrackHeaders {
         workspace: &mut Workspace,
         layout: &RowLayout,
         viewport: Rect,
+        footer: Rect,
     ) {
         let left = viewport.max.x - self.width;
         let rename = self.rename.take();
@@ -95,16 +98,15 @@ impl TrackHeaders {
                 self.track_panel(ui, state, workspace, layout, viewport, rename);
             },
         );
+        // The master, in the footer below the tracks, under the headers.
         let master_track = state.master_track();
         ui.scope_builder(
             egui::UiBuilder::new().max_rect(Rect::from_min_max(
-                pos2(
-                    left + SPLITTER_WIDTH,
-                    viewport.bottom() - master_track.height,
-                ),
-                pos2(viewport.right() - SCROLLBAR_WIDTH, viewport.bottom()),
+                pos2(left + SPLITTER_WIDTH, footer.top() + FOOTER_PADDING),
+                pos2(viewport.right() - SCROLLBAR_WIDTH, footer.bottom()),
             )),
             |ui| {
+                ui.set_clip_rect(footer);
                 ui.horizontal(|ui| {
                     TrackHeader::new().ui(
                         ui,
@@ -170,12 +172,10 @@ impl TrackHeaders {
 
             if ui
                 .add(
-                    FlatButton::ghost(PLUS.to_string())
-                        .font(FontId::new(
-                            10.,
-                            egui::FontFamily::Name(PHOSPHOR_REGULAR.into()),
-                        ))
-                        .size(vec2(ui.available_width(), 20.))
+                    FlatButton::ghost(format!("{PLUS} Add track"))
+                        .font(FontId::proportional(font_size::LABEL))
+                        .color(ui.app_theme().text_muted)
+                        .size(vec2(ui.available_width(), ADD_TRACK_HEIGHT))
                         .tooltip(state.settings().keymap.with_shortcut(
                             ui.ctx(),
                             "Add audio track",

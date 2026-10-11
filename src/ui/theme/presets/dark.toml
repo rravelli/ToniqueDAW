@@ -39,7 +39,7 @@ shadow = "#0000008c"
 
 # Timeline
 playhead = "#f2f3f5"
-edit_cursor = "#00c9d4"
+edit_cursor = "#e8eaed"
 selection_fill = "#e8eaed0d"
 selection_stroke = "#e8eaed66"
 clip_selected = "#f2f3f5"

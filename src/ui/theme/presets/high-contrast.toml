@@ -30,7 +30,7 @@ hover_overlay = "#ffffff1c"
 shadow = "#000000d0"
 
 playhead = "#ffffff"
-edit_cursor = "#ffd400"
+edit_cursor = "#ffffff"
 selection_fill = "#ffffff0d"
 selection_stroke = "#ffffffa6"
 loop_region = "#ffd40040"

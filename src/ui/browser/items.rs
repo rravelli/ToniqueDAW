@@ -22,7 +22,7 @@ use crate::{
         browser::file_tree::{FileNode, FileTree},
         dnd::DragPayload,
         theme::ThemeExt,
-        widget::list_row::ListRow,
+        widget::list_row::{ListRow, SLOT},
     },
 };
 
@@ -191,18 +191,17 @@ impl FileList {
         let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let is_audio = PLAYABLE_FORMAT.contains(&extension);
 
-        let icon = if is_dir {
-            if open {
-                egui_phosphor::fill::CARET_DOWN
-            } else {
-                egui_phosphor::fill::CARET_RIGHT
-            }
-        } else {
-            if is_audio {
-                egui_phosphor::fill::FILE_AUDIO
-            } else {
-                egui_phosphor::fill::FILE
-            }
+        let (caret, icon) = match (is_dir, open) {
+            (true, true) => (
+                Some(egui_phosphor::regular::CARET_DOWN),
+                egui_phosphor::regular::FOLDER_OPEN,
+            ),
+            (true, false) => (
+                Some(egui_phosphor::regular::CARET_RIGHT),
+                egui_phosphor::regular::FOLDER,
+            ),
+            (false, _) if is_audio => (None, egui_phosphor::regular::FILE_AUDIO),
+            (false, _) => (None, egui_phosphor::regular::FILE),
         };
 
         let name = file
@@ -212,13 +211,11 @@ impl FileList {
             .to_string_lossy();
 
         let res = ui.add(
-            ListRow::new(format!(
-                "{}{} {}",
-                " ".repeat((file.depth - 1) * 2),
-                icon,
-                name
-            ))
-            .selected(selected),
+            ListRow::new(name)
+                .indent((file.depth - 1) as f32 * SLOT)
+                .caret(caret)
+                .icon(icon)
+                .selected(selected),
         );
 
         let pressed =

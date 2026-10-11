@@ -13,7 +13,7 @@ use crate::{
         widget::{context_menu::ContextMenuButton, flat_button::FlatButton},
     },
 };
-use egui::{Button, FontId, RichText, ScrollArea, Ui, Widget};
+use egui::{Button, FontId, RichText, Ui, Widget};
 use egui_phosphor::{
     fill::{FOLDER_PLUS, TRASH},
     regular::FOLDER,
@@ -61,39 +61,36 @@ impl FileBrowser {
     ) {
         let moves = take_moves(commands, focused);
         ui.spacing_mut().scroll.bar_width = 5.0;
-        ScrollArea::horizontal().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                self.choose_dir_button(ui);
-                let paths = self.config.list_dirs();
-                for path in paths {
-                    let name = path.file_name().unwrap_or(OsStr::new("")).to_string_lossy();
+        // The folders wrap: a long list never hides any.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+            self.choose_dir_button(ui);
+            let paths = self.config.list_dirs();
+            for path in paths {
+                let name = path.file_name().unwrap_or(OsStr::new("")).to_string_lossy();
 
-                    let res = Button::new(
-                        RichText::new(format!("{} {}", FOLDER, name)).size(font_size::SMALL),
-                    )
-                    .selected(self.root.as_ref().is_some_and(|f| *f == path))
-                    .ui(ui);
+                let res = Button::new(
+                    RichText::new(format!("{} {}", FOLDER, name)).size(font_size::SMALL),
+                )
+                .selected(self.root.as_ref().is_some_and(|f| *f == path))
+                .ui(ui);
 
-                    if res.clicked() {
-                        self.set_dir(path.clone());
-                        res.scroll_to_me(None);
-                    };
+                if res.clicked() {
+                    self.set_dir(path.clone());
+                };
 
-                    res.context_menu(|ui| {
-                        if ui
-                            .add(
-                                ContextMenuButton::new(TRASH, "Delete")
-                                    .text_color(ui.app_theme().danger),
-                            )
-                            .clicked()
-                        {
-                            self.config.remove_dir(&path);
-                        }
-                    });
-                }
-            });
-            ui.add_space(5.0);
+                res.context_menu(|ui| {
+                    if ui
+                        .add(
+                            ContextMenuButton::new(TRASH, "Delete")
+                                .text_color(ui.app_theme().danger),
+                        )
+                        .clicked()
+                    {
+                        self.config.remove_dir(&path);
+                    }
+                });
+            }
         });
 
         ui.add_space(5.0);
