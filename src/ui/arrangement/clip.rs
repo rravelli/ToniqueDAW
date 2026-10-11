@@ -17,8 +17,7 @@ use std::time::Duration;
 
 const PADDING_TEXT: f32 = 4.;
 const BORDER_WIDTH: f32 = 2.;
-/// The header on top of a clip, to grab it by.
-pub const HEADER_HEIGHT: f32 = 16.;
+const HEADER_HEIGHT: f32 = 16.;
 /// Width of the trim handles inside each edge of a clip.
 const TRIM_HANDLE_WIDTH: f32 = 7.;
 const MIN_TRIM_HANDLE_WIDTH: f32 = 2.;

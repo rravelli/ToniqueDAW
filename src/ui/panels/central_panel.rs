@@ -3,7 +3,6 @@ use crate::{
     core::state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
     ui::{
         arrangement::{
-            clip::HEADER_HEIGHT as CLIP_HEADER_HEIGHT,
             row_layout::RowLayout,
             ruler::Ruler,
             timeline::Timeline,
@@ -20,14 +19,14 @@ use crate::{
     },
 };
 use egui::{
-    Align2, Color32, FontId, Frame, Margin, Rangef, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2,
+    Align2, Color32, FontId, Frame, Margin, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
 };
 
 /// Empty bars after the end of the arrangement.
 const TIMELINE_SLACK_BARS: f64 = 16.;
 const EMPTY_LOGO_SIZE: f32 = 80.;
-/// Half the width of the edit cursor's caps.
-const EDIT_CURSOR_CAP: f32 = 3.;
+/// The edit cursor's arrow on the ruler: width and height.
+const EDIT_CURSOR_ARROW: Vec2 = vec2(9., 6.);
 /// The master's output scope, in the footer.
 const SCOPE_WIDTH: f32 = 120.;
 
@@ -157,7 +156,7 @@ impl CentralPanel {
             available_rect.min,
             pos2(timeline_viewport.right(), timeline_viewport.bottom()),
         );
-        self.cursors_ui(ui, state, &layout, cursors, timeline_viewport);
+        self.cursors_ui(ui, state, cursors, timeline_viewport);
     }
 
     /// Keep the playhead in the middle of the view during playback. Near the
@@ -233,18 +232,11 @@ impl CentralPanel {
         scrolled_x
     }
 
-    /// Loop bounds (while looping), edit cursor (only while it differs from
-    /// the playhead, over the selected tracks) and playhead with its
+    /// Loop bounds (while looping), edit cursor (an arrow on the ruler,
+    /// only while it differs from the playhead) and playhead with its
     /// draggable handle. `rect` spans the ruler and the timeline, `lanes`
     /// the timeline alone.
-    fn cursors_ui(
-        &self,
-        ui: &mut Ui,
-        state: &mut ProjectState,
-        layout: &RowLayout,
-        rect: Rect,
-        lanes: Rect,
-    ) {
+    fn cursors_ui(&self, ui: &mut Ui, state: &mut ProjectState, rect: Rect, lanes: Rect) {
         ui.set_clip_rect(rect);
         let theme = ui.app_theme();
         let painter = ui.painter();
@@ -256,17 +248,13 @@ impl CentralPanel {
             }
         }
         if state.edit_cursor() != state.playhead() {
+            // An arrow on the ruler, pointing down at the timeline.
             let x = state.grid.beats_to_x(state.edit_cursor(), rect);
-            let stroke = Stroke::new(1.0, theme.edit_cursor);
-            let lane_painter = painter.with_clip_rect(lanes);
-            for row in layout.rows().iter().filter(|r| r.track.selected) {
-                // An I-beam: the caps tell it from the playhead.
-                let y = edit_cursor_span(row.y, row.track.collapsed);
-                lane_painter.vline(x, y, stroke);
-                for cap in [y.min, y.max] {
-                    lane_painter.hline((x - EDIT_CURSOR_CAP)..=(x + EDIT_CURSOR_CAP), cap, stroke);
-                }
-            }
+            painter.add(Shape::convex_polygon(
+                edit_cursor_arrow(x, lanes.top()).to_vec(),
+                theme.edit_cursor,
+                Stroke::NONE,
+            ));
         }
         let playhead_x = state.grid.beats_to_x(state.playhead(), rect);
         let line_stroke = Stroke::new(2.0, with_alpha(theme.playhead, 160));
@@ -429,16 +417,11 @@ fn empty_project_ui(ui: &Ui, state: &ProjectState, viewport: Rect) {
     );
 }
 
-/// Where the edit cursor goes in a row spanning `row`: under the clips'
-/// headers, which stay readable. A collapsed row is all header, so it goes
-/// over it.
-fn edit_cursor_span(row: Rangef, collapsed: bool) -> Rangef {
-    let top = if collapsed {
-        row.min
-    } else {
-        (row.min + CLIP_HEADER_HEIGHT).min(row.max)
-    };
-    Rangef::new(top, row.max).shrink(1.)
+/// The edit cursor's arrow at `x`, its tip on the ruler's bottom (`bottom`).
+fn edit_cursor_arrow(x: f32, bottom: f32) -> [Pos2; 3] {
+    let half = EDIT_CURSOR_ARROW.x / 2.;
+    let top = bottom - EDIT_CURSOR_ARROW.y;
+    [pos2(x - half, top), pos2(x + half, top), pos2(x, bottom)]
 }
 
 #[cfg(test)]
@@ -446,13 +429,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_edit_cursor_leaves_clip_headers_readable() {
-        let row = Rangef::new(100., 160.);
-        assert_eq!(
-            edit_cursor_span(row, false),
-            Rangef::new(100. + CLIP_HEADER_HEIGHT + 1., 159.)
-        );
-        assert_eq!(edit_cursor_span(row, true), Rangef::new(101., 159.));
+    fn the_edit_cursor_points_down_at_the_timeline() {
+        let [left, right, tip] = edit_cursor_arrow(50., 30.);
+        assert_eq!(tip, pos2(50., 30.), "on the ruler's bottom");
+        assert!(left.y < tip.y && left.y == right.y);
+        assert_eq!((left.x + right.x) / 2., 50., "centred on the cursor");
     }
     use tonique_engine::engine::{Engine, EngineConfig};
 
