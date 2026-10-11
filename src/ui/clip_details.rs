@@ -1,8 +1,8 @@
 //! The bottom panel's view of one clip.
 
 use egui::{
-    Align, Align2, Color32, CursorIcon, DragValue, FontId, Grid, Label, Layout, Rect, RichText,
-    ScrollArea, Sense, Stroke, Ui, UiBuilder, pos2, vec2,
+    Align2, Color32, CursorIcon, DragValue, FontId, Grid, Label, Rect, RichText, ScrollArea, Sense,
+    Stroke, Ui, UiBuilder, pos2, vec2,
 };
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
@@ -413,10 +413,10 @@ fn trimmed(clip: &AudioClip, edge: TrimEdge, at: BeatPos, bpm: f32) -> AudioClip
 }
 
 /// The clip's properties, in sections as in other DAWs' inspectors: where
-/// it is (start, end, length), what it plays (offset in the file, gain),
-/// and the file. Values can be dragged, or clicked and typed; edits show
-/// while dragged and apply as one undo step once released (or typed). Gain
-/// is heard as it's dragged.
+/// it is (start, end, length) and what it plays (offset in the file, gain,
+/// pan). Positions can be dragged, or clicked and typed; edits show while
+/// dragged and apply as one undo step once released (or typed). Gain and
+/// pan are sliders like a track's, heard as they're dragged.
 fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut ProjectState) {
     let theme = ui.app_theme();
     let bpm = state.bpm();
@@ -551,19 +551,6 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
         ui.end_row();
     });
 
-    section(ui, "File");
-    rows(ui, "file", |ui| {
-        label(ui, "Format");
-        value(
-            ui,
-            format_audio(audio.sample_rate, audio.bit_depth, audio.channels),
-        );
-        ui.end_row();
-        label(ui, "Duration");
-        value(ui, format_time(source));
-        ui.end_row();
-    });
-
     match change {
         Some((edited, false)) => state.resize_clip(edited),
         Some((edited, true)) => state.commit_resize_clip(edited),
@@ -610,13 +597,6 @@ fn label(ui: &mut Ui, text: &str) {
 fn field(ui: &mut Ui, value: DragValue) -> egui::Response {
     let width = ui.available_width();
     ui.add_sized(vec2(width, FIELD_HEIGHT), value)
-}
-
-/// A value that can't be changed, right of its label.
-fn value(ui: &mut Ui, text: String) {
-    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-        ui.add(Label::new(RichText::new(text).color(ui.app_theme().text)).truncate());
-    });
 }
 
 /// `clip` playing from `offset` seconds into its file, as long as before
@@ -728,25 +708,6 @@ fn parse_time(text: &str) -> Option<f64> {
     }
 }
 
-/// `48 kHz · 24-bit · stereo`.
-fn format_audio(sample_rate: u32, bit_depth: Option<u32>, channels: u16) -> String {
-    let rate = sample_rate as f32 / 1000.;
-    let rate = if rate.fract() == 0. {
-        format!("{rate:.0} kHz")
-    } else {
-        format!("{rate:.1} kHz")
-    };
-    let channels = match channels {
-        1 => "mono".to_string(),
-        2 => "stereo".to_string(),
-        n => format!("{n} channels"),
-    };
-    match bit_depth {
-        Some(bits) => format!("{rate} · {bits}-bit · {channels}"),
-        None => format!("{rate} · {channels}"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -853,15 +814,6 @@ mod tests {
         // No further than the file's ends.
         let c = slipped(&clip(), 10.);
         assert_eq!((c.trim_start, c.trim_end), (0.5, 1.));
-    }
-
-    #[test]
-    fn formats_read_naturally() {
-        assert_eq!(
-            format_audio(44100, Some(16), 2),
-            "44.1 kHz · 16-bit · stereo"
-        );
-        assert_eq!(format_audio(48000, None, 1), "48 kHz · mono");
     }
 
     /// Drives the view of one clip headless, with real pointer events.
