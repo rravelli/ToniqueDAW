@@ -578,6 +578,7 @@ mod tests {
                 clip,
                 crate::analysis::AudioInfo::silent(1.),
                 tonique_engine::time::BeatPos(0.),
+                120.,
             )],
         );
         let mut workspace = Workspace::default();

@@ -104,8 +104,8 @@ mod tests {
         state.add_clips(
             &track,
             vec![
-                AudioClip::new(a, AudioInfo::silent(1.), BeatPos(0.)),
-                AudioClip::new(b, AudioInfo::silent(1.), BeatPos(4.)),
+                AudioClip::new(a, AudioInfo::silent(1.), BeatPos(0.), 120.),
+                AudioClip::new(b, AudioInfo::silent(1.), BeatPos(4.), 120.),
             ],
         );
         (state, a, b)

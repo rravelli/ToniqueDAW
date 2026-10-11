@@ -173,7 +173,7 @@ impl Timeline {
 
             let mut track_indexes = Vec::new();
             for dragged in clip_drag.clips.iter_mut() {
-                if let Some(duration) = dragged.clip.duration() {
+                {
                     // Calculate track index
                     let track_index =
                         (mouse_track_index + dragged.track_index_delta).max(0) as usize;
@@ -182,7 +182,7 @@ impl Timeline {
                     // Calculate y pos
                     let y = layout.track_top(track_index);
                     // Calculate width
-                    let width = state.grid.duration_to_width(duration, state.bpm());
+                    let width = state.grid.beats_to_width(dragged.clip.length);
                     // Calculate x pos
                     let new_position = state
                         .grid

@@ -9,8 +9,8 @@ use crate::{
     },
 };
 use egui::{
-    Align2, Color32, CursorIcon, FontFamily, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2,
-    pos2, vec2,
+    Align2, Color32, CursorIcon, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Stroke,
+    Ui, Vec2, pos2, vec2,
 };
 use egui_phosphor::fill::TRASH;
 use std::time::Duration;
@@ -165,32 +165,19 @@ impl ClipView<'_> {
             Stroke::new(1.0, with_alpha(ink, 60)),
         );
         // Waveform
-        if show_waveform && let Some(frames) = clip.audio.total_frames() {
+        if show_waveform {
             let waveform_rect = Rect::from_min_max(
                 pos2(pos.x, pos.y + HEADER_HEIGHT),
                 pos2(pos.x + size.x, pos.y + size.y),
             );
-            // Lay out the whole untrimmed file and only show the clip's part,
-            // so trimming doesn't shift which samples fall in each column.
-            let source_width = state
-                .grid
-                .duration_to_width(clip.audio.duration.unwrap_or_default(), state.bpm());
-            let source_rect = Rect::from_min_size(
-                pos2(
-                    waveform_rect.left() - clip.trim_start * source_width,
-                    waveform_rect.top(),
-                ),
-                vec2(source_width, waveform_rect.height()),
-            );
-            paint_waveform(
+            paint_clip_waveform(
                 &painter,
-                source_rect,
-                waveform_rect.intersect(viewport),
-                &clip.audio.data,
-                0.0..frames,
-                clip.audio.channels >= 2,
+                clip,
+                waveform_rect,
+                viewport,
+                state.grid.pixels_per_beat(),
+                state.bpm(),
                 ink,
-                clip.gain,
             );
         }
         // Draw an overlay when audio not ready
@@ -269,5 +256,56 @@ impl ClipView<'_> {
                 state.delete_clips(&[clip.id]);
             };
         });
+    }
+}
+
+/// The waveform of `clip` over `rect` (the clip's, from its start), as it
+/// plays: piece by piece, each pass of its loop after a thin line marking
+/// the seam. Each piece lays out the whole file and shows only its part, so
+/// trimming doesn't shift which samples fall in each column.
+pub fn paint_clip_waveform(
+    painter: &Painter,
+    clip: &AudioClip,
+    rect: Rect,
+    viewport: Rect,
+    pixels_per_beat: f32,
+    bpm: f32,
+    color: Color32,
+) {
+    let Some(frames) = clip.audio.total_frames() else {
+        return;
+    };
+    let seconds = clip.source_seconds() as f64;
+    if seconds <= 0. {
+        return;
+    }
+    let x = |beats: f64| rect.left() + beats as f32 * pixels_per_beat;
+    let file_width = (seconds * bpm as f64 / 60.) as f32 * pixels_per_beat;
+    for segment in clip.segments(bpm) {
+        let (left, right) = (x(segment.start), x(segment.end));
+        if right < viewport.left() || left > viewport.right() {
+            continue;
+        }
+        let file_left = left - (segment.file_start / seconds) as f32 * file_width;
+        let file =
+            Rect::from_min_size(pos2(file_left, rect.top()), vec2(file_width, rect.height()));
+        let shown = Rect::from_x_y_ranges(left..=right, rect.y_range());
+        paint_waveform(
+            painter,
+            file,
+            shown.intersect(rect).intersect(viewport),
+            &clip.audio.data,
+            0.0..frames,
+            clip.audio.channels >= 2,
+            color,
+            clip.gain,
+        );
+        if segment.start > 0. {
+            painter.with_clip_rect(viewport).vline(
+                left,
+                rect.y_range(),
+                Stroke::new(1., with_alpha(color, 110)),
+            );
+        }
     }
 }

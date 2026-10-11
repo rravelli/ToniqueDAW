@@ -2,9 +2,12 @@
 
 use egui::{
     Align2, Color32, CursorIcon, DragValue, FontId, Grid, Label, Rect, RichText, ScrollArea, Sense,
-    Stroke, Ui, UiBuilder, pos2, vec2,
+    Shape, Stroke, Ui, UiBuilder, pos2, vec2,
 };
-use tonique_engine::{edit::ClipId, time::BeatPos};
+use tonique_engine::{
+    edit::{ClipId, ClipLoop},
+    time::BeatPos,
+};
 
 use crate::{
     core::{
@@ -18,6 +21,7 @@ use crate::{
         theme::{Theme, ThemeExt, font_size, with_alpha},
         waveform::paint_waveform,
         widget::{
+            flat_button::FlatButton,
             param_slider::{ParamSlider, SliderEdit},
             scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
         },
@@ -30,19 +34,22 @@ const INSPECTOR_WIDTH: f32 = 210.;
 /// The inspector's labels.
 const LABEL_WIDTH: f32 = 56.;
 const PADDING: f32 = 8.;
-const RULER_HEIGHT: f32 = 18.;
+/// The ruler: the loop's bracket along its top, the bars, and the markers'
+/// flags along its bottom.
+const RULER_HEIGHT: f32 = 24.;
+const LOOP_BAR_HEIGHT: f32 = 6.;
 /// The inspector's values.
 const FIELD_HEIGHT: f32 = 18.;
 /// Between the lane and its scrollbar.
 const SCROLLBAR_GAP: f32 = 3.;
 /// Room left around the clip when fitting it, as a share of its length.
 const FIT_MARGIN: f64 = 0.02;
-/// Half the width of the area grabbing a trim edge.
+/// Half the width of the area grabbing a marker or a loop edge.
 const HANDLE_REACH: f32 = 4.;
 /// The flags marking the clip's start and end in the ruler: their width
 /// (pointing inside the clip) and height.
 const FLAG_SIZE: egui::Vec2 = egui::vec2(8., 10.);
-/// Shortest a clip can be trimmed to, in beats.
+/// Shortest a clip, or a loop, can be, in beats.
 const MIN_LENGTH: f64 = 1. / 16.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Hash)]
@@ -51,19 +58,32 @@ enum TrimEdge {
     End,
 }
 
+/// What a drag in the ruler or the lane moves.
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+enum Handle {
+    /// Where playback starts in the file: slips the audio.
+    StartMarker,
+    /// Where the clip ends, without a loop.
+    EndMarker,
+    LoopStart,
+    LoopEnd,
+    /// The whole loop.
+    Loop,
+}
+
 /// Bottom panel view of one clip, as in other DAWs: an inspector of its
-/// properties on the left, and on the right its whole source file (the
-/// untrimmed clip) on a grid counted from the clip's start (bar 1),
-/// zoomable and scrollable, with the part the clip plays between two edges
-/// that can be dragged to trim it.
+/// properties on the left, and on the right its whole source file on a grid
+/// counted from its start marker (bar 1), zoomable and scrollable. Markers
+/// in the ruler show where playback starts and (without a loop) ends, and
+/// a bracket the loop; all can be dragged.
 pub struct ClipDetails {
     /// The view's zoom and scroll, in beats from [`Self::origin`].
     grid: GridService,
     /// The clip the view was fitted to: another one refits it.
     fitted: Option<ClipId>,
-    /// Where bar 1 is in the arrangement: the clip's start, as in the edit
-    /// (so it holds still while a trim is dragged).
-    origin: BeatPos,
+    /// Where bar 1 is in the file, in seconds: the clip's start marker, as
+    /// in the edit (so it holds still while a marker is dragged).
+    origin: f64,
     /// The waveform's lane, as last drawn.
     #[cfg(test)]
     lane: Rect,
@@ -72,10 +92,10 @@ pub struct ClipDetails {
 impl ClipDetails {
     pub fn new() -> Self {
         Self {
-            // Shows what's before the clip's start, in the file.
+            // Shows what's before the start marker, in the file.
             grid: GridService::new().with_negative_offset(),
             fitted: None,
-            origin: BeatPos::ZERO,
+            origin: 0.,
             #[cfg(test)]
             lane: Rect::NOTHING,
         }
@@ -105,12 +125,14 @@ impl ClipDetails {
         }
 
         let bpm = state.bpm();
-        if self.fitted == Some(clip.id) && clip.position != self.origin {
-            // Its start moved (a trim or a move was applied): bar 1 follows,
-            // and the audio stays where it was on screen.
-            self.grid.offset.x -= self.grid.beats_to_width(clip.position - self.origin);
+        if self.fitted == Some(clip.id) && clip.offset != self.origin {
+            // The start marker moved (a slip or a trim was applied): bar 1
+            // follows, and the audio stays where it was on screen.
+            self.grid.offset.x -= self
+                .grid
+                .beats_to_width(to_beats(clip.offset - self.origin, bpm));
         }
-        self.origin = clip.position;
+        self.origin = clip.offset;
         if self.fitted != Some(clip.id) {
             self.fit(clip, bpm, lane.width());
             self.fitted = Some(clip.id);
@@ -119,19 +141,22 @@ impl ClipDetails {
             state.seek(at);
         }
         self.scrollbar_ui(ui, scrollbar, lane, clip, bpm);
-        self.trim_handles(ui, ruler, lane, clip, state);
-        // Show the trim being dragged, here or in the timeline.
+        self.handles(ui, ruler, lane, clip, state);
+        // As being dragged, here or in the timeline.
         let shown = state.shown_clip(clip);
 
-        // The grid and ruler cover the untrimmed clip: the whole file.
         let theme = ui.app_theme();
-        let file = self.file_x(clip, bpm, lane);
+        let file = self.file_x(&shown, bpm, lane);
         ui.painter_at(ruler).rect_filled(ruler, 0., theme.bg_raised);
+        let bars = Rect::from_min_max(
+            pos2(ruler.left(), ruler.top() + LOOP_BAR_HEIGHT),
+            pos2(ruler.right(), ruler.bottom() - FLAG_SIZE.y),
+        );
         let labels = ruler.intersect(Rect::from_x_y_ranges(file, ruler.y_range()));
         self.grid
-            .paint_bar_labels(&ui.painter_at(labels), ruler, &theme);
+            .paint_bar_labels(&ui.painter_at(labels), bars, &theme);
         self.paint_lane(ui, lane, &shown, track, state, &theme);
-        self.paint_edges(ui, ruler, lane, &shown, bpm, &theme);
+        self.paint_markers(ui, ruler, lane, &shown, track.color, bpm, &theme);
 
         ui.scope_builder(UiBuilder::new().max_rect(inspector), |ui| {
             ScrollArea::vertical()
@@ -142,37 +167,45 @@ impl ClipDetails {
         ui.allocate_rect(rect, Sense::hover());
     }
 
-    /// Where `at` (in the arrangement) is drawn.
-    fn x(&self, at: BeatPos, lane: Rect) -> f32 {
-        self.grid.beats_to_x(BeatPos(at - self.origin), lane)
+    /// Where `file` seconds into the file are drawn.
+    fn x(&self, file: f64, bpm: f32, lane: Rect) -> f32 {
+        self.grid
+            .beats_to_x(BeatPos(to_beats(file - self.origin, bpm)), lane)
     }
 
-    /// The arrangement position drawn at `x`.
-    fn at(&self, x: f32, lane: Rect) -> BeatPos {
-        self.origin + self.grid.x_to_beats(x, lane).0
+    /// The time in the file drawn at `x`, snapped to the grid (counted from
+    /// the start marker) unless Alt is held.
+    fn file_at_x(&self, ui: &Ui, x: f32, bpm: f32, lane: Rect) -> f64 {
+        let beats = self.grid.x_to_beats(x, lane);
+        let beats = if ui.input(|i| i.modifiers.alt) {
+            beats
+        } else {
+            self.grid.snap_at_grid(beats)
+        };
+        self.origin + to_seconds(beats.0, bpm)
     }
 
     /// Where the whole file is drawn, left to right.
     fn file_x(&self, clip: &AudioClip, bpm: f32, lane: Rect) -> std::ops::RangeInclusive<f32> {
-        let start = clip.file_start(bpm);
-        self.x(start, lane)..=self.x(start + clip.source_beats(bpm), lane)
+        self.x(0., bpm, lane)..=self.x(clip.source_seconds() as f64, bpm, lane)
     }
 
-    /// Zoom and scroll to the part of the file the clip plays.
+    /// Zoom and scroll to what the clip plays of the file: from its start
+    /// marker to its end, or through its loop.
     fn fit(&mut self, clip: &AudioClip, bpm: f32, width: f32) {
-        let length = clip.end(bpm) - clip.position;
-        let margin = length * FIT_MARGIN;
+        let (start, end) = played(clip, bpm);
+        let margin = (end - start) * FIT_MARGIN;
         self.grid.fit(
-            BeatPos(clip.position - self.origin - margin),
-            BeatPos(clip.end(bpm) - self.origin + margin),
+            BeatPos(to_beats(start - self.origin, bpm) - margin),
+            BeatPos(to_beats(end - self.origin, bpm) + margin),
             width,
         );
     }
 
     /// Ctrl+wheel or pinch zooms, like the timeline, and so does the wheel
     /// over the ruler. The wheel or a drag over the lane scrolls.
-    /// Double-clicking the lane returns where to seek to; double-clicking
-    /// the ruler fits the clip again.
+    /// Double-clicking the lane returns where to seek to: where that part of
+    /// the file plays first; double-clicking the ruler fits the clip again.
     fn navigate(
         &mut self,
         ui: &Ui,
@@ -206,7 +239,7 @@ impl ClipDetails {
         }
         let ruler_response = ui
             .interact(ruler, ui.id().with("clip-ruler"), Sense::click())
-            .on_hover_text("Bars from the clip's start. Double-click to fit the clip.");
+            .on_hover_text("Bars from the start marker. Double-click to fit the clip.");
         if ruler_response.double_clicked() {
             self.fit(clip, bpm, lane.width());
         }
@@ -214,7 +247,7 @@ impl ClipDetails {
             .double_clicked()
             .then(|| response.interact_pointer_pos())
             .flatten()
-            .map(|p| self.at(p.x, lane));
+            .map(|p| clip.position + self.grid.x_to_beats(p.x, lane).0);
 
         let (min, max) = self.scroll_range(clip, bpm, lane);
         self.grid.offset.x = self.grid.offset.x.clamp(min, max);
@@ -223,7 +256,7 @@ impl ClipDetails {
 
     /// How far the view scrolls: always keeping part of the file in view.
     fn scroll_range(&self, clip: &AudioClip, bpm: f32, lane: Rect) -> (f32, f32) {
-        let file_start = clip.file_start(bpm) - self.origin;
+        let file_start = to_beats(-self.origin, bpm);
         let half = lane.width() / 2.;
         let min = self.grid.beats_to_width(file_start) - half;
         let max = self
@@ -252,11 +285,10 @@ impl ClipDetails {
         self.grid.offset.x = scroll + min;
     }
 
-    /// Drag the edges of the played part, in the lane or by their flags in
-    /// the ruler, to trim the clip. Snaps to the grid (counted from the
-    /// clip's start) unless Alt is held, like the timeline; commits on
-    /// release.
-    fn trim_handles(
+    /// Drag the markers by their flags (or the lines under them), the loop's
+    /// bracket by its edges or its middle. Each edit shows while dragged
+    /// and applies as one undo step on release.
+    fn handles(
         &self,
         ui: &Ui,
         ruler: Rect,
@@ -266,35 +298,105 @@ impl ClipDetails {
     ) {
         let bpm = state.bpm();
         let shown = state.shown_clip(clip);
-        let edges = [
-            (TrimEdge::Start, shown.position),
-            (TrimEdge::End, shown.end(bpm)),
-        ];
         let view = ruler.union(lane);
-        for (edge, at) in edges {
-            let x = self.x(at, lane);
-            let line = Rect::from_x_y_ranges(x - HANDLE_REACH..=x + HANDLE_REACH, view.y_range());
-            let flag = flag_rect(edge, x, ruler);
-            let id = ui.id().with(("trim", edge));
+        let mut areas: Vec<(Handle, Rect)> = Vec::new();
+        let start = self.x(shown.offset, bpm, lane);
+        let marker =
+            |x: f32| Rect::from_x_y_ranges(x - HANDLE_REACH..=x + HANDLE_REACH, view.y_range());
+        areas.push((Handle::StartMarker, marker(start)));
+        areas.push((
+            Handle::StartMarker,
+            flag_rect(TrimEdge::Start, start, ruler),
+        ));
+        match shown.active_loop() {
+            Some(l) => {
+                let (left, right) = (self.x(l.start_s, bpm, lane), self.x(l.end_s, bpm, lane));
+                let bar = |range: std::ops::RangeInclusive<f32>| {
+                    Rect::from_x_y_ranges(range, ruler.top()..=ruler.top() + LOOP_BAR_HEIGHT + 2.)
+                };
+                // The middle first: the edges, registered after it, win where
+                // they overlap it.
+                areas.push((Handle::Loop, bar(left..=right)));
+                areas.push((
+                    Handle::LoopStart,
+                    bar(left - HANDLE_REACH..=left + HANDLE_REACH),
+                ));
+                areas.push((
+                    Handle::LoopEnd,
+                    bar(right - HANDLE_REACH..=right + HANDLE_REACH),
+                ));
+            }
+            None => {
+                let end = self.x(shown.offset + to_seconds(shown.length, bpm), bpm, lane);
+                areas.push((Handle::EndMarker, marker(end)));
+                areas.push((Handle::EndMarker, flag_rect(TrimEdge::End, end, ruler)));
+            }
+        }
+        // Registered after the lane and the ruler, they win over them.
+        let pointer = ui.input(|i| i.pointer.interact_pos());
+        let press = ui.input(|i| i.pointer.press_origin());
+        for (i, (handle, area)) in areas.iter().enumerate() {
             let response = ui
-                .interact(line.intersect(view), id, Sense::drag())
-                .union(ui.interact(flag.intersect(view), id.with("flag"), Sense::drag()))
-                .on_hover_and_drag_cursor(CursorIcon::ResizeHorizontal);
+                .interact(
+                    area.intersect(view),
+                    ui.id().with(("handle", i)),
+                    Sense::drag(),
+                )
+                .on_hover_and_drag_cursor(match handle {
+                    Handle::Loop => CursorIcon::Grab,
+                    _ => CursorIcon::ResizeHorizontal,
+                });
             if response.hovered() || response.dragged() {
                 let theme = ui.app_theme();
-                ui.painter_at(lane)
-                    .rect_filled(line, 1., theme.hover_overlay);
+                ui.painter_at(view)
+                    .rect_filled(*area, 1., theme.hover_overlay);
+            }
+            if response.drag_started() {
+                // The loop as it was, to move it by how far it's dragged.
+                ui.data_mut(|d| d.insert_temp(response.id, shown.looped));
             }
             if response.dragged()
-                && let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
+                && let Some(pointer) = pointer
             {
-                let beats = self.grid.x_to_beats(pointer.x, lane);
-                let beats = if ui.input(|i| i.modifiers.alt) {
-                    beats
-                } else {
-                    self.grid.snap_at_grid(beats)
+                let at = self.file_at_x(ui, pointer.x, bpm, lane);
+                let moved_loop = || {
+                    let from = press.map_or(pointer.x, |p| p.x);
+                    let delta = self.file_at_x(ui, pointer.x, bpm, lane)
+                        - self.file_at_x(ui, from, bpm, lane);
+                    let grabbed: Option<ClipLoop> = ui.data(|d| d.get_temp(response.id)).flatten();
+                    grabbed.map(|l| (l.start_s + delta, l.end_s + delta))
                 };
-                state.resize_clip(trimmed(clip, edge, self.origin + beats.0, bpm));
+                let edited = match handle {
+                    Handle::StartMarker => {
+                        let mut c = shown.clone();
+                        c.slip_to(at, bpm);
+                        Some(c)
+                    }
+                    Handle::EndMarker => {
+                        let mut c = shown.clone();
+                        let length = to_beats(at - c.offset, bpm).max(MIN_LENGTH);
+                        c.trim_end_at(c.position + length, bpm);
+                        Some(c)
+                    }
+                    Handle::LoopStart => shown
+                        .active_loop()
+                        .map(|l| with_loop(&shown, at, l.end_s, bpm)),
+                    Handle::LoopEnd => shown
+                        .active_loop()
+                        .map(|l| with_loop(&shown, l.start_s, at, bpm)),
+                    Handle::Loop => moved_loop().map(|(start, end)| {
+                        // Kept whole inside the file.
+                        let source = shown.source_seconds() as f64;
+                        let shift = (-start).max(0.) - (end - source).max(0.);
+                        with_loop(&shown, start + shift, end + shift, bpm)
+                    }),
+                };
+                if let Some(edited) = edited {
+                    state.resize_clip(edited);
+                }
+                if *handle == Handle::Loop {
+                    ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+                }
             }
             if response.drag_stopped() {
                 state.commit_resize_clip(state.shown_clip(clip));
@@ -302,8 +404,9 @@ impl ClipDetails {
         }
     }
 
-    /// The file's waveform on the grid, dimmed outside the part the clip
-    /// plays, and the playhead.
+    /// The file's waveform on the grid, dimmed outside what the clip plays,
+    /// the loop tinted, and the playhead where the file plays at that
+    /// moment.
     fn paint_lane(
         &self,
         ui: &Ui,
@@ -319,6 +422,14 @@ impl ClipDetails {
         let file = Rect::from_x_y_ranges(self.file_x(clip, bpm, lane), lane.y_range());
         self.grid
             .paint_grid(&ui.painter_at(lane.intersect(file)), lane, theme);
+        if let Some(l) = clip.active_loop() {
+            let (left, right) = (self.x(l.start_s, bpm, lane), self.x(l.end_s, bpm, lane));
+            painter.rect_filled(
+                Rect::from_x_y_ranges(left..=right, lane.y_range()),
+                0.,
+                with_alpha(track.color, 24),
+            );
+        }
 
         if let Some(frames) = clip.audio.total_frames() {
             paint_waveform(
@@ -333,59 +444,145 @@ impl ClipDetails {
             );
         }
 
-        let (start, end) = (self.x(clip.position, lane), self.x(clip.end(bpm), lane));
+        let (start, end) = played(clip, bpm);
+        let (start, end) = (self.x(start, bpm, lane), self.x(end, bpm, lane));
         let dim = with_alpha(theme.bg_deep, 190);
         for part in [file.left()..=start, end..=file.right()] {
             painter.rect_filled(Rect::from_x_y_ranges(part, lane.y_range()), 0., dim);
         }
-        painter.vline(
-            self.x(state.playhead(), lane),
-            lane.y_range(),
-            Stroke::new(1., theme.playhead),
-        );
+        let playhead = state.playhead();
+        if clip.position <= playhead && playhead < clip.end(bpm) {
+            let at = clip.file_at(playhead - clip.position, bpm);
+            painter.vline(
+                self.x(at, bpm, lane),
+                lane.y_range(),
+                Stroke::new(1., theme.playhead),
+            );
+        }
     }
 
-    /// The clip's edges across the lane, with a flag in the ruler pointing
-    /// inside the clip: in the text colour, to stand out on the waveform.
-    fn paint_edges(
+    /// The start marker (and the end one, without a loop) across the lane
+    /// with its flag in the ruler, in the text colour to stand out on the
+    /// waveform; the loop's bracket along the ruler's top, in the clip's
+    /// colour.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_markers(
         &self,
         ui: &Ui,
         ruler: Rect,
         lane: Rect,
         clip: &AudioClip,
+        color: Color32,
         bpm: f32,
         theme: &Theme,
     ) {
         let view = ruler.union(lane);
         let painter = ui.painter_at(view);
-        let color = theme.text;
-        for (edge, at) in [
-            (TrimEdge::Start, clip.position),
-            (TrimEdge::End, clip.end(bpm)),
-        ] {
-            let x = self.x(at, lane);
-            painter.vline(x, ruler.bottom()..=lane.bottom(), Stroke::new(1.5, color));
+        if let Some(l) = clip.active_loop() {
+            let (left, right) = (self.x(l.start_s, bpm, lane), self.x(l.end_s, bpm, lane));
+            let bar = Rect::from_x_y_ranges(
+                left..=right,
+                ruler.top() + 1.0..=ruler.top() + LOOP_BAR_HEIGHT,
+            );
+            painter.rect_filled(bar, 1., color);
+            for x in [left, right] {
+                painter.vline(
+                    x,
+                    bar.top()..=lane.bottom(),
+                    Stroke::new(1., with_alpha(color, 160)),
+                );
+            }
+        }
+        let mut markers = vec![(TrimEdge::Start, clip.offset)];
+        if clip.active_loop().is_none() {
+            markers.push((TrimEdge::End, clip.offset + to_seconds(clip.length, bpm)));
+        }
+        let ink = theme.text;
+        for (edge, at) in markers {
+            let x = self.x(at, bpm, lane);
+            painter.vline(x, ruler.bottom()..=lane.bottom(), Stroke::new(1.5, ink));
             let flag = flag_rect(edge, x, ruler);
-            let tip = match edge {
-                TrimEdge::Start => flag.right_top() + egui::vec2(0., FLAG_SIZE.y / 2.),
-                TrimEdge::End => flag.left_top() + egui::vec2(0., FLAG_SIZE.y / 2.),
+            let middle = egui::vec2(0., FLAG_SIZE.y / 2.);
+            let (tip, top, bottom) = match edge {
+                TrimEdge::Start => (
+                    flag.right_top() + middle,
+                    flag.left_top(),
+                    flag.left_bottom(),
+                ),
+                TrimEdge::End => (
+                    flag.left_top() + middle,
+                    flag.right_top(),
+                    flag.right_bottom(),
+                ),
             };
-            let (outer_top, outer_bottom) = match edge {
-                TrimEdge::Start => (flag.left_top(), flag.left_bottom()),
-                TrimEdge::End => (flag.right_top(), flag.right_bottom()),
-            };
-            painter.add(egui::Shape::convex_polygon(
-                vec![outer_top, tip, outer_bottom],
-                color,
+            painter.add(Shape::convex_polygon(
+                vec![top, tip, bottom],
+                ink,
                 Stroke::NONE,
             ));
             painter.vline(
                 x,
                 flag.y_range().min..=ruler.bottom(),
-                Stroke::new(1.5, color),
+                Stroke::new(1.5, ink),
             );
         }
     }
+}
+
+/// What of the file the clip plays, in seconds: from its start marker to
+/// where it ends, or through its loop.
+fn played(clip: &AudioClip, bpm: f32) -> (f64, f64) {
+    match clip.active_loop() {
+        Some(l) => (clip.offset.min(l.start_s), l.end_s.max(clip.offset)),
+        None => (clip.offset, clip.offset + to_seconds(clip.length, bpm)),
+    }
+}
+
+/// `clip` looping `start..end` of its file (at least [`MIN_LENGTH`] long,
+/// inside the file), its start marker no later than the loop's end.
+fn with_loop(clip: &AudioClip, start: f64, end: f64, bpm: f32) -> AudioClip {
+    let source = clip.source_seconds() as f64;
+    let min = to_seconds(MIN_LENGTH, bpm);
+    let start = start.clamp(0., (source - min).max(0.));
+    let end = end.clamp(start + min, source.max(start + min));
+    let mut c = clip.clone();
+    c.set_loop(
+        Some(ClipLoop {
+            start_s: start,
+            end_s: end,
+        }),
+        bpm,
+    );
+    if c.offset > end {
+        c.offset = start;
+    }
+    c
+}
+
+/// The loop to start with: what the clip plays, or the whole file when
+/// that's too short.
+fn default_loop(clip: &AudioClip, bpm: f32) -> ClipLoop {
+    let source = clip.source_seconds() as f64;
+    let end = (clip.offset + to_seconds(clip.length, bpm)).min(source);
+    if end - clip.offset >= to_seconds(MIN_LENGTH, bpm) {
+        ClipLoop {
+            start_s: clip.offset,
+            end_s: end,
+        }
+    } else {
+        ClipLoop {
+            start_s: 0.,
+            end_s: source,
+        }
+    }
+}
+
+fn to_beats(seconds: f64, bpm: f32) -> f64 {
+    seconds * bpm as f64 / 60.
+}
+
+fn to_seconds(beats: f64, bpm: f32) -> f64 {
+    beats * 60. / bpm as f64
 }
 
 /// Where the flag of `edge`, drawn at `x`, sits in the ruler: at its bottom,
@@ -399,10 +596,8 @@ fn flag_rect(edge: TrimEdge, x: f32, ruler: Rect) -> Rect {
     Rect::from_min_size(pos2(left, top), FLAG_SIZE)
 }
 
-/// `clip` with `edge` moved to `at`. The audio stays where it is in the
-/// arrangement, so trimming the start moves the clip's position; the clip
-/// keeps at least [`MIN_LENGTH`], and its start stays within the file and
-/// after the first beat.
+/// `clip` with `edge` moved to `at`, as the timeline trims it: its sound
+/// stays in place. It keeps at least [`MIN_LENGTH`].
 fn trimmed(clip: &AudioClip, edge: TrimEdge, at: BeatPos, bpm: f32) -> AudioClip {
     let mut clip = clip.clone();
     match edge {
@@ -426,7 +621,7 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
     let end = shown.end(bpm).0;
     let length = end - start;
     let source = shown.source_seconds() as f64;
-    let offset = shown.trim_start as f64 * source;
+    let offset = shown.offset;
     let audio = &shown.audio;
     let free = ui.input(|i| i.modifiers.alt);
     // Positions and lengths snap to sixteenths, unless Alt is held.
@@ -529,7 +724,9 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
         )
         .on_hover_text("Where in the file the clip starts playing");
         if let Some(done) = gesture(&response) {
-            change = Some((slipped(&shown, seconds), done));
+            let mut slipped = shown.clone();
+            slipped.slip_to(seconds, bpm);
+            change = Some((slipped, done));
         }
         ui.end_row();
 
@@ -548,6 +745,65 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
         let (response, edit) = ParamSlider::pan(shown.pan).color(color).size(size).show(ui);
         response.on_hover_text("Balance: turning to a side lowers the other");
         apply_param(state, clip.id, ClipParam::Pan, edit);
+        ui.end_row();
+    });
+
+    section(ui, "Loop");
+    rows(ui, "loop", |ui| {
+        label(ui, "Loop");
+        let looped = shown.active_loop();
+        let toggle = FlatButton::new(if looped.is_some() { "On" } else { "Off" })
+            .size(vec2(ui.available_width(), FIELD_HEIGHT))
+            .font(FontId::proportional(font_size::LABEL))
+            .selected(looped.is_some())
+            .tooltip("Play the loop over and over, for as long as the clip lasts");
+        if ui.add(toggle).clicked() {
+            let mut toggled = shown.clone();
+            match looped {
+                Some(_) => toggled.set_loop(None, bpm),
+                None => toggled.set_loop(Some(default_loop(&shown, bpm)), bpm),
+            }
+            change = Some((toggled, true));
+        }
+        ui.end_row();
+        let Some(l) = looped else {
+            return;
+        };
+
+        label(ui, "Start");
+        let mut start = l.start_s;
+        let response = field(
+            ui,
+            DragValue::new(&mut start)
+                .speed(0.005)
+                .range(0.0..=source)
+                .custom_formatter(|v, _| format_time(v))
+                .custom_parser(parse_time),
+        )
+        .on_hover_text("Where in the file the loop starts");
+        if let Some(done) = gesture(&response) {
+            change = Some((with_loop(&shown, start, l.end_s, bpm), done));
+        }
+        ui.end_row();
+
+        label(ui, "Length");
+        let raw = ui.id().with("loop-length-raw");
+        let loop_length = to_beats(l.end_s - l.start_s, bpm);
+        let mut beats = ui.data(|d| d.get_temp(raw)).unwrap_or(loop_length);
+        let response = field(
+            ui,
+            DragValue::new(&mut beats)
+                .speed(1. / 16.)
+                .range(MIN_LENGTH..=f64::MAX)
+                .custom_formatter(|v, _| format_length(v, bpb))
+                .custom_parser(|text| parse_length(text, bpb)),
+        )
+        .on_hover_text(format!("{} · bars.beats.sixteenths", seconds(loop_length)));
+        keep_raw(ui, raw, &response, beats);
+        if let Some(done) = gesture(&response) {
+            let end = l.start_s + to_seconds(snap(beats).max(MIN_LENGTH), bpm);
+            change = Some((with_loop(&shown, l.start_s, end, bpm), done));
+        }
         ui.end_row();
     });
 
@@ -597,21 +853,6 @@ fn label(ui: &mut Ui, text: &str) {
 fn field(ui: &mut Ui, value: DragValue) -> egui::Response {
     let width = ui.available_width();
     ui.add_sized(vec2(width, FIELD_HEIGHT), value)
-}
-
-/// `clip` playing from `offset` seconds into its file, as long as before
-/// and where it was: slipped within the file (no further than its ends).
-fn slipped(clip: &AudioClip, offset: f64) -> AudioClip {
-    let mut clip = clip.clone();
-    let source = clip.source_seconds() as f64;
-    if source <= 0. {
-        return clip;
-    }
-    let span = (clip.trim_end - clip.trim_start) as f64;
-    let start = (offset / source).clamp(0., (1. - span).max(0.));
-    clip.trim_start = start as f32;
-    clip.trim_end = (start + span) as f32;
-    clip
 }
 
 /// Apply a gain or pan slider's edit to the clip's parameter.
@@ -711,44 +952,27 @@ fn parse_time(text: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::AudioInfo;
 
-    /// A clip at beat 10 playing the middle half of an 8-beat file (at 120
-    /// bpm): beats 2 to 6 of the file.
+    /// A clip at beat 10 playing the middle half of a 4 s (8-beat, at 120
+    /// bpm) file: from 1 s, for 4 beats.
     fn clip() -> AudioClip {
-        use crate::analysis::AudioInfo;
-        let audio = AudioInfo {
-            name: "a.wav".into(),
-            duration: Some(std::time::Duration::from_secs(4)),
-            data: Default::default(),
-            sample_rate: 48000,
-            channels: 2,
-            bit_depth: None,
-            num_samples: None,
-            path: Default::default(),
-        };
-        let mut clip = AudioClip::new(ClipId(1), audio, BeatPos(10.));
-        clip.trim_start = 0.25;
-        clip.trim_end = 0.75;
+        let mut clip = AudioClip::new(ClipId(1), AudioInfo::silent(4.), BeatPos(10.), 120.);
+        clip.offset = 1.;
+        clip.length = 4.;
         clip
-    }
-
-    #[test]
-    fn the_file_starts_before_the_clip_by_what_is_trimmed() {
-        assert_eq!(clip().source_beats(120.), 8.);
-        assert_eq!(clip().file_start(120.), BeatPos(8.));
     }
 
     #[test]
     fn trimming_the_start_keeps_the_audio_in_place() {
         let t = trimmed(&clip(), TrimEdge::Start, BeatPos(9.), 120.);
-        assert_eq!((t.trim_start, t.position), (0.125, BeatPos(9.)));
-        assert_eq!(t.trim_end, 0.75);
+        assert_eq!((t.offset, t.position, t.length), (0.5, BeatPos(9.), 5.));
         // No further than the file's start...
         let t = trimmed(&clip(), TrimEdge::Start, BeatPos(5.), 120.);
-        assert_eq!((t.trim_start, t.position), (0., BeatPos(8.)));
+        assert_eq!((t.offset, t.position), (0., BeatPos(8.)));
         // ...nor past the end, minus the minimum length.
         let t = trimmed(&clip(), TrimEdge::Start, BeatPos(15.), 120.);
-        assert_eq!(t.trim_start, (0.75 - MIN_LENGTH / 8.) as f32);
+        assert_eq!(t.length, MIN_LENGTH);
     }
 
     #[test]
@@ -756,24 +980,37 @@ mod tests {
         let mut near_zero = clip();
         near_zero.position = BeatPos(1.); // the file would start at beat -1
         let t = trimmed(&near_zero, TrimEdge::Start, BeatPos(-1.), 120.);
-        assert_eq!((t.trim_start, t.position), (0.125, BeatPos::ZERO));
+        assert_eq!((t.offset, t.position), (0.5, BeatPos::ZERO));
     }
 
     #[test]
     fn trimming_the_end() {
         let t = trimmed(&clip(), TrimEdge::End, BeatPos(15.), 120.);
+        assert_eq!((t.length, t.position, t.offset), (5., BeatPos(10.), 1.));
+        // To the file's end, no further: 3 s left, 6 beats.
         assert_eq!(
-            (t.trim_end, t.position, t.trim_start),
-            (0.875, BeatPos(10.), 0.25)
+            trimmed(&clip(), TrimEdge::End, BeatPos(28.), 120.).length,
+            6.
         );
         assert_eq!(
-            trimmed(&clip(), TrimEdge::End, BeatPos(28.), 120.).trim_end,
-            1.
+            trimmed(&clip(), TrimEdge::End, BeatPos(8.), 120.).length,
+            MIN_LENGTH
         );
-        assert_eq!(
-            trimmed(&clip(), TrimEdge::End, BeatPos(8.), 120.).trim_end,
-            (0.25 + MIN_LENGTH / 8.) as f32
-        );
+    }
+
+    #[test]
+    fn loops_stay_in_the_file_and_start_as_what_plays() {
+        let looped = default_loop(&clip(), 120.);
+        assert_eq!((looped.start_s, looped.end_s), (1., 3.));
+        let c = with_loop(&clip(), -1., 10., 120.);
+        let l = c.looped.unwrap();
+        assert_eq!((l.start_s, l.end_s), (0., 4.), "inside the file");
+        // Moving the loop before the start marker brings the marker in.
+        let c = with_loop(&clip(), 0., 0.5, 120.);
+        assert_eq!(c.offset, 0.);
+        // Never shorter than the minimum.
+        let l = with_loop(&clip(), 2., 2., 120.).looped.unwrap();
+        assert!(l.end_s > l.start_s);
     }
 
     #[test]
@@ -803,17 +1040,10 @@ mod tests {
     }
 
     #[test]
-    fn typed_times_and_slips() {
+    fn typed_times() {
         assert_eq!(parse_time("1:23.25"), Some(83.25));
         assert_eq!(parse_time("2.5"), Some(2.5));
         assert_eq!(parse_time("-1"), None);
-        // The clip plays the file's middle half (1 to 3 s of 4): slip it.
-        let c = slipped(&clip(), 0.5);
-        assert_eq!((c.trim_start, c.trim_end), (0.125, 0.625));
-        assert_eq!(c.position, clip().position, "it stays where it is");
-        // No further than the file's ends.
-        let c = slipped(&clip(), 10.);
-        assert_eq!((c.trim_start, c.trim_end), (0.5, 1.));
     }
 
     /// Drives the view of one clip headless, with real pointer events.
@@ -825,18 +1055,16 @@ mod tests {
     }
 
     impl Harness {
-        /// A 4-beat file at beat 4, its first and last beat trimmed away.
+        /// A 2 s (4-beat) file played from 0.5 s for 2 beats, at beat 5.
         fn new() -> Self {
-            use crate::analysis::AudioInfo;
             use tonique_engine::engine::{Engine, EngineConfig};
             let (engine, _processor) = Engine::new(EngineConfig::default());
             let mut state = ProjectState::new(engine);
             let track = state.add_track();
             let clip = state.new_clip_id();
-            let mut audio = AudioClip::new(clip, AudioInfo::silent(2.), BeatPos(4.));
-            audio.trim_start = 0.25;
-            audio.trim_end = 0.75;
-            audio.position = BeatPos(5.);
+            let mut audio = AudioClip::new(clip, AudioInfo::silent(2.), BeatPos(5.), 120.);
+            audio.offset = 0.5;
+            audio.length = 2.;
             state.add_clips(&track, vec![audio]);
             let ctx = egui::Context::default();
             ctx.set_fonts(crate::ui::font::fonts());
@@ -889,39 +1117,66 @@ mod tests {
             self.frame(Vec::new());
         }
 
-        /// The middle of the lane at `at` in the arrangement.
-        fn at(&self, at: BeatPos) -> egui::Pos2 {
+        /// The middle of the lane, `at` seconds into the file.
+        fn at(&self, at: f64) -> egui::Pos2 {
             let lane = self.details.lane;
-            egui::pos2(self.details.x(at, lane), lane.center().y)
+            egui::pos2(self.details.x(at, 120., lane), lane.center().y)
+        }
+
+        /// The loop's bracket, at the ruler's top, `at` seconds in.
+        fn on_loop(&self, at: f64) -> egui::Pos2 {
+            let lane = self.details.lane;
+            let top = lane.top() - RULER_HEIGHT + LOOP_BAR_HEIGHT / 2.;
+            egui::pos2(self.details.x(at, 120., lane), top)
         }
     }
 
     #[test]
-    fn dragging_an_edge_trims_the_clip_in_one_step() {
+    fn dragging_the_end_marker_trims_the_clip_in_one_step() {
         let mut h = Harness::new();
-        let end = h.clip().end(120.);
-        assert_eq!(end, BeatPos(7.));
-        // Out past the file's end: it stops there, at beat 8.
-        let (from, to) = (h.at(end), h.at(BeatPos(9.)));
+        assert_eq!(h.clip().end(120.), BeatPos(7.)); // at 1.5 s in the file
+        // Out past the file's end: it stops there, at 2 s.
+        let (from, to) = (h.at(1.5), h.at(2.5));
         h.drag(from, to);
-        assert_eq!(h.clip().end(120.), BeatPos(8.));
+        assert_eq!(h.clip().length, 3.);
         h.state.undo();
-        assert_eq!(h.clip().end(120.), end, "one step");
+        assert_eq!(h.clip().length, 2., "one step");
     }
 
     #[test]
-    fn trimming_the_start_moves_bar_one_but_not_the_audio() {
+    fn the_start_marker_slips_the_audio_and_bar_one_follows() {
         let mut h = Harness::new();
-        let file_start = h.clip().file_start(120.);
-        let before = h.at(file_start).x;
-        assert_eq!(h.details.origin, BeatPos(5.));
-        let (from, to) = (h.at(BeatPos(5.)), h.at(BeatPos(6.)));
+        let file_start = h.at(0.).x;
+        assert_eq!(h.details.origin, 0.5);
+        let (from, to) = (h.at(0.5), h.at(0.75));
         h.drag(from, to);
-        assert_eq!(h.clip().position, BeatPos(6.));
-        assert_eq!(h.details.origin, BeatPos(6.), "bar 1 is the new start");
-        assert!(
-            (h.at(file_start).x - before).abs() < 0.01,
-            "the audio stayed"
+        let clip = h.clip();
+        assert_eq!((clip.offset, clip.position), (0.75, BeatPos(5.)), "slipped");
+        assert_eq!(h.details.origin, 0.75, "bar 1 is the start marker");
+        assert!((h.at(0.).x - file_start).abs() < 0.01, "the audio stayed");
+    }
+
+    #[test]
+    fn the_loop_brackets_end_drags_and_the_clip_outgrows_the_file() {
+        let mut h = Harness::new();
+        let mut looped = h.clip();
+        looped.set_loop(
+            Some(ClipLoop {
+                start_s: 0.5,
+                end_s: 1.5,
+            }),
+            120.,
         );
+        looped.trim_end_at(BeatPos(20.), 120.);
+        h.state.commit_resize_clip(looped);
+        assert_eq!(h.clip().end(120.), BeatPos(20.), "past the file's end");
+        h.frame(Vec::new());
+
+        let (from, to) = (h.on_loop(1.5), h.on_loop(1.75));
+        h.drag(from, to);
+        let l = h.clip().looped.unwrap();
+        assert_eq!((l.start_s, l.end_s), (0.5, 1.75));
+        h.state.undo();
+        assert_eq!(h.clip().looped.unwrap().end_s, 1.5, "one step");
     }
 }

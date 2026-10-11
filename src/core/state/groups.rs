@@ -203,13 +203,12 @@ impl ProjectState {
         let id = TrackId(bus.0);
         let view = self.views.get(&id).cloned().unwrap_or_else(TrackView::new);
         let tracks = self.tracks_in(id);
-        let bpm = self.bpm();
         // Everything inside, for the lane's overview.
         let clips = tracks
             .iter()
             .filter_map(|t| self.edit().track(*t).ok())
             .flat_map(|t| t.clips.iter())
-            .filter_map(|c| self.clip_view(c, bpm))
+            .filter_map(|c| self.clip_view(c))
             .collect();
         Some(TrackRow {
             id,

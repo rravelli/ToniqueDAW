@@ -9,7 +9,7 @@ use crate::{
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tonique_engine::{
-    edit::{ClipId, PluginKind, TrackId},
+    edit::{ClipId, ClipLoop, PluginKind, TrackId},
     engine::{Engine, EngineConfig},
     nodes::FilterMode,
     sample::SampleBuffer,
@@ -30,7 +30,7 @@ fn add_clip(state: &mut ProjectState, track: TrackId, position: f64, seconds: f3
     let id = state.new_clip_id();
     state.add_clips(
         &track,
-        vec![AudioClip::new(id, audio(seconds), BeatPos(position))],
+        vec![AudioClip::new(id, audio(seconds), BeatPos(position), 120.)],
     );
     id
 }
@@ -438,7 +438,7 @@ fn clips_play_through_the_engine_once_loaded() {
     )));
     info.sample_rate = 44100;
     let id = state.new_clip_id();
-    state.add_clips(&track, vec![AudioClip::new(id, info, BeatPos(0.))]);
+    state.add_clips(&track, vec![AudioClip::new(id, info, BeatPos(0.), 120.)]);
     state.play();
 
     // The file is converted on a background thread; the clip is silent until then.
@@ -829,7 +829,10 @@ fn clips_never_start_before_the_first_beat() {
     let mut state = setup_state();
     let track = state.add_track();
     let id = state.new_clip_id();
-    state.add_clips(&track, vec![AudioClip::new(id, audio(1.), BeatPos(-3.))]);
+    state.add_clips(
+        &track,
+        vec![AudioClip::new(id, audio(1.), BeatPos(-3.), 120.)],
+    );
     assert_eq!(spans(&state, track), vec![(0., 2.)]);
 
     state.move_clip(&id, &track, BeatPos(-1.), &[]);
@@ -839,7 +842,7 @@ fn clips_never_start_before_the_first_beat() {
 #[test]
 fn trimming_the_start_stops_at_the_first_beat() {
     let bpm = 120.;
-    let mut clip = AudioClip::new(ClipId(1), audio(2.), BeatPos(1.)); // beats 1..5
+    let mut clip = AudioClip::new(ClipId(1), audio(2.), BeatPos(1.), 120.); // beats 1..5
     clip.trim_start_at(BeatPos(2.), bpm); // hide the first 1 beat of the file: 2..5
     clip.position -= 1.5; // moved near the start: 0.5..3.5, file starts at -0.5
 
@@ -857,14 +860,12 @@ fn trimming_a_clip_of_unknown_length_does_nothing() {
     let bpm = 120.;
     let mut info = audio(2.);
     info.duration = None;
-    let mut clip = AudioClip::new(ClipId(1), info, BeatPos(1.));
+    let mut clip = AudioClip::new(ClipId(1), info, BeatPos(1.), 120.);
     clip.trim_start_at(BeatPos(2.), bpm);
     clip.trim_end_at(BeatPos(1.5), bpm);
     clip.crop(BeatPos(0.), BeatPos(3.), bpm);
-    assert_eq!(
-        (clip.position, clip.trim_start, clip.trim_end),
-        (BeatPos(1.), 0., 1.)
-    );
+    assert_eq!((clip.position, clip.offset), (BeatPos(1.), 0.));
+    assert_eq!(clip.length, 0., "no length to trim");
 }
 
 #[test]
@@ -907,6 +908,37 @@ fn clip_gain_and_pan_are_live_one_undo_step_and_survive_edits() {
     assert_eq!(pan(&state), 0.);
     state.redo();
     assert_eq!(pan(&state), -0.5);
+}
+
+#[test]
+fn looped_clips_split_and_undo_as_one() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let id = state.new_clip_id();
+    // A 2 s (4-beat) file looping 0.5 s to 1 s, over 12 beats.
+    let mut clip = AudioClip::new(id, audio(2.), BeatPos(0.), 120.);
+    clip.set_loop(
+        Some(ClipLoop {
+            start_s: 0.5,
+            end_s: 1.,
+        }),
+        120.,
+    );
+    clip.trim_end_at(BeatPos(12.), 120.);
+    state.add_clips(&track, vec![clip]);
+    assert_eq!(spans(&state, track), [(0., 12.)], "past the file's end");
+
+    state.cut_clip_at(&track, BeatPos(5.5));
+    assert_eq!(spans(&state, track), [(0., 5.5), (5.5, 12.)]);
+    let clips = state.tracks().next().unwrap().clips;
+    let right = clips.iter().find(|c| c.position == BeatPos(5.5)).unwrap();
+    // 2.75 s in: through the file up to the loop's end at 1 s, then
+    // round the loop, half a second each time: 0.75 s.
+    assert!((right.offset - 0.75).abs() < 1e-9, "{}", right.offset);
+    assert_eq!(right.looped, clips[0].looped, "both loop");
+
+    state.undo();
+    assert_eq!(spans(&state, track), [(0., 12.)]);
 }
 
 #[test]
@@ -1045,8 +1077,10 @@ mod projects {
             r(&mut track.height);
             for clip in &mut track.clips {
                 r64(&mut clip.position);
-                r(&mut clip.trim_start);
-                r(&mut clip.trim_end);
+                r64(&mut clip.offset);
+                if let Some(length) = &mut clip.length {
+                    r64(length);
+                }
             }
         }
         p
@@ -1065,9 +1099,16 @@ mod projects {
         let audio = AUDIO_ANALYSIS_CACHE
             .get_or_analyze(dir.join("loop.wav"))
             .unwrap();
-        let mut clip = AudioClip::new(state.new_clip_id(), audio, BeatPos(2.));
-        clip.trim_start = 0.25;
-        clip.trim_end = 0.75;
+        let mut clip = AudioClip::new(state.new_clip_id(), audio, BeatPos(2.), 120.);
+        // The file's middle half, looping its third quarter after the
+        // first.
+        let quarter = clip.source_seconds() as f64 / 4.;
+        clip.offset = quarter;
+        clip.length *= 0.5;
+        clip.looped = Some(ClipLoop {
+            start_s: 2. * quarter,
+            end_s: 3. * quarter,
+        });
         clip.gain = 0.5;
         clip.pan = 0.75;
         state.add_clips(&track, vec![clip]);
@@ -1135,8 +1176,11 @@ mod projects {
             clips: vec![ClipFile {
                 path: "gone.wav".into(),
                 position: 0.,
-                trim_start: 0.,
-                trim_end: 1.,
+                offset: 0.,
+                length: Some(4.),
+                looped: None,
+                trim_start: None,
+                trim_end: None,
                 gain: 1.,
                 pan: 0.,
             }],

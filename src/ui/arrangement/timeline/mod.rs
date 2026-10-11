@@ -287,9 +287,7 @@ impl Timeline {
         dragged: bool,
     ) -> bool {
         let x = state.grid.beats_to_x(clip.position, viewport);
-        let width = state
-            .grid
-            .duration_to_width(clip.duration().unwrap_or_default(), state.bpm());
+        let width = state.grid.beats_to_width(clip.length);
 
         if x + width < viewport.left()
             || x > viewport.right()
@@ -365,7 +363,12 @@ impl Timeline {
                     let snapped_position = state.grid.snap_at_grid(position);
 
                     let track = state.add_track();
-                    let clip = AudioClip::new(state.new_clip_id(), audio_info, snapped_position);
+                    let clip = AudioClip::new(
+                        state.new_clip_id(),
+                        audio_info,
+                        snapped_position,
+                        state.bpm(),
+                    );
                     state.add_clips(&track, vec![clip]);
                 }
             }
@@ -411,7 +414,7 @@ impl Timeline {
             let pos = pos2(x, y);
             let size = Vec2::new(width, height);
             // Placeholder ID: the clip only gets a real one when dropped
-            let clip = AudioClip::new(ClipId(0), audio_info, snapped_position);
+            let clip = AudioClip::new(ClipId(0), audio_info, snapped_position, state.bpm());
             // render clip
             ClipView {
                 clip: &clip,

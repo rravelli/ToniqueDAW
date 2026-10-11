@@ -8,7 +8,7 @@ use std::{
 use egui::Vec2;
 use tonique_engine::{
     edit::{
-        Bus, BusId, Channel, Edit, Output, TrackId,
+        Bus, BusId, Channel, ClipLoop, Edit, Output, TrackId,
         commands::{AddBus, SetBypass, SetOutput, SetSolo},
     },
     time::BeatPos,
@@ -23,8 +23,8 @@ use crate::{
         clip::AudioClip,
         effect::{EffectKind, Setting},
         project::{
-            ChannelFile, ClipFile, EffectFile, GroupFile, ProjectFile, TrackFile, VERSION,
-            resolve_path, store_path,
+            ChannelFile, ClipFile, EffectFile, GroupFile, LoopFile, ProjectFile, TrackFile,
+            VERSION, resolve_path, store_path,
         },
         track::TrackView,
     },
@@ -119,12 +119,18 @@ impl ProjectState {
                     clips: track
                         .clips
                         .iter()
-                        .filter_map(|clip| self.clip_view(clip, bpm))
+                        .filter_map(|clip| self.clip_view(clip))
                         .map(|clip| ClipFile {
                             path: store_path(&clip.audio.path, dir),
                             position: clip.position.0,
-                            trim_start: clip.trim_start,
-                            trim_end: clip.trim_end,
+                            offset: clip.offset,
+                            length: Some(clip.length),
+                            looped: clip.looped.map(|l| LoopFile {
+                                start: l.start_s,
+                                end: l.end_s,
+                            }),
+                            trim_start: None,
+                            trim_end: None,
                             gain: clip.gain,
                             pan: clip.pan,
                         })
@@ -255,15 +261,27 @@ impl ProjectState {
             problems.push(format!("Missing audio file: {}", clip.path.display()));
             return None;
         };
-        Some(AudioClip {
-            id: self.new_clip_id(),
-            audio,
-            position: BeatPos(clip.position),
-            trim_start: clip.trim_start,
-            trim_end: clip.trim_end,
-            gain: clip.gain,
-            pan: clip.pan,
-        })
+        let bpm = self.bpm();
+        let mut restored = AudioClip::new(self.new_clip_id(), audio, BeatPos(clip.position), bpm);
+        restored.gain = clip.gain;
+        restored.pan = clip.pan;
+        restored.looped = clip.looped.map(|l| ClipLoop {
+            start_s: l.start,
+            end_s: l.end,
+        });
+        match (clip.length, clip.trim_start, clip.trim_end) {
+            (Some(length), _, _) => {
+                restored.offset = clip.offset;
+                restored.length = length;
+            }
+            // Older projects: the part of the file played.
+            (None, start, end) => {
+                let (start, end) = (start.unwrap_or(0.), end.unwrap_or(1.));
+                restored.offset = start as f64 * restored.source_seconds() as f64;
+                restored.length = (end - start) as f64 * restored.source_beats(bpm);
+            }
+        }
+        Some(restored)
     }
 
     fn restore_channel(&mut self, id: TrackId, channel: &ChannelFile, problems: &mut Vec<String>) {

@@ -44,8 +44,8 @@ use tonique_engine::{
         Parameter, Plugin, PluginId, Track, TrackId,
         commands::{
             AddClip, AddPlugin, AddTrack, EditCommand, MoveClip, RemoveClip, RemovePlugin,
-            RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetMute, SetParam,
-            SetSolo, SetTempoMap,
+            RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetClipLoop, SetMute,
+            SetParam, SetSolo, SetTempoMap,
         },
     },
     engine::Engine,
@@ -745,12 +745,16 @@ impl ProjectState {
         let Some((track, clip)) = self.find_clip(resized.id) else {
             return;
         };
-        if (clip.position, clip.trim_start, clip.trim_end)
-            == (resized.position, resized.trim_start, resized.trim_end)
-        {
+        let region = |c: &AudioClip| (c.position, c.length, c.offset, c.looped);
+        if region(&clip) == region(&resized) {
             return;
         }
-        self.clip_ops("Resize clip", |s, ops| {
+        let label = if clip.looped != resized.looped {
+            "Clip loop"
+        } else {
+            "Resize clip"
+        };
+        self.clip_ops(label, |s, ops| {
             let (start, end) = (resized.position, resized.end(s.bpm()));
             let mut clips_on_track = s.track_clips(track, ops);
             clips_on_track.carve(start, end, &[resized.id], &mut || s.new_clip_id());
@@ -796,27 +800,31 @@ impl ProjectState {
     }
 
     fn apply_clip_op(&mut self, op: ClipOp) {
-        let bpm = self.bpm();
         match op {
             ClipOp::Add(track, clip) => {
-                let clip = self.engine_clip(&clip, bpm);
+                let clip = self.engine_clip(&clip);
                 self.perform(AddClip::new(track, clip));
             }
             ClipOp::Remove(track, id) => self.perform(RemoveClip::new(track, id)),
             ClipOp::Resize(track, clip) => {
-                let c = self.engine_clip(&clip, bpm);
-                let ClipContent::Audio {
-                    source_offset_s, ..
-                } = c.content
-                else {
-                    return;
-                };
+                let looped = self
+                    .edit()
+                    .track(track)
+                    .ok()
+                    .and_then(|t| t.clip(clip.id))
+                    .and_then(|c| match &c.content {
+                        ClipContent::Audio { looped, .. } => Some(*looped),
+                        ClipContent::Midi { .. } => None,
+                    });
+                if looped.is_some_and(|l| l != clip.looped) {
+                    self.perform(SetClipLoop::new(track, clip.id, clip.looped));
+                }
                 self.perform(ResizeClip::new(
                     track,
-                    c.id,
-                    c.start,
-                    c.length,
-                    source_offset_s,
+                    clip.id,
+                    clip.position,
+                    clip.length,
+                    clip.offset,
                 ));
             }
             ClipOp::Move {
@@ -829,68 +837,63 @@ impl ProjectState {
     }
 
     /// The engine clip for a UI clip, registering its audio file if needed.
-    fn engine_clip(&mut self, clip: &AudioClip, bpm: f32) -> Clip {
+    fn engine_clip(&mut self, clip: &AudioClip) -> Clip {
         let session = &mut self.session;
         let source = self
             .sources
             .get_or_insert(&clip.audio, || session.create(|e| e.new_source()));
-        let length = clip.end(bpm) - clip.position;
         let mut engine_clip = self
             .session
-            .create(|e| Clip::audio(e, clip.position, length, source));
+            .create(|e| Clip::audio(e, clip.position, clip.length, source));
         engine_clip.id = clip.id;
         if let ClipContent::Audio {
             source_offset_s,
             gain,
             pan,
+            looped,
             ..
         } = &mut engine_clip.content
         {
-            *source_offset_s = (clip.trim_start * clip.source_seconds()) as f64;
+            *source_offset_s = clip.offset;
             gain.value.set(clip.gain, 0.);
             pan.value.set(clip.pan, 0.);
+            *looped = clip.looped;
         }
         engine_clip
     }
 
     /// The UI view of an engine clip. `None` for MIDI clips, which the UI
     /// can't show yet.
-    fn clip_view(&self, clip: &Clip, bpm: f32) -> Option<AudioClip> {
+    fn clip_view(&self, clip: &Clip) -> Option<AudioClip> {
         let ClipContent::Audio {
             source,
             source_offset_s,
             ref gain,
             ref pan,
-            ..
+            looped,
         } = clip.content
         else {
             return None;
         };
         let audio = self.sources.info(source)?.clone();
-        let seconds = audio.duration?.as_secs_f64();
-        let trim_start = (source_offset_s / seconds) as f32;
-        let trim_end = trim_start + (clip.length * 60. / bpm as f64 / seconds) as f32;
+        // Clips of files of unknown length can't be edited.
+        audio.duration?;
         Some(AudioClip {
             id: clip.id,
             audio,
             position: clip.start,
-            trim_start,
-            trim_end,
+            length: clip.length,
+            offset: source_offset_s,
+            looped,
             gain: gain.get(),
             pan: pan.get(),
         })
     }
 
     fn clip_views(&self, track: TrackId) -> Vec<AudioClip> {
-        let bpm = self.bpm();
         self.edit()
             .track(track)
-            .map(|t| {
-                t.clips
-                    .iter()
-                    .filter_map(|c| self.clip_view(c, bpm))
-                    .collect()
-            })
+            .map(|t| t.clips.iter().filter_map(|c| self.clip_view(c)).collect())
             .unwrap_or_default()
     }
 
@@ -903,7 +906,7 @@ impl ProjectState {
 
     pub(crate) fn find_clip(&self, id: ClipId) -> Option<(TrackId, AudioClip)> {
         let track = self.edit().tracks.iter().find(|t| t.clip(id).is_some())?;
-        let clip = self.clip_view(track.clip(id)?, self.bpm())?;
+        let clip = self.clip_view(track.clip(id)?)?;
         Some((track.id, clip))
     }
 
@@ -1313,13 +1316,12 @@ impl ProjectState {
             .get(&track.id)
             .cloned()
             .unwrap_or_else(TrackView::new);
-        let bpm = self.bpm();
         Some(TrackRow {
             id: track.id,
             clips: track
                 .clips
                 .iter()
-                .filter_map(|c| self.clip_view(c, bpm))
+                .filter_map(|c| self.clip_view(c))
                 .collect(),
             muted: track.channel.muted,
             volume: track.channel.volume.get(),
