@@ -3,6 +3,7 @@ use crate::{
     core::state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
     ui::{
         arrangement::{
+            clip::HEADER_HEIGHT as CLIP_HEADER_HEIGHT,
             row_layout::RowLayout,
             ruler::Ruler,
             timeline::Timeline,
@@ -18,7 +19,9 @@ use crate::{
         workspace::{MainView, Workspace},
     },
 };
-use egui::{Align2, Color32, FontId, Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{
+    Align2, Color32, FontId, Frame, Margin, Rangef, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2,
+};
 
 /// Empty bars after the end of the arrangement.
 const TIMELINE_SLACK_BARS: f64 = 16.;
@@ -258,7 +261,7 @@ impl CentralPanel {
             let lane_painter = painter.with_clip_rect(lanes);
             for row in layout.rows().iter().filter(|r| r.track.selected) {
                 // An I-beam: the caps tell it from the playhead.
-                let y = row.y.shrink(1.);
+                let y = edit_cursor_span(row.y, row.track.collapsed);
                 lane_painter.vline(x, y, stroke);
                 for cap in [y.min, y.max] {
                     lane_painter.hline((x - EDIT_CURSOR_CAP)..=(x + EDIT_CURSOR_CAP), cap, stroke);
@@ -426,9 +429,31 @@ fn empty_project_ui(ui: &Ui, state: &ProjectState, viewport: Rect) {
     );
 }
 
+/// Where the edit cursor goes in a row spanning `row`: under the clips'
+/// headers, which stay readable. A collapsed row is all header, so it goes
+/// over it.
+fn edit_cursor_span(row: Rangef, collapsed: bool) -> Rangef {
+    let top = if collapsed {
+        row.min
+    } else {
+        (row.min + CLIP_HEADER_HEIGHT).min(row.max)
+    };
+    Rangef::new(top, row.max).shrink(1.)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_edit_cursor_leaves_clip_headers_readable() {
+        let row = Rangef::new(100., 160.);
+        assert_eq!(
+            edit_cursor_span(row, false),
+            Rangef::new(100. + CLIP_HEADER_HEIGHT + 1., 159.)
+        );
+        assert_eq!(edit_cursor_span(row, true), Rangef::new(101., 159.));
+    }
     use tonique_engine::engine::{Engine, EngineConfig};
 
     /// The track list and timeline draw nested and collapsed groups without
