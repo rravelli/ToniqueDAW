@@ -19,6 +19,7 @@ use crate::{
         widget::{flat_button::FlatButton, input::NumberInput},
         workspace::{MainView, Workspace},
     },
+    utils::{format_bars, format_time},
 };
 const BUTTON_SIZE: f32 = 22.;
 /// Between the buttons of a group.
@@ -398,19 +399,9 @@ fn position_ui(ui: &mut Ui, state: &ProjectState) {
 /// `beats` as `bar.beat.sixteenth` (from 1) and `m:ss.mmm`.
 fn position_text(beats: f64, beats_per_bar: usize, bpm: f32) -> (String, String) {
     let beats = beats.max(0.);
-    let per_bar = beats_per_bar.max(1) as f64;
-    let bar = (beats / per_bar).floor() as u64 + 1;
-    let beat = (beats % per_bar).floor() as u64 + 1;
-    let sixteenth = (beats.fract() * 4.).floor() as u64 + 1;
-    let millis = (beats * 60. / bpm as f64 * 1000.).floor() as u64;
     (
-        format!("{bar}.{beat}.{sixteenth}"),
-        format!(
-            "{}:{:02}.{:03}",
-            millis / 60_000,
-            millis / 1000 % 60,
-            millis % 1000
-        ),
+        format_bars(beats, beats_per_bar),
+        format_time(beats * 60. / bpm as f64),
     )
 }
 

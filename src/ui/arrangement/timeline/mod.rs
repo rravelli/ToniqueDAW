@@ -212,14 +212,8 @@ impl Timeline {
             } else {
                 track.clips.clone()
             };
-            for mut clip in clips {
-                if let Some((id, start, end, pos)) = &state.resized_clip
-                    && clip.id == *id
-                {
-                    clip.trim_start = *start;
-                    clip.trim_end = *end;
-                    clip.position = *pos;
-                }
+            for clip in clips {
+                let clip = state.shown_clip(&clip);
                 let dragged = self.clip_ui(
                     track,
                     &clip,

@@ -53,7 +53,7 @@ impl AudioClip {
         if duration <= 0. {
             return;
         }
-        let file_start = self.position - duration * self.trim_start as f64;
+        let file_start = self.file_start(bpm);
         let clamped_beats = beats.clamp(file_start.max(BeatPos::ZERO), self.end(bpm));
         self.trim_start += ((clamped_beats - self.position) / duration) as f32;
         self.position = clamped_beats;
@@ -82,6 +82,12 @@ impl AudioClip {
 
     pub fn end(&self, bpm: f32) -> BeatPos {
         self.position + self.source_beats(bpm) * (self.trim_end - self.trim_start) as f64
+    }
+
+    /// Where the start of the file lies in the arrangement: before the
+    /// clip's position by what its start trims away.
+    pub fn file_start(&self, bpm: f32) -> BeatPos {
+        self.position - self.source_beats(bpm) * self.trim_start as f64
     }
 
     /// Length of the whole source file, in beats.

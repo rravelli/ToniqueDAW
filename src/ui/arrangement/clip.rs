@@ -208,20 +208,10 @@ impl ClipView<'_> {
         };
 
         if resized {
-            state.resize_clip(
-                &clip_copy.id,
-                clip_copy.trim_start,
-                clip_copy.trim_end,
-                clip_copy.position,
-            );
+            state.resize_clip(clip_copy.clone());
         }
         if drag_stopped {
-            state.commit_resize_clip(
-                &clip_copy.id,
-                clip_copy.trim_start,
-                clip_copy.trim_end,
-                clip_copy.position,
-            );
+            state.commit_resize_clip(clip_copy);
         }
 
         response

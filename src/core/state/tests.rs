@@ -138,7 +138,10 @@ fn move_resize_cut_and_duplicate_undo() {
     assert!(spans(&state, a).is_empty());
     assert_eq!(spans(&state, b), [(8., 12.)]);
 
-    state.commit_resize_clip(&clip, 0.25, 1., BeatPos(9.)); // drop the first beat
+    // Drop the first beat.
+    let mut resized = state.find_clip(clip).unwrap().1;
+    resized.trim_start_at(BeatPos(9.), state.bpm());
+    state.commit_resize_clip(resized);
     assert_eq!(spans(&state, b), [(9., 12.)]);
 
     state.cut_clip_at(&b, BeatPos(10.));

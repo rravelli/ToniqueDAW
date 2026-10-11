@@ -131,8 +131,9 @@ pub struct ProjectState {
     /// Tempo the engine's loop (in samples) was computed with.
     loop_bpm: f32,
 
-    /// The clip being resized: its trim start and end, and its position.
-    pub resized_clip: Option<(ClipId, f32, f32, BeatPos)>,
+    /// A clip being trimmed, as it will be once committed: shown instead
+    /// of the edit's (see [`Self::shown_clip`]).
+    resized_clip: Option<AudioClip>,
     /// Colours given to new tracks: the UI sets its theme's palette (grey
     /// until then).
     track_palette: Vec<Color32>,
@@ -723,27 +724,37 @@ impl ProjectState {
         });
         copy_ids
     }
-    /// Resize clip without computing overlap checks.
-    /// Use `commit_resize_clip` to apply overlap checks and add to undo stack.
-    pub fn resize_clip(&mut self, id: &ClipId, start: f32, end: f32, pos: BeatPos) {
-        self.resized_clip = Some((*id, start, end, pos));
+    /// Show a clip trimmed (or moved) as `resized` while dragging, without
+    /// touching the edit. Use `commit_resize_clip` to apply it.
+    pub fn resize_clip(&mut self, resized: AudioClip) {
+        self.resized_clip = Some(resized);
     }
-    /// Resize clip and perform overlap checks
-    pub fn commit_resize_clip(&mut self, id: &ClipId, start: f32, end: f32, pos: BeatPos) {
+    /// Apply a trim as one undo step, trimming the clips it now overlaps.
+    /// Nothing changes (and no step is recorded) when it's as in the edit.
+    pub fn commit_resize_clip(&mut self, resized: AudioClip) {
         self.resized_clip = None;
-        let Some((track, clip)) = self.find_clip(*id) else {
+        let Some((track, clip)) = self.find_clip(resized.id) else {
             return;
         };
+        if (clip.position, clip.trim_start, clip.trim_end)
+            == (resized.position, resized.trim_start, resized.trim_end)
+        {
+            return;
+        }
         self.clip_ops("Resize clip", |s, ops| {
-            let mut resized = clip;
-            resized.trim_start = start;
-            resized.trim_end = end;
-            resized.position = pos;
-            let end = resized.end(s.bpm());
+            let (start, end) = (resized.position, resized.end(s.bpm()));
             let mut clips_on_track = s.track_clips(track, ops);
-            clips_on_track.carve(pos, end, &[*id], &mut || s.new_clip_id());
+            clips_on_track.carve(start, end, &[resized.id], &mut || s.new_clip_id());
             ops.push(ClipOp::Resize(track, resized));
         });
+    }
+    /// `clip` as shown: as being trimmed, if it is.
+    pub fn shown_clip(&self, clip: &AudioClip) -> AudioClip {
+        self.resized_clip
+            .as_ref()
+            .filter(|r| r.id == clip.id)
+            .unwrap_or(clip)
+            .clone()
     }
 
     fn apply_clip_op(&mut self, op: ClipOp) {

@@ -10,6 +10,7 @@ use crate::{
         theme::{Theme, ThemeExt, with_alpha},
         waveform::paint_waveform,
     },
+    utils::{format_bars, format_time},
 };
 
 const DETAILS_WIDTH: f32 = 260.;
@@ -73,11 +74,11 @@ impl ClipDetails {
             self.fitted = Some(clip.id);
         }
         if let Some(beats) = self.navigate(ui, ruler, lane, file_len, played(clip, bpm)) {
-            state.seek(file_start(clip, bpm) + beats);
+            state.seek(clip.file_start(bpm) + beats);
         }
         self.trim_handles(ui, lane, clip, state);
         // Show the trim being dragged, here or in the timeline.
-        let shown = preview(clip, state);
+        let shown = state.shown_clip(clip);
 
         // The grid and ruler cover the untrimmed clip: the whole file.
         let theme = ui.app_theme();
@@ -157,7 +158,7 @@ impl ClipDetails {
     /// unless Alt is held, like the timeline; commits on release.
     fn trim_handles(&self, ui: &Ui, lane: Rect, clip: &AudioClip, state: &mut ProjectState) {
         let bpm = state.bpm();
-        let (start, end) = played(&preview(clip, state), bpm);
+        let (start, end) = played(&state.shown_clip(clip), bpm);
         for (edge, beats) in [(TrimEdge::Start, start), (TrimEdge::End, end)] {
             let x = self.grid.beats_to_x(BeatPos(beats), lane);
             let area = Rect::from_x_y_ranges(x - HANDLE_REACH..=x + HANDLE_REACH, lane.y_range());
@@ -182,14 +183,11 @@ impl ClipDetails {
                 } else {
                     self.grid.snap_at_grid(beats)
                 };
-                let t = trimmed(clip, edge, beats.0, bpm);
-                state.resize_clip(&clip.id, t.trim_start, t.trim_end, t.position);
+                let at = clip.file_start(bpm) + beats.0;
+                state.resize_clip(trimmed(clip, edge, at, bpm));
             }
-            if response.drag_stopped()
-                && let Some((id, start, end, position)) = state.resized_clip
-                && id == clip.id
-            {
-                state.commit_resize_clip(&id, start, end, position);
+            if response.drag_stopped() {
+                state.commit_resize_clip(state.shown_clip(clip));
             }
         }
     }
@@ -238,17 +236,11 @@ impl ClipDetails {
         }
         // The playhead, where the file is at that moment.
         painter.vline(
-            x(state.playhead() - file_start(clip, bpm)),
+            x(state.playhead() - clip.file_start(bpm)),
             lane.y_range(),
             Stroke::new(1., theme.playhead),
         );
     }
-}
-
-/// Where the file's start lies in the arrangement: before the clip's
-/// position by what its start trims away.
-fn file_start(clip: &AudioClip, bpm: f32) -> BeatPos {
-    clip.position - clip.trim_start as f64 * clip.source_beats(bpm)
 }
 
 /// The part of the file the clip plays, in beats from the file's start.
@@ -260,44 +252,15 @@ fn played(clip: &AudioClip, bpm: f32) -> (f64, f64) {
     )
 }
 
-/// `clip` with the trim being dragged, if it's this one.
-fn preview(clip: &AudioClip, state: &ProjectState) -> AudioClip {
-    let mut shown = clip.clone();
-    if let Some((id, start, end, position)) = state.resized_clip
-        && id == clip.id
-    {
-        shown.trim_start = start;
-        shown.trim_end = end;
-        shown.position = position;
-    }
-    shown
-}
-
-/// `clip` with `edge` moved to `beats` from the file's start. The audio
-/// stays where it is in the arrangement, so trimming the start moves the
-/// clip's position; the clip keeps at least [`MIN_LENGTH`] and never starts
-/// before the arrangement.
-fn trimmed(clip: &AudioClip, edge: TrimEdge, beats: f64, bpm: f32) -> AudioClip {
+/// `clip` with `edge` moved to `at`. The audio stays where it is in the
+/// arrangement, so trimming the start moves the clip's position; the clip
+/// keeps at least [`MIN_LENGTH`], and its start stays within the file and
+/// after the first beat.
+fn trimmed(clip: &AudioClip, edge: TrimEdge, at: BeatPos, bpm: f32) -> AudioClip {
     let mut clip = clip.clone();
-    let length = clip.source_beats(bpm);
-    if length <= 0. {
-        return clip;
-    }
-    let ratio = beats / length;
-    let min_ratio = MIN_LENGTH / length;
-    let (trim_start, trim_end) = (clip.trim_start as f64, clip.trim_end as f64);
     match edge {
-        TrimEdge::Start => {
-            let first = (trim_start - clip.position.0 / length).max(0.);
-            let last = (trim_end - min_ratio).max(first);
-            let start = ratio.clamp(first, last);
-            clip.position += (start - trim_start) * length;
-            clip.trim_start = start as f32;
-        }
-        TrimEdge::End => {
-            let first = (trim_start + min_ratio).min(1.);
-            clip.trim_end = ratio.clamp(first, 1.) as f32;
-        }
+        TrimEdge::Start => clip.trim_start_at(at.min(clip.end(bpm) - MIN_LENGTH), bpm),
+        TrimEdge::End => clip.trim_end_at(at.max(clip.position + MIN_LENGTH), bpm),
     }
     clip
 }
@@ -356,18 +319,6 @@ fn details_grid(ui: &mut Ui, clip: &AudioClip, state: &ProjectState) {
         });
 }
 
-/// Position as `bar.beat.sixteenth`, counting from 1: beat 0 is `1.1.1`.
-fn format_bars(beats: f64, beats_per_bar: usize) -> String {
-    let sixteenths = (beats * 4.).floor().max(0.) as usize;
-    let per_bar = beats_per_bar.max(1) * 4;
-    format!(
-        "{}.{}.{}",
-        sixteenths / per_bar + 1,
-        sixteenths % per_bar / 4 + 1,
-        sixteenths % 4 + 1
-    )
-}
-
 /// Length as bars, beats and sixteenths: `1 bar 2 beats`, `3 beats`.
 fn format_length(beats: f64, beats_per_bar: usize) -> String {
     let sixteenths = (beats * 4.).round().max(0.) as usize;
@@ -387,17 +338,6 @@ fn format_length(beats: f64, beats_per_bar: usize) -> String {
     } else {
         parts.join(" ")
     }
-}
-
-/// `m:ss.mmm`.
-fn format_time(seconds: f64) -> String {
-    let millis = (seconds.max(0.) * 1000.).round() as u64;
-    format!(
-        "{}:{:02}.{:03}",
-        millis / 60_000,
-        millis / 1000 % 60,
-        millis % 1000
-    )
 }
 
 /// `48 kHz · 24-bit · stereo`.
@@ -448,19 +388,19 @@ mod tests {
         assert_eq!(clip().source_beats(120.), 8.);
         assert_eq!(played(&clip(), 120.), (2., 6.));
         // Beat 3 of the file plays at beat 11 of the arrangement.
-        assert_eq!(file_start(&clip(), 120.) + 3., BeatPos(11.));
+        assert_eq!(clip().file_start(120.) + 3., BeatPos(11.));
     }
 
     #[test]
     fn trimming_the_start_keeps_the_audio_in_place() {
-        let t = trimmed(&clip(), TrimEdge::Start, 1., 120.);
+        let t = trimmed(&clip(), TrimEdge::Start, BeatPos(9.), 120.);
         assert_eq!((t.trim_start, t.position), (0.125, BeatPos(9.)));
         assert_eq!(t.trim_end, 0.75);
         // No further than the file's start...
-        let t = trimmed(&clip(), TrimEdge::Start, -3., 120.);
+        let t = trimmed(&clip(), TrimEdge::Start, BeatPos(5.), 120.);
         assert_eq!((t.trim_start, t.position), (0., BeatPos(8.)));
         // ...nor past the end, minus the minimum length.
-        let t = trimmed(&clip(), TrimEdge::Start, 7., 120.);
+        let t = trimmed(&clip(), TrimEdge::Start, BeatPos(15.), 120.);
         assert_eq!(t.trim_start, (0.75 - MIN_LENGTH / 8.) as f32);
     }
 
@@ -468,30 +408,25 @@ mod tests {
     fn trimming_the_start_stops_at_the_arrangement_start() {
         let mut near_zero = clip();
         near_zero.position = BeatPos(1.); // the file would start at beat -1
-        let t = trimmed(&near_zero, TrimEdge::Start, 0., 120.);
+        let t = trimmed(&near_zero, TrimEdge::Start, BeatPos(-1.), 120.);
         assert_eq!((t.trim_start, t.position), (0.125, BeatPos::ZERO));
     }
 
     #[test]
     fn trimming_the_end() {
-        let t = trimmed(&clip(), TrimEdge::End, 7., 120.);
+        let t = trimmed(&clip(), TrimEdge::End, BeatPos(15.), 120.);
         assert_eq!(
             (t.trim_end, t.position, t.trim_start),
             (0.875, BeatPos(10.), 0.25)
         );
-        assert_eq!(trimmed(&clip(), TrimEdge::End, 20., 120.).trim_end, 1.);
         assert_eq!(
-            trimmed(&clip(), TrimEdge::End, 0., 120.).trim_end,
+            trimmed(&clip(), TrimEdge::End, BeatPos(28.), 120.).trim_end,
+            1.
+        );
+        assert_eq!(
+            trimmed(&clip(), TrimEdge::End, BeatPos(8.), 120.).trim_end,
             (0.25 + MIN_LENGTH / 8.) as f32
         );
-    }
-
-    #[test]
-    fn positions_count_bars_beats_and_sixteenths_from_one() {
-        assert_eq!(format_bars(0., 4), "1.1.1");
-        assert_eq!(format_bars(9.5, 4), "3.2.3");
-        assert_eq!(format_bars(3.99, 4), "1.4.4");
-        assert_eq!(format_bars(3., 3), "2.1.1");
     }
 
     #[test]
@@ -503,9 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn times_and_formats() {
-        assert_eq!(format_time(0.), "0:00.000");
-        assert_eq!(format_time(83.25), "1:23.250");
+    fn formats_read_naturally() {
         assert_eq!(
             format_audio(44100, Some(16), 2),
             "44.1 kHz · 16-bit · stereo"
