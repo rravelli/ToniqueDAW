@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use egui::{Align2, CursorIcon, FontId, Response, Sense, Ui, Widget, emath::Numeric, pos2, vec2};
 
 use crate::ui::theme::ThemeExt;
@@ -140,7 +141,7 @@ impl<N: Numeric> Widget for ValueSlider<'_, N> {
             rect.right_center(),
             Align2::RIGHT_CENTER,
             (self.formatter)(self.value.to_f64()),
-            FontId::proportional(11.),
+            FontId::proportional(font_size::LABEL),
             if enabled {
                 theme.text_muted
             } else {

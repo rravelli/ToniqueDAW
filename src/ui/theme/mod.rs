@@ -123,6 +123,20 @@ theme_colors! {
     }
 }
 
+/// The interface's type scale: every text size comes from here, so text
+/// stays consistent and never too small to render crisply. Icon sizes are
+/// set where the icons are drawn.
+pub mod font_size {
+    /// Dense labels: rulers, axes, meters, badges, track names.
+    pub const SMALL: f32 = 10.;
+    /// Secondary text: values, hints, menus.
+    pub const LABEL: f32 = 11.;
+    /// Body text, buttons, inputs.
+    pub const BODY: f32 = 12.;
+    /// Titles.
+    pub const HEADING: f32 = 14.;
+}
+
 /// A colour of the theme, as listed in theme files and the editor.
 pub struct ColorRole {
     /// Field of [`Theme`] and key in theme files.
@@ -139,8 +153,8 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// The built-in Dark theme: neutral greys with a slight cool tint, a
-    /// teal accent, and even lightness steps between surfaces.
+    /// The built-in Dark theme: neutral greys with a slight cool tint, the
+    /// logo's cyan accent, and even lightness steps between surfaces.
     pub fn dark() -> Self {
         static DARK: LazyLock<Theme> = LazyLock::new(library::base_theme);
         DARK.clone()
@@ -220,7 +234,7 @@ impl Theme {
         };
         style
             .text_styles
-            .insert(TextStyle::Body, FontId::proportional(12.0));
+            .insert(TextStyle::Body, FontId::proportional(font_size::BODY));
         style
     }
 
@@ -440,7 +454,7 @@ mod tests {
         assert!((contrast(Color32::BLACK, Color32::WHITE) - 21.).abs() < 0.01);
         assert!((contrast(Color32::WHITE, Color32::WHITE) - 1.).abs() < 0.01);
         assert!(Theme::dark().is_dark());
-        assert_eq!(Theme::dark().accent, Color32::from_rgb(0, 200, 150));
+        assert_eq!(Theme::dark().accent, Color32::from_rgb(0, 201, 212));
     }
 
     #[test]

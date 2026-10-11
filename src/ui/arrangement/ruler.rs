@@ -1,21 +1,29 @@
-use egui::{CursorIcon, Painter, Rect, Sense, Stroke, Ui, Vec2, vec2};
-use egui_phosphor::fill::{ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL, LINE_SEGMENTS};
+use egui::{CursorIcon, FontFamily, FontId, Painter, Rect, Sense, Stroke, Ui, Vec2, vec2};
+use egui_phosphor::regular::{ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL};
 use tonique_engine::time::BeatPos;
 
 use crate::{
     core::state::ProjectState,
     ui::arrangement::grid::PaintGrid,
     ui::{
-        arrangement::track_headers::SPLITTER_WIDTH, theme::ThemeExt,
+        arrangement::track_headers::SPLITTER_WIDTH, font::PHOSPHOR_REGULAR, theme::ThemeExt,
         widget::flat_button::FlatButton,
     },
 };
 
-pub const RULER_HEIGHT: f32 = 30.;
+/// The loop lane, then the bars, then the time: a row each.
+pub const RULER_HEIGHT: f32 = 3. * ROW_HEIGHT;
+const ROW_HEIGHT: f32 = 12.;
 /// Height of the loop lane at the top of the ruler; the rest seeks.
-const LOOP_LANE_HEIGHT: f32 = 14.;
+const LOOP_LANE_HEIGHT: f32 = ROW_HEIGHT;
 /// How close to an edge of the loop brace grabs that edge, in points.
-const EDGE_GRAB: f32 = 5.;
+const EDGE_GRAB: f32 = LOOP_GRIP_WIDTH;
+/// Space above and below the loop bar, in its lane.
+const LOOP_INSET: f32 = 1.5;
+/// The loop bar's end caps.
+const LOOP_GRIP_WIDTH: f32 = 6.;
+/// The buttons over the track headers.
+const HEADER_BUTTON_SIZE: f32 = 22.;
 
 /// What a drag in the loop lane is doing.
 #[derive(Clone, Copy)]
@@ -56,10 +64,11 @@ impl Ruler {
 
             // Draw rectangle
             painter.rect_filled(ruler_rect, 0.0, ui.app_theme().bg_raised);
-            // Draw Labels
+            // Draw Labels, under the loop lane
+            let labels = ruler_rect.with_min_y(ruler_rect.top() + LOOP_LANE_HEIGHT);
             state
                 .grid
-                .paint_labels(&painter, ruler_rect, state.bpm(), &ui.app_theme());
+                .paint_labels(&painter, labels, state.bpm(), &ui.app_theme());
             let loop_lane =
                 Rect::from_min_size(ruler_rect.min, vec2(ruler_rect.width(), LOOP_LANE_HEIGHT));
             let clicked_lane = self.loop_lane(ui, &painter, state, loop_lane);
@@ -174,49 +183,100 @@ impl Ruler {
 
         // Paint with the range as it is after this frame's edits.
         let (start, end) = state.loop_range();
-        let brace = Rect::from_x_y_ranges(
-            state.grid.beats_to_x(start, lane)..=state.grid.beats_to_x(end, lane),
-            lane.y_range(),
+        let x_range = state.grid.beats_to_x(start, lane)..=state.grid.beats_to_x(end, lane);
+        self.paint_loop(
+            ui,
+            painter,
+            Rect::from_x_y_ranges(x_range, lane.shrink2(vec2(0., LOOP_INSET)).y_range()),
+            state.looping(),
+            self.loop_drag.or(hovered),
         );
-        let theme = ui.app_theme();
-        let color = if state.looping() {
-            theme.accent
-        } else {
-            theme.text_disabled
-        };
-        let fill = if response.hovered() || self.loop_drag.is_some() {
-            0.45
-        } else {
-            0.3
-        };
-        painter.rect_filled(brace, 0., color.gamma_multiply(fill));
-        painter.rect_filled(
-            Rect::from_x_y_ranges(brace.x_range(), lane.top()..=lane.top() + 3.),
-            0.,
-            color,
-        );
-        for x in [brace.left(), brace.right()] {
-            painter.vline(x, lane.y_range(), Stroke::new(2., color));
-        }
         clicked_lane
+    }
+
+    /// The loop region as a rounded bar with grips at its ends: the accent
+    /// while looping, dim otherwise. The part under the pointer or being
+    /// dragged (an edge, or the whole bar) lights up.
+    fn paint_loop(
+        &self,
+        ui: &Ui,
+        painter: &Painter,
+        bar: Rect,
+        looping: bool,
+        active: Option<LoopDrag>,
+    ) {
+        let theme = ui.app_theme();
+        let (color, on_color) = if looping {
+            (theme.accent, theme.text_on_accent)
+        } else {
+            (theme.text_disabled, theme.bg_deep)
+        };
+        let whole = matches!(active, Some(LoopDrag::Move { .. }));
+        let body = if whole { 0.85 } else { 0.6 };
+        let radius = bar.height() / 2.;
+        painter.rect_filled(bar, radius, color.gamma_multiply(body));
+
+        // The edges: a solid cap, wider while grabbed, with a grip.
+        let edges = [
+            (bar.left(), 1., matches!(active, Some(LoopDrag::Start))),
+            (bar.right(), -1., matches!(active, Some(LoopDrag::End))),
+        ];
+        // Too short for grips: just the bar.
+        if bar.width() < 4. * LOOP_GRIP_WIDTH {
+            return;
+        }
+        for (x, inward, grabbed) in edges {
+            let width = if grabbed {
+                LOOP_GRIP_WIDTH + 2.
+            } else {
+                LOOP_GRIP_WIDTH
+            };
+            let cap = Rect::from_x_y_ranges(
+                (x.min(x + inward * width))..=(x.max(x + inward * width)),
+                bar.y_range(),
+            );
+            let corners = if inward > 0. {
+                egui::CornerRadius {
+                    nw: radius as u8,
+                    sw: radius as u8,
+                    ..Default::default()
+                }
+            } else {
+                egui::CornerRadius {
+                    ne: radius as u8,
+                    se: radius as u8,
+                    ..Default::default()
+                }
+            };
+            painter.rect_filled(cap, corners, color);
+            let grip = cap.shrink2(vec2(0., 2.5)).y_range();
+            for dx in [-1., 1.] {
+                painter.vline(cap.center().x + dx, grip, Stroke::new(1., on_color));
+            }
+        }
     }
 
     fn right_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         ui.scope(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+            ui.spacing_mut().item_spacing = Vec2::new(2.0, 4.0);
+            let button = |icon: &str, tooltip: &str| {
+                FlatButton::ghost(icon)
+                    .square(HEADER_BUTTON_SIZE)
+                    .font(FontId::new(14., FontFamily::Name(PHOSPHOR_REGULAR.into())))
+                    .tooltip(tooltip)
+            };
             if ui
-                .add(FlatButton::new(ARROWS_OUT_LINE_VERTICAL).tooltip("Expand all"))
+                .add(button(ARROWS_OUT_LINE_VERTICAL, "Expand all tracks"))
                 .clicked()
             {
                 state.set_all_collapsed(false);
             };
             if ui
-                .add(FlatButton::new(ARROWS_IN_LINE_VERTICAL).tooltip("Collapse all"))
+                .add(button(ARROWS_IN_LINE_VERTICAL, "Collapse all tracks"))
                 .clicked()
             {
                 state.set_all_collapsed(true);
             };
-            ui.add_enabled(false, FlatButton::new(LINE_SEGMENTS).tooltip("Automate"));
         });
     }
 }

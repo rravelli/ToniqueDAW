@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use crate::{
     core::{graph_monitor::GraphMonitor, state::ProjectState},
     ui::theme::{Theme, ThemeExt},
@@ -61,7 +62,7 @@ impl GraphView {
                 viewport.center(),
                 Align2::CENTER_CENTER,
                 "No graph yet",
-                FontId::proportional(14.),
+                FontId::proportional(font_size::HEADING),
                 theme.text_muted,
             );
             return;
@@ -273,7 +274,7 @@ impl GraphView {
             rect.left_top() + vec2(8., 6.) * z,
             Align2::LEFT_TOP,
             elide(title, 26),
-            FontId::proportional(11. * z),
+            FontId::proportional(font_size::LABEL * z),
             text,
         );
         if node.label.is_some() {
@@ -281,7 +282,7 @@ impl GraphView {
                 rect.left_top() + vec2(8., 21.) * z,
                 Align2::LEFT_TOP,
                 node.name,
-                FontId::proportional(9. * z),
+                FontId::proportional(font_size::SMALL * z),
                 theme.text_muted,
             );
         }
@@ -290,7 +291,7 @@ impl GraphView {
             rect.right_top() + vec2(-8., 21.) * z,
             Align2::RIGHT_TOP,
             format!("{:.1}%", cpu * 100.),
-            FontId::monospace(9. * z),
+            FontId::monospace(font_size::SMALL * z),
             theme.text_muted,
         );
     }
@@ -405,7 +406,11 @@ fn paint_header(
         nodes_cpu * 100.,
     );
     let pos = viewport.left_top() + vec2(10., 8.);
-    let galley = painter.layout_no_wrap(text, FontId::proportional(11.), theme.text_muted);
+    let galley = painter.layout_no_wrap(
+        text,
+        FontId::proportional(font_size::LABEL),
+        theme.text_muted,
+    );
     painter.rect_filled(
         Rect::from_min_size(pos, galley.size()).expand(4.),
         3.,
@@ -416,7 +421,7 @@ fn paint_header(
         viewport.left_bottom() + vec2(10., -8.),
         Align2::LEFT_BOTTOM,
         "Drag to pan · Ctrl+scroll to zoom · Double-click to fit",
-        FontId::proportional(10.),
+        FontId::proportional(font_size::SMALL),
         theme.text_disabled,
     );
 }

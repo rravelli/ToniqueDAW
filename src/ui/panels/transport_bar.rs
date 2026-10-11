@@ -1,14 +1,16 @@
+use crate::ui::theme::font_size;
 use egui::{
-    FontFamily, FontId, Frame, Layout, Margin, Pos2, Rangef, Response, Sense, Stroke, Ui, Vec2,
+    Align, Align2, FontFamily, FontId, Frame, Layout, Margin, Rangef, Rect, Response, Sense, Ui,
+    UiBuilder, Vec2, pos2, vec2,
 };
 use egui_phosphor::{
     fill::SIDEBAR_SIMPLE,
-    regular::{GRAPH, RECORD, SPEAKER_SLASH},
+    regular::{CPU, GRAPH, RECORD, SPEAKER_SLASH},
 };
 
 use crate::{
     config::keymap::Action,
-    core::state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+    core::state::{PlaybackState, ProjectState},
     ui::{
         RECORDING,
         commands::Commands,
@@ -19,6 +21,13 @@ use crate::{
     },
 };
 const BUTTON_SIZE: f32 = 22.;
+/// Between the buttons of a group.
+const BUTTON_GAP: f32 = 2.;
+/// Between groups.
+const GROUP_GAP: f32 = 8.;
+/// The playhead's position: bars and time.
+const POSITION_WIDTH: f32 = 140.;
+const USAGE_WIDTH: f32 = 46.;
 
 pub struct TransportBar {
     bpm_input: NumberInput,
@@ -27,7 +36,10 @@ pub struct TransportBar {
 impl TransportBar {
     pub fn new() -> Self {
         Self {
-            bpm_input: NumberInput::new(Vec2::new(50., BUTTON_SIZE)).range(Rangef::new(10., 1000.)),
+            bpm_input: NumberInput::new(Vec2::new(76., BUTTON_SIZE))
+                .range(Rangef::new(10., 1000.))
+                .suffix(" BPM")
+                .draggable(),
         }
     }
 
@@ -50,6 +62,8 @@ impl TransportBar {
             });
     }
 
+    /// Three groups: the views on the left, the transport centred, the
+    /// project's tempo and the status on the right.
     pub fn ui(
         &mut self,
         ui: &mut Ui,
@@ -57,46 +71,68 @@ impl TransportBar {
         workspace: &Workspace,
         commands: &mut Commands,
     ) {
+        let full = ui.available_rect_before_wrap();
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
+            ui.spacing_mut().item_spacing = Vec2::new(BUTTON_GAP, BUTTON_GAP);
             if self.sidebar_ui(ui, state, workspace).clicked() {
                 commands.push(Action::ToggleBrowser);
             }
             if self.graph_view_ui(ui, state, workspace).clicked() {
                 commands.push(Action::ToggleGraphView);
             }
-            if self.metronome_ui(ui, state).clicked() {
-                commands.push(Action::ToggleMetronome);
-            }
-            if self.play_button_ui(ui, state).clicked() {
-                commands.push(Action::PlayStop);
-            }
-            if RECORDING {
-                self.record_button_ui(ui);
-            }
-            self.loop_ui(ui, state);
-            if self.follow_ui(ui, state).clicked() {
-                commands.push(Action::ToggleFollowPlayhead);
-            }
-            self.bpm_input.value = state.bpm();
-            self.bpm_input.ui(ui);
-            if self.bpm_input.value != state.bpm() {
-                state.set_bpm(self.bpm_input.value);
-            }
 
-            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+            let buttons = if RECORDING { 5. } else { 4. };
+            let width = buttons * (BUTTON_SIZE + BUTTON_GAP) + GROUP_GAP + POSITION_WIDTH;
+            let center = Rect::from_center_size(
+                pos2(full.center().x, ui.max_rect().center().y),
+                vec2(width, BUTTON_SIZE),
+            );
+            ui.scope_builder(
+                UiBuilder::new()
+                    .max_rect(center)
+                    .layout(Layout::left_to_right(Align::Center)),
+                |ui| {
+                    if self.metronome_ui(ui, state).clicked() {
+                        commands.push(Action::ToggleMetronome);
+                    }
+                    if self.play_button_ui(ui, state).clicked() {
+                        commands.push(Action::PlayStop);
+                    }
+                    if RECORDING {
+                        self.record_button_ui(ui);
+                    }
+                    self.loop_ui(ui, state);
+                    if self.follow_ui(ui, state).clicked() {
+                        commands.push(Action::ToggleFollowPlayhead);
+                    }
+                    ui.add_space(GROUP_GAP - BUTTON_GAP);
+                    position_ui(ui, state);
+                },
+            );
+
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if self.redo_ui(ui, state).clicked() {
                     commands.push(Action::Redo);
                 }
                 if self.undo_ui(ui, state).clicked() {
                     commands.push(Action::Undo);
                 }
+                ui.add_space(GROUP_GAP);
                 self.usage_ui(ui, state);
-                self.fps_ui(ui);
+                if cfg!(debug_assertions) {
+                    self.fps_ui(ui);
+                }
                 if state.audio_lost() && self.no_audio_ui(ui, state).clicked() {
                     commands.push(Action::OpenSettings);
                 }
-                self.waveform_ui(ui, state);
+                ui.add_space(GROUP_GAP);
+                self.bpm_input.value = state.bpm();
+                self.bpm_input
+                    .ui(ui)
+                    .on_hover_text("Tempo: drag or double-click to edit");
+                if self.bpm_input.value != state.bpm() {
+                    state.set_bpm(self.bpm_input.value);
+                }
             });
         });
     }
@@ -263,54 +299,19 @@ impl TransportBar {
         )
     }
 
-    fn waveform_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
-        let (rect, _) =
-            ui.allocate_exact_size(Vec2::new(35., ui.available_height()), Sense::hover());
-        let painter = ui.painter_at(rect);
-
-        // Background rectangle
-        let theme = ui.app_theme();
-        painter.rect_filled(rect, 1.0, theme.bg_deep);
-
-        // If we have waveform data
-        if let Some(m) = state.metrics.tracks.get(&MASTER_TRACK_ID)
-            && m.samples.len() >= 2
-            && m.samples[0].len() > 3
-        {
-            let len = m.samples[0].len() as f32;
-            let mut last_point = None;
-
-            for (index, (l, r)) in m.samples[0].iter().zip(m.samples[1].iter()).enumerate() {
-                let x = rect.left() + index as f32 * rect.width() / len;
-                let y = rect.top() + rect.height() * (0.5 - (l + r) / 4.0);
-                let pos = Pos2::new(x, y);
-
-                // Gradient color based on amplitude intensity
-                let amp = ((l.abs() + r.abs()) / 2.0).clamp(0.0, 1.0);
-                let color = theme.text_disabled.lerp_to_gamma(theme.accent, amp);
-
-                // Draw connecting lines for smoother waveform
-                if let Some(last) = last_point {
-                    painter.line_segment([last, pos], Stroke::new(1.0, color));
-                }
-                last_point = Some(pos);
-            }
-        } else {
-            // Draw center line if no waveform
-            painter.line_segment(
-                [rect.left_center(), rect.right_center()],
-                Stroke::new(1.0, theme.separator),
-            );
-        };
-    }
-
     fn usage_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) -> Response {
         ui.add(
-            FlatButton::new(format!("{:.0}%", (state.metrics.latency * 100.).round()))
-                .square(BUTTON_SIZE)
-                .font(FontId::new(10., egui::FontFamily::Proportional))
-                .color(ui.app_theme().text_muted)
-                .tooltip("CPU usage"),
+            FlatButton::new(format!(
+                "{CPU} {:.0}%",
+                (state.metrics.latency * 100.).round()
+            ))
+            .size(vec2(USAGE_WIDTH, BUTTON_SIZE))
+            .font(FontId::new(
+                font_size::SMALL,
+                egui::FontFamily::Proportional,
+            ))
+            .color(ui.app_theme().text_muted)
+            .tooltip("Audio processing load"),
         )
     }
 
@@ -334,7 +335,10 @@ impl TransportBar {
                 1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
             ))
             .square(BUTTON_SIZE)
-            .font(FontId::new(10., egui::FontFamily::Proportional))
+            .font(FontId::new(
+                font_size::SMALL,
+                egui::FontFamily::Proportional,
+            ))
             .color(ui.app_theme().text_muted)
             .tooltip("FPS"),
         )
@@ -367,10 +371,72 @@ impl TransportBar {
     }
 }
 
+/// Where the playhead is, in bars.beats.sixteenths and in time.
+fn position_ui(ui: &mut Ui, state: &ProjectState) {
+    let (rect, _) = ui.allocate_exact_size(vec2(POSITION_WIDTH, BUTTON_SIZE), Sense::hover());
+    let theme = ui.app_theme();
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 2.0, theme.bg_deep);
+    let (bars, time) = position_text(state.playhead().0, state.grid.beats_per_bar(), state.bpm());
+    let font = FontId::monospace(font_size::BODY);
+    painter.text(
+        rect.left_center() + vec2(8., 0.),
+        Align2::LEFT_CENTER,
+        bars,
+        font.clone(),
+        theme.text,
+    );
+    painter.text(
+        rect.right_center() - vec2(8., 0.),
+        Align2::RIGHT_CENTER,
+        time,
+        font,
+        theme.text_muted,
+    );
+}
+
+/// `beats` as `bar.beat.sixteenth` (from 1) and `m:ss.mmm`.
+fn position_text(beats: f64, beats_per_bar: usize, bpm: f32) -> (String, String) {
+    let beats = beats.max(0.);
+    let per_bar = beats_per_bar.max(1) as f64;
+    let bar = (beats / per_bar).floor() as u64 + 1;
+    let beat = (beats % per_bar).floor() as u64 + 1;
+    let sixteenth = (beats.fract() * 4.).floor() as u64 + 1;
+    let millis = (beats * 60. / bpm as f64 * 1000.).floor() as u64;
+    (
+        format!("{bar}.{beat}.{sixteenth}"),
+        format!(
+            "{}:{:02}.{:03}",
+            millis / 60_000,
+            millis / 1000 % 60,
+            millis % 1000
+        ),
+    )
+}
+
 /// `text` with the shortcut of `action`, e.g. `Loop (Ctrl+L)`.
 fn tooltip(ui: &Ui, state: &ProjectState, text: &str, action: Action) -> String {
     state
         .settings()
         .keymap
         .with_shortcut(ui.ctx(), text, action)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn position_counts_from_one() {
+        assert_eq!(
+            position_text(0., 4, 120.),
+            ("1.1.1".to_string(), "0:00.000".to_string())
+        );
+        // Bar 2, beat 3, the second sixteenth: 6.25 beats, 3.125 s at 120.
+        assert_eq!(
+            position_text(6.25, 4, 120.),
+            ("2.3.2".to_string(), "0:03.125".to_string())
+        );
+        assert_eq!(position_text(150., 4, 60.).1, "2:30.000");
+    }
 }

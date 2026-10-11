@@ -1,10 +1,23 @@
-use egui::{Sense, Vec2, Widget};
+use egui::{Align2, FontId, Pos2, Sense, TextWrapMode, Vec2, Widget, WidgetText};
 
 use crate::ui::theme::{ThemeExt, with_alpha};
 
+const HEIGHT: f32 = 16.;
+const FONT_SIZE: f32 = 12.;
+/// Left of the row to the indent.
+const PADDING: f32 = 6.;
+/// Width of the caret's and the icon's slots.
+pub const SLOT: f32 = 14.;
+
+/// A row of a list or tree: an optional caret and icon, muted, then the
+/// text, cut with an ellipsis when it doesn't fit (the full text then shows
+/// on hover).
 pub struct ListRow {
     text: String,
     selected: bool,
+    indent: f32,
+    caret: Option<&'static str>,
+    icon: Option<&'static str>,
 }
 
 impl ListRow {
@@ -12,6 +25,9 @@ impl ListRow {
         Self {
             text: text.to_string(),
             selected: false,
+            indent: 0.,
+            caret: None,
+            icon: None,
         }
     }
 
@@ -19,12 +35,31 @@ impl ListRow {
         self.selected = val;
         self
     }
+
+    /// Space before the caret, in points.
+    pub fn indent(mut self, indent: f32) -> Self {
+        self.indent = indent;
+        self
+    }
+
+    /// Drawn in a slot before the icon; rows without one keep the slot
+    /// empty when given `None`, so tree rows line up.
+    pub fn caret(mut self, caret: Option<&'static str>) -> Self {
+        self.caret = caret;
+        self.indent += if caret.is_none() { SLOT } else { 0. };
+        self
+    }
+
+    pub fn icon(mut self, icon: &'static str) -> Self {
+        self.icon = Some(icon);
+        self
+    }
 }
 
 impl Widget for ListRow {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let (rect, response) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), 16.0),
+            Vec2::new(ui.available_width(), HEIGHT),
             Sense::click_and_drag(),
         );
 
@@ -37,22 +72,41 @@ impl Widget for ListRow {
             egui::Color32::TRANSPARENT
         };
         let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0., bg_color);
 
-        painter.rect_filled(response.rect, 0., bg_color);
+        let font = FontId::proportional(FONT_SIZE);
+        let mut x = rect.left() + PADDING + self.indent;
+        for glyph in [self.caret, self.icon].into_iter().flatten() {
+            painter.text(
+                Pos2::new(x + SLOT / 2., rect.center().y),
+                Align2::CENTER_CENTER,
+                glyph,
+                font.clone(),
+                theme.text_muted,
+            );
+            x += SLOT;
+        }
+        if self.icon.is_some() {
+            x += 2.;
+        }
 
-        let mut font_id = egui::TextStyle::Button.resolve(ui.style());
-        font_id.size = 12.;
-
-        let galley = ui
-            .painter()
-            .layout_no_wrap(self.text.to_string(), font_id, theme.text);
-
+        let galley = WidgetText::from(self.text.as_str()).into_galley(
+            ui,
+            Some(TextWrapMode::Truncate),
+            (rect.right() - x - PADDING).max(0.),
+            font,
+        );
+        let elided = galley.elided;
         painter.galley(
-            response.rect.left_top() + Vec2::new(6.0, 1.0),
+            Pos2::new(x, rect.center().y - galley.size().y / 2.),
             galley,
             theme.text,
         );
 
-        response
+        if elided {
+            response.on_hover_text(self.text)
+        } else {
+            response
+        }
     }
 }

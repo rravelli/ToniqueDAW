@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use egui::{
     Align2, FontId, Margin, Painter, Pos2, Rangef, Rect, Response, Sense, Stroke, StrokeKind,
     TextEdit, UiBuilder, Vec2,
@@ -10,6 +11,10 @@ const BUTTON_SIZE: Vec2 = Vec2::new(14., 8.0);
 
 const BUTTONS_GAP: f32 = 1.0;
 const STROKE_SIZE: f32 = 1.0;
+/// Points of vertical drag per step, when draggable.
+const DRAG_PIXELS_PER_STEP: f32 = 3.0;
+/// Step while dragging with Shift held; a whole unit otherwise.
+const FINE_STEP: f32 = 0.1;
 pub struct NumberInput {
     size: Vec2,
     font: FontId,
@@ -20,19 +25,25 @@ pub struct NumberInput {
     range: Rangef,
     decimals: usize,
     suffix: String,
+    /// Dragged up and down to change, without arrow buttons.
+    draggable: bool,
+    /// Drag not yet turned into a step.
+    drag_rest: f32,
 }
 
 impl NumberInput {
     pub fn new(size: Vec2) -> Self {
         Self {
             size,
-            font: FontId::new(12., egui::FontFamily::Proportional),
+            font: FontId::new(font_size::BODY, egui::FontFamily::Proportional),
             edit_mode: false,
             buffer: "".into(),
             value: 0.,
             range: Rangef::new(0., 1000.),
             decimals: 1,
             suffix: String::new(),
+            draggable: false,
+            drag_rest: 0.,
         }
     }
 
@@ -52,6 +63,13 @@ impl NumberInput {
         self
     }
 
+    /// Drag up or down to change the value (Shift for finer steps), in
+    /// place of the arrow buttons.
+    pub fn draggable(mut self) -> Self {
+        self.draggable = true;
+        self
+    }
+
     fn commit_buffer(&mut self) {
         let result = self.buffer.parse::<f32>();
         if let Ok(number) = result {
@@ -64,7 +82,12 @@ impl NumberInput {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) -> Response {
-        let (res, painter) = ui.allocate_painter(self.size, Sense::click());
+        let sense = if self.draggable {
+            Sense::click_and_drag()
+        } else {
+            Sense::click()
+        };
+        let (res, painter) = ui.allocate_painter(self.size, sense);
         let rect = res.rect;
         let theme = ui.app_theme();
         // Paint widget
@@ -72,10 +95,14 @@ impl NumberInput {
 
         let mut text = self.format_value(self.value) + &self.suffix;
         // Text
-        let text_edit_rect = Rect::from_min_max(
-            rect.min,
-            Pos2::new(rect.max.x - BUTTON_SIZE.x - STROKE_SIZE, rect.max.y),
-        );
+        let text_edit_rect = if self.draggable {
+            rect
+        } else {
+            Rect::from_min_max(
+                rect.min,
+                Pos2::new(rect.max.x - BUTTON_SIZE.x - STROKE_SIZE, rect.max.y),
+            )
+        };
         let text_edit = ui
             .scope_builder(UiBuilder::new().max_rect(rect), |ui| {
                 TextEdit::singleline(if self.edit_mode {
@@ -98,6 +125,9 @@ impl NumberInput {
         if text_edit.lost_focus() {
             self.edit_mode = false;
             self.commit_buffer();
+        }
+        if self.draggable {
+            return self.drag_ui(ui, res, &painter, &text_edit);
         }
 
         let offset = BUTTONS_GAP / 2.;
@@ -154,6 +184,66 @@ impl NumberInput {
         ui.allocate_rect(rect, Sense::empty());
 
         res
+    }
+
+    /// Focus, editing and dragging for a draggable input.
+    fn drag_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        res: Response,
+        painter: &Painter,
+        text_edit: &Response,
+    ) -> Response {
+        let theme = ui.app_theme();
+        let focused = res.has_focus() || text_edit.has_focus();
+        if focused || res.dragged() {
+            painter.rect_stroke(
+                res.rect,
+                1.0,
+                Stroke::new(STROKE_SIZE, theme.accent),
+                StrokeKind::Inside,
+            );
+        }
+        if res.double_clicked() {
+            self.edit_mode = true;
+            self.buffer = self.format_value(self.value);
+            text_edit.request_focus();
+        }
+        if res.clicked() {
+            res.request_focus();
+        }
+        if res.drag_started() {
+            self.drag_rest = 0.;
+        }
+        if res.dragged() {
+            let step = if ui.input(|i| i.modifiers.shift) {
+                FINE_STEP
+            } else {
+                1.0
+            };
+            self.drag_rest -= res.drag_delta().y / DRAG_PIXELS_PER_STEP;
+            let steps = self.drag_rest.trunc();
+            self.drag_rest -= steps;
+            if steps != 0. {
+                // Back on the step grid, so Shift's tenths don't linger.
+                let value = ((self.value / step).round() + steps) * step;
+                self.value = value.clamp(self.range.min, self.range.max);
+            }
+        }
+        if focused && !self.edit_mode {
+            let delta = ui.input_mut(|i| {
+                if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                    1.0
+                } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                    -1.0
+                } else {
+                    0.0
+                }
+            });
+            self.value = (self.value + delta).clamp(self.range.min, self.range.max);
+        }
+        ui.allocate_rect(res.rect, Sense::empty());
+        res.on_hover_cursor(egui::CursorIcon::ResizeVertical)
     }
 
     fn make_button(

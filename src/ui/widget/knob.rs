@@ -1,6 +1,7 @@
 //! A knob: drag up or down to change a value, on a linear or log scale.
 
 use crate::ui::theme::ThemeExt;
+use crate::ui::theme::font_size;
 use egui::{
     Align2, CursorIcon, FontId, Pos2, Response, Sense, Shape, Stroke, Ui, Vec2, Widget, vec2,
 };
@@ -130,7 +131,7 @@ impl Widget for Knob<'_> {
 
         let theme = ui.app_theme();
         let painter = ui.painter();
-        let font = FontId::proportional(9.);
+        let font = FontId::proportional(font_size::SMALL);
         painter.text(
             Pos2::new(rect.center().x, rect.top()),
             Align2::CENTER_TOP,

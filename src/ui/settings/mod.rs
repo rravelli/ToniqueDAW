@@ -4,6 +4,7 @@
 mod appearance;
 mod shortcuts;
 
+use crate::ui::theme::font_size;
 use crate::{
     config::settings::{Settings, UI_SCALE_RANGE},
     core::state::ProjectState,
@@ -12,14 +13,14 @@ use crate::{
         panels::menu_bar::set_ui_scale,
         theme::{ThemeExt, ThemeLibrary},
         widget::{
-            flat_button::FlatButton, input::NumberInput, section::SectionHeader, select::Select,
-            slider::ValueSlider, tab_bar::TabBar,
+            dialog, flat_button::FlatButton, input::NumberInput, section::SectionHeader,
+            select::Select, slider::ValueSlider, tab_bar::TabBar,
         },
     },
 };
 use appearance::AppearanceTab;
-use egui::{FontFamily, FontId, Frame, Grid, Layout, Margin, Rangef, RichText, Ui, Vec2, vec2};
-use egui_phosphor::regular::ARROWS_CLOCKWISE;
+use egui::{Align, Align2, FontFamily, FontId, Grid, Layout, Rangef, RichText, Ui, Vec2, vec2};
+use egui_phosphor::regular::{ARROWS_CLOCKWISE, X};
 use shortcuts::ShortcutsTab;
 use tonique_engine::device::{DeviceInfo, DeviceOptions, OutputDevice, output_devices};
 
@@ -29,6 +30,9 @@ const LABEL_WIDTH: f32 = 120.;
 const CONTROL_WIDTH: f32 = 240.;
 const BUTTON_HEIGHT: f32 = 22.;
 const WINDOW_WIDTH: f32 = 440.;
+/// Fits the tallest tab (Shortcuts), so switching tabs doesn't resize the
+/// window.
+const WINDOW_HEIGHT: f32 = 510.;
 
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsTab {
@@ -103,14 +107,32 @@ impl SettingsWindow {
             return;
         }
         let mut open = self.open;
+        // Our own header instead of egui's title bar, like the dialogs.
+        // Opens centred; it can still be dragged aside.
         egui::Window::new("Settings")
-            .open(&mut open)
+            .title_bar(false)
             .collapsible(false)
             .resizable(false)
-            .frame(Frame::window(ui.style()).inner_margin(Margin::same(5)))
+            .pivot(Align2::CENTER_CENTER)
+            .default_pos(ui.ctx().content_rect().center())
+            .frame(dialog::frame(ui))
             .show(ui.ctx(), |ui| {
                 ui.set_width(WINDOW_WIDTH);
+                ui.set_min_height(WINDOW_HEIGHT);
                 ui.spacing_mut().item_spacing = vec2(6., 4.);
+                ui.horizontal(|ui| {
+                    dialog::title(ui, "Settings");
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let close = FlatButton::ghost(X).square(20.).font(FontId::new(
+                            font_size::HEADING,
+                            FontFamily::Name(PHOSPHOR_REGULAR.into()),
+                        ));
+                        if ui.add(close).on_hover_text("Close").clicked() {
+                            open = false;
+                        }
+                    });
+                });
+                ui.add_space(10.);
                 let tabs = ui.add(TabBar::new(
                     &mut self.tab,
                     [
@@ -346,16 +368,20 @@ impl SettingsWindow {
 
     fn general_buttons(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         ui.separator();
-        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add(secondary_button("Restore defaults")).clicked() {
-                let defaults = Settings::default();
-                self.draft.ui_scale = defaults.ui_scale;
-                self.draft.metronome_level = defaults.metronome_level;
-                set_ui_scale(ui.ctx(), state, self.draft.ui_scale);
-                let mut settings = state.settings().clone();
-                settings.metronome_level = self.draft.metronome_level;
-                state.apply_settings(settings);
-            }
+        // In a row: alone, the layout would take the rest of the window's
+        // height and centre the button in it.
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add(secondary_button("Restore defaults")).clicked() {
+                    let defaults = Settings::default();
+                    self.draft.ui_scale = defaults.ui_scale;
+                    self.draft.metronome_level = defaults.metronome_level;
+                    set_ui_scale(ui.ctx(), state, self.draft.ui_scale);
+                    let mut settings = state.settings().clone();
+                    settings.metronome_level = self.draft.metronome_level;
+                    state.apply_settings(settings);
+                }
+            });
         });
     }
 
@@ -378,7 +404,7 @@ impl SettingsWindow {
             let apply = FlatButton::new("Apply audio changes")
                 .size(vec2(0., BUTTON_HEIGHT))
                 .padding(10.)
-                .font(FontId::proportional(12.))
+                .font(FontId::proportional(font_size::BODY))
                 .selected(true)
                 .border_radius(2.);
             if ui
@@ -454,6 +480,6 @@ fn secondary_button(text: &str) -> FlatButton {
     FlatButton::new(text)
         .size(Vec2::new(0., BUTTON_HEIGHT))
         .padding(10.)
-        .font(FontId::proportional(12.))
+        .font(FontId::proportional(font_size::BODY))
         .border_radius(2.)
 }

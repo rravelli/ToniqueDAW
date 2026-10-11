@@ -3,6 +3,7 @@ use crate::{
     core::project::project_name,
     core::state::ProjectState,
     ui::{
+        about::AboutWindow,
         commands::Commands,
         project::ProjectAction,
         theme::ThemeExt,
@@ -15,11 +16,15 @@ use std::path::PathBuf;
 const ZOOM_STEP: f32 = 0.1;
 
 /// Application menus at the very top of the window.
-pub struct AppMenuBar;
+pub struct AppMenuBar {
+    about: AboutWindow,
+}
 
 impl AppMenuBar {
     pub fn new() -> Self {
-        Self
+        Self {
+            about: AboutWindow::default(),
+        }
     }
 
     /// `recent`: recently opened projects, newest first. Returns what was
@@ -54,9 +59,19 @@ impl AppMenuBar {
                     if ui.button("Settings").on_hover_text(tooltip).clicked() {
                         commands.push(Action::OpenSettings);
                     }
+                    self.help_menu(ui);
                 });
             });
+        self.about.show(ui);
         picked
+    }
+
+    fn help_menu(&mut self, ui: &mut Ui) {
+        ui.menu_button("Help", |ui| {
+            if ui.button("About Tonique").clicked() {
+                self.about.open();
+            }
+        });
     }
 
     fn file_menu(

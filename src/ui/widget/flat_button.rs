@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use egui::{
     Align2, Color32, CursorIcon, FontFamily, FontId, RichText, Sense, Stroke, Vec2, Widget, vec2,
 };
@@ -156,10 +157,10 @@ impl Widget for FlatButton {
         }
 
         if !self.tooltip_text.is_empty() {
-            res = res.on_hover_text(
-                RichText::new(self.tooltip_text)
-                    .font(FontId::new(8., egui::FontFamily::Proportional)),
-            )
+            res = res.on_hover_text(RichText::new(self.tooltip_text).font(FontId::new(
+                font_size::SMALL,
+                egui::FontFamily::Proportional,
+            )))
         }
 
         res

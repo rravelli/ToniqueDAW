@@ -1,3 +1,4 @@
+use crate::ui::theme::font_size;
 use crate::{
     config::keymap::{Action, FIXED_SHORTCUTS, Keymap, reserved_by, shortcut_from_press},
     core::state::ProjectState,
@@ -99,19 +100,23 @@ impl ShortcutsTab {
                 .color(ui.app_theme().text_muted),
         );
         ui.separator();
-        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            let reset_all = FlatButton::new("Reset all")
-                .size(vec2(0., 22.))
-                .padding(10.)
-                .font(FontId::proportional(12.))
-                .border_radius(2.);
-            if ui
-                .add_enabled(!keymap.is_all_default(), reset_all)
-                .clicked()
-            {
-                keymap = Keymap::default();
-                self.cancel();
-            }
+        // In a row: alone, the layout would take the rest of the window's
+        // height and centre the button in it.
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                let reset_all = FlatButton::new("Reset all")
+                    .size(vec2(0., 22.))
+                    .padding(10.)
+                    .font(FontId::proportional(font_size::BODY))
+                    .border_radius(2.);
+                if ui
+                    .add_enabled(!keymap.is_all_default(), reset_all)
+                    .clicked()
+                {
+                    keymap = Keymap::default();
+                    self.cancel();
+                }
+            });
         });
 
         if keymap != state.settings().keymap {
@@ -254,7 +259,7 @@ fn chip(text: impl ToString) -> FlatButton {
     FlatButton::new(text)
         .size(vec2(0., CHIP_HEIGHT))
         .padding(8.)
-        .font(FontId::proportional(12.))
+        .font(FontId::proportional(font_size::BODY))
         .border_radius(2.)
 }
 
