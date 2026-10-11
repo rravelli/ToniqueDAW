@@ -21,17 +21,18 @@ const HEADER_HEIGHT: f32 = 16.;
 /// Width of the trim handles inside each edge of a clip.
 const TRIM_HANDLE_WIDTH: f32 = 7.;
 const MIN_TRIM_HANDLE_WIDTH: f32 = 2.;
-/// Opacity of a clip's body over the lane: a tint of its track's colour,
-/// unlike its solid header, so the header reads as the clip to grab and the
-/// body as time.
-const BODY_ALPHA: u8 = 100;
+/// How much of its track's colour a clip's body has, mixed into the
+/// timeline's background: a tint, unlike its solid header, so the header
+/// reads as the clip to grab and the body as time. Opaque, so clips dragged
+/// over others hide them.
+const BODY_TINT: f32 = 0.4;
 /// A selected clip's body: a little more, its header carrying the selection.
-const SELECTED_BODY_ALPHA: u8 = 130;
-/// Opacity of a silenced clip's body, header and outline over the lane: a
-/// faint wash of its track's colour.
-const SILENCED_BODY_ALPHA: u8 = 40;
-const SILENCED_HEADER_ALPHA: u8 = 70;
-const SILENCED_BORDER_ALPHA: u8 = 110;
+const SELECTED_BODY_TINT: f32 = 0.5;
+/// How much of its track's colour a silenced clip's body, header and
+/// outline have: a faint wash of it.
+const SILENCED_BODY_TINT: f32 = 0.16;
+const SILENCED_HEADER_TINT: f32 = 0.27;
+const SILENCED_BORDER_TINT: f32 = 0.43;
 #[derive(Clone, Copy)]
 enum Edge {
     Start,
@@ -79,26 +80,28 @@ impl ClipView<'_> {
         } else {
             color
         };
+        // Mixed into the background rather than see-through.
+        let tint = |color: Color32, amount: f32| theme.bg_base.lerp_to_gamma(color, amount);
         let (body, header, header_ink, wave, outline) = if self.silenced {
             (
-                with_alpha(color, SILENCED_BODY_ALPHA),
-                with_alpha(color, SILENCED_HEADER_ALPHA),
+                tint(color, SILENCED_BODY_TINT),
+                tint(color, SILENCED_HEADER_TINT),
                 theme.text_muted,
                 theme.text_muted,
-                with_alpha(color, SILENCED_BORDER_ALPHA),
+                tint(color, SILENCED_BORDER_TINT),
             )
         } else {
-            let alpha = if selected {
-                SELECTED_BODY_ALPHA
+            let amount = if selected {
+                SELECTED_BODY_TINT
             } else {
-                BODY_ALPHA
+                BODY_TINT
             };
             (
-                with_alpha(header, alpha),
+                tint(header, amount),
                 header,
                 theme.text_on(header),
                 color,
-                with_alpha(color, 170),
+                tint(color, 0.67),
             )
         };
         let stroke = if selected {
