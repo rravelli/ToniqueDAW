@@ -194,8 +194,10 @@ impl Timeline {
                     let mut show_waveform = true;
                     let mut color = ui.app_theme().text_muted;
                     let mut height = DEFAULT_TRACK_HEIGHT;
+                    let mut silenced = false;
                     if let Some(t) = state.track_from_index(track_index) {
                         show_waveform = !t.collapsed;
+                        silenced = t.is_silenced();
                         color = t.color;
                         height = t.height;
                     }
@@ -209,6 +211,7 @@ impl Timeline {
                         color,
                         selected: true,
                         show_waveform,
+                        silenced,
                     }
                     .ui(ui, state);
                 }

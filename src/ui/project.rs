@@ -246,7 +246,7 @@ impl ProjectManager {
         let title = format!(
             "{}{} — Tonique",
             self.name(),
-            if modified { " •" } else { "" }
+            if modified { " *" } else { "" }
         );
         if title != self.title {
             ui.ctx()

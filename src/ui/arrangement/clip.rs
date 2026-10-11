@@ -21,6 +21,11 @@ const HEADER_HEIGHT: f32 = 16.;
 /// Width of the trim handles inside each edge of a clip.
 const TRIM_HANDLE_WIDTH: f32 = 7.;
 const MIN_TRIM_HANDLE_WIDTH: f32 = 2.;
+/// Opacity of a silenced clip's body, header and outline over the lane: a
+/// faint wash of its track's colour.
+const SILENCED_BODY_ALPHA: u8 = 40;
+const SILENCED_HEADER_ALPHA: u8 = 70;
+const SILENCED_BORDER_ALPHA: u8 = 110;
 #[derive(Clone, Copy)]
 enum Edge {
     Start,
@@ -40,6 +45,8 @@ pub struct ClipView<'a> {
     pub selected: bool,
     /// False in a collapsed row: only the header shows.
     pub show_waveform: bool,
+    /// Its track is muted or soloed out: drawn faded, in muted ink.
+    pub silenced: bool,
 }
 
 impl ClipView<'_> {
@@ -64,13 +71,23 @@ impl ClipView<'_> {
         } else {
             color
         };
-        // Name and waveform are drawn on the clip's colour.
-        let ink = theme.text_on(fill);
+        // Name and waveform are drawn on the clip's colour; a silenced clip
+        // only keeps a trace of it, so it recedes without losing its track.
+        let (fill, header, ink, outline) = if self.silenced {
+            (
+                with_alpha(fill, SILENCED_BODY_ALPHA),
+                with_alpha(color, SILENCED_HEADER_ALPHA),
+                theme.text_muted,
+                with_alpha(color, SILENCED_BORDER_ALPHA),
+            )
+        } else {
+            (fill, color, theme.text_on(fill), fill)
+        };
 
         let stroke = if selected {
             Stroke::new(BORDER_WIDTH, theme.clip_selected)
         } else {
-            Stroke::new(BORDER_WIDTH, fill)
+            Stroke::new(BORDER_WIDTH, outline)
         };
         // Main rect
         painter.rect(
@@ -103,7 +120,7 @@ impl ClipView<'_> {
             ),
         )
         .intersect(viewport);
-        painter.rect(hitbox, 2.0, color, Stroke::NONE, egui::StrokeKind::Inside);
+        painter.rect(hitbox, 2.0, header, Stroke::NONE, egui::StrokeKind::Inside);
 
         let response = ui.interact(
             hitbox,

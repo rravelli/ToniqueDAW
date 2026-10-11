@@ -29,6 +29,8 @@ mod selection;
 
 /// Opacity of the clips in a group's preview, out of 255.
 const PREVIEW_ALPHA: u8 = 80;
+/// The same for a silenced track: fainter, but still its colour.
+const SILENCED_PREVIEW_ALPHA: u8 = 30;
 
 pub struct Timeline {
     clip_drag: Option<ClipDrag>,
@@ -303,9 +305,7 @@ impl Timeline {
         let pos = pos2(x, top);
         let size = vec2(width, track.height);
         let theme = ui.app_theme();
-        let color = if track.is_silenced() {
-            theme.bg_control_hover
-        } else if dragged {
+        let color = if dragged {
             theme.hover_overlay
         } else {
             track.color
@@ -320,6 +320,7 @@ impl Timeline {
                 && state.selection_bounds().is_none()
                 && state.is_clip_selected(clip.id),
             show_waveform: !track.collapsed,
+            silenced: track.is_silenced(),
         }
         .ui(ui, state);
         // Select clip
@@ -402,6 +403,7 @@ impl Timeline {
 
             let height = track.as_ref().map_or(DEFAULT_TRACK_HEIGHT, |t| t.height);
             let show_waveform = track.as_ref().is_none_or(|t| !t.collapsed);
+            let silenced = track.as_ref().is_some_and(|t| t.is_silenced());
             let color = track
                 .as_ref()
                 .map_or(ui.app_theme().text_muted, |t| t.color);
@@ -419,6 +421,7 @@ impl Timeline {
                 color,
                 selected: false,
                 show_waveform,
+                silenced,
             }
             .ui(ui, state);
 
@@ -444,7 +447,6 @@ fn paint_group_overview(ui: &Ui, state: &ProjectState, group: &TrackRow, lane: R
     if tracks.is_empty() {
         return;
     }
-    let theme = ui.app_theme();
     let painter = ui.painter_at(lane);
     let bpm = state.bpm();
     let band = Rect::from_min_max(
@@ -459,12 +461,12 @@ fn paint_group_overview(ui: &Ui, state: &ProjectState, group: &TrackRow, lane: R
     for (k, track) in tracks.iter().enumerate() {
         let top = band.top() + k as f32 * strip;
         let rows = top..=top + strip;
-        let color = if track.is_silenced() {
-            theme.text_disabled
+        let alpha = if track.is_silenced() {
+            SILENCED_PREVIEW_ALPHA
         } else {
-            track.color
+            PREVIEW_ALPHA
         };
-        let color = with_alpha(color, PREVIEW_ALPHA);
+        let color = with_alpha(track.color, alpha);
         for clip in &track.clips {
             let x = state.grid.beats_to_x(clip.position, lane)
                 ..=state.grid.beats_to_x(clip.end(bpm), lane);
