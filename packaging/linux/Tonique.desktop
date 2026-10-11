@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Tonique
+GenericName=Digital Audio Workstation
+Comment=Arrange and mix audio
+Exec=tonique
+Icon=tonique
+Terminal=false
+Categories=AudioVideo;Audio;
+StartupWMClass=Tonique
