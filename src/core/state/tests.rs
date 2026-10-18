@@ -9,7 +9,7 @@ use crate::{
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tonique_engine::{
-    edit::{ClipId, ClipLoop, PluginKind, TrackId},
+    edit::{ClipId, ClipLoop, PluginKind, TrackId, WarpMode},
     engine::{Engine, EngineConfig},
     nodes::FilterMode,
     sample::SampleBuffer,
@@ -158,17 +158,28 @@ fn a_batch_is_one_undo_step() {
     assert!(!state.can_undo());
 }
 
+/// On a tempo change, unwarped clips keep their length in seconds (and so
+/// their sound); warped ones keep theirs in beats, stretched to the tempo.
 #[test]
-fn tempo_changes_keep_audio_length_in_seconds() {
+fn tempo_changes_keep_unwarped_clips_in_seconds_warped_in_beats() {
     let mut state = setup_state();
-    let track = state.add_track();
-    add_clip(&mut state, track, 2., 1.); // 2 beats at 120 bpm
+    let unwarped = state.add_track();
+    let clip = add_clip(&mut state, unwarped, 2., 1.); // 2 beats at 120 bpm
+    let mut off = state.find_clip(clip).unwrap().1;
+    off.set_warp(WarpMode::Off, 120., 0, 0., 120.);
+    state.commit_resize_clip(off);
+    let warped = state.add_track();
+    add_clip(&mut state, warped, 2., 1.);
+
     state.set_bpm(60.);
     assert_eq!(state.bpm(), 60.);
-    assert_eq!(spans(&state, track), [(2., 3.)]);
+    assert_eq!(spans(&state, unwarped), [(2., 3.)]);
+    assert_eq!(spans(&state, warped), [(2., 4.)]);
+    let stretched = &state.tracks().nth(1).unwrap().clips[0];
+    assert_eq!(stretched.speed(60.), 0.5, "the file at 120 played at 60");
     state.undo();
     assert_eq!(state.bpm(), 120.);
-    assert_eq!(spans(&state, track), [(2., 4.)]);
+    assert_eq!(spans(&state, unwarped), [(2., 4.)]);
 }
 
 #[test]
@@ -1195,6 +1206,9 @@ mod projects {
         clip.gain = 0.5;
         clip.pan = 0.75;
         clip.origin = quarter / 2.;
+        clip.bpm = 100.;
+        clip.transpose = 3;
+        clip.detune = -25.;
         state.add_clips(&track, vec![clip]);
         state.commit_volume(track, 1.0, 0.5);
         state.commit_volume(MASTER_TRACK_ID, 1.0, 0.8);
@@ -1275,6 +1289,9 @@ mod projects {
                 gain: 1.,
                 pan: 0.,
                 origin: 0.,
+                warp: crate::core::project::WarpFile::Off,
+                bpm: None,
+                transpose: 0.,
             }],
         });
         let mut state = setup_state();
@@ -1311,6 +1328,9 @@ mod projects {
                 gain: 20.,
                 pan: 5.,
                 origin: 0.,
+                warp: crate::core::project::WarpFile::Off,
+                bpm: None,
+                transpose: 0.,
             }],
         });
         let mut state = setup_state();
@@ -1695,4 +1715,36 @@ fn time_signature_changes_are_undoable() {
     add_clip(&mut state, track, 6., 1.);
     state.set_time_signature(TimeSignature::new(7, 8).unwrap());
     assert_eq!(spans(&state, track), [(6., 8.)]);
+}
+
+/// Changing the tempo (or undoing it) leaves the playhead on its beat.
+#[test]
+fn the_playhead_stays_on_its_beat_when_the_tempo_changes() {
+    let mut state = setup_state();
+    state.seek(BeatPos(8.));
+    state.update();
+    state.set_bpm(60.);
+    state.update();
+    assert_eq!(state.playhead(), BeatPos(8.));
+    state.undo();
+    state.update();
+    assert_eq!(state.playhead(), BeatPos(8.));
+}
+
+/// A transposition being dragged is heard at once, each step applied; done,
+/// it's one undo step back to where the drag started.
+#[test]
+fn live_clip_edits_are_heard_at_once_and_undone_as_one() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let clip = add_clip(&mut state, track, 0., 2.);
+    let pitch = |state: &ProjectState| state.find_clip(clip).unwrap().1.transpose;
+    for (transpose, done) in [(1, false), (2, false), (3, true)] {
+        let mut edited = state.find_clip(clip).unwrap().1;
+        edited.set_warp(WarpMode::Stretch, 120., transpose, 0., 120.);
+        state.edit_clip_live(edited, done);
+        assert_eq!(pitch(&state), transpose, "applied at once");
+    }
+    state.undo();
+    assert_eq!(pitch(&state), 0, "one step");
 }

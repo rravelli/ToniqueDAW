@@ -8,7 +8,7 @@ use std::{
 use egui::Vec2;
 use tonique_engine::{
     edit::{
-        Bus, BusId, Channel, ClipLoop, Edit, Output, TrackId,
+        Bus, BusId, Channel, ClipLoop, Edit, MAX_TRANSPOSE, Output, TrackId, WarpMode,
         commands::{AddBus, SetBypass, SetOutput, SetSolo},
     },
     time::BeatPos,
@@ -24,7 +24,7 @@ use crate::{
         effect::{EffectKind, Setting},
         project::{
             ChannelFile, ClipFile, EffectFile, GroupFile, LoopFile, ProjectFile, TrackFile,
-            VERSION, resolve_path, store_path,
+            VERSION, WarpFile, resolve_path, store_path,
         },
         track::TrackView,
     },
@@ -136,6 +136,12 @@ impl ProjectState {
                             gain: clip.gain,
                             pan: clip.pan,
                             origin: clip.origin,
+                            warp: match clip.warp {
+                                WarpMode::Off => WarpFile::Off,
+                                WarpMode::Stretch => WarpFile::Stretch,
+                            },
+                            bpm: Some(clip.bpm),
+                            transpose: clip.pitch(),
                         })
                         .collect(),
                 }
@@ -278,6 +284,16 @@ impl ProjectState {
         restored.gain = clip.gain;
         restored.pan = clip.pan;
         restored.origin = clip.origin;
+        restored.warp = match clip.warp {
+            WarpFile::Off => WarpMode::Off,
+            WarpFile::Stretch => WarpMode::Stretch,
+        };
+        restored.bpm = clip.bpm.filter(|b| *b > 0.).unwrap_or(bpm as f64);
+        // In range, whatever a project file says.
+        let limit = MAX_TRANSPOSE;
+        let transpose = clip.transpose.clamp(-limit, limit);
+        restored.transpose = transpose.round() as i32;
+        restored.detune = (transpose - transpose.round()) * 100.;
         restored.looped = clip.looped.map(|l| ClipLoop {
             start_s: l.start,
             end_s: l.end,

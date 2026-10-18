@@ -1,7 +1,8 @@
 use crate::analysis::AudioInfo;
 use std::fmt::Debug;
 use tonique_engine::{
-    edit::{ClipId, ClipLoop},
+    edit::{ClipId, ClipLoop, MAX_TRANSPOSE, WarpMode},
+    nodes::ClipWarp,
     time::BeatPos,
 };
 
@@ -35,6 +36,15 @@ pub struct AudioClip {
     /// Where bar 1 of the clip's own grid is in the file, in seconds: the
     /// file's start unless set. Trims and slips leave it where it is.
     pub origin: f64,
+    /// How it follows the project's tempo.
+    pub warp: WarpMode,
+    /// The file's tempo: warped, the clip plays at the project's over it.
+    pub bpm: f64,
+    /// In whole semitones: warped, the pitch alone moves; unwarped, the
+    /// speed too.
+    pub transpose: i32,
+    /// Fine tuning, in cents (-50 to 50), as `transpose`.
+    pub detune: f32,
 }
 
 /// A stretch of a clip playing one stretch of its file, without a jump.
@@ -62,6 +72,10 @@ impl AudioClip {
             gain: 1.,
             pan: 0.,
             origin: 0.,
+            warp: WarpMode::Stretch,
+            bpm: bpm as f64,
+            transpose: 0,
+            detune: 0.,
         };
         clip.length = clip.source_beats(bpm);
         clip
@@ -78,9 +92,60 @@ impl AudioClip {
         self.audio.duration.map_or(0., |d| d.as_secs_f32())
     }
 
-    /// Length of the whole source file, in beats.
+    /// Its transposition in semitones, fractions being cents.
+    pub fn pitch(&self) -> f32 {
+        self.transpose as f32 + self.detune / 100.
+    }
+
+    /// How it plays its file at `bpm`.
+    pub fn play(&self, bpm: f32) -> ClipWarp {
+        self.warp.play(self.bpm, self.pitch(), bpm as f64)
+    }
+
+    /// Seconds of the file played per second at `bpm`.
+    pub fn speed(&self, bpm: f32) -> f64 {
+        self.play(bpm).speed()
+    }
+
+    /// Beats the clip takes to play `seconds` of its file.
+    pub fn file_beats(&self, seconds: f64, bpm: f32) -> f64 {
+        to_beats(seconds / self.speed(bpm), bpm)
+    }
+
+    /// Seconds of its file the clip plays in `beats`.
+    pub fn file_seconds(&self, beats: f64, bpm: f32) -> f64 {
+        to_seconds(beats, bpm) * self.speed(bpm)
+    }
+
+    /// Follow the tempo as `warp` with the file at `file_bpm`, transposed by
+    /// `transpose` semitones and `detune` cents, keeping what's played of
+    /// the file: the clip gets shorter played faster, longer played slower
+    /// (no longer than the file allows).
+    pub fn set_warp(
+        &mut self,
+        warp: WarpMode,
+        file_bpm: f64,
+        transpose: i32,
+        detune: f32,
+        bpm: f32,
+    ) {
+        let played = self.file_seconds(self.length, bpm);
+        let limit = MAX_TRANSPOSE as i32;
+        self.warp = warp;
+        if file_bpm > 0. {
+            self.bpm = file_bpm;
+        }
+        self.transpose = transpose.clamp(-limit, limit);
+        self.detune = detune.clamp(-50., 50.);
+        self.length = self
+            .file_beats(played, bpm)
+            .max(MIN_LENGTH)
+            .min(self.max_length(bpm));
+    }
+
+    /// Length of the whole source file as the clip plays it, in beats.
     pub fn source_beats(&self, bpm: f32) -> f64 {
-        to_beats(self.source_seconds() as f64, bpm)
+        self.file_beats(self.source_seconds() as f64, bpm)
     }
 
     /// The loop, if it's one that plays: inside the file, and not empty.
@@ -93,7 +158,7 @@ impl AudioClip {
     /// Where in the file the clip reads `beats` after its start, in
     /// seconds.
     pub fn file_at(&self, beats: f64, bpm: f32) -> f64 {
-        let at = self.offset + to_seconds(beats, bpm);
+        let at = self.offset + self.file_seconds(beats, bpm);
         match self.active_loop() {
             Some(l) if at >= l.end_s => {
                 l.start_s + (at - l.start_s).rem_euclid(l.end_s - l.start_s)
@@ -107,7 +172,8 @@ impl AudioClip {
         if self.active_loop().is_some() {
             f64::INFINITY
         } else {
-            to_beats(self.source_seconds() as f64 - self.offset, bpm).max(0.)
+            self.file_beats(self.source_seconds() as f64 - self.offset, bpm)
+                .max(0.)
         }
     }
 
@@ -119,7 +185,7 @@ impl AudioClip {
     /// Where the start of the file lies in the arrangement, read without
     /// looping: before the clip's position by its offset.
     pub fn file_start(&self, bpm: f32) -> BeatPos {
-        self.position - to_beats(self.offset, bpm)
+        self.position - self.file_beats(self.offset, bpm)
     }
 
     /// Move the clip's start to `beats`, keeping its end and its sound in
@@ -141,7 +207,7 @@ impl AudioClip {
         let shift = beats - self.position;
         self.offset = match looping_back {
             Some(l) if shift < 0. => {
-                let back = self.offset - l.start_s + to_seconds(shift, bpm);
+                let back = self.offset - l.start_s + self.file_seconds(shift, bpm);
                 l.start_s + back.rem_euclid(l.end_s - l.start_s)
             }
             _ => self.file_at(shift, bpm),
@@ -177,7 +243,7 @@ impl AudioClip {
         self.looped = looped;
         if self.active_loop().is_none() {
             let source = self.source_seconds() as f64;
-            let min = to_seconds(MIN_LENGTH, bpm).min(source);
+            let min = self.file_seconds(MIN_LENGTH, bpm).min(source);
             self.offset = self.offset.min(source - min).max(0.);
         }
         self.length = self.length.min(self.max_length(bpm));
@@ -190,7 +256,7 @@ impl AudioClip {
         let source = self.source_seconds() as f64;
         let last = match self.active_loop() {
             Some(l) => l.end_s,
-            None => source - to_seconds(self.length, bpm),
+            None => source - self.file_seconds(self.length, bpm),
         };
         self.offset = offset.clamp(0., last.max(0.));
     }
@@ -206,7 +272,7 @@ impl AudioClip {
                 Some(l) if file_start < l.end_s => l.end_s,
                 _ => self.source_seconds() as f64,
             };
-            let end = (start + to_beats(until - file_start, bpm)).min(self.length);
+            let end = (start + self.file_beats(until - file_start, bpm)).min(self.length);
             if end <= start {
                 break;
             }
@@ -214,7 +280,7 @@ impl AudioClip {
                 start,
                 end,
                 file_start,
-                file_end: file_start + to_seconds(end - start, bpm),
+                file_end: file_start + self.file_seconds(end - start, bpm),
             });
             start = end;
         }
@@ -246,6 +312,7 @@ impl Debug for AudioClip {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tonique_engine::edit::WarpMode;
 
     /// 120 bpm: two beats a second.
     const BPM: f32 = 120.;
@@ -367,6 +434,36 @@ mod tests {
         c.trim_start_at(BeatPos(100.), BPM);
         assert_eq!(c.end(BPM), BeatPos(14.), "the end stays");
         assert!(close(c.length, MIN_LENGTH), "the start past the end");
+    }
+
+    /// Warped, a clip plays at the project's tempo over its file's;
+    /// keeping what it plays of the file, it gets shorter or longer.
+    #[test]
+    fn warped_clips_play_at_the_project_tempo_over_theirs() {
+        let mut c = clip(); // from 1 s, 4 beats: 1 s to 3 s
+        assert_eq!(c.speed(BPM), 1., "new: at the project's tempo");
+        c.set_warp(WarpMode::Stretch, 60., 0, 0., BPM);
+        assert_eq!(c.speed(BPM), 2., "a 60 bpm file at 120");
+        assert_eq!(c.length, 2., "the same 2 s of file, in half the beats");
+        assert!(close(c.file_at(1., BPM), 2.), "a beat is a second of file");
+        // Transposed, the pitch alone moves.
+        c.set_warp(WarpMode::Stretch, 60., 7, 0., BPM);
+        assert_eq!((c.speed(BPM), c.length), (2., 2.));
+    }
+
+    /// Unwarped, transposing resamples: an octave up, twice as fast.
+    #[test]
+    fn unwarped_clips_play_faster_transposed_up() {
+        let mut c = clip();
+        c.set_warp(WarpMode::Off, BPM as f64, 12, 0., BPM);
+        assert!(close(c.speed(BPM), 2.));
+        assert!(close(c.length, 2.));
+        assert!(close(c.speed(60.), 2.), "whatever the tempo");
+        // Detuned by cents.
+        c.set_warp(WarpMode::Off, BPM as f64, 0, 50., BPM);
+        assert!(close(c.speed(BPM), 2f64.powf(0.5 / 12.)));
+        c.set_warp(WarpMode::Off, BPM as f64, 0, 80., BPM);
+        assert_eq!(c.detune, 50., "at most half a semitone");
     }
 
     #[test]

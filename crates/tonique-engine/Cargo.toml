@@ -12,6 +12,9 @@ workspace = true
 default = []
 # Real audio device output through cpal.
 device = ["dep:cpal"]
+# Time stretching with Signalsmith Stretch (C++, built with a C++ compiler
+# and libclang). Without it, stretched clips play resampled.
+signalsmith = ["dep:signalsmith-stretch"]
 
 # Keep this crate free of UI dependencies: it must stay usable (and
 # publishable) on its own. UI code lives in the DAW crate at the repo root.
@@ -22,6 +25,7 @@ libc = "0.2"
 rtrb = "0.4"
 rustfft = "6.4"
 cpal = { version = "0.18", optional = true }
+signalsmith-stretch = { version = "0.1.3", optional = true }
 
 [[example]]
 name = "play"

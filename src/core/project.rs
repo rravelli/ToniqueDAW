@@ -19,8 +19,9 @@ pub const EXTENSION: &str = "tonique";
 /// 2 added groups; 3 the echo, spectrum and utility effects, settings
 /// (filter `mode`, echo `time`) among effect parameters, and effect names;
 /// 4 the time signature; 5 clip gain, pan, loops and bar 1, clips saved by
-/// offset and length rather than by trims.
-pub const VERSION: u32 = 5;
+/// offset and length rather than by trims; 6 clip warp, tempo and
+/// transposition.
+pub const VERSION: u32 = 6;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
@@ -147,6 +148,30 @@ pub struct ClipFile {
     /// file's start (0) when absent.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub origin: f64,
+    /// How it follows the project's tempo; older projects' clips don't.
+    #[serde(default, skip_serializing_if = "WarpFile::is_off")]
+    pub warp: WarpFile,
+    /// The file's tempo; the project's when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
+    /// In semitones, fractions being cents.
+    #[serde(default, skip_serializing_if = "is_centred")]
+    pub transpose: f32,
+}
+
+/// See [`tonique_engine::edit::WarpMode`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WarpFile {
+    #[default]
+    Off,
+    Stretch,
+}
+
+impl WarpFile {
+    fn is_off(&self) -> bool {
+        *self == Self::Off
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -339,6 +364,9 @@ mod tests {
                     gain: 0.5,
                     pan: -0.25,
                     origin: 0.75,
+                    warp: WarpFile::Stretch,
+                    bpm: Some(96.),
+                    transpose: -2.5,
                 }],
             }],
         };
