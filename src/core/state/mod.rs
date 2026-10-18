@@ -933,8 +933,9 @@ impl ProjectState {
         } = &mut engine_clip.content
         {
             *source_offset_s = clip.offset;
-            gain.value.set(clip.gain, 0.);
-            pan.value.set(clip.pan, 0.);
+            // In range, whatever a project file says.
+            gain.value.set(clip.gain.clamp(gain.min, gain.max), 0.);
+            pan.value.set(clip.pan.clamp(pan.min, pan.max), 0.);
             *looped = clip.looped;
         }
         engine_clip

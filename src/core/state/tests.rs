@@ -1278,6 +1278,42 @@ mod projects {
     }
 
     #[test]
+    fn clip_gain_and_pan_out_of_range_in_a_file_are_clamped() {
+        let dir = temp_dir("clamped");
+        write_wav(&dir.join("loop.wav"));
+        let mut project = setup_state().project(Some(&dir));
+        project.tracks.push(crate::core::project::TrackFile {
+            name: "Loud".into(),
+            color: "#ffffff".into(),
+            height: 60.,
+            collapsed: false,
+            soloed: false,
+            group: None,
+            channel: project.master.clone(),
+            clips: vec![ClipFile {
+                path: "loop.wav".into(),
+                position: 0.,
+                offset: 0.,
+                length: Some(1.),
+                looped: None,
+                trim_start: None,
+                trim_end: None,
+                gain: 20.,
+                pan: 5.,
+            }],
+        });
+        let mut state = setup_state();
+        let problems = state.load_project(&project, &dir);
+        assert!(problems.is_empty(), "{problems:?}");
+        let clip = &state.tracks().next().unwrap().clips[0];
+        assert_eq!(
+            (clip.gain, clip.pan),
+            (tonique_engine::edit::CLIP_GAIN_MAX, 1.)
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_new_project_is_empty() {
         let mut state = setup_state();
         let track = state.add_track();
