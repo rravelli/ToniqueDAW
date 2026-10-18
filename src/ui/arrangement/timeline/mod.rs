@@ -334,7 +334,7 @@ impl Timeline {
                 .selection_bounds()
                 .filter(|_| !dragged && state.is_clip_selected(clip.id))
                 .map(|b| (b.start_pos, b.end_pos)),
-            show_waveform: !track.collapsed,
+            collapsed: track.collapsed,
             silenced: track.is_silenced(),
         }
         .ui(ui, state);
@@ -425,7 +425,7 @@ impl Timeline {
             };
 
             let height = track.as_ref().map_or(DEFAULT_TRACK_HEIGHT, |t| t.height);
-            let show_waveform = track.as_ref().is_none_or(|t| !t.collapsed);
+            let collapsed = track.as_ref().is_some_and(|t| t.collapsed);
             let silenced = track.as_ref().is_some_and(|t| t.is_silenced());
             // Past the last track: on the one dropping it will add, in the
             // colour it will get.
@@ -451,7 +451,7 @@ impl Timeline {
                 color,
                 selected: false,
                 zone: None,
-                show_waveform,
+                collapsed,
                 silenced,
             }
             .preview(ui, state);

@@ -201,7 +201,7 @@ impl Timeline {
                     dragged.clip.position = new_position;
                     let x = state.grid.beats_to_x(new_position, viewport);
 
-                    let mut show_waveform = true;
+                    let mut collapsed = false;
                     let mut color = track_index
                         .checked_sub(state.track_count())
                         .and_then(|new| new_colors.get(new).copied())
@@ -209,7 +209,7 @@ impl Timeline {
                     let mut height = DEFAULT_TRACK_HEIGHT;
                     let mut silenced = false;
                     if let Some(t) = state.track_from_index(track_index) {
-                        show_waveform = !t.collapsed;
+                        collapsed = t.collapsed;
                         silenced = t.is_silenced();
                         color = t.color;
                         height = t.height;
@@ -224,7 +224,7 @@ impl Timeline {
                         color,
                         selected: true,
                         zone: None,
-                        show_waveform,
+                        collapsed,
                         silenced,
                     }
                     .preview(ui, state);

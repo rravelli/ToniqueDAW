@@ -1,6 +1,6 @@
 use crate::ui::theme::font_size;
 use crate::{
-    core::{clip::AudioClip, state::ProjectState, track::TRACK_COLLAPSED_HEIGHT},
+    core::{clip::AudioClip, state::ProjectState},
     ui::arrangement::grid::PaintGrid,
     ui::{
         theme::{ThemeExt, with_alpha},
@@ -17,7 +17,6 @@ use std::time::Duration;
 use tonique_engine::time::BeatPos;
 
 const PADDING_TEXT: f32 = 4.;
-const BORDER_WIDTH: f32 = 2.;
 const HEADER_HEIGHT: f32 = 16.;
 /// Left bare at the end of each clip, so where one clip ends and the next
 /// starts (as after a split) shows as a cut through both.
@@ -30,12 +29,13 @@ const MIN_TRIM_HANDLE_WIDTH: f32 = 2.;
 /// reads as the clip to grab and the body as time. Opaque, so clips dragged
 /// over others hide them.
 const BODY_TINT: f32 = 0.4;
-/// A selected clip's body: a little more, its header carrying the selection.
-const SELECTED_BODY_TINT: f32 = 0.5;
-/// The part of a clip's body in a selection zone: more of its colour, and
-/// some of the selection's.
-const ZONE_BODY_TINT: f32 = 0.6;
-const ZONE_TOWARDS_SELECTED: f32 = 0.3;
+/// The selected part of a clip's body (all of it, or a selection zone's
+/// part): lit towards the theme's neutral selection colour,
+/// keeping a hint of the clip's, its waveform and grid in contrasting ink.
+const SELECTION_FILL: f32 = 0.8;
+/// How much a collapsed clip's waveform stands out from its body: a hint
+/// of where the sound is, the header being what's read.
+const COLLAPSED_WAVE: f32 = 0.4;
 /// How much of its track's colour a silenced clip's body, header, waveform
 /// and outline have: a faint wash of it.
 const SILENCED_BODY_TINT: f32 = 0.16;
@@ -62,8 +62,9 @@ pub struct ClipView<'a> {
     /// The part of a selection zone over it (start and end, in beats): its
     /// body is highlighted there.
     pub zone: Option<(BeatPos, BeatPos)>,
-    /// False in a collapsed row: only the header shows.
-    pub show_waveform: bool,
+    /// In a collapsed row: the same header, over a thin strip of body with
+    /// a faint waveform.
+    pub collapsed: bool,
     /// Its track is muted or soloed out: drawn faded, in muted ink.
     pub silenced: bool,
 }
@@ -102,16 +103,14 @@ impl ClipView<'_> {
                     .rect_filled(rect, 1.0, theme.hover_overlay);
             }
         }
-        if self.show_waveform {
-            // Between the trim handles, the body is the timeline's: show
-            // where a click places the edit cursor.
-            let body = Rect::from_min_max(
-                pos2(pos.x + handle_width, pos.y + HEADER_HEIGHT),
-                pos2(pos.x + size.x - handle_width, pos.y + size.y),
-            )
-            .intersect(viewport);
-            self.body_hover(ui, state, body);
-        }
+        // Between the trim handles, the body is the timeline's: show where a
+        // click places the edit cursor.
+        let body = Rect::from_min_max(
+            pos2(pos.x + handle_width, pos.y + HEADER_HEIGHT),
+            pos2(pos.x + size.x - handle_width, pos.y + size.y),
+        )
+        .intersect(viewport);
+        self.body_hover(ui, state, body);
 
         response.context_menu(|ui| self.context_menu(ui, clip, state));
         if response.dragged() {
@@ -137,12 +136,7 @@ impl ClipView<'_> {
 
     /// Where the header is in `rect`: its whole top, edge to edge.
     fn header_rect(&self, rect: Rect) -> Rect {
-        let height = if self.show_waveform {
-            HEADER_HEIGHT
-        } else {
-            TRACK_COLLAPSED_HEIGHT
-        };
-        Rect::from_min_size(rect.min, vec2(rect.width(), height))
+        Rect::from_min_size(rect.min, vec2(rect.width(), HEADER_HEIGHT))
     }
 
     fn handle_width(&self) -> f32 {
@@ -164,14 +158,9 @@ impl ClipView<'_> {
         let painter = ui.painter_at(sample_rect);
         let theme = ui.app_theme();
         // The header is the clip, to select and move: solid in its track's
-        // colour, lit up when selected (towards a neutral colour that can't
-        // clash with the clip's). The body is time, a click there places
-        // the edit cursor: a tint of the colour, the waveform on it.
-        let header = if selected {
-            color.lerp_to_gamma(theme.clip_selected, 0.35)
-        } else {
-            color
-        };
+        // colour. The body is time, a click there places the edit cursor: a
+        // tint of the colour, the waveform on it. Selection is time too:
+        // the selected part of the body is lit, the header stays as is.
         // Mixed into the background rather than see-through.
         let tint = |color: Color32, amount: f32| theme.bg_base.lerp_to_gamma(color, amount);
         let (body, header, header_ink, wave, outline) = if self.silenced {
@@ -183,81 +172,78 @@ impl ClipView<'_> {
                 tint(color, SILENCED_BORDER_TINT),
             )
         } else {
-            let amount = if selected {
-                SELECTED_BODY_TINT
-            } else {
-                BODY_TINT
-            };
             (
-                tint(header, amount),
-                header,
-                theme.text_on(header),
+                tint(color, BODY_TINT),
+                color,
+                theme.text_on(color),
                 color,
                 tint(color, 0.67),
             )
         };
-        let stroke = if selected {
-            Stroke::new(BORDER_WIDTH, theme.clip_selected)
-        } else {
-            Stroke::new(1., outline)
+        let selection = color.lerp_to_gamma(theme.clip_selected, SELECTION_FILL);
+        let selection_ink = theme.text_on(selection);
+        // The selected beats: the zone's part of the clip, or all of it.
+        let end = clip.end(state.bpm());
+        let lit_range = match self.zone {
+            Some((start, stop)) => Some((start.max(clip.position), stop.min(end))),
+            None => selected.then_some((clip.position, end)),
         };
         painter.rect(
             Rect::from_min_size(pos, size),
             2.0,
             body,
-            stroke,
+            Stroke::new(1., outline),
             egui::StrokeKind::Inside,
         );
-        if self.show_waveform {
-            let rect = Rect::from_min_size(
-                pos2(pos.x, pos.y + HEADER_HEIGHT),
-                vec2(size.x, size.y - HEADER_HEIGHT),
-            );
-            // The selected part: its background lit, inside the border.
-            if let Some((start, end)) = self.zone {
-                let x = |beats: BeatPos| state.grid.beats_to_x(beats, viewport);
-                let lit = Rect::from_x_y_ranges(
-                    x(start.max(clip.position))..=x(end.min(clip.end(state.bpm()))),
-                    rect.top()..=pos.y + size.y,
-                )
-                .intersect(Rect::from_min_size(pos, size).shrink(stroke.width));
-                let fill = tint(
-                    color.lerp_to_gamma(theme.clip_selected, ZONE_TOWARDS_SELECTED),
-                    ZONE_BODY_TINT,
-                );
-                painter.rect_filled(lit, 0., fill);
-            }
+        let rect = Rect::from_min_max(pos2(pos.x, pos.y + HEADER_HEIGHT), pos + size);
+        let waveform = |painter: &Painter, bg: Color32, ink: Color32| {
+            let ink = if self.collapsed {
+                bg.lerp_to_gamma(ink, COLLAPSED_WAVE)
+            } else {
+                ink
+            };
             state
                 .grid
-                .paint_clip_grid(&painter, viewport, rect, with_alpha(wave, 30));
+                .paint_clip_grid(painter, viewport, rect, with_alpha(ink, 30));
+            paint_clip_waveform(
+                painter,
+                clip,
+                rect,
+                viewport,
+                state.grid.pixels_per_beat(),
+                state.bpm(),
+                ink,
+            );
+        };
+        waveform(&painter, body, wave);
+        // The selected part: lit, inside the outline, its waveform drawn
+        // again over it in ink that reads on it.
+        if let Some((start, stop)) = lit_range {
+            let x = |beats: BeatPos| state.grid.beats_to_x(beats, viewport);
+            let lit = Rect::from_x_y_ranges(x(start)..=x(stop), rect.top()..=rect.bottom())
+                .intersect(Rect::from_min_size(pos, size).shrink(1.));
+            if lit.is_positive() {
+                painter.rect_filled(lit, 0., selection);
+                waveform(
+                    &painter.with_clip_rect(painter.clip_rect().intersect(lit)),
+                    selection,
+                    selection_ink,
+                );
+            }
         }
         let header = if lit {
             header.blend(theme.hover_overlay)
         } else {
             header
         };
-        // Over the body's outline: only its top corners are rounded, unless
-        // it's the whole clip.
-        let radius = if self.show_waveform {
-            CornerRadius {
-                nw: 2,
-                ne: 2,
-                sw: 0,
-                se: 0,
-            }
-        } else {
-            CornerRadius::same(2)
+        // Over the body's outline: only its top corners are rounded.
+        let radius = CornerRadius {
+            nw: 2,
+            ne: 2,
+            sw: 0,
+            se: 0,
         };
         painter.rect_filled(self.header_rect(drawn), radius, header);
-        // The selection's outline goes round the header too.
-        if selected {
-            painter.rect_stroke(
-                Rect::from_min_size(pos, size),
-                2.0,
-                stroke,
-                egui::StrokeKind::Inside,
-            );
-        }
         painter.text(
             Pos2::new(pos.x + PADDING_TEXT, pos.y + 2.),
             Align2::LEFT_TOP,
@@ -265,21 +251,6 @@ impl ClipView<'_> {
             FontId::new(font_size::SMALL, FontFamily::Monospace),
             header_ink,
         );
-        if self.show_waveform {
-            let waveform_rect = Rect::from_min_max(
-                pos2(pos.x, pos.y + HEADER_HEIGHT),
-                pos2(pos.x + size.x, pos.y + size.y),
-            );
-            paint_clip_waveform(
-                &painter,
-                clip,
-                waveform_rect,
-                viewport,
-                state.grid.pixels_per_beat(),
-                state.bpm(),
-                wave,
-            );
-        }
         // Draw an overlay when audio not ready
         if !clip.audio.data.is_ready() {
             painter.rect_filled(sample_rect, 1.0, theme.shadow);
@@ -444,7 +415,7 @@ mod tests {
                     color: crate::ui::theme::Theme::dark().accent,
                     selected: false,
                     zone: None,
-                    show_waveform: true,
+                    collapsed: false,
                     silenced: false,
                 }
                 .ui(ui, &mut state);
@@ -483,7 +454,7 @@ mod tests {
             color: crate::ui::theme::Theme::dark().accent,
             selected: false,
             zone: None,
-            show_waveform: true,
+            collapsed: false,
             silenced: false,
         };
         let input = egui::RawInput {
