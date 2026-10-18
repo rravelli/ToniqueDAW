@@ -4,7 +4,6 @@ use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Weak;
-use std::time::Instant;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::FormatOptions;
@@ -93,7 +92,6 @@ fn normalize_buffer(audio_buf: &AudioBufferRef, sample_buffer: &mut Vec<f32>, ch
 /// `keep_samples`. Stops early once `data` is dropped, or for a peaks-only
 /// decode, once a decode keeping the samples takes over.
 pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Result<(), String> {
-    let start = Instant::now();
     // Open the audio file
     let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
@@ -134,6 +132,9 @@ pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Re
     let mut scratch: Vec<Vec<f32>> = Vec::new();
     let mut builder: Option<PeakBuilder> = None;
     let mut next_publish = CHUNK_SIZE;
+    // Packets that couldn't be decoded, or changed channel count: told
+    // once, at the end, however many.
+    let mut skipped = 0usize;
 
     // Decode the audio packets
     while let Ok(packet) = format.next_packet() {
@@ -152,8 +153,8 @@ pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Re
 
         let audio_buf = match decoder.decode(&packet) {
             Ok(audio_buf) => audio_buf,
-            Err(e) => {
-                eprintln!("Error decoding audio packet: {}", e);
+            Err(_) => {
+                skipped += 1;
                 continue;
             }
         };
@@ -168,7 +169,7 @@ pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Re
             builder = (!peaks_complete).then(|| PeakBuilder::new(num_channels, sample_rate));
         }
         if num_channels != scratch.len() {
-            eprintln!("Skipping packet with a different channel count");
+            skipped += 1;
             continue;
         }
         for (ch, buf) in scratch.iter_mut().enumerate() {
@@ -190,6 +191,12 @@ pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Re
             }
         }
     }
+    if skipped > 0 {
+        eprintln!(
+            "Skipped {skipped} packets of {} that couldn't be decoded",
+            path.display()
+        );
+    }
     if scratch.is_empty() {
         return Err("No audio decoded".into());
     }
@@ -206,8 +213,6 @@ pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Re
         channels.iter_mut().for_each(Vec::shrink_to_fit);
         data.finish(SampleBuffer::new(channels, sample_rate));
     }
-    println!("Finished {} in: {:?}", path.display(), start.elapsed());
-
     Ok(())
 }
 
