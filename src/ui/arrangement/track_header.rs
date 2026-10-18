@@ -256,16 +256,7 @@ impl TrackHeader {
                 state.commit_track_view(&track.id);
             }
         } else {
-            let formatted_name = display_name(&track.name, track.first_track_index);
-            ui.add(
-                Label::new(
-                    RichText::new(formatted_name)
-                        .color(ui.app_theme().text)
-                        .size(font_size::SMALL),
-                )
-                .truncate()
-                .selectable(false),
-            );
+            name_label(ui, track);
         }
     }
 
@@ -364,18 +355,8 @@ impl TrackHeader {
         track: &TrackRow,
         state: &mut ProjectState,
     ) -> Response {
-        let track_view_mut = state.track_view_mut(&track.id);
-        let icon = if track_view_mut.collapsed {
-            egui_phosphor::fill::CARET_RIGHT
-        } else {
-            egui_phosphor::fill::CARET_DOWN
-        };
-        let response = ui.add(
-            FlatButton::new(icon)
-                .family(egui::FontFamily::Name(PHOSPHOR_FILL.into()))
-                .square(BUTTON_SIZE),
-        );
-        let collapsed = track_view_mut.collapsed;
+        let collapsed = state.track_view_mut(&track.id).collapsed;
+        let response = ui.add(collapse_button(collapsed));
         if response.clicked() {
             state.set_collapsed(&track.id, !collapsed);
         }
@@ -426,6 +407,95 @@ fn pan_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
         SliderEdit::Reset { from, to } => state.commit_pan(track.id, from, to),
         _ => {}
     }
+}
+
+/// A header as track `track` will have once added, faded and inert: for a
+/// track a drop would add. The same widgets as [`TrackHeader`], in the same
+/// places, so the real one takes its place without a jump.
+pub fn ghost_header(ui: &mut Ui, track: &TrackRow) {
+    let theme = ui.app_theme();
+    // Opaque under the fading, as the real one is.
+    ui.painter().rect_filled(
+        Rect::from_min_size(
+            ui.next_widget_position(),
+            vec2(ui.available_width(), track.height),
+        ),
+        0.,
+        theme.bg_raised,
+    );
+    ui.disable();
+    Frame::new()
+        .inner_margin(MarginF32::same(PADDING))
+        .fill(theme.bg_raised)
+        .stroke(Stroke::new(STROKE_WIDTH, theme.separator))
+        .show(ui, |ui| {
+            let actual_height = track.height - 2. * PADDING - 2. * STROKE_WIDTH;
+            ui.set_width(ui.available_width());
+            ui.set_height(actual_height);
+            ui.spacing_mut().interact_size.y = 18.0;
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
+                ui.add(ColorBar::new(Vec2::new(COLOR_BAR_WIDTH, actual_height)).color(track.color));
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = CONTROLS_GAP;
+                    ui.horizontal(|ui| {
+                        ui.set_height(BUTTON_SIZE);
+                        ui.add(collapse_button(false));
+                        let buttons = if RECORDING { 3. } else { 2. };
+                        let text_width = ui.available_width()
+                            - 4. * PADDING
+                            - buttons * BUTTON_SIZE
+                            - METER_WIDTH;
+                        if text_width > 0. {
+                            ui.scope(|ui| {
+                                ui.set_width(text_width);
+                                name_label(ui, track);
+                            });
+                        }
+                        ui.add(toggle_button("M", None, &theme));
+                        ui.add(toggle_button("S", None, &theme));
+                        if RECORDING {
+                            ui.add(toggle_button(MUSIC_NOTE_SIMPLE, None, &theme));
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ParamSlider::gain(track.volume, VOLUME_RANGE)
+                            .color(track.color)
+                            .size(SLIDER_SIZE)
+                            .show(ui);
+                        ParamSlider::pan(track.pan)
+                            .color(track.color)
+                            .size(SLIDER_SIZE)
+                            .show(ui);
+                    });
+                });
+            });
+        });
+}
+
+/// The track's name, as shown when not renaming it.
+fn name_label(ui: &mut Ui, track: &TrackRow) {
+    ui.add(
+        Label::new(
+            RichText::new(display_name(&track.name, track.first_track_index))
+                .color(ui.app_theme().text)
+                .size(font_size::SMALL),
+        )
+        .truncate()
+        .selectable(false),
+    );
+}
+
+/// The caret folding a row: pointing right when `collapsed`.
+fn collapse_button(collapsed: bool) -> FlatButton {
+    let icon = if collapsed {
+        egui_phosphor::fill::CARET_RIGHT
+    } else {
+        egui_phosphor::fill::CARET_DOWN
+    };
+    FlatButton::new(icon)
+        .family(egui::FontFamily::Name(PHOSPHOR_FILL.into()))
+        .square(BUTTON_SIZE)
 }
 
 /// Track header toggle: `fill` when on, the default control colour when off.

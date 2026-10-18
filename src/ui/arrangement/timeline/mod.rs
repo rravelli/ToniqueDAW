@@ -16,14 +16,11 @@ use crate::{
         },
         commands::Commands,
         dnd::DragPayload,
-        theme::{ThemeExt, font_size, with_alpha},
+        theme::{ThemeExt, with_alpha},
         workspace::Workspace,
     },
 };
-use egui::{
-    Align2, Color32, DragAndDrop, FontId, Rangef, Rect, Response, Sense, Shape, Stroke, Ui, Vec2,
-    pos2, vec2,
-};
+use egui::{Color32, DragAndDrop, Rangef, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use tonique_engine::edit::{ClipId, TrackId};
 mod drag;
 mod keys;
@@ -66,6 +63,7 @@ impl Timeline {
         viewport: Rect,
     ) {
         self.new_tracks.clear();
+        let track_count = state.track_count();
         // First the actions on the selection
         self.run_actions(ui, state, commands, viewport);
         // Create timeline area
@@ -98,6 +96,13 @@ impl Timeline {
         let hovered_files = ui.input(|i| i.raw.hovered_files.clone());
         if !hovered_files.is_empty() {
             painter.rect_filled(viewport, 1.0, with_alpha(ui.app_theme().accent, 20));
+        }
+
+        // A drop added tracks: the headers, drawn next, show them this
+        // frame, in place of their ghosts.
+        if state.track_count() != track_count {
+            layout.rebuild(state);
+            self.new_tracks.clear();
         }
     }
 
@@ -548,7 +553,7 @@ impl Timeline {
 }
 
 /// A faint lane for each of `count` tracks a drop will add below the last
-/// one, in the colour it will get, with a dashed outline and a label.
+/// one, in the colour it will get.
 /// Returns their colours.
 fn paint_new_track_lanes(
     ui: &Ui,
@@ -558,31 +563,15 @@ fn paint_new_track_lanes(
     count: usize,
 ) -> Vec<Color32> {
     let colors = state.new_track_colors(count);
-    let theme = ui.app_theme();
     let painter = ui.painter_at(viewport);
     for (i, color) in colors.iter().enumerate() {
         let top = layout.track_top(state.track_count() + i);
         let lane = Rect::from_x_y_ranges(viewport.x_range(), top..=top + DEFAULT_TRACK_HEIGHT);
-        painter.rect_filled(lane, 2., with_alpha(*color, 20));
-        let edge = lane.shrink(0.5);
-        painter.extend(Shape::dashed_line(
-            &[
-                edge.left_top(),
-                edge.right_top(),
-                edge.right_bottom(),
-                edge.left_bottom(),
-                edge.left_top(),
-            ],
-            Stroke::new(1., with_alpha(*color, 150)),
-            5.,
-            3.,
-        ));
-        painter.text(
-            lane.left_top() + vec2(6., 4.),
-            Align2::LEFT_TOP,
-            "+ New track",
-            FontId::proportional(font_size::SMALL),
-            theme.text_muted,
+        painter.rect_filled(lane, 1., with_alpha(*color, 20));
+        painter.hline(
+            viewport.x_range(),
+            lane.bottom() + ROW_GAP / 2.,
+            Stroke::new(ROW_GAP, ui.app_theme().separator),
         );
     }
     colors

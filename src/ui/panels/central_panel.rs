@@ -559,7 +559,7 @@ mod tests {
     }
 
     /// Dragging a file below the last track shows the track a drop would
-    /// add: a lane, and a header with the name it'll get.
+    /// add: a header with the name it'll get.
     #[test]
     fn dragging_past_the_last_track_shows_a_ghost_track() {
         use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
@@ -600,10 +600,6 @@ mod tests {
         egui::DragAndDrop::set_payload(&ctx, DragPayload::File(AudioInfo::silent(1.)));
         let shown = texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
         assert!(
-            shown.iter().any(|t| t == "+ New track"),
-            "the lane: {shown:?}"
-        );
-        assert!(
             shown.iter().any(|t| t == "3 Audio Track"),
             "the header: {shown:?}"
         );
@@ -611,6 +607,64 @@ mod tests {
         egui::DragAndDrop::clear_payload(&ctx);
         let shown = texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
         assert!(!shown.iter().any(|t| t == "3 Audio Track"), "gone after");
+    }
+
+    /// On the frame a drop adds the track, its header is shown where its
+    /// ghost was, and the ghost is gone: no frame without it.
+    #[test]
+    fn dropping_past_the_last_track_shows_its_header_at_once() {
+        use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
+        use egui::{Event, PointerButton, Pos2};
+
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        state.add_track();
+        state.add_track();
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        // The app's spacing, which the headers stack with.
+        crate::ui::theme::Theme::default().install(&ctx);
+        let mut panel = CentralPanel::new();
+        // Where "3 Audio Track" is shown, each time.
+        let mut names = |state: &mut ProjectState, events: Vec<Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(
+                    ui,
+                    state,
+                    &mut Workspace::default(),
+                    &mut Commands::default(),
+                )
+            });
+            output.textures_delta.clear();
+            output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == "3 Audio Track" => Some(t.pos),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let below = Pos2::new(300., 500.);
+        names(&mut state, Vec::new()); // lay out once
+        egui::DragAndDrop::set_payload(&ctx, DragPayload::File(AudioInfo::silent(1.)));
+        let ghost = names(&mut state, vec![Event::PointerMoved(below)]);
+        assert_eq!(ghost.len(), 1, "the ghost");
+
+        let release = Event::PointerButton {
+            pos: below,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        };
+        let dropped = names(&mut state, vec![release]);
+        assert_eq!(state.track_count(), 3);
+        assert_eq!(dropped, ghost, "the real header, in the ghost's place");
     }
 
     /// A rubber band starts where the button went down, between grid lines
