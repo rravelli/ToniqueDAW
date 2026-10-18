@@ -8,6 +8,15 @@ const FONT_SIZE: f32 = 12.;
 const PADDING: f32 = 6.;
 /// Width of the caret's and the icon's slots.
 pub const SLOT: f32 = 14.;
+/// Room for the dot at the row's end, and its size.
+const DOT_ROOM: f32 = 12.;
+const DOT_RADIUS: f32 = 3.;
+
+/// Where the dot at the end of a row in `rect` is: rows of a tree drawn
+/// one under another line theirs up.
+pub fn dot_center(rect: egui::Rect) -> Pos2 {
+    Pos2::new(rect.right() - PADDING - DOT_RADIUS, rect.center().y)
+}
 /// How opaque indent guides are, in muted ink: faint.
 const GUIDE_ALPHA: u8 = 50;
 
@@ -25,6 +34,8 @@ pub struct ListRow {
     /// Indent guides: a line down the row under each of this many levels'
     /// carets.
     guides: usize,
+    /// A dot of this colour at the row's end (a label's).
+    dot: Option<Color32>,
 }
 
 impl ListRow {
@@ -37,7 +48,14 @@ impl ListRow {
             icon: None,
             icon_color: None,
             guides: 0,
+            dot: None,
         }
+    }
+
+    /// A dot of `color` at the row's end, or none.
+    pub fn dot(mut self, color: Option<Color32>) -> Self {
+        self.dot = color;
+        self
     }
 
     /// Lines down the row, one under each of `levels` carets before its
@@ -124,13 +142,17 @@ impl Widget for ListRow {
             x += 2.;
         }
 
+        let dot_room = if self.dot.is_some() { DOT_ROOM } else { 0. };
         let galley = WidgetText::from(self.text.as_str()).into_galley(
             ui,
             Some(TextWrapMode::Truncate),
-            (rect.right() - x - PADDING).max(0.),
+            (rect.right() - x - PADDING - dot_room).max(0.),
             font,
         );
         let elided = galley.elided;
+        if let Some(color) = self.dot {
+            painter.circle_filled(dot_center(rect), DOT_RADIUS, color);
+        }
         painter.galley(
             Pos2::new(x, rect.center().y - galley.size().y / 2.),
             galley,

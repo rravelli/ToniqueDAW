@@ -25,6 +25,18 @@ impl FolderNode {
         }
     }
 
+    /// A section of `paths` gathered from anywhere (a label's), not read
+    /// from disk: `path` only names it.
+    pub fn gathered(path: &Path, paths: &[PathBuf]) -> Self {
+        let mut children: Vec<FileNode> = paths.iter().map(|p| FileNode::new(p, 1)).collect();
+        // By name; reversed, as the rows are taken from the end.
+        children.sort_by_key(|f| std::cmp::Reverse(f.name_lower.clone()));
+        Self {
+            children: Some(children),
+            ..Self::new(path, 0)
+        }
+    }
+
     /// What's inside, read from disk the first time.
     pub fn children(&mut self) -> Vec<FileNode> {
         if let Some(children) = self.children.clone() {
@@ -43,6 +55,20 @@ pub struct FileNode {
     pub depth: usize,
     name_lower: String,
     pub is_dir: bool,
+}
+
+impl FileNode {
+    fn new(path: &Path, depth: usize) -> Self {
+        Self {
+            name_lower: path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_lowercase())
+                .unwrap_or_default(),
+            path: path.to_path_buf(),
+            depth,
+            is_dir: path.is_dir(),
+        }
+    }
 }
 
 /// The browser's folders, each a root at depth 0 with what's inside it
@@ -83,6 +109,21 @@ impl FileTree {
         self.roots = roots;
         self.open_before_search = None;
         self.rebuild();
+    }
+
+    /// Show `sections`, each `paths` gathered under a header named by its
+    /// path, open but for those in `collapsed`.
+    pub fn set_sections(&mut self, sections: Vec<(PathBuf, Vec<PathBuf>)>, collapsed: &[PathBuf]) {
+        self.roots = sections.iter().map(|(header, _)| header.clone()).collect();
+        for (header, paths) in sections {
+            let mut folder = FolderNode::gathered(&header, &paths);
+            folder.open = !collapsed.contains(&header);
+            self.folders.insert(header, folder);
+        }
+        self.open_before_search = None;
+        if self.query.is_empty() {
+            self.rebuild();
+        }
     }
 
     /// The roots closed, unless a search opened them all.
@@ -533,6 +574,28 @@ mod tests {
 
     /// A label's section gathers files and folders from anywhere; its
     /// folders open as anywhere else, and a search looks through them.
+    #[test]
+    fn sections_gather_items_from_anywhere() {
+        let (base, drums, keys) = folders("sections");
+        let mut tree = FileTree::new();
+        let header = PathBuf::from("\u{0}label-0");
+        let items = vec![keys.join("pad.wav"), drums.join("loops")];
+        tree.set_sections(vec![(header.clone(), items)], &[]);
+        assert_eq!(rows(&tree)[1..], ["  loops", "  pad.wav"]);
+        tree.toggle_folder(1);
+        assert_eq!(rows(&tree)[1..], ["  loops", "    break.wav", "  pad.wav"]);
+
+        // Open, loops shows its match.
+        tree.search("break", None);
+        assert_eq!(rows(&tree)[1..], ["  loops", "    break.wav"]);
+        tree.search("nothing", None);
+        assert!(
+            tree.items.is_empty(),
+            "a section without a match is left out"
+        );
+        let _ = fs::remove_dir_all(base);
+    }
+
     #[test]
     fn collapsing_all_closes_a_roots_folders_but_not_it() {
         let (base, drums, _) = folders("collapse");

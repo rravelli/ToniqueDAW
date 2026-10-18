@@ -1,8 +1,10 @@
 pub mod keymap;
+pub mod labels;
 pub mod recent;
 pub mod settings;
 
 use directories::ProjectDirs;
+use labels::Labels;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -17,6 +19,7 @@ pub struct Config {
     collapsed: Vec<PathBuf>,
     /// Selecting an audio file in the browser plays it.
     auto_preview: bool,
+    labels: Labels,
 }
 
 impl Default for Config {
@@ -25,6 +28,7 @@ impl Default for Config {
             directories: Vec::new(),
             collapsed: Vec::new(),
             auto_preview: true,
+            labels: Labels::default(),
         }
     }
 }
@@ -63,6 +67,8 @@ struct ConfigSerdeHelper {
     collapsed: Vec<PathBuf>,
     #[serde(default = "yes")]
     auto_preview: bool,
+    #[serde(default)]
+    labels: Labels,
 }
 
 fn yes() -> bool {
@@ -80,6 +86,7 @@ impl Config {
                 directories: helper.directories,
                 collapsed: helper.collapsed,
                 auto_preview: helper.auto_preview,
+                labels: helper.labels,
             };
         }
         Config::default()
@@ -96,6 +103,7 @@ impl Config {
                 directories: self.directories.clone(),
                 collapsed: self.collapsed.clone(),
                 auto_preview: self.auto_preview,
+                labels: self.labels.clone(),
             };
 
             if let Ok(json) = serde_json::to_string_pretty(&helper) {
@@ -127,6 +135,16 @@ impl Config {
 
     pub fn set_auto_preview(&mut self, on: bool) {
         self.auto_preview = on;
+        self.save();
+    }
+
+    pub fn labels(&self) -> &Labels {
+        &self.labels
+    }
+
+    /// Change the labels, and save them.
+    pub fn edit_labels(&mut self, edit: impl FnOnce(&mut Labels)) {
+        edit(&mut self.labels);
         self.save();
     }
 

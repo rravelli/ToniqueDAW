@@ -4,7 +4,7 @@ use crate::{
     core::state::{PlaybackState, ProjectState},
     ui::{
         browser::{
-            items::{FileList, FolderAction},
+            items::{FileList, FolderAction, LabelView},
             preview::{PREVIEW_HEIGHT, preview_ui},
         },
         commands::Commands,
@@ -13,10 +13,13 @@ use crate::{
         widget::flat_button::FlatButton,
     },
 };
-use egui::{FontId, Rect, RichText, Stroke, Ui};
+use egui::{Color32, FontId, Rect, RichText, Stroke, Ui};
 use egui_phosphor::{fill::FOLDER_PLUS, regular::HEADPHONES};
 use rfd::FileDialog;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 mod file_tree;
 mod items;
@@ -26,10 +29,15 @@ mod preview;
 pub const ADD_FOLDER_SIZE: f32 = 22.;
 
 /// The files of the folders added to it, each a section of one tree,
-/// searchable together or one at a time; and a preview of the audio file
+/// searchable together or one at a time; the files and folders given a
+/// label, by label, in a tab of their own; and a preview of the audio file
 /// selected.
 pub struct FileBrowser {
     items: FileList,
+    /// The labels' tab.
+    labelled: FileList,
+    /// Its sections closed.
+    labels_collapsed: Vec<PathBuf>,
     config: Config,
 }
 
@@ -39,7 +47,37 @@ impl FileBrowser {
         let mut items = FileList::new();
         items.set_roots(config.list_dirs(), config.collapsed_dirs());
         items.auto_preview = config.auto_preview();
-        Self { items, config }
+        let mut labelled = FileList::new();
+        labelled.auto_preview = config.auto_preview();
+        let mut browser = Self {
+            items,
+            labelled,
+            labels_collapsed: Vec::new(),
+            config,
+        };
+        browser.refresh_labels();
+        browser
+    }
+
+    /// Show the labels as configured, in both tabs.
+    fn refresh_labels(&mut self) {
+        let labels = self.config.labels();
+        let views: Vec<LabelView> = labels
+            .all()
+            .iter()
+            .map(|label| LabelView {
+                name: label.name.clone(),
+                color: Color32::from_hex(&label.color).unwrap_or(Color32::GRAY),
+            })
+            .collect();
+        let assigned: HashMap<PathBuf, usize> = labels
+            .assigned()
+            .map(|(path, label)| (path.clone(), label))
+            .collect();
+        let sections = (0..views.len()).map(|i| (i, labels.items(i))).collect();
+        self.items.set_labels(views.clone(), assigned.clone());
+        self.labelled.set_labels(views, assigned);
+        self.labelled.set_sections(sections, &self.labels_collapsed);
     }
 
     /// `focused`: the browser has the keyboard, and takes the selection
@@ -61,21 +99,7 @@ impl FileBrowser {
             return;
         }
 
-        if ui.response().clicked_elsewhere() {
-            self.items.selected_audio = None;
-        }
-
-        let height = if self.items.selected_audio.is_some() {
-            ui.available_height() - PREVIEW_HEIGHT
-        } else {
-            ui.available_height()
-        };
-        let actions = ui
-            .vertical(|ui| {
-                ui.set_height(height);
-                self.items.ui(ui, state, focused, &moves)
-            })
-            .inner;
+        let actions = list_ui(&mut self.items, ui, state, focused, &moves);
         for action in actions {
             self.act(action);
         }
@@ -83,15 +107,24 @@ impl FileBrowser {
         if let Some(collapsed) = self.items.collapsed_roots() {
             self.config.set_collapsed_dirs(collapsed);
         }
+    }
 
-        if let Some(audio) = &self.items.selected_audio {
-            preview_ui(ui, state, audio);
+    /// The labels' tab: a section for each label, with what has it.
+    pub fn labels_ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        commands: &mut Commands,
+        focused: bool,
+    ) {
+        let moves = take_moves(commands, focused);
+        ui.spacing_mut().scroll.bar_width = 5.0;
+        let actions = list_ui(&mut self.labelled, ui, state, focused, &moves);
+        for action in actions {
+            self.act(action);
         }
-
-        if state.preview_playback_state() == PlaybackState::Playing
-            && self.items.selected_audio.is_none()
-        {
-            state.pause_preview();
+        if let Some(collapsed) = self.labelled.collapsed_roots() {
+            self.labels_collapsed = collapsed;
         }
     }
 
@@ -167,6 +200,23 @@ impl FileBrowser {
             FolderAction::SearchIn(dir) => self.items.set_scope(Some(dir)),
             FolderAction::SearchEverywhere => self.items.set_scope(None),
             FolderAction::Add(dir) => self.add_folder(dir),
+            FolderAction::SetLabel(path, label) => {
+                self.config.edit_labels(|labels| labels.set(path, label));
+                self.refresh_labels();
+            }
+            FolderAction::RenameLabel(index, name) => {
+                self.config.edit_labels(|labels| labels.rename(index, name));
+                self.refresh_labels();
+            }
+            FolderAction::RecolorLabel(index, color) => {
+                self.config
+                    .edit_labels(|labels| labels.recolor(index, color));
+                self.refresh_labels();
+            }
+            FolderAction::ClearLabel(index) => {
+                self.config.edit_labels(|labels| labels.clear(index));
+                self.refresh_labels();
+            }
         }
     }
 
@@ -207,6 +257,7 @@ impl FileBrowser {
             });
         if ui.add(button).clicked() {
             self.items.auto_preview = !on;
+            self.labelled.auto_preview = !on;
             self.config.set_auto_preview(!on);
         }
     }
@@ -233,12 +284,57 @@ impl FileBrowser {
     }
 
     pub fn trigger_search(&mut self, query: &str) {
-        if query.is_empty() {
-            self.items.clear_search();
-        } else {
-            self.items.search(query);
-        }
+        search(&mut self.items, query);
     }
+
+    pub fn is_searching_labels(&self) -> bool {
+        self.labelled.is_searching()
+    }
+
+    /// Search what has a label.
+    pub fn trigger_label_search(&mut self, query: &str) {
+        search(&mut self.labelled, query);
+    }
+}
+
+fn search(list: &mut FileList, query: &str) {
+    if query.is_empty() {
+        list.clear_search();
+    } else {
+        list.search(query);
+    }
+}
+
+/// `list`, and under it a preview of its file selected. Returns what was
+/// asked of its sections.
+fn list_ui(
+    list: &mut FileList,
+    ui: &mut Ui,
+    state: &mut ProjectState,
+    focused: bool,
+    moves: &[Action],
+) -> Vec<FolderAction> {
+    if ui.response().clicked_elsewhere() {
+        list.selected_audio = None;
+    }
+    let height = if list.selected_audio.is_some() {
+        ui.available_height() - PREVIEW_HEIGHT
+    } else {
+        ui.available_height()
+    };
+    let actions = ui
+        .vertical(|ui| {
+            ui.set_height(height);
+            list.ui(ui, state, focused, moves)
+        })
+        .inner;
+    if let Some(audio) = &list.selected_audio {
+        preview_ui(ui, state, audio);
+    }
+    if state.preview_playback_state() == PlaybackState::Playing && list.selected_audio.is_none() {
+        state.pause_preview();
+    }
+    actions
 }
 
 /// Open `dir` in the system's file manager.

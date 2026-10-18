@@ -38,6 +38,11 @@ pub struct ContextMenuButton {
     submenu: bool,
     /// Highlighted while its submenu is open.
     open: bool,
+    /// A dot of this colour in the icon's place; transparent, an empty
+    /// ring (no colour).
+    swatch: Option<Color32>,
+    /// Ticked: what's chosen among items like it.
+    checked: bool,
 }
 
 impl ContextMenuButton {
@@ -48,7 +53,28 @@ impl ContextMenuButton {
             text_color: None,
             submenu: false,
             open: false,
+            swatch: None,
+            checked: false,
         }
+    }
+
+    /// An item for a colour (a label's): a dot of it in the icon's place.
+    pub fn swatch(color: Color32, text: &str) -> Self {
+        Self {
+            swatch: Some(color),
+            ..Self::new("", text)
+        }
+    }
+
+    /// An item for no colour (no label): an empty ring in the icon's place,
+    /// beside the swatches of the colours.
+    pub fn no_swatch(text: &str) -> Self {
+        Self::swatch(Color32::TRANSPARENT, text)
+    }
+
+    pub fn checked(mut self, checked: bool) -> Self {
+        self.checked = checked;
+        self
     }
 
     pub fn text_color(mut self, color: Color32) -> Self {
@@ -82,7 +108,11 @@ impl Widget for ContextMenuButton {
         let galley =
             ui.painter()
                 .layout_no_wrap(self.text.clone(), text_font.clone(), Color32::PLACEHOLDER);
-        let caret = if self.submenu { CARET_WIDTH } else { 0. };
+        let caret = if self.submenu || self.checked {
+            CARET_WIDTH
+        } else {
+            0.
+        };
         let width = item_width(ui, TEXT_LEFT + galley.size().x + TEXT_RIGHT + caret);
         let desired_size = Vec2::new(width, height);
 
@@ -110,14 +140,28 @@ impl Widget for ContextMenuButton {
 
         let painter = ui.painter();
 
-        // Icon
-        painter.text(
-            egui::pos2(icon_x, center_y),
-            Align2::LEFT_CENTER,
-            self.icon,
-            icon_font.clone(),
-            text_color,
-        );
+        // Icon, or a dot of a colour.
+        match self.swatch {
+            Some(Color32::TRANSPARENT) => {
+                painter.circle_stroke(
+                    egui::pos2(icon_x + 5., center_y),
+                    3.5,
+                    Stroke::new(1., theme.text_muted),
+                );
+            }
+            Some(color) => {
+                painter.circle_filled(egui::pos2(icon_x + 5., center_y), 4., color);
+            }
+            None => {
+                painter.text(
+                    egui::pos2(icon_x, center_y),
+                    Align2::LEFT_CENTER,
+                    self.icon,
+                    icon_font.clone(),
+                    text_color,
+                );
+            }
+        }
 
         // Text
         painter.galley(
@@ -134,7 +178,15 @@ impl Widget for ContextMenuButton {
                 icon_font,
                 text_color,
             );
-        };
+        } else if self.checked {
+            painter.text(
+                egui::pos2(rect.right() - 4., center_y),
+                Align2::RIGHT_CENTER,
+                egui_phosphor::regular::CHECK,
+                icon_font,
+                text_color,
+            );
+        }
         response
         // Change cursor on hover
         // response.on_hover_cursor(CursorIcon::PointingHand)

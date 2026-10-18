@@ -19,6 +19,7 @@ use crate::{
     analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,
     config::keymap::Action,
+    config::labels as label_colors,
     core::state::ProjectState,
     ui::browser::preview::details,
     ui::{
@@ -29,12 +30,14 @@ use crate::{
         widget::{
             context_menu::ContextMenuButton,
             flat_button::FlatButton,
-            list_row::{ListRow, SLOT},
+            list_row::{ListRow, SLOT, dot_center},
         },
     },
 };
 
 const PLAYABLE_FORMAT: &[&str] = &["mp3", "wav", "ogg"];
+/// Width of a label's menu: its name's field and its colours'.
+const LABEL_MENU_WIDTH: f32 = 140.;
 /// Most rows pinned at the top while scrolled into folders.
 const MAX_PINNED: usize = 4;
 /// Height of a row, folders' headers included.
@@ -53,6 +56,20 @@ pub enum FolderAction {
     SearchEverywhere,
     /// Add a folder inside one of them as a folder of its own.
     Add(PathBuf),
+    /// Give a file or folder a label, or take its label off.
+    SetLabel(PathBuf, Option<usize>),
+    RenameLabel(usize, String),
+    /// To a colour of [`label_colors::COLORS`].
+    RecolorLabel(usize, String),
+    /// Take a label off everything.
+    ClearLabel(usize),
+}
+
+/// A label, as the list shows it.
+#[derive(Clone, Debug)]
+pub struct LabelView {
+    pub name: String,
+    pub color: egui::Color32,
 }
 
 pub struct FileList {
@@ -73,6 +90,12 @@ pub struct FileList {
     ctx: Option<egui::Context>,
     /// Selecting an audio file plays it.
     pub auto_preview: bool,
+    labels: Vec<LabelView>,
+    /// Each labelled file or folder's label.
+    item_labels: HashMap<PathBuf, usize>,
+    /// The labels' sections (in the labels' list), by their headers'
+    /// paths: their labels, and how many items they have.
+    sections: HashMap<PathBuf, (usize, usize)>,
 }
 
 impl FileList {
@@ -89,6 +112,38 @@ impl FileList {
             names: HashMap::new(),
             ctx: None,
             auto_preview: true,
+            labels: Vec::new(),
+            item_labels: HashMap::new(),
+            sections: HashMap::new(),
+        }
+    }
+
+    /// The labels, and which file or folder has which.
+    pub fn set_labels(&mut self, labels: Vec<LabelView>, item_labels: HashMap<PathBuf, usize>) {
+        self.labels = labels;
+        self.item_labels = item_labels;
+    }
+
+    /// Show a section for each label, with its `items`, all but those in
+    /// `collapsed` open.
+    pub fn set_sections(&mut self, sections: Vec<(usize, Vec<PathBuf>)>, collapsed: &[PathBuf]) {
+        self.search_generation.fetch_add(1, Ordering::Relaxed);
+        self.selected = None;
+        self.sections = sections
+            .iter()
+            .map(|(label, items)| (section_path(*label), (*label, items.len())))
+            .collect();
+        if let Ok(mut files) = self.files.lock() {
+            files.set_sections(
+                sections
+                    .into_iter()
+                    .map(|(label, items)| (section_path(label), items))
+                    .collect(),
+                collapsed,
+            );
+        }
+        if !self.query.is_empty() {
+            self.search(&self.query.clone());
         }
     }
 
@@ -288,11 +343,55 @@ impl FileList {
         for action in moves {
             self.move_selection(state, *action == Action::MoveTrackUp);
         }
+        if let Some(action) = self.label_keys(ui) {
+            actions.push(action);
+        }
         actions
     }
 
-    /// One of the browser's folders: a header, its name in small capitals
-    /// (its path on hover), with a menu of what can be done with it on its
+    /// With the keyboard, and a row selected: 1 to 7 give it that label,
+    /// 0 takes its label off. Not a label's header.
+    fn label_keys(&self, ui: &Ui) -> Option<FolderAction> {
+        if !self.focused || ui.ctx().egui_wants_keyboard_input() {
+            return None;
+        }
+        let path = self
+            .files
+            .lock()
+            .ok()?
+            .items
+            .get(self.selected?)?
+            .path
+            .clone();
+        if self.sections.contains_key(&path) {
+            return None;
+        }
+        const KEYS: [Key; 8] = [
+            Key::Num0,
+            Key::Num1,
+            Key::Num2,
+            Key::Num3,
+            Key::Num4,
+            Key::Num5,
+            Key::Num6,
+            Key::Num7,
+        ];
+        let pressed = ui.input_mut(|i| {
+            KEYS.iter()
+                .position(|&key| i.consume_key(egui::Modifiers::NONE, key))
+        })?;
+        let label = pressed.checked_sub(1).filter(|&l| l < self.labels.len());
+        if pressed > 0 && label.is_none() {
+            return None;
+        }
+        // Its own label's key again: taken off.
+        let label = label.filter(|&l| self.item_labels.get(&path) != Some(&l));
+        Some(FolderAction::SetLabel(path, label))
+    }
+
+    /// A section's header: one of the browser's folders (its name in small
+    /// capitals, its path on hover) or a label's (its colour, name and how
+    /// many items it has), with a menu of what can be done with it on its
     /// right while hovered, or on a right-click. Returns whether it was
     /// clicked, to open or close.
     fn root_ui(
@@ -313,7 +412,7 @@ impl FileList {
         } else if response.hovered() {
             painter.rect_filled(rect, 0., theme.hover_overlay);
         }
-        // Between folders.
+        // Between sections.
         if index > 0 {
             painter.hline(
                 rect.x_range(),
@@ -334,17 +433,18 @@ impl FileList {
             FontId::proportional(12.),
             theme.text_muted,
         );
-        let name = self
-            .names
-            .get(&file.path)
-            .cloned()
-            .unwrap_or_default()
-            .to_uppercase();
+        let section = self.sections.get(&file.path).copied();
         let menu_width = ROW_HEIGHT;
         // The folder searched in alone: a magnifier before its name, and a
         // button to search them all again before its menu.
         let scoped = self.scope.as_ref() == Some(&file.path);
         let mut name_x = x + SLOT;
+        if let Some((label, _)) = section
+            && let Some(label) = self.labels.get(label)
+        {
+            painter.circle_filled(pos2(name_x + 4., rect.center().y), 4., label.color);
+            name_x += 12.;
+        }
         if scoped {
             painter.text(
                 pos2(name_x + SLOT / 2., rect.center().y),
@@ -355,69 +455,76 @@ impl FileList {
             );
             name_x += SLOT;
         }
+        let name = match section {
+            Some((label, _)) => self.labels.get(label).map(|l| l.name.clone()),
+            None => self.names.get(&file.path).cloned(),
+        }
+        .unwrap_or_default()
+        .to_uppercase();
+        // A label's count, right.
+        let count = section.map(|(_, count)| {
+            painter.layout_no_wrap(
+                count.to_string(),
+                FontId::proportional(font_size::SMALL),
+                theme.text_disabled,
+            )
+        });
         let buttons = if scoped { 2. } else { 1. } * menu_width;
-        let galley = egui::WidgetText::from(RichText::new(name).strong()).into_galley(
-            ui,
-            Some(egui::TextWrapMode::Truncate),
-            (rect.right() - name_x - buttons - 4.).max(0.),
-            FontId::proportional(font_size::SMALL),
-        );
-        painter.galley(
-            pos2(name_x, rect.center().y - galley.size().y / 2.),
-            galley,
-            if scoped { theme.text } else { theme.text_muted },
-        );
-
-        let path = file.path.clone();
-        let menu = |ui: &mut Ui, actions: &mut Vec<FolderAction>| {
-            let search = if scoped {
-                ("Search all folders", FolderAction::SearchEverywhere)
-            } else {
-                (
-                    "Search in this folder",
-                    FolderAction::SearchIn(path.clone()),
-                )
-            };
-            for (icon, text, action) in [
-                (MAGNIFYING_GLASS, search.0, search.1),
-                (
-                    ARROWS_IN_LINE_VERTICAL,
-                    "Collapse all",
-                    FolderAction::CollapseAll(path.clone()),
-                ),
-                (
-                    ARROW_SQUARE_OUT,
-                    "Show in file manager",
-                    FolderAction::Reveal(path.clone()),
-                ),
-            ] {
-                if ui.add(ContextMenuButton::new(icon, text)).clicked() {
-                    actions.push(action);
-                }
-            }
-            ui.separator();
-            if ui
-                .add(
-                    ContextMenuButton::new(
-                        egui_phosphor::regular::FOLDER_MINUS,
-                        "Remove from browser",
-                    )
-                    .text_color(ui.app_theme().danger),
-                )
-                .clicked()
-            {
-                actions.push(FolderAction::Remove(path.clone()));
-            }
-        };
-        // The menu's button, while the header's hovered or its menu open.
+        let count_width = count.as_ref().map_or(0., |c| c.size().x + 6.);
+        // A labelled folder: a dot after its name.
+        let folder_label = section
+            .is_none()
+            .then(|| self.item_labels.get(&file.path))
+            .flatten()
+            .and_then(|&l| self.labels.get(l));
+        // The menu's button, while the header's hovered or its menu open;
+        // the dot's place otherwise.
         let button_rect = Rect::from_min_size(
             pos2(rect.right() - menu_width - 2., rect.top()),
             vec2(menu_width, ROW_HEIGHT),
         );
         let menu_id = ui.id().with(("folder-menu", &file.path));
         let menu_open = Popup::is_id_open(ui.ctx(), menu_id);
+        let show_button = response.hovered() || menu_open || ui.rect_contains_pointer(button_rect);
+        let dot_width = if folder_label.is_some() { 12. } else { 0. };
+        let galley = egui::WidgetText::from(RichText::new(name).strong()).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Truncate),
+            (rect.right() - name_x - buttons - count_width - dot_width - 4.).max(0.),
+            FontId::proportional(font_size::SMALL),
+        );
+        let empty = section.is_some_and(|(_, count)| count == 0);
+        painter.galley(
+            pos2(name_x, rect.center().y - galley.size().y / 2.),
+            galley,
+            if scoped {
+                theme.text
+            } else if empty {
+                theme.text_disabled
+            } else {
+                theme.text_muted
+            },
+        );
+        if let Some(label) = folder_label
+            && !show_button
+        {
+            painter.circle_filled(dot_center(rect), 3., label.color);
+        }
+        if let Some(count) = count {
+            let pos = pos2(
+                rect.right() - buttons - 4. - count.size().x,
+                rect.center().y - count.size().y / 2.,
+            );
+            painter.galley(pos, count, theme.text_disabled);
+        }
+
+        let path = file.path.clone();
+        let menu = |ui: &mut Ui, actions: &mut Vec<FolderAction>| match section {
+            Some((label, _)) => self.section_menu(ui, label, actions),
+            None => self.folder_menu(ui, &path, scoped, actions),
+        };
         let mut over_button = false;
-        if response.hovered() || menu_open || ui.rect_contains_pointer(button_rect) {
+        if show_button {
             let button = ui.put(
                 button_rect,
                 FlatButton::ghost(DOTS_THREE)
@@ -449,7 +556,11 @@ impl FileList {
             }
         }
         response.context_menu(|ui| menu(ui, actions));
-        let response = response.on_hover_text(file.path.display().to_string());
+        let response = if section.is_none() {
+            response.on_hover_text(file.path.display().to_string())
+        } else {
+            response
+        };
         let pressed = !over_button
             && (response.clicked()
                 || (selected && self.focused && ui.input(|i| i.key_pressed(Key::Enter))));
@@ -457,6 +568,134 @@ impl FileList {
             self.selected = Some(index);
         }
         pressed
+    }
+
+    /// What can be done with one of the browser's folders.
+    fn folder_menu(&self, ui: &mut Ui, path: &Path, scoped: bool, actions: &mut Vec<FolderAction>) {
+        let search = if scoped {
+            ("Search all folders", FolderAction::SearchEverywhere)
+        } else {
+            (
+                "Search in this folder",
+                FolderAction::SearchIn(path.to_path_buf()),
+            )
+        };
+        for (icon, text, action) in [
+            (MAGNIFYING_GLASS, search.0, search.1),
+            (
+                ARROWS_IN_LINE_VERTICAL,
+                "Collapse all",
+                FolderAction::CollapseAll(path.to_path_buf()),
+            ),
+            (
+                ARROW_SQUARE_OUT,
+                "Show in file manager",
+                FolderAction::Reveal(path.to_path_buf()),
+            ),
+        ] {
+            if ui.add(ContextMenuButton::new(icon, text)).clicked() {
+                actions.push(action);
+            }
+        }
+        self.label_submenu(ui, path, actions);
+        ui.separator();
+        if ui
+            .add(
+                ContextMenuButton::new(egui_phosphor::regular::FOLDER_MINUS, "Remove from browser")
+                    .text_color(ui.app_theme().danger),
+            )
+            .clicked()
+        {
+            actions.push(FolderAction::Remove(path.to_path_buf()));
+        }
+    }
+
+    /// What can be done with label `index`: renaming it (typed in the
+    /// menu), recolouring it, taking it off everything.
+    fn section_menu(&self, ui: &mut Ui, index: usize, actions: &mut Vec<FolderAction>) {
+        let Some(label) = self.labels.get(index) else {
+            return;
+        };
+        // As narrow as other menus: the field and swatches would take all
+        // the room they're given.
+        ui.set_max_width(LABEL_MENU_WIDTH);
+        let id = ui.id().with(("label-name", index));
+        let mut name = ui
+            .data(|d| d.get_temp::<String>(id))
+            .unwrap_or_else(|| label.name.clone());
+        let field = ui.add(
+            egui::TextEdit::singleline(&mut name)
+                .hint_text("Name")
+                .desired_width(ui.available_width()),
+        );
+        if field.changed() {
+            ui.data_mut(|d| d.insert_temp(id, name.clone()));
+        }
+        if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+            ui.data_mut(|d| d.remove::<String>(id));
+            if !name.trim().is_empty() {
+                actions.push(FolderAction::RenameLabel(index, name.trim().to_string()));
+            }
+            ui.close();
+        }
+        // Its colour: one of a few.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(2., 2.);
+            for hex in label_colors::COLORS {
+                let Ok(color) = egui::Color32::from_hex(hex) else {
+                    continue;
+                };
+                let (rect, swatch) = ui.allocate_exact_size(vec2(16., 16.), Sense::click());
+                let swatch = swatch.on_hover_cursor(egui::CursorIcon::PointingHand);
+                ui.painter().circle_filled(rect.center(), 6., color);
+                if color == label.color || swatch.hovered() {
+                    ui.painter().circle_stroke(
+                        rect.center(),
+                        7.5,
+                        Stroke::new(1., ui.app_theme().text),
+                    );
+                }
+                if swatch.clicked() {
+                    actions.push(FolderAction::RecolorLabel(index, hex.to_string()));
+                }
+            }
+        });
+        ui.separator();
+        if ui
+            .add(
+                ContextMenuButton::new(egui_phosphor::regular::ERASER, "Clear label")
+                    .text_color(ui.app_theme().danger),
+            )
+            .clicked()
+        {
+            actions.push(FolderAction::ClearLabel(index));
+        }
+    }
+
+    /// "Label": a submenu of the labels, to give `path` one (shortcuts 1
+    /// to 7) or none (0).
+    fn label_submenu(&self, ui: &mut Ui, path: &Path, actions: &mut Vec<FolderAction>) {
+        let current = self.item_labels.get(path).copied();
+        ContextMenuButton::new(egui_phosphor::regular::TAG, "Label").submenu(ui, |ui| {
+            for (index, label) in self.labels.iter().enumerate() {
+                let chosen = current == Some(index);
+                let item = ContextMenuButton::swatch(label.color, &label.name).checked(chosen);
+                if ui.add(item).clicked() {
+                    // Its own label again: taken off.
+                    let label = (!chosen).then_some(index);
+                    actions.push(FolderAction::SetLabel(path.to_path_buf(), label));
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui
+                .add(ContextMenuButton::no_swatch("No label").checked(current.is_none()))
+                .clicked()
+            {
+                actions.push(FolderAction::SetLabel(path.to_path_buf(), None));
+                ui.close();
+            }
+        });
     }
 
     /// The file at `path` was selected: play it if previews play on their
@@ -545,6 +784,12 @@ impl FileList {
             .guides(file.depth - 1)
             .caret(caret)
             .icon(icon)
+            .dot(
+                self.item_labels
+                    .get(&file.path)
+                    .and_then(|&l| self.labels.get(l))
+                    .map(|l| l.color),
+            )
             .selected(selected);
         if playing {
             row = row.icon_color(ui.app_theme().accent);
@@ -561,28 +806,46 @@ impl FileList {
         } else {
             res
         };
-        if is_dir {
-            res.context_menu(|ui| {
-                if ui
+        // In the labels' list, an item's folder on disk; what an item can
+        // be given, a right-click away.
+        let in_section = file.depth == 1 && !self.sections.is_empty();
+        let res = if in_section {
+            match file.path.parent() {
+                Some(parent) => res.on_hover_text(parent.display().to_string()),
+                None => res,
+            }
+        } else {
+            res
+        };
+        res.context_menu(|ui| {
+            self.label_submenu(ui, &file.path, actions);
+            if is_dir
+                && !in_section
+                && ui
                     .add(ContextMenuButton::new(
                         egui_phosphor::regular::FOLDER_PLUS,
                         "Add as browser folder",
                     ))
                     .clicked()
-                {
-                    actions.push(FolderAction::Add(file.path.clone()));
-                }
-                if ui
+            {
+                actions.push(FolderAction::Add(file.path.clone()));
+            }
+            let shown = if is_dir {
+                Some(file.path.as_path())
+            } else {
+                file.path.parent()
+            };
+            if let Some(shown) = shown
+                && ui
                     .add(ContextMenuButton::new(
                         ARROW_SQUARE_OUT,
                         "Show in file manager",
                     ))
                     .clicked()
-                {
-                    actions.push(FolderAction::Reveal(file.path.clone()));
-                }
-            });
-        }
+            {
+                actions.push(FolderAction::Reveal(shown.to_path_buf()));
+            }
+        });
 
         let pressed =
             res.clicked() || (selected && self.focused && ui.input(|i| i.key_pressed(Key::Enter)));
@@ -695,6 +958,11 @@ fn folder_names(roots: &[PathBuf]) -> HashMap<PathBuf, String> {
             (root.clone(), shown)
         })
         .collect()
+}
+
+/// The path naming label `index`'s section in the labels' list: no file's.
+pub fn section_path(index: usize) -> PathBuf {
+    PathBuf::from(format!("\u{0}label-{index}"))
 }
 
 #[cfg(test)]
