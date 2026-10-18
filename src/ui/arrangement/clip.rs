@@ -36,11 +36,12 @@ const SELECTED_BODY_TINT: f32 = 0.5;
 /// some of the selection's.
 const ZONE_BODY_TINT: f32 = 0.6;
 const ZONE_TOWARDS_SELECTED: f32 = 0.3;
-/// How much of its track's colour a silenced clip's body, header and
-/// outline have: a faint wash of it.
+/// How much of its track's colour a silenced clip's body, header, waveform
+/// and outline have: a faint wash of it.
 const SILENCED_BODY_TINT: f32 = 0.16;
 const SILENCED_HEADER_TINT: f32 = 0.27;
 const SILENCED_BORDER_TINT: f32 = 0.43;
+const SILENCED_WAVE_TINT: f32 = 0.5;
 #[derive(Clone, Copy)]
 enum Edge {
     Start,
@@ -178,7 +179,7 @@ impl ClipView<'_> {
                 tint(color, SILENCED_BODY_TINT),
                 tint(color, SILENCED_HEADER_TINT),
                 theme.text_muted,
-                theme.text_muted,
+                tint(color, SILENCED_WAVE_TINT),
                 tint(color, SILENCED_BORDER_TINT),
             )
         } else {
