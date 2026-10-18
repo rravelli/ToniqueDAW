@@ -2,7 +2,7 @@
 
 A rust based Digital Audio Workstation (DAW).
 
-![Tonique with a project open: tracks of colored audio clips on the timeline, a file browser and the mixer](images/screenshot.png)
+![Tonique with a project open: colored audio clips on the timeline, some looping, drums in a group, the effects browser and the mixer](images/screenshot.png)
 
 ## Download
 
