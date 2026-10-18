@@ -141,19 +141,20 @@ impl Node for AudioClipNode {
     }
 
     fn process(&mut self, ctx: &mut ProcessContext) {
-        self.gain_s.retarget(&self.gain);
-        self.pan_s.retarget(&self.pan);
-        if !ctx.playing {
-            return;
-        }
         let p = self.place;
         let block_start = ctx.timeline_pos;
         let block_end = block_start + ctx.block_len as SamplePos;
         let a = block_start.max(p.start);
         let b = block_end.min(p.start + p.length);
-        if a >= b {
+        // Silent: changes take effect at once, so none is ramped in when
+        // the clip next plays.
+        if !ctx.playing || a >= b {
+            self.gain_s.snap(&self.gain);
+            self.pan_s.snap(&self.pan);
             return;
         }
+        self.gain_s.retarget(&self.gain);
+        self.pan_s.retarget(&self.pan);
         let src_len = self.source.len() as SamplePos;
         let src_chans = self.source.num_channels();
         let (left, right) = ctx.audio_out.channel_pair_mut(0, 1);

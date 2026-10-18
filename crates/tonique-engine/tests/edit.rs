@@ -460,6 +460,28 @@ fn clip_gain_is_heard_at_once_and_undone() {
     assert_eq!(gain.get(), 1.0);
 }
 
+/// A gain set while the clip is silent is its level from its first sample:
+/// nothing ramped in from the old one.
+#[test]
+fn clip_gain_set_before_it_plays_is_not_ramped_in() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000 * 8));
+    let mut track = Track::new(&mut edit, "t");
+    // From 0.5 s: 24000 samples in.
+    let clip = Clip::audio(&mut edit, BeatPos(1.0), 8.0, src);
+    let gain = clip.gain().expect("an audio clip has a gain").clone();
+    track.clips.push(clip);
+    edit.tracks.push(track);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    render_offline(&mut p, 4800, 2);
+    gain.set(0.0);
+    render_offline(&mut p, 4800 * 4, 2); // up to the clip
+    let start = peak(&render_offline(&mut p, 4800, 2));
+    assert!(start < 1e-6, "{start}");
+}
+
 #[test]
 fn clip_pan_balances_live_and_is_undone() {
     let mut edit = Edit::new(120.0);
