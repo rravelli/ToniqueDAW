@@ -9,8 +9,8 @@ use crate::{
     },
 };
 use egui::{
-    Align2, Color32, CursorIcon, FontFamily, FontId, Id, Painter, Pos2, Rect, Response, Sense,
-    Stroke, Ui, pos2, vec2,
+    Align2, Color32, CornerRadius, CursorIcon, FontFamily, FontId, Id, Painter, Pos2, Rect,
+    Response, Sense, Stroke, Ui, pos2, vec2,
 };
 use egui_phosphor::fill::TRASH;
 use std::time::Duration;
@@ -19,6 +19,9 @@ use tonique_engine::time::BeatPos;
 const PADDING_TEXT: f32 = 4.;
 const BORDER_WIDTH: f32 = 2.;
 const HEADER_HEIGHT: f32 = 16.;
+/// Left bare at the end of each clip, so where one clip ends and the next
+/// starts (as after a split) shows as a cut through both.
+const CUT_GAP: f32 = 1.;
 /// Width of the trim handles inside each edge of a clip.
 const TRIM_HANDLE_WIDTH: f32 = 7.;
 const MIN_TRIM_HANDLE_WIDTH: f32 = 2.;
@@ -72,7 +75,7 @@ impl ClipView<'_> {
         let (clip, viewport) = (self.clip, self.viewport);
         let (pos, size) = (self.rect.min, self.rect.size());
         let response = ui.interact(
-            self.header_rect(),
+            self.header_rect(self.rect).intersect(viewport),
             Id::new(("clip-header", clip.id)),
             Sense::all(),
         );
@@ -131,19 +134,14 @@ impl ClipView<'_> {
         self.paint(ui, state, false);
     }
 
-    /// Where the header is, clipped to the viewport.
-    fn header_rect(&self) -> Rect {
-        let (pos, size) = (self.rect.min, self.rect.size());
+    /// Where the header is in `rect`: its whole top, edge to edge.
+    fn header_rect(&self, rect: Rect) -> Rect {
         let height = if self.show_waveform {
             HEADER_HEIGHT
         } else {
             TRACK_COLLAPSED_HEIGHT
         };
-        Rect::from_min_size(
-            pos2(pos.x + BORDER_WIDTH, pos.y + BORDER_WIDTH),
-            vec2(size.x - 2. * BORDER_WIDTH, height - 2. * BORDER_WIDTH),
-        )
-        .intersect(self.viewport)
+        Rect::from_min_size(rect.min, vec2(rect.width(), height))
     }
 
     fn handle_width(&self) -> f32 {
@@ -154,7 +152,13 @@ impl ClipView<'_> {
     fn paint(&self, ui: &Ui, state: &ProjectState, lit: bool) {
         let (clip, viewport, color, selected) =
             (self.clip, self.viewport, self.color, self.selected);
-        let (pos, size) = (self.rect.min, self.rect.size());
+        // Short of its end by the gap, unless that'd hide a tiny clip.
+        let drawn = if self.rect.width() > 2. * CUT_GAP {
+            Rect::from_min_max(self.rect.min, self.rect.max - vec2(CUT_GAP, 0.))
+        } else {
+            self.rect
+        };
+        let (pos, size) = (drawn.min, drawn.size());
         let sample_rect = Rect::from_min_max(viewport.clamp(pos), viewport.clamp(pos + size));
         let painter = ui.painter_at(sample_rect);
         let theme = ui.app_theme();
@@ -205,7 +209,7 @@ impl ClipView<'_> {
         );
         if self.show_waveform {
             let rect = Rect::from_min_size(
-                pos2(pos.x, pos.y + HEADER_HEIGHT - BORDER_WIDTH),
+                pos2(pos.x, pos.y + HEADER_HEIGHT),
                 vec2(size.x, size.y - HEADER_HEIGHT),
             );
             // The selected part: its background lit, inside the border.
@@ -231,13 +235,28 @@ impl ClipView<'_> {
         } else {
             header
         };
-        painter.rect(
-            self.header_rect(),
-            2.0,
-            header,
-            Stroke::NONE,
-            egui::StrokeKind::Inside,
-        );
+        // Over the body's outline: only its top corners are rounded, unless
+        // it's the whole clip.
+        let radius = if self.show_waveform {
+            CornerRadius {
+                nw: 2,
+                ne: 2,
+                sw: 0,
+                se: 0,
+            }
+        } else {
+            CornerRadius::same(2)
+        };
+        painter.rect_filled(self.header_rect(drawn), radius, header);
+        // The selection's outline goes round the header too.
+        if selected {
+            painter.rect_stroke(
+                Rect::from_min_size(pos, size),
+                2.0,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
         painter.text(
             Pos2::new(pos.x + PADDING_TEXT, pos.y + 2.),
             Align2::LEFT_TOP,
