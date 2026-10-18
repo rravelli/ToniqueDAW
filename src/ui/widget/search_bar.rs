@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use egui::{
     Align, CursorIcon, FontFamily, FontId, Frame, Key, Layout, Margin, RichText, Sense, Shape,
-    Stroke, StrokeKind, TextEdit, Ui, UiBuilder, vec2,
+    Spinner, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, vec2,
 };
 use egui_phosphor::regular::{MAGNIFYING_GLASS, X};
 
@@ -19,24 +19,37 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 
 /// Single-line search field with a clear button, spanning the available
 /// width. The query is reported once typing pauses, or right away on Enter
-/// or when cleared.
+/// or when cleared. Its hint can change (to say what the search is kept
+/// to), and it shows a spinner while the search runs.
 pub struct SearchBar {
-    hint: &'static str,
+    hint: String,
     query: String,
     /// Last query reported to the caller.
     submitted: String,
     /// When the query last changed, while a report is pending.
     edited_at: Option<Instant>,
+    busy: bool,
 }
 
 impl SearchBar {
     pub fn new(hint: &'static str) -> Self {
         Self {
-            hint,
+            hint: hint.to_string(),
             query: String::new(),
             submitted: String::new(),
             edited_at: None,
+            busy: false,
         }
+    }
+
+    /// What the empty field says.
+    pub fn set_hint(&mut self, hint: impl Into<String>) {
+        self.hint = hint.into();
+    }
+
+    /// Show a spinner while the search runs.
+    pub fn set_busy(&mut self, busy: bool) {
+        self.busy = busy;
     }
 
     /// What's typed, as typed: for searches cheap enough to run at every
@@ -69,12 +82,17 @@ impl SearchBar {
                     // The clear button's space is always reserved, so the
                     // field doesn't resize when it appears.
                     let field = TextEdit::singleline(&mut self.query)
-                        .hint_text(RichText::new(self.hint).color(theme.text_disabled))
+                        .hint_text(RichText::new(&self.hint).color(theme.text_disabled))
                         .frame(Frame::NONE)
                         .margin(Margin::ZERO)
                         .font(FontId::new(FONT_SIZE, FontFamily::Proportional))
                         .text_color(theme.text)
-                        .desired_width(ui.available_width() - GAP - ICON_SIZE)
+                        .desired_width(
+                            ui.available_width()
+                                - GAP
+                                - ICON_SIZE
+                                - if self.busy { GAP + ICON_SIZE } else { 0. },
+                        )
                         .show(ui)
                         .response;
                     if field.changed() {
@@ -84,6 +102,9 @@ impl SearchBar {
                         submit_now = true;
                     }
 
+                    if self.busy {
+                        ui.add(Spinner::new().size(ICON_SIZE).color(theme.text_muted));
+                    }
                     if !self.query.is_empty() {
                         let clear = ui
                             .add(
