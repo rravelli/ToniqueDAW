@@ -1,4 +1,9 @@
 use crate::utils::{display_name, format_bars, format_pan, format_time, snap_to_centre};
+use tonique_engine::time::TimeSignature;
+
+fn signature(numerator: u32, denominator: u32) -> TimeSignature {
+    TimeSignature::new(numerator, denominator).unwrap()
+}
 
 #[test]
 fn test_parse_name() {
@@ -8,13 +13,16 @@ fn test_parse_name() {
 
 #[test]
 fn positions_count_bars_beats_and_sixteenths_from_one() {
-    assert_eq!(format_bars(0., 4), "1.1.1");
-    assert_eq!(format_bars(9.5, 4), "3.2.3");
-    assert_eq!(format_bars(3.99, 4), "1.4.4");
-    assert_eq!(format_bars(3., 3), "2.1.1");
+    let four = signature(4, 4);
+    assert_eq!(format_bars(0., four), "1.1.1");
+    assert_eq!(format_bars(9.5, four), "3.2.3");
+    assert_eq!(format_bars(3.99, four), "1.4.4");
+    assert_eq!(format_bars(3., signature(3, 4)), "2.1.1");
+    // 6/8 counts eighths: 4.75 is bar 2, its 4th eighth, second sixteenth.
+    assert_eq!(format_bars(4.75, signature(6, 8)), "2.4.2");
     // Before the start: the bar before 1 is -1.
-    assert_eq!(format_bars(-1., 4), "-1.4.1");
-    assert_eq!(format_bars(-4.5, 4), "-2.4.3");
+    assert_eq!(format_bars(-1., four), "-1.4.1");
+    assert_eq!(format_bars(-4.5, four), "-2.4.3");
 }
 
 #[test]

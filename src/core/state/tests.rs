@@ -13,7 +13,7 @@ use tonique_engine::{
     engine::{Engine, EngineConfig},
     nodes::FilterMode,
     sample::SampleBuffer,
-    time::BeatPos,
+    time::{BeatPos, TimeSignature},
 };
 
 fn setup_state() -> ProjectState {
@@ -1175,6 +1175,7 @@ mod projects {
 
         let mut state = setup_state();
         state.set_bpm(100.);
+        state.set_time_signature(TimeSignature::new(7, 8).unwrap());
         state.set_loop_range(BeatPos(4.), BeatPos(12.));
         state.set_looping(true);
         let track = state.add_track();
@@ -1220,6 +1221,13 @@ mod projects {
         state.set_effect_collapsed(spectrum, true);
 
         let saved = state.project(Some(&dir));
+        assert_eq!(
+            (
+                saved.time_signature.numerator,
+                saved.time_signature.denominator
+            ),
+            (7, 8)
+        );
         let track_file = &saved.tracks[0];
         // Settings are saved among the parameters.
         assert_eq!(track_file.channel.effects[0].params["mode"], 1.);
@@ -1591,6 +1599,18 @@ mod groups {
         let file = serde_json::from_str(v1).unwrap();
         assert!(state.load_project(&file, Path::new("/")).is_empty());
         assert_eq!(tree(&state), ["a"]);
+        // Nor a time signature: 4/4.
+        assert_eq!(state.time_signature(), TimeSignature::default());
+    }
+
+    #[test]
+    fn unsupported_time_signatures_are_reported() {
+        let mut project = setup_state().project(None);
+        project.time_signature.denominator = 3;
+        let mut state = setup_state();
+        let problems = state.load_project(&project, Path::new("/"));
+        assert_eq!(problems, ["Unsupported time signature 4/3: using 4/4"]);
+        assert_eq!(state.time_signature(), TimeSignature::default());
     }
 
     #[test]
@@ -1653,4 +1673,26 @@ fn starts_without_audio_and_waits_for_a_device() {
     assert!(state.audio_lost());
     assert_eq!(state.audio_error.as_deref(), Some("no device"));
     assert_eq!(state.playback_state(), PlaybackState::Paused);
+}
+
+/// Changing the signature is one undo step; the grid follows the edit.
+#[test]
+fn time_signature_changes_are_undoable() {
+    let mut state = setup_state();
+    let waltz = TimeSignature::new(3, 4).unwrap();
+    state.set_time_signature(waltz);
+    assert_eq!(state.time_signature(), waltz);
+    assert_eq!(state.grid.beats_per_bar(), 3.);
+
+    state.undo();
+    assert_eq!(state.time_signature(), TimeSignature::default());
+    assert_eq!(state.grid.beats_per_bar(), 4.);
+    state.redo();
+    assert_eq!(state.grid.beats_per_bar(), 3.);
+
+    // Clips keep their place in beats.
+    let track = state.add_track();
+    add_clip(&mut state, track, 6., 1.);
+    state.set_time_signature(TimeSignature::new(7, 8).unwrap());
+    assert_eq!(spans(&state, track), [(6., 8.)]);
 }

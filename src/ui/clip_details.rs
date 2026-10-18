@@ -6,7 +6,7 @@ use egui::{
 };
 use tonique_engine::{
     edit::{ClipId, ClipLoop},
-    time::BeatPos,
+    time::{BeatPos, TimeSignature},
 };
 
 use crate::{
@@ -126,6 +126,8 @@ impl ClipDetails {
         }
 
         let bpm = state.bpm();
+        // Bars as the project counts them.
+        self.grid.set_time_signature(state.time_signature());
         if self.fitted == Some(clip.id) && clip.origin != self.origin {
             // Bar 1 moved: the grid follows, and the audio stays where it
             // was on screen.
@@ -661,7 +663,7 @@ fn trimmed(clip: &AudioClip, edge: TrimEdge, at: BeatPos, bpm: f32) -> AudioClip
 /// pan are sliders like a track's, heard as they're dragged.
 fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut ProjectState) {
     let bpm = state.bpm();
-    let bpb = state.grid.beats_per_bar();
+    let bpb = state.time_signature();
     let shown = state.shown_clip(clip);
     let start = shown.position.0;
     let end = shown.end(bpm).0;
@@ -930,24 +932,28 @@ const CLIP_GAIN_RANGE: std::ops::RangeInclusive<f32> = -40.0..=12.0;
 
 /// A position as typed, `bar.beat.sixteenth` from 1 (`3.2.1`; missing
 /// parts are the first), in beats.
-fn parse_bars(text: &str, beats_per_bar: usize) -> Option<f64> {
+fn parse_bars(text: &str, signature: TimeSignature) -> Option<f64> {
     let parts = parse_parts(text)?;
     let part = |i: usize| parts.get(i).copied().unwrap_or(1.);
     if parts.is_empty() || parts.iter().any(|p| *p < 1.) {
         return None;
     }
-    Some((part(0) - 1.) * beats_per_bar as f64 + (part(1) - 1.) + (part(2) - 1.) / 4.)
+    Some(
+        (part(0) - 1.) * signature.beats_per_bar()
+            + (part(1) - 1.) * signature.beat_length()
+            + (part(2) - 1.) / 4.,
+    )
 }
 
 /// A length as typed, `bars.beats.sixteenths` (`1.2.0`; missing parts are
 /// none), in beats.
-fn parse_length(text: &str, beats_per_bar: usize) -> Option<f64> {
+fn parse_length(text: &str, signature: TimeSignature) -> Option<f64> {
     let parts = parse_parts(text)?;
     let part = |i: usize| parts.get(i).copied().unwrap_or(0.);
     if parts.is_empty() || parts.iter().any(|p| *p < 0.) {
         return None;
     }
-    Some(part(0) * beats_per_bar as f64 + part(1) + part(2) / 4.)
+    Some(part(0) * signature.beats_per_bar() + part(1) * signature.beat_length() + part(2) / 4.)
 }
 
 /// Up to three numbers separated by dots.
@@ -960,16 +966,19 @@ fn parse_parts(text: &str) -> Option<Vec<f64>> {
     (parts.len() <= 3).then_some(parts)
 }
 
-/// A length as `bars.beats.sixteenths`, counting from 0: one bar and two
-/// beats is `1.2.0`.
-fn format_length(beats: f64, beats_per_bar: usize) -> String {
-    let sixteenths = (beats * 4.).round().max(0.) as usize;
-    let per_bar = beats_per_bar.max(1) * 4;
+/// A length as `bars.beats.sixteenths`, counting from 0, beats as
+/// `signature` counts them: one bar and two beats is `1.2.0`.
+fn format_length(beats: f64, signature: TimeSignature) -> String {
+    let sixteenths = (beats * 4.).round().max(0.) as u64;
+    // Whole numbers of sixteenths, whatever the signature.
+    let per_bar = ((signature.beats_per_bar() * 4.).round() as u64).max(1);
+    let per_beat = ((signature.beat_length() * 4.).round() as u64).max(1);
+    let within = sixteenths % per_bar;
     format!(
         "{}.{}.{}",
         sixteenths / per_bar,
-        sixteenths % per_bar / 4,
-        sixteenths % 4
+        within / per_beat,
+        within % per_beat
     )
 }
 
@@ -1052,28 +1061,45 @@ mod tests {
 
     #[test]
     fn typed_positions_and_lengths_read_as_shown() {
-        assert_eq!(parse_bars("3.2.3", 4), Some(9.5));
-        assert_eq!(parse_bars("1.1.1", 4), Some(0.));
-        assert_eq!(parse_bars("2", 4), Some(4.), "missing parts are the first");
-        assert_eq!(parse_bars("0.1.1", 4), None, "bars count from 1");
-        assert_eq!(parse_bars("1.2.3.4", 4), None);
-        assert_eq!(parse_bars("x", 4), None);
-        assert_eq!(parse_length("1.2.1", 4), Some(6.25));
-        assert_eq!(parse_length("3", 4), Some(12.), "bars first");
-        assert_eq!(parse_length("0.0.2", 4), Some(0.5));
+        const FOUR: TimeSignature = TimeSignature {
+            numerator: 4,
+            denominator: 4,
+        };
+        assert_eq!(parse_bars("3.2.3", FOUR), Some(9.5));
+        assert_eq!(parse_bars("1.1.1", FOUR), Some(0.));
+        assert_eq!(
+            parse_bars("2", FOUR),
+            Some(4.),
+            "missing parts are the first"
+        );
+        assert_eq!(parse_bars("0.1.1", FOUR), None, "bars count from 1");
+        assert_eq!(parse_bars("1.2.3.4", FOUR), None);
+        assert_eq!(parse_bars("x", FOUR), None);
+        assert_eq!(parse_length("1.2.1", FOUR), Some(6.25));
+        assert_eq!(parse_length("3", FOUR), Some(12.), "bars first");
+        assert_eq!(parse_length("0.0.2", FOUR), Some(0.5));
         for beats in [0., 6.25, 9.5] {
-            assert_eq!(parse_bars(&format_bars(beats, 4), 4), Some(beats));
+            assert_eq!(parse_bars(&format_bars(beats, FOUR), FOUR), Some(beats));
         }
     }
 
     #[test]
     fn lengths_count_bars_beats_and_sixteenths_from_zero() {
-        assert_eq!(format_length(4., 4), "1.0.0");
-        assert_eq!(format_length(6.25, 4), "1.2.1");
-        assert_eq!(format_length(3., 4), "0.3.0");
+        const FOUR: TimeSignature = TimeSignature {
+            numerator: 4,
+            denominator: 4,
+        };
+        assert_eq!(format_length(4., FOUR), "1.0.0");
+        assert_eq!(format_length(6.25, FOUR), "1.2.1");
+        assert_eq!(format_length(3., FOUR), "0.3.0");
         for beats in [0.25, 6.25, 12.] {
-            assert_eq!(parse_length(&format_length(beats, 4), 4), Some(beats));
+            assert_eq!(parse_length(&format_length(beats, FOUR), FOUR), Some(beats));
         }
+        // 6/8 counts eighths: a bar is 3 beats, of 6 eighths.
+        let six_eight = TimeSignature::new(6, 8).unwrap();
+        assert_eq!(format_length(3.5, six_eight), "1.1.0");
+        assert_eq!(parse_length("1.1.0", six_eight), Some(3.5));
+        assert_eq!(parse_bars("2.4.2", six_eight), Some(4.75))
     }
 
     #[test]

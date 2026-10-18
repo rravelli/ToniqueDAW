@@ -13,8 +13,8 @@ const DECAY_PER_S: f32 = 80.0;
 /// Past this the decay is inaudible (below -55 dB).
 const CLICK_S: f32 = 0.08;
 
-/// Square-wave click on every beat, higher-pitched on the first beat of a
-/// bar. Silent while stopped; `gain` of 0 turns it off.
+/// Square-wave click on every beat the time signature counts, higher-pitched
+/// on the first beat of a bar. Silent while stopped; `gain` of 0 turns it off.
 pub struct MetronomeNode {
     tempo: TempoMap,
     gain: Arc<AtomicParam>,
@@ -42,20 +42,24 @@ impl MetronomeNode {
         self
     }
 
-    /// Next beat starting in `[start, end)`, as (offset in block, is accent).
+    /// Next counted beat (the time signature's denominator: eighths in
+    /// 6/8) starting in `[start, end)`, as (offset in block, is accent).
     fn beat_in(&self, start: SamplePos, end: SamplePos, sr: f64) -> Option<(usize, bool)> {
-        let first = self.tempo.samples_to_beats(start, sr).0.floor();
-        let last = self.tempo.samples_to_beats(end, sr).0.ceil();
-        let mut beat = first.max(0.0);
-        // Compare in samples, so a beat is never missed or doubled because
-        // of rounding at block boundaries.
-        while beat <= last {
-            let t = self.tempo.beats_to_samples(BeatPos(beat), sr);
+        let signature = self.tempo.time_signature;
+        let length = signature.beat_length();
+        let first = (self.tempo.samples_to_beats(start, sr).0 / length).floor() as i64;
+        let last = (self.tempo.samples_to_beats(end, sr).0 / length).ceil() as i64;
+        // Count beats as integers, so bars are found exactly; compare in
+        // samples, so a beat is never missed or doubled because of rounding
+        // at block boundaries.
+        for index in first.max(0)..=last {
+            let t = self
+                .tempo
+                .beats_to_samples(BeatPos(index as f64 * length), sr);
             if (start..end).contains(&t) {
-                let accent = beat % self.tempo.time_signature.beats_per_bar() == 0.0;
+                let accent = index % signature.numerator as i64 == 0;
                 return Some(((t - start) as usize, accent));
             }
-            beat += 1.0;
         }
         None
     }
@@ -147,5 +151,23 @@ mod tests {
         assert_eq!(node.beat_in(96000, 96256, SR), Some((0, true)));
         assert_eq!(node.beat_in(24000 - 256, 24000, SR), None);
         assert_eq!(node.beat_in(1, 23999, SR), None);
+    }
+
+    /// In 7/8 it clicks every eighth (12000 samples) and accents every 7th.
+    #[test]
+    fn clicks_follow_the_time_signature() {
+        let mut tempo = TempoMap::new(120.0);
+        tempo.time_signature = crate::time::TimeSignature::new(7, 8).unwrap();
+        let node = MetronomeNode::new(tempo, Arc::new(AtomicParam::new(1.0)));
+        let clicks: Vec<_> = (0..16)
+            .filter_map(|i| {
+                let start = i * 12000;
+                node.beat_in(start, start + 256, SR)
+                    .map(|(at, accent)| (start + at as SamplePos, accent))
+            })
+            .collect();
+        assert_eq!(clicks.len(), 16);
+        let accents: Vec<_> = clicks.iter().filter(|c| c.1).map(|c| c.0).collect();
+        assert_eq!(accents, [0, 84000, 168000]);
     }
 }

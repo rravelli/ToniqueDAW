@@ -54,9 +54,10 @@ impl ProjectState {
         self.batching = false;
         self.resized_clip = None;
         self.grid.offset = Vec2::ZERO;
+        self.sync_time_signature();
         self.loop_range = (
             BeatPos::ZERO,
-            BeatPos(DEFAULT_LOOP_BARS * self.grid.beats_per_bar() as f64),
+            BeatPos(DEFAULT_LOOP_BARS * self.grid.beats_per_bar()),
         );
         self.looping = false;
         self.sync_loop();
@@ -143,6 +144,7 @@ impl ProjectState {
         ProjectFile {
             version: VERSION,
             bpm,
+            time_signature: edit.tempo.time_signature.into(),
             loop_range: (self.loop_range.0.0, self.loop_range.1.0),
             looping: self.looping,
             master: self.channel_file(&edit.master),
@@ -185,6 +187,13 @@ impl ProjectState {
         self.new_project();
         let mut problems = Vec::new();
         self.set_bpm(project.bpm);
+        match project.time_signature.signature() {
+            Some(signature) => self.set_time_signature(signature),
+            None => problems.push(format!(
+                "Unsupported time signature {}/{}: using 4/4",
+                project.time_signature.numerator, project.time_signature.denominator
+            )),
+        }
         self.set_loop_range(BeatPos(project.loop_range.0), BeatPos(project.loop_range.1));
         self.set_looping(project.looping);
         self.restore_channel(MASTER_TRACK_ID, &project.master, &mut problems);

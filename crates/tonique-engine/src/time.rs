@@ -78,10 +78,64 @@ impl Default for TimeSignature {
 }
 
 impl TimeSignature {
+    /// Most beats a bar can count.
+    pub const MAX_NUMERATOR: u32 = 32;
+    /// Note values a signature can count in (half notes to sixteenths).
+    pub const DENOMINATORS: [u32; 4] = [2, 4, 8, 16];
+
+    /// `None` unless `numerator` is 1 to [`Self::MAX_NUMERATOR`] and
+    /// `denominator` one of [`Self::DENOMINATORS`].
+    pub fn new(numerator: u32, denominator: u32) -> Option<Self> {
+        ((1..=Self::MAX_NUMERATOR).contains(&numerator)
+            && Self::DENOMINATORS.contains(&denominator))
+        .then_some(Self {
+            numerator,
+            denominator,
+        })
+    }
+
     /// Length of one bar in quarter-note beats.
     pub fn beats_per_bar(&self) -> f64 {
-        self.numerator as f64 * 4.0 / self.denominator as f64
+        self.numerator as f64 * self.beat_length()
     }
+
+    /// Length of the beat the signature counts (its denominator's note) in
+    /// quarter-note beats: 1 in 3/4, 0.5 in 6/8.
+    pub fn beat_length(&self) -> f64 {
+        4.0 / self.denominator as f64
+    }
+
+    /// Start of `bar` (zero-based).
+    pub fn bar_start(&self, bar: i64) -> BeatPos {
+        BeatPos(bar as f64 * self.beats_per_bar())
+    }
+
+    /// Where `beat` falls: its bar and counted beat (both zero-based), and
+    /// how far into that beat it is, in quarter-note beats.
+    pub fn locate(&self, beat: BeatPos) -> BarPosition {
+        let bar = (beat.0 / self.beats_per_bar()).floor();
+        let in_bar = beat.0 - bar * self.beats_per_bar();
+        let counted = (in_bar / self.beat_length()).floor();
+        BarPosition {
+            bar: bar as i64,
+            beat: counted as u32,
+            offset: in_bar - counted * self.beat_length(),
+        }
+    }
+}
+
+impl std::fmt::Display for TimeSignature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.numerator, self.denominator)
+    }
+}
+
+/// A position in bars, see [`TimeSignature::locate`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarPosition {
+    pub bar: i64,
+    pub beat: u32,
+    pub offset: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -185,7 +239,7 @@ impl TempoMap {
 
     /// `bar` and `beat` are zero-based.
     pub fn bar_beat_to_beats(&self, bar: u32, beat: f64) -> BeatPos {
-        BeatPos(bar as f64 * self.time_signature.beats_per_bar() + beat)
+        self.time_signature.bar_start(bar as i64) + beat
     }
 }
 
@@ -215,5 +269,32 @@ mod tests {
         assert_eq!(t.bpm_at(BeatPos(4.0)), 60.0);
         t.remove_tempo(BeatPos(4.0));
         assert_eq!(t.beats_to_seconds(BeatPos(6.0)), 3.0);
+    }
+
+    #[test]
+    fn signatures_are_validated() {
+        assert_eq!(TimeSignature::new(4, 4), Some(TimeSignature::default()));
+        assert!(TimeSignature::new(7, 8).is_some());
+        assert!(TimeSignature::new(0, 4).is_none());
+        assert!(TimeSignature::new(33, 4).is_none());
+        assert!(TimeSignature::new(4, 3).is_none());
+        assert_eq!(TimeSignature::new(6, 8).unwrap().to_string(), "6/8");
+    }
+
+    /// Bars and counted beats, in quarter-note beats.
+    #[test]
+    fn signatures_measure_bars() {
+        let sig = |n, d| TimeSignature::new(n, d).unwrap();
+        assert_eq!(sig(3, 4).beats_per_bar(), 3.0);
+        assert_eq!(sig(6, 8).beats_per_bar(), 3.0);
+        assert_eq!(sig(6, 8).beat_length(), 0.5);
+        assert_eq!(sig(7, 8).bar_start(2), BeatPos(7.0));
+        assert_eq!(sig(2, 2).beats_per_bar(), 4.0);
+
+        // 7/8: bar 2 starts at 3.5; 5.25 is its fourth eighth, plus 0.25.
+        let at = sig(7, 8).locate(BeatPos(5.25));
+        assert_eq!((at.bar, at.beat, at.offset), (1, 3, 0.25));
+        let at = sig(3, 4).locate(BeatPos(3.0));
+        assert_eq!((at.bar, at.beat, at.offset), (1, 0, 0.0));
     }
 }

@@ -1,12 +1,13 @@
 use crate::ui::theme::font_size;
 use egui::{
-    Align, Align2, FontFamily, FontId, Frame, Layout, Margin, Rangef, Rect, Response, Sense, Ui,
-    UiBuilder, Vec2, pos2, vec2,
+    Align, Align2, FontFamily, FontId, Frame, Layout, Margin, Rangef, Rect, Response, RichText,
+    Sense, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 use egui_phosphor::{
     fill::SIDEBAR_SIMPLE,
     regular::{CPU, GRAPH, RECORD, SPEAKER_SLASH},
 };
+use tonique_engine::time::TimeSignature;
 
 use crate::{
     config::keymap::Action,
@@ -16,7 +17,7 @@ use crate::{
         commands::Commands,
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::{ThemeExt, with_alpha},
-        widget::{flat_button::FlatButton, input::NumberInput},
+        widget::{flat_button::FlatButton, input::NumberInput, select::Select},
         workspace::{MainView, Workspace},
     },
     utils::{format_bars, format_time},
@@ -32,6 +33,8 @@ const USAGE_WIDTH: f32 = 46.;
 
 pub struct TransportBar {
     bpm_input: NumberInput,
+    /// The time signature's beats per bar.
+    numerator_input: NumberInput,
 }
 
 impl TransportBar {
@@ -40,6 +43,10 @@ impl TransportBar {
             bpm_input: NumberInput::new(Vec2::new(76., BUTTON_SIZE))
                 .range(Rangef::new(10., 1000.))
                 .suffix(" BPM")
+                .draggable(),
+            numerator_input: NumberInput::new(Vec2::new(28., BUTTON_SIZE))
+                .range(Rangef::new(1., TimeSignature::MAX_NUMERATOR as f32))
+                .decimals(0)
                 .draggable(),
         }
     }
@@ -134,8 +141,39 @@ impl TransportBar {
                 if self.bpm_input.value != state.bpm() {
                     state.set_bpm(self.bpm_input.value);
                 }
+                ui.add_space(BUTTON_GAP);
+                self.time_signature_ui(ui, state);
             });
         });
+    }
+
+    /// Beats per bar (typed or dragged) over the note that counts them.
+    /// Laid out right to left, like the rest of this side of the bar.
+    fn time_signature_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
+        let current = state.time_signature();
+        let mut denominator = current.denominator;
+        ui.add(
+            Select::new("time-signature-denominator", &mut denominator)
+                .options(
+                    TimeSignature::DENOMINATORS
+                        .iter()
+                        .map(|d| (*d, d.to_string())),
+                )
+                .width(44.),
+        )
+        .on_hover_text("Note value of a beat");
+        ui.label(RichText::new("/").color(ui.app_theme().text_muted));
+        self.numerator_input.value = current.numerator as f32;
+        self.numerator_input
+            .ui(ui)
+            .on_hover_text("Beats per bar: drag or double-click to edit");
+        // Shift-dragging moves in tenths: only whole beats count.
+        let numerator = self.numerator_input.value.round() as u32;
+        if let Some(signature) = TimeSignature::new(numerator, denominator)
+            && signature != current
+        {
+            state.set_time_signature(signature);
+        }
     }
 
     fn play_button_ui(&mut self, ui: &mut Ui, state: &ProjectState) -> Response {
@@ -378,7 +416,7 @@ fn position_ui(ui: &mut Ui, state: &ProjectState) {
     let theme = ui.app_theme();
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 2.0, theme.bg_deep);
-    let (bars, time) = position_text(state.playhead().0, state.grid.beats_per_bar(), state.bpm());
+    let (bars, time) = position_text(state.playhead().0, state.time_signature(), state.bpm());
     let font = FontId::monospace(font_size::BODY);
     painter.text(
         rect.left_center() + vec2(8., 0.),
@@ -396,11 +434,12 @@ fn position_ui(ui: &mut Ui, state: &ProjectState) {
     );
 }
 
-/// `beats` as `bar.beat.sixteenth` (from 1) and `m:ss.mmm`.
-fn position_text(beats: f64, beats_per_bar: usize, bpm: f32) -> (String, String) {
+/// `beats` as `bar.beat.sixteenth` (from 1, beats as the signature counts
+/// them) and `m:ss.mmm`.
+fn position_text(beats: f64, signature: TimeSignature, bpm: f32) -> (String, String) {
     let beats = beats.max(0.);
     (
-        format_bars(beats, beats_per_bar),
+        format_bars(beats, signature),
         format_time(beats * 60. / bpm as f64),
     )
 }
@@ -417,17 +456,33 @@ fn tooltip(ui: &Ui, state: &ProjectState, text: &str, action: Action) -> String 
 mod tests {
     use super::*;
 
+    fn signature(numerator: u32, denominator: u32) -> TimeSignature {
+        TimeSignature::new(numerator, denominator).unwrap()
+    }
+
     #[test]
     fn position_counts_from_one() {
+        let four = signature(4, 4);
         assert_eq!(
-            position_text(0., 4, 120.),
+            position_text(0., four, 120.),
             ("1.1.1".to_string(), "0:00.000".to_string())
         );
         // Bar 2, beat 3, the second sixteenth: 6.25 beats, 3.125 s at 120.
         assert_eq!(
-            position_text(6.25, 4, 120.),
+            position_text(6.25, four, 120.),
             ("2.3.2".to_string(), "0:03.125".to_string())
         );
-        assert_eq!(position_text(150., 4, 60.).1, "2:30.000");
+        assert_eq!(position_text(150., four, 60.).1, "2:30.000");
+    }
+
+    /// Beats are counted in the signature's note value.
+    #[test]
+    fn position_follows_the_time_signature() {
+        // 3/4: beat 6.25 is in bar 3, first beat, second sixteenth.
+        assert_eq!(position_text(6.25, signature(3, 4), 120.).0, "3.1.2");
+        // 6/8: a bar is 3 quarters of 6 eighths; 4.75 is bar 2, 4th eighth.
+        assert_eq!(position_text(4.75, signature(6, 8), 120.).0, "2.4.2");
+        // 7/8: bar 2 starts at 3.5.
+        assert_eq!(position_text(3.5, signature(7, 8), 120.).0, "2.1.1");
     }
 }

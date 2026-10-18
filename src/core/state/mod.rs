@@ -50,7 +50,7 @@ use tonique_engine::{
     },
     engine::Engine,
     param::ParamId,
-    time::BeatPos,
+    time::{BeatPos, TimeSignature},
 };
 
 /// The master strip, addressed like a track by the UI. The engine never
@@ -195,7 +195,7 @@ impl ProjectState {
             grid: GridService::new(),
             loop_range: (
                 BeatPos::ZERO,
-                BeatPos(DEFAULT_LOOP_BARS * GridService::new().beats_per_bar() as f64),
+                BeatPos(DEFAULT_LOOP_BARS * GridService::new().beats_per_bar()),
             ),
             looping: false,
             loop_bpm: DEFAULT_BPM as f32,
@@ -212,6 +212,7 @@ impl ProjectState {
             let result = self.session.set_source(id, data);
             report(result);
         }
+        self.sync_time_signature();
         // Tempo changes (edits, undo, redo) move the loop in samples.
         if self.looping && self.bpm() != self.loop_bpm {
             self.sync_loop();
@@ -481,6 +482,31 @@ impl ProjectState {
 
     pub fn bpm(&self) -> f32 {
         self.edit().tempo.bpm_at(BeatPos(0.)) as f32
+    }
+    // Time signature
+    /// Change the project's time signature. Positions are in quarter-note
+    /// beats, so clips stay where they are; only the bars move.
+    pub fn set_time_signature(&mut self, signature: TimeSignature) {
+        if signature == self.time_signature() {
+            return;
+        }
+        let mut tempo = self.edit().tempo.clone();
+        tempo.time_signature = signature;
+        self.transaction("Change time signature", |s| {
+            s.perform(SetTempoMap::new(tempo))
+        });
+        self.sync_time_signature();
+    }
+
+    pub fn time_signature(&self) -> TimeSignature {
+        self.edit().tempo.time_signature
+    }
+
+    /// The grid keeps a copy of the signature: refresh it after anything
+    /// that may change the edit's (edits, undo, redo, loading).
+    fn sync_time_signature(&mut self) {
+        let signature = self.time_signature();
+        self.grid.set_time_signature(signature);
     }
     // Playhead and edit cursor
     /// Move the playhead and the edit cursor there (ruler, playhead handle).
@@ -1484,6 +1510,7 @@ impl ProjectState {
         self.after_history_change();
     }
     fn after_history_change(&mut self) {
+        self.sync_time_signature();
         // Renames may have been undone: show the engine's names.
         for track in &self.session.edit().tracks {
             if let Some(view) = self.views.get_mut(&track.id) {

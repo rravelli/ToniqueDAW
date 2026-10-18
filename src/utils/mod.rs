@@ -1,17 +1,17 @@
+use tonique_engine::time::{BeatPos, TimeSignature};
+
 pub mod color;
 #[cfg(test)]
 mod tests;
 
-/// A position in beats as `bar.beat.sixteenth`, counting from 1: beat 0
-/// is `1.1.1`. Before beat 0 (as in a view counted from a clip's start), bars
+/// A position in beats as `bar.beat.sixteenth`, counting from 1, beats as
+/// `signature` counts them: beat 0 is `1.1.1`. Before beat 0 (as in a view counted from a clip's start), bars
 /// count down from -1, the bar right before bar 1.
-pub fn format_bars(beats: f64, beats_per_bar: usize) -> String {
-    let sixteenths = (beats * 4. + 1e-6).floor() as i64;
-    let per_bar = beats_per_bar.max(1) as i64 * 4;
-    let bar = sixteenths.div_euclid(per_bar);
-    let bar = if bar >= 0 { bar + 1 } else { bar };
-    let within = sixteenths.rem_euclid(per_bar);
-    format!("{bar}.{}.{}", within / 4 + 1, within % 4 + 1)
+pub fn format_bars(beats: f64, signature: TimeSignature) -> String {
+    let at = signature.locate(BeatPos(beats + 1e-6));
+    let bar = if at.bar >= 0 { at.bar + 1 } else { at.bar };
+    let sixteenth = (at.offset * 4.).floor() as u64 + 1;
+    format!("{bar}.{}.{sixteenth}", at.beat + 1)
 }
 
 /// `m:ss.mmm`, with a `-` before zero.
