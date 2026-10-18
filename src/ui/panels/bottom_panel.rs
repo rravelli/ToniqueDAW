@@ -13,9 +13,8 @@ use crate::{
     utils::display_name,
 };
 use egui::{
-    Align, Align2, Color32, CornerRadius, CursorIcon, DragAndDrop, FontId, Frame, Galley, Label,
-    Layout, Margin, Painter, Pos2, Rangef, Rect, RichText, ScrollArea, Sense, Stroke, Ui, pos2,
-    vec2,
+    Align, Align2, Color32, CursorIcon, DragAndDrop, FontId, Frame, Galley, Label, Layout, Margin,
+    Mesh, Painter, Pos2, Rangef, Rect, RichText, ScrollArea, Sense, Shape, Stroke, Ui, pos2, vec2,
 };
 use std::sync::Arc;
 use tonique_engine::edit::{ClipId, TrackId};
@@ -441,7 +440,7 @@ impl BottomPanel {
         drawn.sort_by_key(|(.., selected, _)| !selected);
         for (rect, galley, selected, hovered) in drawn {
             let text = if selected {
-                paint_tab(painter, rect.x_range(), header, theme.bg_panel, track.color);
+                paint_tab(painter, rect.x_range(), header, theme.bg_panel);
                 theme.text
             } else {
                 if hovered {
@@ -456,28 +455,42 @@ impl BottomPanel {
     }
 }
 
-/// A selected tab across `x`, from near the top of `header` down through
-/// its bottom edge, in `fill`: rounded on top, its foot curving out into
-/// `around` (the header's colour) on each side, so it reads as part of
-/// the panel below.
-fn paint_tab(painter: &Painter, x: Rangef, header: Rect, fill: Color32, around: Color32) {
+/// A selected tab across `x`, from near the top of `header` down to its
+/// bottom edge, in `fill`: rounded on top, its foot curving out on each
+/// side, so it reads as part of the panel below. One shape, kept inside
+/// the header, its curved edges smoothed by a thin line along them.
+fn paint_tab(painter: &Painter, x: Rangef, header: Rect, fill: Color32) {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    const STEPS: usize = 8;
     let r = TAB_RADIUS;
-    let body = Rect::from_x_y_ranges(x, header.top() + 2.0..=header.bottom());
-    let top = CornerRadius {
-        nw: r as u8,
-        ne: r as u8,
-        sw: 0,
-        se: 0,
+    let (top, bottom) = (header.top() + 2., header.bottom());
+    // A quarter circle around `centre`, from angle `from` to `to` (y down).
+    let arc = |centre: Pos2, from: f32, to: f32| {
+        (0..=STEPS).map(move |i| {
+            let a = from + (to - from) * i as f32 / STEPS as f32;
+            centre + r * vec2(a.cos(), a.sin())
+        })
     };
-    painter.rect_filled(body, top, fill);
-    for (edge, out) in [(x.min, -r), (x.max, r)] {
-        let foot = Rect::from_two_pos(
-            pos2(edge, header.bottom() - r),
-            pos2(edge + out, header.bottom()),
-        );
-        painter.rect_filled(foot, 0., fill);
-        painter.circle_filled(pos2(edge + out, header.bottom() - r), r, around);
+    // Its outline left to right: the left foot, the top corners, the
+    // right foot. Each x has one point on it, the bottom being flat.
+    let edge: Vec<Pos2> = arc(pos2(x.min - r, bottom - r), FRAC_PI_2, 0.)
+        .chain(arc(pos2(x.min + r, top + r), PI, 1.5 * PI))
+        .chain(arc(pos2(x.max - r, top + r), 1.5 * PI, 2. * PI))
+        .chain(arc(pos2(x.max + r, bottom - r), PI, FRAC_PI_2))
+        .collect();
+    let mut mesh = Mesh::default();
+    for pair in edge.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let i = mesh.vertices.len() as u32;
+        for p in [a, b, pos2(b.x, bottom), pos2(a.x, bottom)] {
+            mesh.colored_vertex(p, fill);
+        }
+        mesh.add_triangle(i, i + 1, i + 2);
+        mesh.add_triangle(i, i + 2, i + 3);
     }
+    let painter = painter.with_clip_rect(header);
+    painter.add(mesh);
+    painter.add(Shape::line(edge, Stroke::new(1., fill)));
 }
 
 /// Muted text in the middle of `rect`.
