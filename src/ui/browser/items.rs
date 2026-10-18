@@ -54,6 +54,8 @@ pub enum FolderAction {
     SearchIn(PathBuf),
     /// Search in every folder again.
     SearchEverywhere,
+    /// Read every folder from disk again.
+    Refresh,
     /// Add a folder inside one of them as a folder of its own.
     Add(PathBuf),
     /// Give a file or folder a label, or take its label off.
@@ -160,6 +162,24 @@ impl FileList {
         if let Ok(mut files) = self.files.lock() {
             files.set_roots(roots, collapsed);
         }
+        if !self.query.is_empty() {
+            self.search(&self.query.clone());
+        }
+    }
+
+    /// Read the folders from disk again, keeping what's selected and the
+    /// search, if one is on.
+    pub fn refresh(&mut self) {
+        let Ok(mut files) = self.files.lock() else {
+            return;
+        };
+        let selected = self
+            .selected
+            .and_then(|i| files.items.get(i))
+            .map(|f| f.path.clone());
+        files.refresh();
+        self.selected = selected.and_then(|path| files.items.iter().position(|f| f.path == path));
+        drop(files);
         if !self.query.is_empty() {
             self.search(&self.query.clone());
         }
@@ -582,6 +602,11 @@ impl FileList {
         };
         for (icon, text, action) in [
             (MAGNIFYING_GLASS, search.0, search.1),
+            (
+                egui_phosphor::regular::ARROWS_CLOCKWISE,
+                "Refresh (F5)",
+                FolderAction::Refresh,
+            ),
             (
                 ARROWS_IN_LINE_VERTICAL,
                 "Collapse all",

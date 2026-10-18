@@ -12,6 +12,9 @@ pub struct FolderNode {
     children: Option<Vec<FileNode>>,
     pub search_result: Vec<FileNode>,
     pub depth: usize,
+    /// Its children were gathered (a label's section), not read from disk:
+    /// there's nothing to read again.
+    gathered: bool,
 }
 
 impl FolderNode {
@@ -22,6 +25,7 @@ impl FolderNode {
             children: None,
             search_result: Vec::new(),
             depth,
+            gathered: false,
         }
     }
 
@@ -33,7 +37,15 @@ impl FolderNode {
         children.sort_by_key(|f| std::cmp::Reverse(f.name_lower.clone()));
         Self {
             children: Some(children),
+            gathered: true,
             ..Self::new(path, 0)
+        }
+    }
+
+    /// Read what's inside from disk again next time it's needed.
+    fn forget(&mut self) {
+        if !self.gathered {
+            self.children = None;
         }
     }
 
@@ -215,6 +227,12 @@ impl FileTree {
             .get(&file.path)
             .is_some_and(|folder| folder.open);
         if is_open {
+            // Read again when opened, or searched: it may change meanwhile.
+            for (path, folder) in &mut self.folders {
+                if path.starts_with(&file.path) {
+                    folder.forget();
+                }
+            }
             if let Some(folder) = self.folders.get_mut(&file.path) {
                 folder.open = false;
             }
@@ -225,10 +243,21 @@ impl FileTree {
         } else {
             if let Some(folder) = self.folders.get_mut(&file.path) {
                 folder.open = true;
+                // As it is now on disk.
+                folder.forget();
             }
             let children = self.visible_under(&file);
             self.items.splice(index + 1..index + 1, children);
         }
+    }
+
+    /// Read every folder from disk again (folders opened as they were),
+    /// to show files added, removed or renamed since.
+    pub fn refresh(&mut self) {
+        for folder in self.folders.values_mut() {
+            folder.forget();
+        }
+        self.rebuild();
     }
 
     /// Close every folder inside `root`, leaving it open.
@@ -592,6 +621,30 @@ mod tests {
         assert!(
             tree.items.is_empty(),
             "a section without a match is left out"
+        );
+        let _ = fs::remove_dir_all(base);
+    }
+
+    /// Files added or removed on disk show once the tree is refreshed, or
+    /// once their folder is opened again.
+    #[test]
+    fn changes_on_disk_show_on_refresh_or_reopening() {
+        let (base, drums, _) = folders("refresh");
+        let mut tree = FileTree::new();
+        tree.set_roots(vec![drums.clone()], &[]);
+        fs::write(drums.join("snare.wav"), b"").unwrap();
+        fs::remove_file(drums.join("kick.wav")).unwrap();
+        assert_eq!(rows(&tree), ["drums", "  kick.wav", "  loops"], "cached");
+        tree.refresh();
+        assert_eq!(rows(&tree), ["drums", "  loops", "  snare.wav"]);
+
+        tree.toggle_folder(1); // loops
+        fs::write(drums.join("loops/fill.wav"), b"").unwrap();
+        tree.toggle_folder(1);
+        tree.toggle_folder(1);
+        assert_eq!(
+            rows(&tree)[1..4],
+            ["  loops", "    break.wav", "    fill.wav"]
         );
         let _ = fs::remove_dir_all(base);
     }

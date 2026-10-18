@@ -39,6 +39,9 @@ pub struct FileBrowser {
     /// Its sections closed.
     labels_collapsed: Vec<PathBuf>,
     config: Config,
+    /// The app's window had the focus last frame: getting it back, files
+    /// may have changed meanwhile.
+    window_focused: bool,
 }
 
 impl FileBrowser {
@@ -54,9 +57,33 @@ impl FileBrowser {
             labelled,
             labels_collapsed: Vec::new(),
             config,
+            window_focused: true,
         };
         browser.refresh_labels();
         browser
+    }
+
+    /// Read the folders from disk again when the app's window gets the
+    /// focus back (files are often added from elsewhere meanwhile), or on
+    /// F5 while the browser has the keyboard.
+    fn refresh_when_due(&mut self, ui: &Ui, focused: bool) {
+        let window_focused = ui.input(|i| i.focused);
+        let regained = window_focused && !self.window_focused;
+        self.window_focused = window_focused;
+        let asked = focused
+            && !ui.ctx().egui_wants_keyboard_input()
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F5));
+        if regained || asked {
+            self.refresh();
+        }
+    }
+
+    /// Read both tabs' folders from disk again; labelled files gone are
+    /// left out.
+    fn refresh(&mut self) {
+        self.items.refresh();
+        self.refresh_labels();
+        self.labelled.refresh();
     }
 
     /// Show the labels as configured, in both tabs.
@@ -90,6 +117,7 @@ impl FileBrowser {
         focused: bool,
     ) {
         let moves = take_moves(commands, focused);
+        self.refresh_when_due(ui, focused);
         ui.spacing_mut().scroll.bar_width = 5.0;
         let area = ui.available_rect_before_wrap();
         self.folder_drop(ui, area);
@@ -118,6 +146,7 @@ impl FileBrowser {
         focused: bool,
     ) {
         let moves = take_moves(commands, focused);
+        self.refresh_when_due(ui, focused);
         ui.spacing_mut().scroll.bar_width = 5.0;
         let actions = list_ui(&mut self.labelled, ui, state, focused, &moves);
         for action in actions {
@@ -199,6 +228,7 @@ impl FileBrowser {
             FolderAction::CollapseAll(dir) => self.items.collapse_all(&dir),
             FolderAction::SearchIn(dir) => self.items.set_scope(Some(dir)),
             FolderAction::SearchEverywhere => self.items.set_scope(None),
+            FolderAction::Refresh => self.refresh(),
             FolderAction::Add(dir) => self.add_folder(dir),
             FolderAction::SetLabel(path, label) => {
                 self.config.edit_labels(|labels| labels.set(path, label));
