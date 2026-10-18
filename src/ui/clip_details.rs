@@ -11,7 +11,7 @@ use tonique_engine::{
 
 use crate::{
     core::{
-        clip::AudioClip,
+        clip::{AudioClip, MIN_LENGTH},
         grid::GridService,
         state::{ClipParam, ProjectState},
         track::TrackRow,
@@ -53,8 +53,6 @@ const HANDLE_REACH: f32 = 4.;
 /// The flags marking the clip's start and end in the ruler: their width
 /// (pointing inside the clip) and height.
 const FLAG_SIZE: egui::Vec2 = egui::vec2(8., 10.);
-/// Shortest a clip, or a loop, can be, in beats.
-const MIN_LENGTH: f64 = 1. / 16.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Hash)]
 enum TrimEdge {

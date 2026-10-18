@@ -8,6 +8,8 @@ use tonique_engine::{
 /// Most pieces [`AudioClip::segments`] cuts a clip into: a tiny loop over
 /// a long clip would make too many to draw.
 const MAX_SEGMENTS: usize = 4096;
+/// Shortest a clip, or a loop, can be, in beats.
+pub const MIN_LENGTH: f64 = 1. / 16.;
 
 /// A clip representing an audio file placed on a track: from `offset` in
 /// the file (its start marker), for `length` beats; with a loop, once
@@ -117,16 +119,16 @@ impl AudioClip {
     }
 
     /// Move the clip's start to `beats`, keeping its end and its sound in
-    /// place: what's left of the start goes; extending it reveals what
-    /// played before, no earlier than the first beat, nor (without a loop)
-    /// the start of the file. A loop goes on repeating backwards. Does
-    /// nothing when the file's length is unknown.
+    /// place: what's left of the start goes, keeping [`MIN_LENGTH`];
+    /// extending it reveals what played before, no earlier than the first
+    /// beat, nor (without a loop) the start of the file. A loop goes on
+    /// repeating backwards. Does nothing when the file's length is unknown.
     pub fn trim_start_at(&mut self, beats: BeatPos, bpm: f32) {
         if self.source_seconds() <= 0. {
             return;
         }
         let end = self.end(bpm);
-        let mut beats = beats.clamp(BeatPos::ZERO, end);
+        let mut beats = beats.min(end - MIN_LENGTH).max(BeatPos::ZERO);
         let looping_back = self.active_loop().filter(|l| self.offset >= l.start_s);
         if beats < self.position && looping_back.is_none() {
             // Not before the file's start.
@@ -144,14 +146,16 @@ impl AudioClip {
         self.length = end - beats;
     }
 
-    /// Move the clip's end to `beats`, keeping its start: no further than
-    /// the file's end, unless it loops. Does nothing when the file's length
-    /// is unknown.
+    /// Move the clip's end to `beats`, keeping its start and
+    /// [`MIN_LENGTH`]: no further than the file's end, unless it loops.
+    /// Does nothing when the file's length is unknown.
     pub fn trim_end_at(&mut self, beats: BeatPos, bpm: f32) {
         if self.source_seconds() <= 0. {
             return;
         }
-        self.length = (beats - self.position).clamp(0., self.max_length(bpm));
+        self.length = (beats - self.position)
+            .max(MIN_LENGTH)
+            .min(self.max_length(bpm));
     }
 
     /// Keep only the part of the clip inside `start..end` (in beats). Never
@@ -163,9 +167,15 @@ impl AudioClip {
     }
 
     /// Start (or stop) looping `looped`. Turning a loop off cuts the clip
-    /// at the file's end.
+    /// at the file's end, its start moving back if that leaves less than
+    /// [`MIN_LENGTH`] to play.
     pub fn set_loop(&mut self, looped: Option<ClipLoop>, bpm: f32) {
         self.looped = looped;
+        if self.active_loop().is_none() {
+            let source = self.source_seconds() as f64;
+            let min = to_seconds(MIN_LENGTH, bpm).min(source);
+            self.offset = self.offset.min(source - min).max(0.);
+        }
         self.length = self.length.min(self.max_length(bpm));
     }
 
@@ -329,6 +339,30 @@ mod tests {
         let mut c = looped();
         c.set_loop(None, BPM);
         assert_eq!(c.length, 6., "1 s in, 3 s of file left");
+    }
+
+    #[test]
+    fn turning_a_loop_off_at_the_files_end_leaves_a_clip() {
+        let mut c = looped();
+        c.looped = Some(ClipLoop {
+            start_s: 2.,
+            end_s: 4.,
+        });
+        c.slip_to(4., BPM);
+        c.set_loop(None, BPM);
+        assert!(close(c.length, MIN_LENGTH), "{}", c.length);
+        assert!(close(c.offset, 4. - to_seconds(MIN_LENGTH, BPM)));
+    }
+
+    #[test]
+    fn trims_keep_the_shortest_clip() {
+        let mut c = clip();
+        c.trim_end_at(BeatPos(0.), BPM);
+        assert_eq!(c.length, MIN_LENGTH, "the end past the start");
+        let mut c = clip();
+        c.trim_start_at(BeatPos(100.), BPM);
+        assert_eq!(c.end(BPM), BeatPos(14.), "the end stays");
+        assert!(close(c.length, MIN_LENGTH), "the start past the end");
     }
 
     #[test]
