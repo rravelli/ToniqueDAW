@@ -18,8 +18,9 @@ pub const EXTENSION: &str = "tonique";
 /// Format version written; files from newer versions are refused.
 /// 2 added groups; 3 the echo, spectrum and utility effects, settings
 /// (filter `mode`, echo `time`) among effect parameters, and effect names;
-/// 4 the time signature.
-pub const VERSION: u32 = 4;
+/// 4 the time signature; 5 clip gain, pan, loops and bar 1, clips saved by
+/// offset and length rather than by trims.
+pub const VERSION: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
@@ -119,9 +120,56 @@ pub struct ClipFile {
     pub path: PathBuf,
     /// Start in the arrangement, in beats.
     pub position: f64,
-    /// Part of the file played, as ratios of its length.
-    pub trim_start: f32,
-    pub trim_end: f32,
+    /// Where in the file playback starts, in seconds.
+    #[serde(default)]
+    pub offset: f64,
+    /// In beats. Older projects have the part of the file played instead,
+    /// in `trim_start` and `trim_end`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+    /// The part of the file that loops, in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub looped: Option<LoopFile>,
+    /// Format 4 and before: the part of the file played, as ratios of its
+    /// length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trim_start: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trim_end: Option<f32>,
+    /// Linear; older projects have none (1).
+    #[serde(default = "unity", skip_serializing_if = "is_unity")]
+    pub gain: f32,
+    /// Balance, -1 (left only) to 1 (right only); older projects have none
+    /// (centred).
+    #[serde(default, skip_serializing_if = "is_centred")]
+    pub pan: f32,
+    /// Where bar 1 of the clip's own grid is in the file, in seconds; the
+    /// file's start (0) when absent.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub origin: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LoopFile {
+    /// In the file, in seconds.
+    pub start: f64,
+    pub end: f64,
+}
+
+fn unity() -> f32 {
+    1.
+}
+
+fn is_unity(gain: &f32) -> bool {
+    *gain == 1.
+}
+
+fn is_centred(pan: &f32) -> bool {
+    *pan == 0.
+}
+
+fn is_zero(seconds: &f64) -> bool {
+    *seconds == 0.
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -280,8 +328,17 @@ mod tests {
                 clips: vec![ClipFile {
                     path: "kick.wav".into(),
                     position: 2.,
-                    trim_start: 0.1,
-                    trim_end: 0.9,
+                    offset: 0.1,
+                    length: Some(4.),
+                    looped: Some(LoopFile {
+                        start: 0.5,
+                        end: 1.,
+                    }),
+                    trim_start: None,
+                    trim_end: None,
+                    gain: 0.5,
+                    pan: -0.25,
+                    origin: 0.75,
                 }],
             }],
         };

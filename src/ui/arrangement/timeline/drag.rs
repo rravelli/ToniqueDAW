@@ -171,9 +171,19 @@ impl Timeline {
                 );
             }
 
+            // Tracks a drop will add past the last one, with the colours
+            // they'll get: the clips going there are shown on them.
+            let added = clip_drag
+                .clips
+                .iter()
+                .map(|d| (mouse_track_index + d.track_index_delta).max(0) as usize + 1)
+                .max()
+                .unwrap_or(0)
+                .saturating_sub(state.track_count());
+            let new_colors = self.new_track_lanes(ui, state, layout, viewport, added);
             let mut track_indexes = Vec::new();
             for dragged in clip_drag.clips.iter_mut() {
-                if let Some(duration) = dragged.clip.duration() {
+                {
                     // Calculate track index
                     let track_index =
                         (mouse_track_index + dragged.track_index_delta).max(0) as usize;
@@ -182,7 +192,7 @@ impl Timeline {
                     // Calculate y pos
                     let y = layout.track_top(track_index);
                     // Calculate width
-                    let width = state.grid.duration_to_width(duration, state.bpm());
+                    let width = state.grid.beats_to_width(dragged.clip.length);
                     // Calculate x pos
                     let new_position = state
                         .grid
@@ -191,12 +201,15 @@ impl Timeline {
                     dragged.clip.position = new_position;
                     let x = state.grid.beats_to_x(new_position, viewport);
 
-                    let mut show_waveform = true;
-                    let mut color = ui.app_theme().text_muted;
+                    let mut collapsed = false;
+                    let mut color = track_index
+                        .checked_sub(state.track_count())
+                        .and_then(|new| new_colors.get(new).copied())
+                        .unwrap_or(ui.app_theme().text_muted);
                     let mut height = DEFAULT_TRACK_HEIGHT;
                     let mut silenced = false;
                     if let Some(t) = state.track_from_index(track_index) {
-                        show_waveform = !t.collapsed;
+                        collapsed = t.collapsed;
                         silenced = t.is_silenced();
                         color = t.color;
                         height = t.height;
@@ -210,10 +223,11 @@ impl Timeline {
                         viewport,
                         color,
                         selected: true,
-                        show_waveform,
+                        zone: None,
+                        collapsed,
                         silenced,
                     }
-                    .ui(ui, state);
+                    .preview(ui, state);
                 }
             }
 

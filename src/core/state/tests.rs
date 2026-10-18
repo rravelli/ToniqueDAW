@@ -4,12 +4,12 @@ use crate::{
     core::{
         clip::AudioClip,
         effect::{EffectKind, Setting},
-        state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+        state::{ClipParam, MASTER_TRACK_ID, PlaybackState, ProjectState},
     },
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tonique_engine::{
-    edit::{ClipId, PluginKind, TrackId},
+    edit::{ClipId, ClipLoop, PluginKind, TrackId},
     engine::{Engine, EngineConfig},
     nodes::FilterMode,
     sample::SampleBuffer,
@@ -23,26 +23,14 @@ fn setup_state() -> ProjectState {
 
 /// A decoded (silent) file of `seconds`. At 120 bpm that's `2 * seconds` beats.
 fn audio(seconds: f32) -> AudioInfo {
-    AudioInfo {
-        name: "test.wav".into(),
-        duration: Some(Duration::from_secs_f32(seconds)),
-        data: Arc::new(AudioData::from_samples(SampleBuffer::new(
-            vec![vec![0.; 480], vec![0.; 480]],
-            48000.,
-        ))),
-        sample_rate: 48000,
-        channels: 2,
-        bit_depth: None,
-        num_samples: None,
-        path: PathBuf::from(format!("test-{seconds}.wav")),
-    }
+    AudioInfo::silent(seconds)
 }
 
 fn add_clip(state: &mut ProjectState, track: TrackId, position: f64, seconds: f32) -> ClipId {
     let id = state.new_clip_id();
     state.add_clips(
         &track,
-        vec![AudioClip::new(id, audio(seconds), BeatPos(position))],
+        vec![AudioClip::new(id, audio(seconds), BeatPos(position), 120.)],
     );
     id
 }
@@ -138,7 +126,10 @@ fn move_resize_cut_and_duplicate_undo() {
     assert!(spans(&state, a).is_empty());
     assert_eq!(spans(&state, b), [(8., 12.)]);
 
-    state.commit_resize_clip(&clip, 0.25, 1., BeatPos(9.)); // drop the first beat
+    // Drop the first beat.
+    let mut resized = state.find_clip(clip).unwrap().1;
+    resized.trim_start_at(BeatPos(9.), state.bpm());
+    state.commit_resize_clip(resized);
     assert_eq!(spans(&state, b), [(9., 12.)]);
 
     state.cut_clip_at(&b, BeatPos(10.));
@@ -191,6 +182,13 @@ fn mixer_changes_undo() {
     assert_eq!(state.tracks().next().unwrap().volume, 0.5);
     state.undo();
     assert_eq!(state.tracks().next().unwrap().volume, 1.0);
+
+    state.set_pan(a, 0.8); // live drag
+    assert_eq!(state.tracks().next().unwrap().pan, 0.8);
+    state.commit_pan(a, 0.0, -0.5);
+    assert_eq!(state.tracks().next().unwrap().pan, -0.5);
+    state.undo();
+    assert_eq!(state.tracks().next().unwrap().pan, 0.0);
 
     state.set_mute(b, true);
     assert!(state.tracks().nth(1).unwrap().muted);
@@ -440,7 +438,7 @@ fn clips_play_through_the_engine_once_loaded() {
     )));
     info.sample_rate = 44100;
     let id = state.new_clip_id();
-    state.add_clips(&track, vec![AudioClip::new(id, info, BeatPos(0.))]);
+    state.add_clips(&track, vec![AudioClip::new(id, info, BeatPos(0.), 120.)]);
     state.play();
 
     // The file is converted on a background thread; the clip is silent until then.
@@ -796,6 +794,17 @@ fn splitting_at_a_zone_keeps_the_ids_inside_for_a_drop() {
 }
 
 #[test]
+fn deleting_clicked_clips_removes_them_whole() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let a = add_clip(&mut state, track, 0., 2.); // beats 0..4
+    add_clip(&mut state, track, 6., 1.); // beats 6..8
+    state.select_clips(vec![a]);
+    state.delete_selected_clips();
+    assert_eq!(spans(&state, track), vec![(6., 8.)]);
+}
+
+#[test]
 fn nudging_moves_the_selection_as_a_block() {
     let mut state = setup_state();
     let track = state.add_track();
@@ -820,7 +829,10 @@ fn clips_never_start_before_the_first_beat() {
     let mut state = setup_state();
     let track = state.add_track();
     let id = state.new_clip_id();
-    state.add_clips(&track, vec![AudioClip::new(id, audio(1.), BeatPos(-3.))]);
+    state.add_clips(
+        &track,
+        vec![AudioClip::new(id, audio(1.), BeatPos(-3.), 120.)],
+    );
     assert_eq!(spans(&state, track), vec![(0., 2.)]);
 
     state.move_clip(&id, &track, BeatPos(-1.), &[]);
@@ -830,7 +842,7 @@ fn clips_never_start_before_the_first_beat() {
 #[test]
 fn trimming_the_start_stops_at_the_first_beat() {
     let bpm = 120.;
-    let mut clip = AudioClip::new(ClipId(1), audio(2.), BeatPos(1.)); // beats 1..5
+    let mut clip = AudioClip::new(ClipId(1), audio(2.), BeatPos(1.), 120.); // beats 1..5
     clip.trim_start_at(BeatPos(2.), bpm); // hide the first 1 beat of the file: 2..5
     clip.position -= 1.5; // moved near the start: 0.5..3.5, file starts at -0.5
 
@@ -848,14 +860,167 @@ fn trimming_a_clip_of_unknown_length_does_nothing() {
     let bpm = 120.;
     let mut info = audio(2.);
     info.duration = None;
-    let mut clip = AudioClip::new(ClipId(1), info, BeatPos(1.));
+    let mut clip = AudioClip::new(ClipId(1), info, BeatPos(1.), 120.);
     clip.trim_start_at(BeatPos(2.), bpm);
     clip.trim_end_at(BeatPos(1.5), bpm);
     clip.crop(BeatPos(0.), BeatPos(3.), bpm);
-    assert_eq!(
-        (clip.position, clip.trim_start, clip.trim_end),
-        (BeatPos(1.), 0., 1.)
+    assert_eq!((clip.position, clip.offset), (BeatPos(1.), 0.));
+    assert_eq!(clip.length, 0., "no length to trim");
+}
+
+#[test]
+fn clip_gain_and_pan_are_live_one_undo_step_and_survive_edits() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let clip = add_clip(&mut state, track, 0., 2.); // beats 0..4
+    let gain = |state: &ProjectState, id| state.find_clip(id).unwrap().1.gain;
+    assert_eq!(gain(&state, clip), 1.);
+
+    // Set live while dragged, then recorded from where it started.
+    state.set_clip_param(clip, ClipParam::Gain, 0.5);
+    assert_eq!(gain(&state, clip), 0.5, "heard at once");
+    state.set_clip_param(clip, ClipParam::Gain, 0.25);
+    state.commit_clip_param(clip, ClipParam::Gain, 1., 0.25);
+    assert_eq!(gain(&state, clip), 0.25);
+
+    // Splitting keeps it on both parts.
+    state.cut_clip_at(&track, BeatPos(2.));
+    let gains: Vec<_> = state
+        .tracks()
+        .next()
+        .unwrap()
+        .clips
+        .iter()
+        .map(|c| c.gain)
+        .collect();
+    assert_eq!(gains, [0.25, 0.25]);
+
+    state.undo();
+    state.undo();
+    assert_eq!(gain(&state, clip), 1., "one step");
+
+    // Pan likewise.
+    let pan = |state: &ProjectState| state.find_clip(clip).unwrap().1.pan;
+    state.set_clip_param(clip, ClipParam::Pan, -0.5);
+    assert_eq!(pan(&state), -0.5, "heard at once");
+    state.commit_clip_param(clip, ClipParam::Pan, 0., -0.5);
+    state.undo();
+    assert_eq!(pan(&state), 0.);
+    state.redo();
+    assert_eq!(pan(&state), -0.5);
+}
+
+#[test]
+fn looped_clips_split_and_undo_as_one() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let id = state.new_clip_id();
+    // A 2 s (4-beat) file looping 0.5 s to 1 s, over 12 beats.
+    let mut clip = AudioClip::new(id, audio(2.), BeatPos(0.), 120.);
+    clip.set_loop(
+        Some(ClipLoop {
+            start_s: 0.5,
+            end_s: 1.,
+        }),
+        120.,
     );
+    clip.trim_end_at(BeatPos(12.), 120.);
+    state.add_clips(&track, vec![clip]);
+    assert_eq!(spans(&state, track), [(0., 12.)], "past the file's end");
+
+    state.cut_clip_at(&track, BeatPos(5.5));
+    assert_eq!(spans(&state, track), [(0., 5.5), (5.5, 12.)]);
+    let clips = state.tracks().next().unwrap().clips;
+    let right = clips.iter().find(|c| c.position == BeatPos(5.5)).unwrap();
+    // 2.75 s in: through the file up to the loop's end at 1 s, then
+    // round the loop, half a second each time: 0.75 s.
+    assert!((right.offset - 0.75).abs() < 1e-9, "{}", right.offset);
+    assert_eq!(right.looped, clips[0].looped, "both loop");
+
+    state.undo();
+    assert_eq!(spans(&state, track), [(0., 12.)]);
+}
+
+#[test]
+fn only_the_clip_being_trimmed_is_resizing() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let a = add_clip(&mut state, track, 0., 1.);
+    let b = add_clip(&mut state, track, 4., 1.);
+    assert!(!state.is_resizing(a));
+    let mut trimmed = state.find_clip(a).unwrap().1;
+    trimmed.trim_end_at(BeatPos(1.), state.bpm());
+    state.resize_clip(trimmed.clone());
+    assert!(state.is_resizing(a) && !state.is_resizing(b));
+    state.commit_resize_clip(trimmed);
+    assert!(!state.is_resizing(a), "done once applied");
+}
+
+#[test]
+fn undo_brings_the_selection_back_and_redo_its_successor() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let track = state.add_track();
+    let clip = add_clip(&mut state, track, 0., 2.); // beats 0..4
+    let zone = SelectionBounds::between((0, BeatPos(1.)), (0, BeatPos(3.)));
+    state.select_in_bounds(zone);
+    let range = |s: &ProjectState| s.selection_bounds().map(|b| (b.start_pos.0, b.end_pos.0));
+
+    // Duplicating moves the zone onto the copies...
+    state.duplicate_selected_clips();
+    assert_eq!(range(&state), Some((3., 5.)));
+    let copies = state.selected_clips().to_vec();
+    // ...and undoing brings it back where it was, on the original.
+    state.undo();
+    assert_eq!(range(&state), Some((1., 3.)));
+    assert_eq!(state.selected_clips(), &[clip]);
+    // Redoing moves it onto the copies again.
+    state.redo();
+    assert_eq!(range(&state), Some((3., 5.)));
+    assert_eq!(state.selected_clips(), &copies[..]);
+
+    // Nudging, then deleting: each undo brings its own selection back.
+    state.nudge_selection(1.);
+    assert_eq!(range(&state), Some((4., 6.)));
+    state.delete_selected_clips();
+    assert_eq!(range(&state), None);
+    state.undo();
+    assert_eq!(range(&state), Some((4., 6.)), "before the delete");
+    state.undo();
+    assert_eq!(range(&state), Some((3., 5.)), "before the nudge");
+}
+
+#[test]
+fn a_new_edit_forgets_the_selections_to_redo() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let a = add_clip(&mut state, track, 0., 1.);
+    state.select_clips(vec![a]);
+    state.duplicate_selected_clips();
+    state.undo();
+    // Another edit: nothing to redo, so the duplicate's selection is gone.
+    state.add_track();
+    state.redo();
+    assert_eq!(state.selected_clips(), &[a]);
+}
+
+#[test]
+fn new_track_colors_are_foretold() {
+    use egui::Color32;
+    let mut state = setup_state();
+    let palette = [Color32::RED, Color32::GREEN, Color32::BLUE];
+    state.set_track_palette(&palette);
+    state.add_track(); // red
+    let foretold = state.new_track_colors(3);
+    assert_eq!(foretold, [Color32::GREEN, Color32::BLUE, Color32::RED]);
+    let added: Vec<_> = (0..3)
+        .map(|_| {
+            let id = state.add_track();
+            state.tracks().find(|t| t.id == id).unwrap().color
+        })
+        .collect();
+    assert_eq!(added, foretold, "as they come");
 }
 
 #[test]
@@ -994,8 +1159,10 @@ mod projects {
             r(&mut track.height);
             for clip in &mut track.clips {
                 r64(&mut clip.position);
-                r(&mut clip.trim_start);
-                r(&mut clip.trim_end);
+                r64(&mut clip.offset);
+                if let Some(length) = &mut clip.length {
+                    r64(length);
+                }
             }
         }
         p
@@ -1015,9 +1182,19 @@ mod projects {
         let audio = AUDIO_ANALYSIS_CACHE
             .get_or_analyze(dir.join("loop.wav"))
             .unwrap();
-        let mut clip = AudioClip::new(state.new_clip_id(), audio, BeatPos(2.));
-        clip.trim_start = 0.25;
-        clip.trim_end = 0.75;
+        let mut clip = AudioClip::new(state.new_clip_id(), audio, BeatPos(2.), 120.);
+        // The file's middle half, looping its third quarter after the
+        // first.
+        let quarter = clip.source_seconds() as f64 / 4.;
+        clip.offset = quarter;
+        clip.length *= 0.5;
+        clip.looped = Some(ClipLoop {
+            start_s: 2. * quarter,
+            end_s: 3. * quarter,
+        });
+        clip.gain = 0.5;
+        clip.pan = 0.75;
+        clip.origin = quarter / 2.;
         state.add_clips(&track, vec![clip]);
         state.commit_volume(track, 1.0, 0.5);
         state.commit_volume(MASTER_TRACK_ID, 1.0, 0.8);
@@ -1090,8 +1267,14 @@ mod projects {
             clips: vec![ClipFile {
                 path: "gone.wav".into(),
                 position: 0.,
-                trim_start: 0.,
-                trim_end: 1.,
+                offset: 0.,
+                length: Some(4.),
+                looped: None,
+                trim_start: None,
+                trim_end: None,
+                gain: 1.,
+                pan: 0.,
+                origin: 0.,
             }],
         });
         let mut state = setup_state();
@@ -1101,6 +1284,43 @@ mod projects {
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0].name, "Gone");
         assert!(tracks[0].clips.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clip_gain_and_pan_out_of_range_in_a_file_are_clamped() {
+        let dir = temp_dir("clamped");
+        write_wav(&dir.join("loop.wav"));
+        let mut project = setup_state().project(Some(&dir));
+        project.tracks.push(crate::core::project::TrackFile {
+            name: "Loud".into(),
+            color: "#ffffff".into(),
+            height: 60.,
+            collapsed: false,
+            soloed: false,
+            group: None,
+            channel: project.master.clone(),
+            clips: vec![ClipFile {
+                path: "loop.wav".into(),
+                position: 0.,
+                offset: 0.,
+                length: Some(1.),
+                looped: None,
+                trim_start: None,
+                trim_end: None,
+                gain: 20.,
+                pan: 5.,
+                origin: 0.,
+            }],
+        });
+        let mut state = setup_state();
+        let problems = state.load_project(&project, &dir);
+        assert!(problems.is_empty(), "{problems:?}");
+        let clip = &state.tracks().next().unwrap().clips[0];
+        assert_eq!(
+            (clip.gain, clip.pan),
+            (tonique_engine::edit::CLIP_GAIN_MAX, 1.)
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

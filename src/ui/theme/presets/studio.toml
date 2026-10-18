@@ -1,5 +1,4 @@
-# Inspired by Logic Pro: neutral charcoal, a system-blue accent and a
-# yellow cycle region.
+# Neutral charcoal, a system-blue accent and a yellow cycle region.
 
 name = "Studio"
 
@@ -31,8 +30,8 @@ shadow = "#00000099"
 
 playhead = "#f2f2f7"
 edit_cursor = "#f2f2f7"
-selection_fill = "#f2f2f70d"
-selection_stroke = "#f2f2f766"
+selection_fill = "#f2f2f726"
+selection_stroke = "#f2f2f7b3"
 loop_region = "#ffd60a40"
 grid_bar = "#ffffff17"
 grid_beat = "#ffffff09"

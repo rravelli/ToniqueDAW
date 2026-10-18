@@ -15,6 +15,8 @@ pub trait PaintGrid {
     fn paint_grid(&self, painter: &Painter, viewport: Rect, theme: &Theme);
     /// Bar and beat numbers along the ruler's bottom, times along its top.
     fn paint_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme);
+    /// Bar and beat numbers only, over all of `rect`.
+    fn paint_bar_labels(&self, painter: &Painter, rect: Rect, theme: &Theme);
 }
 
 impl PaintGrid for GridService {
@@ -34,7 +36,7 @@ impl PaintGrid for GridService {
         let right = rect.right().min(viewport.right());
         while x < right {
             // Skip if out of bounds
-            if step_index < 0 {
+            if step_index < 0 && !self.allows_negative() {
                 step_index += 1;
                 x += step;
                 continue;
@@ -60,7 +62,7 @@ impl PaintGrid for GridService {
 
         while x < right {
             // Skip if out of bounds
-            if step_index < 0 {
+            if step_index < 0 && !self.allows_negative() {
                 step_index += 1;
                 x += step;
                 continue;
@@ -90,7 +92,11 @@ impl PaintGrid for GridService {
     fn paint_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
         // Bars on the upper half, time on the lower.
         let (bars, times) = rect.split_top_bottom_at_fraction(0.5);
-        let rect = bars;
+        self.paint_bar_labels(painter, bars, theme);
+        paint_time_labels(self, painter, times, bpm, theme);
+    }
+
+    fn paint_bar_labels(&self, painter: &Painter, rect: Rect, theme: &Theme) {
         // pixel spacing between grid lines
         let step = self.step_beats() as f32 * self.pixels_per_beat();
         // Beats are only numbered when zoomed in past them.
@@ -102,7 +108,7 @@ impl PaintGrid for GridService {
 
         while x < right {
             // Skip if out of bounds
-            if step_index < 0 {
+            if step_index < 0 && !self.allows_negative() {
                 step_index += 1;
                 x += step;
                 continue;
@@ -141,8 +147,6 @@ impl PaintGrid for GridService {
             step_index += 1;
             x += step;
         }
-
-        paint_time_labels(self, painter, times, bpm, theme);
     }
 }
 
@@ -154,15 +158,17 @@ fn paint_time_labels(grid: &GridService, painter: &Painter, rect: Rect, bpm: f32
 
     while x < rect.right() {
         // Skip if out of bounds
-        if step_index < 0 {
+        if step_index < 0 && !grid.allows_negative() {
             step_index += 1;
             x += step;
             continue;
         }
         let time = (step_index as f32 * seconds_step).floor() as i32;
+        let sign = if time < 0 { "-" } else { "" };
+        let time = time.abs();
         let seconds = time % 60;
         let minutes = (time / 60) % 60;
-        let text = format!("{}:{:0>2}", minutes, seconds);
+        let text = format!("{sign}{}:{:0>2}", minutes, seconds);
         painter.text(
             pos2(x + 3.0, rect.center().y),
             Align2::LEFT_CENTER,

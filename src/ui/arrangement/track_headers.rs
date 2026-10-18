@@ -1,24 +1,24 @@
-use egui::{FontId, Rangef, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Color32, FontId, Rangef, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use egui_phosphor::regular::PLUS;
 use tonique_engine::edit::TrackId;
 
 use crate::{
     config::keymap::Action,
     core::{
-        state::{ProjectState, RowTarget},
-        track::TrackKind,
+        state::{ProjectState, RowTarget, TRACK_NAME},
+        track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackRow, TrackSoloState},
     },
     ui::theme::{ThemeExt, font_size},
     ui::{
         arrangement::row_layout::{Row, RowLayout},
         arrangement::track_header::{
-            COLOR_BAR_WIDTH, HEADER_INSET, ROW_GAP, TrackHeader, color_bar_x,
+            COLOR_BAR_WIDTH, HEADER_INSET, ROW_GAP, TrackHeader, color_bar_x, ghost_header,
         },
         dnd::DragPayload,
         widget::{
             context_menu::ContextMenuButton, flat_button::FlatButton, scroll_bar::SCROLLBAR_WIDTH,
         },
-        workspace::Workspace,
+        workspace::{BottomView, Workspace},
     },
 };
 
@@ -54,6 +54,9 @@ impl TrackHeaders {
         self.rename = Some(track);
     }
 
+    /// `new_tracks`: the colours of the tracks a drop on the timeline would
+    /// add, shown as ghost headers below the last.
+    #[allow(clippy::too_many_arguments)]
     pub fn ui(
         &mut self,
         ui: &mut Ui,
@@ -62,6 +65,7 @@ impl TrackHeaders {
         layout: &RowLayout,
         viewport: Rect,
         footer: Rect,
+        new_tracks: &[Color32],
     ) {
         let left = viewport.max.x - self.width;
         let rename = self.rename.take();
@@ -96,6 +100,7 @@ impl TrackHeaders {
                 .id_salt("track-area"),
             |ui| {
                 self.track_panel(ui, state, workspace, layout, viewport, rename);
+                paint_new_track_headers(ui, state, layout, new_tracks);
             },
         );
         // The master, in the footer below the tracks, under the headers.
@@ -154,11 +159,13 @@ impl TrackHeaders {
                 }
                 // Open bottom panel
                 if response.double_clicked() {
-                    if track.selected {
+                    let showing_effects = workspace.bottom_view == BottomView::Effects;
+                    if track.selected && showing_effects {
                         workspace.bottom_panel_open = !workspace.bottom_panel_open;
                     } else {
                         workspace.bottom_panel_open = true;
                     }
+                    workspace.bottom_view = BottomView::Effects;
                 }
                 // Insert effects
                 if let Some(payload) = response.dnd_release_payload::<DragPayload>()
@@ -300,5 +307,44 @@ fn paint_group_scopes(ui: &Ui, rows: &[Row], x: Rangef) {
             group.color
         };
         ui.painter().rect_filled(bar, 0., color);
+    }
+}
+
+/// A ghost header for each track a drop would add below the last, as it
+/// will look once added. Opaque, over the "Add track" button.
+fn paint_new_track_headers(
+    ui: &mut Ui,
+    state: &ProjectState,
+    layout: &RowLayout,
+    colors: &[Color32],
+) {
+    let x = ui.max_rect().x_range();
+    for (i, color) in colors.iter().enumerate() {
+        let index = state.track_count() + i;
+        let top = layout.track_top(index);
+        let rect = Rect::from_x_y_ranges(x, top..=top + DEFAULT_TRACK_HEIGHT);
+        let track = TrackRow {
+            id: TrackId(u64::MAX),
+            clips: Vec::new(),
+            muted: false,
+            volume: 1.,
+            pan: 0.,
+            armed: false,
+            name: TRACK_NAME.into(),
+            height: DEFAULT_TRACK_HEIGHT,
+            collapsed: false,
+            color: *color,
+            selected: false,
+            solo: TrackSoloState::NotSoloing,
+            first_track_index: index,
+            kind: TrackKind::Audio,
+            depth: 0,
+        };
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .id_salt(("new-track", i)),
+            |ui| ghost_header(ui, &track),
+        );
     }
 }

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use tonique_engine::automation::{BeatPoint, CurveShape};
 use tonique_engine::edit::commands::*;
 use tonique_engine::edit::{
-    Bus, BusId, ChannelRef, Clip, ClipContent, Edit, EditError, EditSession, Note, Output, Plugin,
-    PluginKind, Send, Track, TrackId,
+    Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, ClipLoop, Edit, EditError, EditSession,
+    Note, Output, Plugin, PluginKind, Send, Track, TrackId,
 };
 use tonique_engine::engine::{AudioProcessor, Engine, EngineConfig, render_offline};
 use tonique_engine::nodes::{Envelope, FilterMode, UTILITY_SILENT_DB};
@@ -246,12 +246,13 @@ fn automation_curves_swap_without_rebuild() {
 fn identical_clips_are_deduplicated_and_latency_is_compensated() {
     let mut edit = Edit::new(120.0);
     let src = edit.add_source(impulse());
+    let mut clip = Clip::audio(&mut edit, BeatPos(0.0), 4.0, src);
+    clip.fade_in_s = 0.0;
+    clip.fade_out_s = 0.0;
     for latency in [0, 100] {
         let mut t = Track::new(&mut edit, "t");
-        let mut clip = Clip::audio(&mut edit, BeatPos(0.0), 4.0, src);
-        clip.fade_in_s = 0.0;
-        clip.fade_out_s = 0.0;
-        t.clips.push(clip);
+        // The same clip on both tracks, gain included: the same output.
+        t.clips.push(clip.clone());
         if latency > 0 {
             let lat = Plugin::new(&mut edit, PluginKind::Latency { samples: latency });
             t.channel.plugins.push(lat);
@@ -428,6 +429,225 @@ fn resize_and_move_clips_across_tracks_undo() {
         s.perform(ResizeClip::new(ta, cid, BeatPos(0.0), 0.0, 0.0))
             .is_err()
     );
+}
+
+#[test]
+fn clip_gain_is_heard_at_once_and_undone() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000 * 8));
+    let mut track = Track::new(&mut edit, "t");
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 8.0, src);
+    let gain = clip.gain().expect("an audio clip has a gain").clone();
+    track.clips.push(clip);
+    edit.tracks.push(track);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    let before = peak(&render_offline(&mut p, 4800, 2));
+
+    // Set live, as while dragging: heard without rebuilding the graph.
+    gain.set(0.5);
+    render_offline(&mut p, 4800, 2); // through the ramp
+    let half = peak(&render_offline(&mut p, 4800, 2));
+    assert!((half - before / 2.).abs() < 0.01, "{before} then {half}");
+    assert_eq!(s.engine().graphs_adopted(), 1, "no rebuild");
+
+    // Recorded as a parameter change, and undone.
+    gain.set(1.0);
+    s.perform(SetParam::new(gain.id, 0.5)).unwrap();
+    assert_eq!(gain.get(), 0.5);
+    s.undo().unwrap();
+    assert_eq!(gain.get(), 1.0);
+}
+
+/// A gain set while the clip is silent is its level from its first sample:
+/// nothing ramped in from the old one.
+#[test]
+fn clip_gain_set_before_it_plays_is_not_ramped_in() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000 * 8));
+    let mut track = Track::new(&mut edit, "t");
+    // From 0.5 s: 24000 samples in.
+    let clip = Clip::audio(&mut edit, BeatPos(1.0), 8.0, src);
+    let gain = clip.gain().expect("an audio clip has a gain").clone();
+    track.clips.push(clip);
+    edit.tracks.push(track);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    render_offline(&mut p, 4800, 2);
+    gain.set(0.0);
+    render_offline(&mut p, 4800 * 4, 2); // up to the clip
+    let start = peak(&render_offline(&mut p, 4800, 2));
+    assert!(start < 1e-6, "{start}");
+}
+
+#[test]
+fn clip_pan_balances_live_and_is_undone() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000 * 8)); // mono: the same on both sides
+    let mut track = Track::new(&mut edit, "t");
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 8.0, src);
+    let pan = clip.pan().expect("an audio clip has a pan").clone();
+    track.clips.push(clip);
+    edit.tracks.push(track);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    let mut sides = || {
+        render_offline(&mut p, 4800, 2); // through the ramp
+        let out = render_offline(&mut p, 4800, 2);
+        let side = |ch: usize| {
+            out.iter()
+                .skip(ch)
+                .step_by(2)
+                .fold(0f32, |m, x| m.max(x.abs()))
+        };
+        (side(0), side(1))
+    };
+    let (l, r) = sides();
+    assert!((l - r).abs() < 1e-3 && l > 0.4, "centred: ({l}, {r})");
+
+    // Halfway right: the left at half, the right as it was.
+    pan.set(0.5);
+    let (l2, r2) = sides();
+    assert!(
+        (l2 - l / 2.).abs() < 0.01 && (r2 - r).abs() < 0.01,
+        "({l2}, {r2})"
+    );
+    // All the way left: the right is silent.
+    pan.set(-1.0);
+    let (l3, r3) = sides();
+    assert!((l3 - l).abs() < 0.01 && r3 < 1e-3, "({l3}, {r3})");
+    assert_eq!(s.engine().graphs_adopted(), 1, "no rebuild");
+
+    pan.set(0.0);
+    s.perform(SetParam::new(pan.id, 0.5)).unwrap();
+    s.undo().unwrap();
+    assert_eq!(pan.get(), 0.0);
+}
+
+/// A session playing, from its start, one track with `clip` on a source of
+/// `samples`, and the clip's ID.
+fn playing_clip(
+    samples: Arc<SampleBuffer>,
+    looped: Option<ClipLoop>,
+    seconds: f64,
+) -> (EditSession, AudioProcessor, TrackId, ClipId) {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(samples);
+    let mut track = Track::new(&mut edit, "t");
+    // 120 bpm: two beats a second.
+    let mut clip = Clip::audio(&mut edit, BeatPos(0.0), seconds * 2., src);
+    clip.fade_in_s = 0.0;
+    clip.fade_out_s = 0.0;
+    if let ClipContent::Audio { looped: l, .. } = &mut clip.content {
+        *l = looped;
+    }
+    let (tid, cid) = (track.id, clip.id);
+    track.clips.push(clip);
+    edit.tracks.push(track);
+    let (e, p) = engine(0);
+    let mut s = EditSession::new(edit, e).expect("session");
+    s.play().expect("play");
+    (s, p, tid, cid)
+}
+
+#[test]
+fn looped_clips_go_on_from_the_loop_start() {
+    // Each sample its own value, to tell where reading is.
+    let len = 48000;
+    let ramp: Vec<f32> = (0..len).map(|i| i as f32 / len as f32).collect();
+    let source = Arc::new(SampleBuffer::new(vec![ramp.clone()], SR));
+    // Loop 0.25 s to 0.5 s of a 1 s file, over 1 s of clip.
+    let looped = ClipLoop {
+        start_s: 0.25,
+        end_s: 0.5,
+    };
+    let (_s, mut p, _, _) = playing_clip(source, Some(looped), 1.0);
+    let out = render_offline(&mut p, 48000, 2);
+    let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+    // The intro plays once, then the loop over and over.
+    for t in [100, 12_000, 23_000, 24_000 + 100, 30_000, 47_000] {
+        let expected = if t < 24_000 {
+            ramp[t]
+        } else {
+            ramp[12_000 + (t - 12_000) % 12_000]
+        };
+        assert!(
+            (left[t] - expected).abs() < 1e-5,
+            "at {t}: {} vs {expected}",
+            left[t]
+        );
+    }
+}
+
+#[test]
+fn loop_seams_are_crossfaded() {
+    // A sine whose loop doesn't hold a whole number of periods: cut
+    // straight, the seam would jump.
+    let source = sine(48000 * 2);
+    let looped = ClipLoop {
+        start_s: 0.5,
+        end_s: 0.5 + 0.1003,
+    };
+    let (_s, mut p, _, _) = playing_clip(source, Some(looped), 1.0);
+    let out = render_offline(&mut p, 48000, 2);
+    let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+    // A 0.5 sine moving 0.05 rad a sample changes by less than 0.025 per
+    // sample; a seam would jump much more.
+    let jump = left
+        .windows(2)
+        .skip(100)
+        .take(47_000)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0f32, f32::max);
+    assert!(jump < 0.03, "a sample jumps by {jump}");
+}
+
+#[test]
+fn clip_loops_are_set_and_undone() {
+    let (mut s, mut p, tid, cid) = playing_clip(sine(48000 * 2), None, 4.0);
+    let looped = ClipLoop {
+        start_s: 0.0,
+        end_s: 0.5,
+    };
+    s.perform(SetClipLoop::new(tid, cid, Some(looped))).unwrap();
+    let content = |s: &EditSession| match &s.edit().track(tid).unwrap().clip(cid).unwrap().content {
+        ClipContent::Audio { looped, .. } => *looped,
+        ClipContent::Midi { .. } => unreachable!(),
+    };
+    assert_eq!(content(&s), Some(looped));
+    // Past the 2 s file: still playing, looped.
+    render_offline(&mut p, 48000 * 3, 2);
+    assert!(peak(&render_offline(&mut p, 4800, 2)) > 0.4);
+    s.undo().unwrap();
+    assert_eq!(content(&s), None);
+
+    let backwards = ClipLoop {
+        start_s: 1.0,
+        end_s: 0.5,
+    };
+    assert!(
+        s.perform(SetClipLoop::new(tid, cid, Some(backwards)))
+            .is_err()
+    );
+}
+
+#[test]
+fn a_clips_bar_1_is_set_and_undone_without_a_rebuild() {
+    let (mut s, _p, tid, cid) = playing_clip(sine(48000 * 2), None, 4.0);
+    let origin = |s: &EditSession| match &s.edit().track(tid).unwrap().clip(cid).unwrap().content {
+        ClipContent::Audio { origin_s, .. } => *origin_s,
+        ClipContent::Midi { .. } => unreachable!(),
+    };
+    assert_eq!(origin(&s), 0.0, "the file's start");
+    let graphs = s.engine().graphs_adopted();
+    s.perform(SetClipOrigin::new(tid, cid, 0.25)).unwrap();
+    assert_eq!(origin(&s), 0.25);
+    assert_eq!(s.engine().graphs_adopted(), graphs, "not heard");
+    s.undo().unwrap();
+    assert_eq!(origin(&s), 0.0);
 }
 
 #[test]

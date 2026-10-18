@@ -51,6 +51,8 @@ pub struct UndoManager {
     redo_stack: Vec<Transaction>,
     open: Option<Transaction>,
     max_depth: usize,
+    /// Steps recorded so far, ever: tells callers when one was.
+    recorded: u64,
 }
 
 impl Default for UndoManager {
@@ -66,6 +68,7 @@ impl UndoManager {
             redo_stack: Vec::new(),
             open: None,
             max_depth,
+            recorded: 0,
         }
     }
 
@@ -87,6 +90,7 @@ impl UndoManager {
     }
 
     fn push(&mut self, t: Transaction) {
+        self.recorded += 1;
         self.undo_stack.push(t);
         if self.undo_stack.len() > self.max_depth {
             self.undo_stack.remove(0);
@@ -159,6 +163,17 @@ impl UndoManager {
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.open = None;
+    }
+
+    /// How many steps have been recorded (not undone or redone: new ones),
+    /// ever. It changes when an edit becomes a step of its own.
+    pub fn steps_recorded(&self) -> u64 {
+        self.recorded
+    }
+
+    /// Steps there are to undo.
+    pub fn undo_len(&self) -> usize {
+        self.undo_stack.len()
     }
 
     pub fn undo_label(&self) -> Option<&'static str> {

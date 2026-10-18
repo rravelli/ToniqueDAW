@@ -66,6 +66,9 @@ pub struct GridService {
     min_pixels_per_beat: f32,
     max_pixels_per_beat: f32,
     pub offset: Vec2,
+    /// Whether the view may scroll before beat 0, with grid lines and
+    /// labels there too (bars count down from -1).
+    negative_offset: bool,
 }
 
 impl GridService {
@@ -77,6 +80,7 @@ impl GridService {
             min_pixels_per_beat: 0.5,
             max_pixels_per_beat: 5000.,
             offset: Vec2::ZERO,
+            negative_offset: false,
         }
     }
     pub fn set_time_signature(&mut self, signature: TimeSignature) {
@@ -103,11 +107,16 @@ impl GridService {
         let beat = units(self.time_signature.beat_length()).max(1);
         let position = index * units(self.step_beats());
         let in_bar = position.rem_euclid(bar);
+        // From 1, and before beat 0 from -1 down: there's no bar 0.
+        let number = match position.div_euclid(bar) {
+            n if n >= 0 => n + 1,
+            n => n,
+        };
         if in_bar == 0 {
-            GridLine::Bar(position.div_euclid(bar) + 1)
+            GridLine::Bar(number)
         } else if in_bar % beat == 0 {
             GridLine::Beat {
-                bar: position.div_euclid(bar) + 1,
+                bar: number,
                 beat: (in_bar / beat) as u32 + 1,
             }
         } else {
@@ -165,7 +174,39 @@ impl GridService {
         let new_ppb = self.pixels_per_beat;
         let new_offset_x = beat_under_cursor * new_ppb - (cursor_x - viewport.left());
 
-        self.offset.x = new_offset_x.max(0.);
+        self.offset.x = self.bound_offset(new_offset_x);
+    }
+
+    /// Zoom and scroll so `start..end` (in beats) spans `width` points.
+    pub fn fit(&mut self, start: BeatPos, end: BeatPos, width: f32) {
+        if end > start && width > 0. {
+            self.pixels_per_beat = (width / (end - start) as f32)
+                .clamp(self.min_pixels_per_beat, self.max_pixels_per_beat);
+            self.update_resolution();
+        }
+        self.offset.x = self.bound_offset(self.beats_to_width(start.0));
+    }
+
+    /// Let the view scroll before beat 0, e.g. to show what's before a
+    /// clip in a grid counted from its start. The grid and its labels go
+    /// on there.
+    pub fn with_negative_offset(mut self) -> Self {
+        self.negative_offset = true;
+        self
+    }
+
+    /// Whether the view may show beats before 0 (see
+    /// [`Self::with_negative_offset`]).
+    pub fn allows_negative(&self) -> bool {
+        self.negative_offset
+    }
+
+    fn bound_offset(&self, offset: f32) -> f32 {
+        if self.negative_offset {
+            offset
+        } else {
+            offset.max(0.)
+        }
     }
 
     /// Snap `beats` to the nearest of `targets` within [`TARGET_REACH`]
@@ -224,6 +265,24 @@ impl GridService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fitting_shows_exactly_the_range() {
+        let mut grid = GridService::new();
+        let viewport = Rect::from_min_size(egui::pos2(100., 0.), egui::vec2(400., 50.));
+        grid.fit(BeatPos(8.), BeatPos(16.), 400.);
+        assert_eq!(grid.pixels_per_beat(), 50.);
+        assert_eq!(grid.beats_to_x(BeatPos(8.), viewport), 100.);
+        assert_eq!(grid.beats_to_x(BeatPos(16.), viewport), 500.);
+        assert_eq!(grid.step_beats(), 1.); // resolution follows the zoom
+
+        // Before beat 0 only when allowed.
+        grid.fit(BeatPos(-2.), BeatPos(6.), 400.);
+        assert_eq!(grid.offset.x, 0.);
+        let mut grid = GridService::new().with_negative_offset();
+        grid.fit(BeatPos(-2.), BeatPos(6.), 400.);
+        assert_eq!(grid.beats_to_x(BeatPos(-2.), viewport), 100.);
+    }
 
     fn grid(numerator: u32, denominator: u32, resolution: GridResolution) -> GridService {
         let mut grid = GridService::new();
@@ -290,5 +349,16 @@ mod tests {
         let grid = grid(7, 8, GridResolution::Bar);
         assert_eq!(grid.snap_to_step(BeatPos(4.0)), BeatPos(3.5));
         assert_eq!(grid.snap_to_step(BeatPos(5.5)), BeatPos(7.0));
+    }
+
+    /// Before beat 0 bars count down from -1: there's no bar 0.
+    #[test]
+    fn bars_before_the_start_count_down_from_minus_one() {
+        let grid = grid(4, 4, GridResolution::Bar);
+        assert_eq!(grid.line(0), GridLine::Bar(1));
+        assert_eq!(grid.line(-1), GridLine::Bar(-1));
+        assert_eq!(grid.line(-2), GridLine::Bar(-2));
+        let grid = self::grid(4, 4, GridResolution::Beat);
+        assert_eq!(grid.line(-1), GridLine::Beat { bar: -1, beat: 4 });
     }
 }

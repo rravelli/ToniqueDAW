@@ -58,6 +58,8 @@ pub struct ProjectManager {
     /// Set once the user agreed to close, to let the next close through.
     closing: bool,
     title: String,
+    /// Another project replaced the current one since last asked.
+    replaced: bool,
 }
 
 impl ProjectManager {
@@ -70,6 +72,7 @@ impl ProjectManager {
             recent: RecentProjects::load(),
             closing: false,
             title: String::new(),
+            replaced: false,
         }
     }
 
@@ -89,6 +92,12 @@ impl ProjectManager {
 
     pub fn name(&self) -> String {
         self.path.as_deref().map_or("Untitled".into(), project_name)
+    }
+
+    /// Whether another project replaced the current one since last asked:
+    /// what refers to its clips and tracks no longer does.
+    pub fn take_replaced(&mut self) -> bool {
+        std::mem::take(&mut self.replaced)
     }
 
     pub fn is_modified(&self, state: &ProjectState) -> bool {
@@ -127,6 +136,7 @@ impl ProjectManager {
         match pending {
             Pending::New => {
                 state.new_project();
+                self.replaced = true;
                 self.path = None;
                 self.saved = state.project(None);
             }
@@ -156,6 +166,7 @@ impl ProjectManager {
         };
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let problems = state.load_project(&project, &dir);
+        self.replaced = true;
         self.saved = state.project(Some(&dir));
         if !problems.is_empty() {
             self.notice = Some(Notice {

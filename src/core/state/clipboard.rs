@@ -56,6 +56,9 @@ impl ProjectState {
     /// Copy the selection, then remove it: the zone's part of the clips on
     /// its tracks, or else the selected clips.
     pub fn cut_selection(&mut self) {
+        self.selection_step(|s| s.cut_selection_edit());
+    }
+    fn cut_selection_edit(&mut self) {
         if !self.copy_selection() {
             return;
         }
@@ -84,6 +87,9 @@ impl ProjectState {
     /// pasted clips get selected and the edit cursor moves past them, so
     /// pasting again appends.
     pub fn paste(&mut self) {
+        self.selection_step(|s| s.paste_edit());
+    }
+    fn paste_edit(&mut self) {
         if !self.can_paste() {
             return;
         }
@@ -118,6 +124,9 @@ impl ProjectState {
     /// without going before the start of the arrangement. With a zone, only
     /// its part of the clips moves.
     pub fn nudge_selection(&mut self, delta: f64) {
+        self.selection_step(|s| s.nudge_selection_edit(delta));
+    }
+    fn nudge_selection_edit(&mut self, delta: f64) {
         let zone_start = self.selection_bounds().map(|b| b.start_pos);
         let Some(first) = self
             .selected_clips()

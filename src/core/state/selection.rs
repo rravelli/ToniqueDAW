@@ -36,7 +36,7 @@ impl SelectionBounds {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClipSelection {
     clips: Vec<ClipId>,
     bounds: Option<SelectionBounds>,
@@ -110,6 +110,9 @@ impl ProjectState {
     }
     /// Delete the selected clips; with a zone, only their part inside it.
     pub fn delete_selected_clips(&mut self) {
+        self.selection_step(|s| s.delete_selected_clips_edit());
+    }
+    fn delete_selected_clips_edit(&mut self) {
         if self.clip_selection.bounds.is_none() {
             let ids = std::mem::take(&mut self.clip_selection).clips;
             return self.delete_clips(&ids);
@@ -164,6 +167,9 @@ impl ProjectState {
     /// Copy the selected clips right after the selection, and select the
     /// copies (with the zone moved along).
     pub fn duplicate_selected_clips(&mut self) {
+        self.selection_step(|s| s.duplicate_selected_clips_edit());
+    }
+    fn duplicate_selected_clips_edit(&mut self) {
         let bounds = self.clip_selection.bounds;
         let copies = self.duplicate_clips(
             &self.clip_selection.clips.clone(),
@@ -191,6 +197,9 @@ impl ProjectState {
     /// Move the selected clips (and zone) `delta` tracks down (up when
     /// negative) as one block, staying within the existing tracks.
     pub fn move_selection_tracks(&mut self, delta: i32) {
+        self.selection_step(|s| s.move_selection_tracks_edit(delta));
+    }
+    fn move_selection_tracks_edit(&mut self, delta: i32) {
         let ids = self.selected_clips().to_vec();
         let moves: Vec<_> = ids
             .iter()

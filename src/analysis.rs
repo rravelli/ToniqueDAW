@@ -100,6 +100,25 @@ pub struct AudioInfo {
 }
 
 impl AudioInfo {
+    /// A decoded, silent file of `seconds`, for tests. At 120 bpm that's
+    /// `2 * seconds` beats.
+    #[cfg(test)]
+    pub fn silent(seconds: f32) -> Self {
+        Self {
+            name: "test.wav".into(),
+            duration: Some(Duration::from_secs_f32(seconds)),
+            data: Arc::new(AudioData::from_samples(SampleBuffer::new(
+                vec![vec![0.; 480], vec![0.; 480]],
+                48000.,
+            ))),
+            sample_rate: 48000,
+            channels: 2,
+            bit_depth: None,
+            num_samples: None,
+            path: std::path::PathBuf::from(format!("test-{seconds}.wav")),
+        }
+    }
+
     /// Length of the file in frames, at its own sample rate.
     pub fn total_frames(&self) -> Option<f64> {
         match (self.data.samples(), self.num_samples, self.duration) {

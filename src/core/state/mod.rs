@@ -40,12 +40,12 @@ pub use groups::RowTarget;
 pub use selection::SelectionBounds;
 use tonique_engine::{
     edit::{
-        BusId, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, EditSession, Output, Plugin,
-        PluginId, Track, TrackId,
+        BusId, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, EditSession, Output,
+        Parameter, Plugin, PluginId, Track, TrackId,
         commands::{
             AddClip, AddPlugin, AddTrack, EditCommand, MoveClip, RemoveClip, RemovePlugin,
-            RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetMute, SetParam,
-            SetSolo, SetTempoMap,
+            RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetClipLoop,
+            SetClipOrigin, SetMute, SetParam, SetSolo, SetTempoMap,
         },
     },
     engine::Engine,
@@ -60,7 +60,8 @@ pub const MASTER_TRACK_ID: TrackId = TrackId(0);
 const DEFAULT_BPM: f64 = 120.;
 /// Length of the loop region in a new project.
 const DEFAULT_LOOP_BARS: f64 = 4.;
-const TRACK_NAME: &str = "# Audio Track";
+/// A new track's name; `#` is its number.
+pub const TRACK_NAME: &str = "# Audio Track";
 /// How often to try opening an output again while there's none.
 const AUDIO_RETRY: Duration = Duration::from_secs(2);
 /// Smallest height of an expanded row (its controls must fit).
@@ -69,6 +70,15 @@ pub const MIN_EXPANDED_HEIGHT: f32 = TRACK_COLLAPSED_HEIGHT + 25.;
 #[derive(Clone, Debug)]
 enum ProjectStatePendingAction {
     DeleteTrack { id: TrackId },
+}
+
+/// An audio clip's parameter: heard as it's set, like a fader's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipParam {
+    /// Linear.
+    Gain,
+    /// Balance, -1 (left only) to 1 (right only).
+    Pan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -122,6 +132,14 @@ pub struct ProjectState {
 
     pending_actions: Vec<ProjectStatePendingAction>,
     batching: bool,
+    /// For each step of the edit's undo history, in step with it: the clip
+    /// selection before it, when the step moved the selection (a duplicate
+    /// selects the copies). Undoing it brings that selection back.
+    selection_undo: Vec<Option<ClipSelection>>,
+    /// The same for the undone steps: the selection they left, for redoing.
+    selection_redo: Vec<Option<ClipSelection>>,
+    /// The steps recorded when the open batch began.
+    batch_steps: Option<u64>,
 
     pub grid: GridService,
     metronome: bool,
@@ -131,8 +149,9 @@ pub struct ProjectState {
     /// Tempo the engine's loop (in samples) was computed with.
     loop_bpm: f32,
 
-    /// The clip being resized: its trim start and end, and its position.
-    pub resized_clip: Option<(ClipId, f32, f32, BeatPos)>,
+    /// A clip being trimmed, as it will be once committed: shown instead
+    /// of the edit's (see [`Self::shown_clip`]).
+    resized_clip: Option<AudioClip>,
     /// Colours given to new tracks: the UI sets its theme's palette (grey
     /// until then).
     track_palette: Vec<Color32>,
@@ -169,6 +188,9 @@ impl ProjectState {
             clipboard: Clipboard::default(),
             pending_actions: Vec::new(),
             batching: false,
+            selection_undo: Vec::new(),
+            selection_redo: Vec::new(),
+            batch_steps: None,
             resized_clip: None,
             grid: GridService::new(),
             loop_range: (
@@ -351,8 +373,10 @@ impl ProjectState {
     }
 
     fn perform(&mut self, cmd: impl EditCommand + 'static) {
+        let steps = self.steps_recorded();
         let result = self.session.perform(cmd);
         report(result);
+        self.track_steps(steps);
     }
 
     /// Run `f` as one undo step (or as part of the open batch).
@@ -360,9 +384,51 @@ impl ProjectState {
         if self.batching {
             return f(self);
         }
+        let steps = self.steps_recorded();
         self.session.begin_transaction(label);
         f(self);
         self.session.commit_transaction();
+        self.track_steps(steps);
+    }
+
+    fn steps_recorded(&self) -> u64 {
+        self.session.undo_manager().steps_recorded()
+    }
+
+    /// If a step was recorded since `steps` were, keep `selection_undo` in
+    /// step with it (see [`Self::selection_step`]).
+    fn track_steps(&mut self, steps: u64) {
+        if self.steps_recorded() == steps {
+            return;
+        }
+        self.selection_undo.push(None);
+        self.selection_redo.clear();
+        // The history forgets its oldest steps past its depth.
+        let excess = self
+            .selection_undo
+            .len()
+            .saturating_sub(self.session.undo_manager().undo_len());
+        self.selection_undo.drain(..excess);
+    }
+
+    /// Run `f`, an edit that moves the clip selection: undoing it brings the
+    /// selection from before it back (redoing, the one it left).
+    pub(super) fn selection_step(&mut self, f: impl FnOnce(&mut Self)) {
+        let (before, steps) = (self.clip_selection.clone(), self.steps_recorded());
+        f(self);
+        if self.steps_recorded() != steps
+            && self.clip_selection != before
+            && let Some(last) = self.selection_undo.last_mut()
+        {
+            *last = Some(before);
+        }
+    }
+
+    /// Forget the selections of the history, along with it.
+    fn clear_selection_history(&mut self) {
+        self.selection_undo.clear();
+        self.selection_redo.clear();
+        self.batch_steps = None;
     }
 
     /// The channel of a track, a group (addressed by its bus's ID) or the
@@ -586,17 +652,35 @@ impl ProjectState {
     /// The palette colour the fewest tracks use, the first one on ties, so
     /// new tracks go through the palette before repeating a colour.
     fn next_track_color(&self) -> Color32 {
-        let uses = |color: Color32| {
-            self.views
-                .iter()
-                .filter(|(id, view)| **id != MASTER_TRACK_ID && view.color == color)
-                .count()
-        };
-        self.track_palette
-            .iter()
+        self.new_track_colors(1)
+            .first()
             .copied()
-            .min_by_key(|color| uses(*color))
             .unwrap_or(Color32::GRAY)
+    }
+    /// The colours the next `count` new tracks will get, in order: each the
+    /// palette's least used one so far. Grey without a palette.
+    pub fn new_track_colors(&self, count: usize) -> Vec<Color32> {
+        let mut uses: Vec<usize> = self
+            .track_palette
+            .iter()
+            .map(|color| {
+                self.views
+                    .iter()
+                    .filter(|(id, view)| **id != MASTER_TRACK_ID && view.color == *color)
+                    .count()
+            })
+            .collect();
+        (0..count)
+            .map(|_| {
+                // The first of the least used, as `min_by_key` picks.
+                let Some((index, _)) = uses.iter().enumerate().min_by_key(|(_, uses)| **uses)
+                else {
+                    return Color32::GRAY;
+                };
+                uses[index] += 1;
+                self.track_palette[index]
+            })
+            .collect()
     }
 
     /// Colours for new tracks; the UI passes the installed theme's.
@@ -749,51 +833,113 @@ impl ProjectState {
         });
         copy_ids
     }
-    /// Resize clip without computing overlap checks.
-    /// Use `commit_resize_clip` to apply overlap checks and add to undo stack.
-    pub fn resize_clip(&mut self, id: &ClipId, start: f32, end: f32, pos: BeatPos) {
-        self.resized_clip = Some((*id, start, end, pos));
+    /// Show a clip trimmed (or moved) as `resized` while dragging, without
+    /// touching the edit. Use `commit_resize_clip` to apply it.
+    pub fn resize_clip(&mut self, resized: AudioClip) {
+        self.resized_clip = Some(resized);
     }
-    /// Resize clip and perform overlap checks
-    pub fn commit_resize_clip(&mut self, id: &ClipId, start: f32, end: f32, pos: BeatPos) {
+    /// Apply a trim as one undo step, trimming the clips it now overlaps.
+    /// Nothing changes (and no step is recorded) when it's as in the edit.
+    pub fn commit_resize_clip(&mut self, resized: AudioClip) {
         self.resized_clip = None;
-        let Some((track, clip)) = self.find_clip(*id) else {
+        let Some((track, clip)) = self.find_clip(resized.id) else {
             return;
         };
-        self.clip_ops("Resize clip", |s, ops| {
-            let mut resized = clip;
-            resized.trim_start = start;
-            resized.trim_end = end;
-            resized.position = pos;
-            let end = resized.end(s.bpm());
+        let region = |c: &AudioClip| (c.position, c.length, c.offset, c.looped);
+        if region(&clip) == region(&resized) {
+            return;
+        }
+        let label = if clip.looped != resized.looped {
+            "Clip loop"
+        } else {
+            "Resize clip"
+        };
+        self.clip_ops(label, |s, ops| {
+            let (start, end) = (resized.position, resized.end(s.bpm()));
             let mut clips_on_track = s.track_clips(track, ops);
-            clips_on_track.carve(pos, end, &[*id], &mut || s.new_clip_id());
+            clips_on_track.carve(start, end, &[resized.id], &mut || s.new_clip_id());
             ops.push(ClipOp::Resize(track, resized));
         });
     }
+    /// Move bar 1 of clip `id`'s own grid to `origin` seconds into its file,
+    /// as an undo step.
+    pub fn set_clip_origin(&mut self, id: ClipId, origin: f64) {
+        let Some((track, clip)) = self.find_clip(id) else {
+            return;
+        };
+        let origin = origin.clamp(0., clip.source_seconds() as f64);
+        if origin != clip.origin {
+            self.perform(SetClipOrigin::new(track, id, origin));
+        }
+    }
+    /// Set an audio clip's gain (linear) or pan, heard at once. Not an
+    /// undo step: see [`Self::commit_clip_param`].
+    pub fn set_clip_param(&mut self, id: ClipId, which: ClipParam, value: f32) {
+        if let Some(param) = self.clip_param(id, which) {
+            param.set(value);
+        }
+    }
+    /// Set an audio clip's gain or pan as an undo step from `old`, its value
+    /// before the user started changing it.
+    pub fn commit_clip_param(&mut self, id: ClipId, which: ClipParam, old: f32, new: f32) {
+        let Some(param) = self.clip_param(id, which) else {
+            return;
+        };
+        if old == new {
+            return param.set(new);
+        }
+        // `SetParam` records the current value for undo: restore it first.
+        param.set(old);
+        let id = param.id;
+        self.perform(SetParam::new(id, new));
+    }
+    fn clip_param(&self, id: ClipId, which: ClipParam) -> Option<Parameter> {
+        let clip = self.edit().tracks.iter().find_map(|t| t.clip(id))?;
+        match which {
+            ClipParam::Gain => clip.gain(),
+            ClipParam::Pan => clip.pan(),
+        }
+        .cloned()
+    }
+    /// Whether clip `id` is being trimmed (see [`Self::resize_clip`]).
+    pub fn is_resizing(&self, id: ClipId) -> bool {
+        self.resized_clip.as_ref().is_some_and(|r| r.id == id)
+    }
+    /// `clip` as shown: as being trimmed, if it is.
+    pub fn shown_clip(&self, clip: &AudioClip) -> AudioClip {
+        self.resized_clip
+            .as_ref()
+            .filter(|r| r.id == clip.id)
+            .unwrap_or(clip)
+            .clone()
+    }
 
     fn apply_clip_op(&mut self, op: ClipOp) {
-        let bpm = self.bpm();
         match op {
             ClipOp::Add(track, clip) => {
-                let clip = self.engine_clip(&clip, bpm);
+                let clip = self.engine_clip(&clip);
                 self.perform(AddClip::new(track, clip));
             }
             ClipOp::Remove(track, id) => self.perform(RemoveClip::new(track, id)),
             ClipOp::Resize(track, clip) => {
-                let c = self.engine_clip(&clip, bpm);
-                let ClipContent::Audio {
-                    source_offset_s, ..
-                } = c.content
-                else {
-                    return;
-                };
+                let looped = self
+                    .edit()
+                    .track(track)
+                    .ok()
+                    .and_then(|t| t.clip(clip.id))
+                    .and_then(|c| match &c.content {
+                        ClipContent::Audio { looped, .. } => Some(*looped),
+                        ClipContent::Midi { .. } => None,
+                    });
+                if looped.is_some_and(|l| l != clip.looped) {
+                    self.perform(SetClipLoop::new(track, clip.id, clip.looped));
+                }
                 self.perform(ResizeClip::new(
                     track,
-                    c.id,
-                    c.start,
-                    c.length,
-                    source_offset_s,
+                    clip.id,
+                    clip.position,
+                    clip.length,
+                    clip.offset,
                 ));
             }
             ClipOp::Move {
@@ -806,65 +952,81 @@ impl ProjectState {
     }
 
     /// The engine clip for a UI clip, registering its audio file if needed.
-    fn engine_clip(&mut self, clip: &AudioClip, bpm: f32) -> Clip {
+    fn engine_clip(&mut self, clip: &AudioClip) -> Clip {
         let session = &mut self.session;
         let source = self
             .sources
             .get_or_insert(&clip.audio, || session.create(|e| e.new_source()));
-        Clip {
-            id: clip.id,
-            start: clip.position,
-            length: clip.end(bpm) - clip.position,
-            fade_in_s: 0.005,
-            fade_out_s: 0.005,
-            content: ClipContent::Audio {
-                source,
-                source_offset_s: (clip.trim_start * clip.source_seconds()) as f64,
-                gain: 1.,
-            },
+        let mut engine_clip = self
+            .session
+            .create(|e| Clip::audio(e, clip.position, clip.length, source));
+        engine_clip.id = clip.id;
+        if let ClipContent::Audio {
+            source_offset_s,
+            gain,
+            pan,
+            looped,
+            origin_s,
+            ..
+        } = &mut engine_clip.content
+        {
+            *source_offset_s = clip.offset;
+            *origin_s = clip.origin;
+            // In range, whatever a project file says.
+            gain.value.set(clip.gain.clamp(gain.min, gain.max), 0.);
+            pan.value.set(clip.pan.clamp(pan.min, pan.max), 0.);
+            *looped = clip.looped;
         }
+        engine_clip
     }
 
     /// The UI view of an engine clip. `None` for MIDI clips, which the UI
     /// can't show yet.
-    fn clip_view(&self, clip: &Clip, bpm: f32) -> Option<AudioClip> {
+    fn clip_view(&self, clip: &Clip) -> Option<AudioClip> {
         let ClipContent::Audio {
             source,
             source_offset_s,
-            ..
+            ref gain,
+            ref pan,
+            looped,
+            origin_s,
         } = clip.content
         else {
             return None;
         };
         let audio = self.sources.info(source)?.clone();
-        let seconds = audio.duration?.as_secs_f64();
-        let trim_start = (source_offset_s / seconds) as f32;
-        let trim_end = trim_start + (clip.length * 60. / bpm as f64 / seconds) as f32;
+        // Clips of files of unknown length can't be edited.
+        audio.duration?;
         Some(AudioClip {
             id: clip.id,
             audio,
             position: clip.start,
-            trim_start,
-            trim_end,
+            length: clip.length,
+            offset: source_offset_s,
+            looped,
+            gain: gain.get(),
+            pan: pan.get(),
+            origin: origin_s,
         })
     }
 
     fn clip_views(&self, track: TrackId) -> Vec<AudioClip> {
-        let bpm = self.bpm();
         self.edit()
             .track(track)
-            .map(|t| {
-                t.clips
-                    .iter()
-                    .filter_map(|c| self.clip_view(c, bpm))
-                    .collect()
-            })
+            .map(|t| t.clips.iter().filter_map(|c| self.clip_view(c)).collect())
             .unwrap_or_default()
     }
 
-    fn find_clip(&self, id: ClipId) -> Option<(TrackId, AudioClip)> {
+    /// Clip `id` and the row of its track, if it exists.
+    pub fn clip_with_track(&self, id: ClipId) -> Option<(TrackRow, AudioClip)> {
+        let (track, clip) = self.find_clip(id)?;
+        let track = self.track_from_index(self.track_index(track)?)?;
+        Some((track, clip))
+    }
+
+    pub(crate) fn find_clip(&self, id: ClipId) -> Option<(TrackId, AudioClip)> {
         let track = self.edit().tracks.iter().find(|t| t.clip(id).is_some())?;
-        let clip = self.clip_view(track.clip(id)?, self.bpm())?;
+        let clip = self.clip_view(track.clip(id)?)?;
         Some((track.id, clip))
     }
 
@@ -1082,6 +1244,23 @@ impl ProjectState {
         let param = c.volume.id;
         self.perform(SetParam::new(param, new_volume));
     }
+    /// Set track pan (-1 left to 1 right). Changes are not saved in undo
+    /// stack.
+    pub fn set_pan(&mut self, id: TrackId, pan: f32) {
+        if let Ok(c) = self.edit().channel(self.channel_ref(id)) {
+            c.pan.set(pan);
+        }
+    }
+    /// Set track pan and save in undo stack given `old_pan`.
+    pub fn commit_pan(&mut self, id: TrackId, old_pan: f32, new_pan: f32) {
+        let Ok(c) = self.edit().channel(self.channel_ref(id)) else {
+            return;
+        };
+        // `SetParam` records the current value for undo: restore it first.
+        c.pan.set(old_pan);
+        let param = c.pan.id;
+        self.perform(SetParam::new(param, new_pan));
+    }
     /// Mute or unmute this track
     pub fn set_mute(&mut self, id: TrackId, mute: bool) {
         self.perform(SetMute::new(self.channel_ref(id), mute));
@@ -1180,6 +1359,7 @@ impl ProjectState {
             clips: Vec::new(),
             muted: master.muted,
             volume: master.volume.get(),
+            pan: master.pan.get(),
             armed: false,
             name: view.name.clone(),
             height: view.height,
@@ -1256,16 +1436,16 @@ impl ProjectState {
             .get(&track.id)
             .cloned()
             .unwrap_or_else(TrackView::new);
-        let bpm = self.bpm();
         Some(TrackRow {
             id: track.id,
             clips: track
                 .clips
                 .iter()
-                .filter_map(|c| self.clip_view(c, bpm))
+                .filter_map(|c| self.clip_view(c))
                 .collect(),
             muted: track.channel.muted,
             volume: track.channel.volume.get(),
+            pan: track.channel.pan.get(),
             armed: view.armed,
             name: track.name.clone(),
             height: view.height,
@@ -1292,22 +1472,40 @@ impl ProjectState {
     /// Group the following changes into one undo step, until `commit_batch`.
     pub fn begin_batch(&mut self) {
         self.batching = true;
+        self.batch_steps = Some(self.steps_recorded());
         self.session.begin_transaction("Edit");
     }
     /// Close the undo step opened by `begin_batch`.
     pub fn commit_batch(&mut self) {
         self.batching = false;
         self.session.commit_transaction();
+        if let Some(steps) = self.batch_steps.take() {
+            self.track_steps(steps);
+        }
     }
-    /// Undo last action. Does nothing if there is no action.
+    /// Undo last action, and bring back the clip selection from before it.
+    /// Does nothing if there is no action.
     pub fn undo(&mut self) {
         let result = self.session.undo();
+        if matches!(result, Ok(true))
+            && let Some(entry) = self.selection_undo.pop()
+        {
+            let after = entry.map(|before| std::mem::replace(&mut self.clip_selection, before));
+            self.selection_redo.push(after);
+        }
         report(result);
         self.after_history_change();
     }
-    /// Redo last action. Does nothing if there is no action.
+    /// Redo last action, and its clip selection. Does nothing if there is no
+    /// action.
     pub fn redo(&mut self) {
         let result = self.session.redo();
+        if matches!(result, Ok(true))
+            && let Some(entry) = self.selection_redo.pop()
+        {
+            let before = entry.map(|after| std::mem::replace(&mut self.clip_selection, after));
+            self.selection_undo.push(before);
+        }
         report(result);
         self.after_history_change();
     }

@@ -149,7 +149,7 @@ mod tests {
             num_samples: None,
             path: PathBuf::from("test.wav"),
         };
-        AudioClip::new(ClipId(id), audio, BeatPos(position))
+        AudioClip::new(ClipId(id), audio, BeatPos(position), BPM)
     }
 
     fn ids() -> impl FnMut() -> ClipId {

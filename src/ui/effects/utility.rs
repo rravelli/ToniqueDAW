@@ -24,7 +24,7 @@ pub fn format_gain(db: f32) -> String {
     }
 }
 
-/// `C` in the middle, else how far to a side, from 1 to 50 as Ableton does.
+/// `C` in the middle, else how far to a side, from 1 to 50.
 pub fn format_balance(balance: f32) -> String {
     let amount = (balance.abs() * 50.).round();
     if amount == 0. {

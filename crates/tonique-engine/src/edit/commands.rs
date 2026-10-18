@@ -3,8 +3,8 @@
 //! or only an automation curve swapped, or nothing (atomic param changes).
 
 use super::{
-    Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, Effects, Output, Plugin,
-    PluginId, Send, Track, TrackId,
+    Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, ClipLoop, Edit, EditError, Effects, Output,
+    Plugin, PluginId, Send, Track, TrackId,
 };
 use crate::automation::BeatPoint;
 use crate::param::ParamId;
@@ -288,6 +288,92 @@ impl ResizeClip {
 impl EditCommand for ResizeClip {
     fn label(&self) -> &'static str {
         "Resize clip"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+}
+
+/// Loop part of an audio clip's source, or stop looping (`None`).
+pub struct SetClipLoop {
+    track: TrackId,
+    id: ClipId,
+    looped: Option<ClipLoop>,
+}
+
+impl SetClipLoop {
+    pub fn new(track: TrackId, id: ClipId, looped: Option<ClipLoop>) -> Self {
+        Self { track, id, looped }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        if self.looped.is_some_and(|l| !l.is_valid()) {
+            return Err(EditError::Invalid("a loop must end after it starts"));
+        }
+        let c = edit
+            .track_mut(self.track)?
+            .clips
+            .iter_mut()
+            .find(|c| c.id == self.id)
+            .ok_or(EditError::ClipNotFound(self.id))?;
+        let ClipContent::Audio { looped, .. } = &mut c.content else {
+            return Err(EditError::Invalid("not an audio clip"));
+        };
+        std::mem::swap(looped, &mut self.looped);
+        Ok(Effects::rebuild())
+    }
+}
+
+impl EditCommand for SetClipLoop {
+    fn label(&self) -> &'static str {
+        "Clip loop"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+}
+
+/// Move bar 1 of an audio clip's own grid to `origin_s` seconds into its
+/// source. Not heard: nothing to rebuild.
+pub struct SetClipOrigin {
+    track: TrackId,
+    id: ClipId,
+    origin_s: f64,
+}
+
+impl SetClipOrigin {
+    pub fn new(track: TrackId, id: ClipId, origin_s: f64) -> Self {
+        Self {
+            track,
+            id,
+            origin_s,
+        }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        let c = edit
+            .track_mut(self.track)?
+            .clips
+            .iter_mut()
+            .find(|c| c.id == self.id)
+            .ok_or(EditError::ClipNotFound(self.id))?;
+        let ClipContent::Audio { origin_s, .. } = &mut c.content else {
+            return Err(EditError::Invalid("not an audio clip"));
+        };
+        std::mem::swap(origin_s, &mut self.origin_s);
+        Ok(Effects::none())
+    }
+}
+
+impl EditCommand for SetClipOrigin {
+    fn label(&self) -> &'static str {
+        "Clip bar 1"
     }
     fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         self.swap(edit)

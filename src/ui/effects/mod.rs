@@ -1,6 +1,6 @@
 //! Effect editors: the UI of each [`EffectKind`], in a frame with a header
 //! holding the power and collapse buttons and its name. Beside the frame,
-//! low at its right, a meter of its output, as in Bitwig. A collapsed effect
+//! low at its right, a meter of its output. A collapsed effect
 //! is a strip with its name up it.
 
 use crate::ui::theme::font_size;

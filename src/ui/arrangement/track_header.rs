@@ -14,13 +14,14 @@ use crate::{
             context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
             flat_button::FlatButton,
             meter::LevelMeter,
+            param_slider::{ParamSlider, SliderEdit},
         },
     },
     utils::display_name,
 };
 use egui::{
-    Align2, Color32, FontId, Frame, Label, Margin, Pos2, Rect, Response, RichText, Sense, Stroke,
-    TextEdit, Ui, Vec2, epaint::MarginF32,
+    Color32, FontId, Frame, Label, Margin, Rect, Response, RichText, Sense, Stroke, TextEdit, Ui,
+    Vec2, epaint::MarginF32, vec2,
 };
 use egui_phosphor::{
     fill::{COPY, FOLDER_MINUS, FOLDER_PLUS, PALETTE, PLUS, TRASH},
@@ -39,6 +40,11 @@ const INDENT: f32 = 8.;
 const MAX_INDENT_LEVELS: usize = 6;
 /// Width of the coloured bar on the left of each header.
 pub const COLOR_BAR_WIDTH: f32 = 4.;
+/// Volume slider range, in dB: its bottom is silence.
+pub const VOLUME_RANGE: RangeInclusive<f32> = -40.0..=5.0;
+const SLIDER_SIZE: Vec2 = vec2(2. * BUTTON_SIZE + 1., 20.);
+/// Gap between the rows of controls.
+const CONTROLS_GAP: f32 = 4.;
 
 /// Left of the coloured bar of a row at `depth`, in a header starting at
 /// `left`. Groups extend theirs down to their last row from there.
@@ -51,8 +57,6 @@ pub const HEADER_INSET: f32 = STROKE_WIDTH + PADDING;
 
 #[derive(Debug, Clone)]
 pub struct TrackHeader {
-    gain_db: f32,
-    committed_volume: f32,
     edit: bool,
     focus_requested: bool,
 }
@@ -62,8 +66,6 @@ impl TrackHeader {
         Self {
             focus_requested: false,
             edit: false,
-            gain_db: 0.,
-            committed_volume: 1.0,
         }
     }
 
@@ -86,7 +88,6 @@ impl TrackHeader {
             self.focus_requested = false;
         }
 
-        let mut volume_changed = false;
         let is_group = track.kind == TrackKind::Group;
         let silenced = track.is_silenced();
         let is_solo = matches!(track.solo, crate::core::track::TrackSoloState::Solo);
@@ -155,6 +156,7 @@ impl TrackHeader {
 
                     // Middle: Text & Controls
                     ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = CONTROLS_GAP;
                         ui.horizontal(|ui| {
                             ui.set_height(BUTTON_SIZE);
 
@@ -189,12 +191,12 @@ impl TrackHeader {
                                 state.set_armed(&track.id, !track.armed);
                             }
                         });
-                        let track_view_mut = state.track_view_mut(&track.id);
-                        // Extra controls
-                        if !track_view_mut.collapsed {
-                            let prev_gain_db = self.gain_db;
-                            self.volume_slider(ui, RangeInclusive::new(-40., 5.), track, state);
-                            volume_changed = prev_gain_db != self.gain_db;
+                        // Volume and pan
+                        if !track.collapsed {
+                            ui.horizontal(|ui| {
+                                volume_slider(ui, track, state);
+                                pan_slider(ui, track, state);
+                            });
                         };
                     });
 
@@ -254,16 +256,7 @@ impl TrackHeader {
                 state.commit_track_view(&track.id);
             }
         } else {
-            let formatted_name = display_name(&track.name, track.first_track_index);
-            ui.add(
-                Label::new(
-                    RichText::new(formatted_name)
-                        .color(ui.app_theme().text)
-                        .size(font_size::SMALL),
-                )
-                .truncate()
-                .selectable(false),
-            );
+            name_label(ui, track);
         }
     }
 
@@ -362,90 +355,11 @@ impl TrackHeader {
         track: &TrackRow,
         state: &mut ProjectState,
     ) -> Response {
-        let track_view_mut = state.track_view_mut(&track.id);
-        let icon = if track_view_mut.collapsed {
-            egui_phosphor::fill::CARET_RIGHT
-        } else {
-            egui_phosphor::fill::CARET_DOWN
-        };
-        let response = ui.add(
-            FlatButton::new(icon)
-                .family(egui::FontFamily::Name(PHOSPHOR_FILL.into()))
-                .square(BUTTON_SIZE),
-        );
-        let collapsed = track_view_mut.collapsed;
+        let collapsed = state.track_view_mut(&track.id).collapsed;
+        let response = ui.add(collapse_button(collapsed));
         if response.clicked() {
             state.set_collapsed(&track.id, !collapsed);
         }
-
-        response
-    }
-
-    fn volume_slider(
-        &mut self,
-        ui: &mut Ui,
-        range: std::ops::RangeInclusive<f32>,
-        track: &TrackRow,
-        state: &mut ProjectState,
-    ) -> Response {
-        let desired_size = egui::vec2(2. * BUTTON_SIZE + 1., 20.);
-        let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
-        self.gain_db = 20. * track.volume.log10();
-
-        if response.dragged() {
-            let delta = response.drag_delta().x;
-            self.gain_db += delta * (range.end() - range.start()) / rect.width();
-            self.gain_db = self.gain_db.clamp(*range.start(), *range.end());
-            state.set_volume(track.id, 10f32.powf(self.gain_db / 20.));
-            response.mark_changed();
-        }
-
-        if response.drag_stopped() {
-            let new_volume = 10f32.powf(self.gain_db / 20.);
-            state.commit_volume(track.id, self.committed_volume, new_volume);
-            self.committed_volume = new_volume;
-        }
-
-        if response.double_clicked() {
-            self.gain_db = 0.;
-            state.commit_volume(track.id, self.committed_volume, 1.0);
-            self.committed_volume = 1.0;
-            response.mark_changed();
-        }
-
-        if response.hovered() {
-            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::ResizeHorizontal);
-        }
-
-        // Compute fill ratio
-        let t = (self.gain_db - *range.start()) / (*range.end() - *range.start());
-
-        // Paint background bar
-        let theme = ui.app_theme();
-        let bg_fill = theme.bg_deep;
-        let fill_color = track.color;
-
-        let painter = ui.painter();
-
-        // Full background
-        painter.rect_filled(rect, 1.0, bg_fill);
-
-        // Filled ratio bar
-        let fill_rect = Rect::from_min_max(
-            rect.min,
-            Pos2::new(rect.left() + rect.width() * t, rect.bottom()),
-        );
-        painter.rect_filled(fill_rect, 2.0, fill_color);
-
-        // Text value
-        let text = format!("{:.1}", self.gain_db);
-        painter.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            text,
-            FontId::new(font_size::SMALL, egui::FontFamily::Proportional),
-            theme.text,
-        );
 
         response
     }
@@ -463,6 +377,125 @@ impl TrackHeader {
             track_view_mut.height = track_view_mut.height.clamp(MIN_EXPANDED_HEIGHT, 400.);
         }
     }
+}
+
+/// Volume in dB, filled from the left.
+fn volume_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
+    let slider = ParamSlider::gain(track.volume, VOLUME_RANGE)
+        .color(track.color)
+        .size(SLIDER_SIZE);
+    match slider.show(ui).1 {
+        SliderEdit::Moved(volume) => state.set_volume(track.id, volume),
+        SliderEdit::Released { start, value } if value != start => {
+            state.commit_volume(track.id, start, value)
+        }
+        SliderEdit::Reset { from, to } => state.commit_volume(track.id, from, to),
+        _ => {}
+    }
+}
+
+/// Pan, filled from the centre towards the side it leans to.
+fn pan_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
+    let slider = ParamSlider::pan(track.pan)
+        .color(track.color)
+        .size(SLIDER_SIZE);
+    match slider.show(ui).1 {
+        SliderEdit::Moved(pan) => state.set_pan(track.id, pan),
+        SliderEdit::Released { start, value } if value != start => {
+            state.commit_pan(track.id, start, value)
+        }
+        SliderEdit::Reset { from, to } => state.commit_pan(track.id, from, to),
+        _ => {}
+    }
+}
+
+/// A header as track `track` will have once added, faded and inert: for a
+/// track a drop would add. The same widgets as [`TrackHeader`], in the same
+/// places, so the real one takes its place without a jump.
+pub fn ghost_header(ui: &mut Ui, track: &TrackRow) {
+    let theme = ui.app_theme();
+    // Opaque under the fading, as the real one is.
+    ui.painter().rect_filled(
+        Rect::from_min_size(
+            ui.next_widget_position(),
+            vec2(ui.available_width(), track.height),
+        ),
+        0.,
+        theme.bg_raised,
+    );
+    ui.disable();
+    Frame::new()
+        .inner_margin(MarginF32::same(PADDING))
+        .fill(theme.bg_raised)
+        .stroke(Stroke::new(STROKE_WIDTH, theme.separator))
+        .show(ui, |ui| {
+            let actual_height = track.height - 2. * PADDING - 2. * STROKE_WIDTH;
+            ui.set_width(ui.available_width());
+            ui.set_height(actual_height);
+            ui.spacing_mut().interact_size.y = 18.0;
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
+                ui.add(ColorBar::new(Vec2::new(COLOR_BAR_WIDTH, actual_height)).color(track.color));
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = CONTROLS_GAP;
+                    ui.horizontal(|ui| {
+                        ui.set_height(BUTTON_SIZE);
+                        ui.add(collapse_button(false));
+                        let buttons = if RECORDING { 3. } else { 2. };
+                        let text_width = ui.available_width()
+                            - 4. * PADDING
+                            - buttons * BUTTON_SIZE
+                            - METER_WIDTH;
+                        if text_width > 0. {
+                            ui.scope(|ui| {
+                                ui.set_width(text_width);
+                                name_label(ui, track);
+                            });
+                        }
+                        ui.add(toggle_button("M", None, &theme));
+                        ui.add(toggle_button("S", None, &theme));
+                        if RECORDING {
+                            ui.add(toggle_button(MUSIC_NOTE_SIMPLE, None, &theme));
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ParamSlider::gain(track.volume, VOLUME_RANGE)
+                            .color(track.color)
+                            .size(SLIDER_SIZE)
+                            .show(ui);
+                        ParamSlider::pan(track.pan)
+                            .color(track.color)
+                            .size(SLIDER_SIZE)
+                            .show(ui);
+                    });
+                });
+            });
+        });
+}
+
+/// The track's name, as shown when not renaming it.
+fn name_label(ui: &mut Ui, track: &TrackRow) {
+    ui.add(
+        Label::new(
+            RichText::new(display_name(&track.name, track.first_track_index))
+                .color(ui.app_theme().text)
+                .size(font_size::SMALL),
+        )
+        .truncate()
+        .selectable(false),
+    );
+}
+
+/// The caret folding a row: pointing right when `collapsed`.
+fn collapse_button(collapsed: bool) -> FlatButton {
+    let icon = if collapsed {
+        egui_phosphor::fill::CARET_RIGHT
+    } else {
+        egui_phosphor::fill::CARET_DOWN
+    };
+    FlatButton::new(icon)
+        .family(egui::FontFamily::Name(PHOSPHOR_FILL.into()))
+        .square(BUTTON_SIZE)
 }
 
 /// Track header toggle: `fill` when on, the default control colour when off.

@@ -3,20 +3,28 @@ use crate::{
     config::keymap::Action,
     core::{state::ProjectState, track::TrackRow},
     ui::{
+        clip_details::ClipDetails,
         commands::Commands,
         dnd::DragPayload,
         effects::{EffectEdit, EffectRack},
-        theme::ThemeExt,
-        workspace::Workspace,
+        theme::{ThemeExt, with_alpha},
+        workspace::{BottomView, Workspace},
     },
     utils::display_name,
 };
 use egui::{
-    Align, Align2, CursorIcon, DragAndDrop, FontId, Frame, Layout, Margin, Pos2, Rangef, Rect,
-    RichText, ScrollArea, Stroke, Ui, vec2,
+    Align, Align2, Color32, CursorIcon, DragAndDrop, FontId, Frame, Galley, Label, Layout, Margin,
+    Mesh, Painter, Pos2, Rangef, Rect, RichText, ScrollArea, Sense, Shape, Stroke, Ui, pos2, vec2,
 };
-use tonique_engine::edit::TrackId;
+use std::sync::Arc;
+use tonique_engine::edit::{ClipId, TrackId};
 
+/// Height of the header's row: the track's name, and tabs.
+const HEADER_ROW: f32 = 14.;
+/// Space each side of a tab's name.
+const TAB_PADDING: f32 = 6.;
+/// Rounding of a tab's top corners, and of the curves at its foot.
+const TAB_RADIUS: f32 = 4.;
 /// Between effects, and around them.
 const GAP: f32 = 8.;
 
@@ -26,6 +34,7 @@ struct MovedEffect(usize);
 
 pub struct BottomPanel {
     rack: EffectRack,
+    clip_details: ClipDetails,
     /// Selected effects, by index, of `track`'s. Delete removes them.
     selected: Vec<usize>,
     track: Option<TrackId>,
@@ -44,6 +53,7 @@ impl BottomPanel {
     pub fn new() -> Self {
         Self {
             rack: EffectRack::default(),
+            clip_details: ClipDetails::new(),
             selected: vec![],
             track: None,
             focused: false,
@@ -66,7 +76,11 @@ impl BottomPanel {
             .size_range(Rangef::new(160., 400.))
             .default_size(200.)
             .resizable(true)
-            .frame(Frame::new().inner_margin(Margin::ZERO))
+            .frame(
+                Frame::new()
+                    .inner_margin(Margin::ZERO)
+                    .fill(ui.app_theme().bg_panel),
+            )
             .show_collapsible(ui, &mut open, |ui| {
                 ui.set_height(ui.available_height());
                 let panel = ui.max_rect();
@@ -78,8 +92,29 @@ impl BottomPanel {
                 }) {
                     self.focused = panel.contains(pos);
                 }
+                workspace.follow_clip_selection(state);
+                let clip = match workspace.bottom_view {
+                    BottomView::Clip(id) => state.clip_with_track(id),
+                    BottomView::Effects => None,
+                };
+                if let Some((track, clip)) = clip {
+                    self.track = None;
+                    self.selected.clear();
+                    let tabs = Some((BottomView::Clip(clip.id), clip.id));
+                    if let Some(view) =
+                        self.header(ui, &track, Some((&clip.audio.name, &clip.audio.path)), tabs)
+                    {
+                        workspace.bottom_view = view;
+                    }
+                    self.clip_details.ui(ui, &clip, &track, state);
+                    return;
+                }
                 match state.selected_track() {
-                    Some(track) => self.ui(ui, track, state),
+                    Some(track) => {
+                        if let Some(view) = self.ui(ui, track, state) {
+                            workspace.show_view(state, view);
+                        }
+                    }
                     None => {
                         self.track = None;
                         self.rack.retain(&[]);
@@ -97,13 +132,14 @@ impl BottomPanel {
             self.selected.clear();
             return;
         }
+        // Without effects shown (a clip is), they're for the timeline.
+        let Some(track) = self.track else {
+            return;
+        };
         let delete = !commands.take(|a| a == Action::Delete).is_empty();
         let select_all = !commands.take(|a| a == Action::SelectAll).is_empty();
         let duplicate = !commands.take(|a| a == Action::Duplicate).is_empty();
         let rename = !commands.take(|a| a == Action::Rename).is_empty();
-        let Some(track) = self.track else {
-            return;
-        };
         if delete && !self.selected.is_empty() {
             state.remove_effects(&track, &self.selected);
             self.selected.clear();
@@ -126,7 +162,14 @@ impl BottomPanel {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, track: TrackRow, state: &mut ProjectState) {
+    /// The effects of `track`. Returns the view picked in the header, if
+    /// any.
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        track: TrackRow,
+        state: &mut ProjectState,
+    ) -> Option<BottomView> {
         if self.track != Some(track.id) {
             self.selected.clear();
             self.track = Some(track.id);
@@ -136,7 +179,12 @@ impl BottomPanel {
         let shown: Vec<_> = effects.iter().map(|e| e.plugin.id).collect();
         self.rack.retain(&shown);
 
-        self.header(ui, &track);
+        // A tab to the clip selected on this track, if one is.
+        let clip = match state.selected_clips() {
+            [id] if state.find_clip(*id).is_some_and(|(t, _)| t == track.id) => Some(*id),
+            _ => None,
+        };
+        let picked = self.header(ui, &track, None, clip.map(|c| (BottomView::Effects, c)));
         let area = ui.available_rect_before_wrap();
 
         // An effect dragged from the browser, or one of these being moved.
@@ -308,11 +356,25 @@ impl BottomPanel {
             state.remove_effects(&track.id, &[index]);
             self.selected.clear();
         }
+        picked
     }
 
-    fn header(&mut self, ui: &mut Ui, track: &TrackRow) {
+    /// Track name, and the clip's when showing one. With `tabs` (the view
+    /// shown, and a clip of the track), Clip and Effects tabs on the right
+    /// switch between them: returns the one picked.
+    fn header(
+        &mut self,
+        ui: &mut Ui,
+        track: &TrackRow,
+        clip: Option<(&str, &std::path::Path)>,
+        tabs: Option<(BottomView, ClipId)>,
+    ) -> Option<BottomView> {
         let theme = ui.app_theme();
-        Frame::new()
+        let ink = theme.text_on(track.color);
+        let mut picked = None;
+        // Drawn once the header is: (where, name, selected, hovered).
+        let mut drawn: Vec<(Rect, Arc<Galley>, bool, bool)> = Vec::new();
+        let header = Frame::new()
             .fill(track.color)
             .stroke(Stroke::new(1.0, theme.border))
             .inner_margin(Margin {
@@ -323,15 +385,112 @@ impl BottomPanel {
             })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(display_name(&track.name, track.first_track_index))
-                            .size(font_size::SMALL)
-                            .color(theme.text_on(track.color)),
-                    );
+                let row = vec2(ui.available_width(), HEADER_ROW);
+                ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
+                    // Room for the selected tab's feet, clear of its neighbour.
+                    ui.spacing_mut().item_spacing.x = TAB_RADIUS + 2.;
+                    if let Some((shown, clip)) = tabs {
+                        // Right to left: Effects, then Clip.
+                        for (view, name) in [
+                            (BottomView::Effects, "Effects"),
+                            (BottomView::Clip(clip), "Clip"),
+                        ] {
+                            let selected = view == shown;
+                            let galley = ui.painter().layout_no_wrap(
+                                name.into(),
+                                FontId::proportional(font_size::SMALL),
+                                Color32::PLACEHOLDER,
+                            );
+                            let size = vec2(galley.size().x + 2. * TAB_PADDING, HEADER_ROW);
+                            let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+                            if !selected {
+                                let response = response.on_hover_cursor(CursorIcon::PointingHand);
+                                if response.clicked() {
+                                    picked = Some(view);
+                                }
+                                drawn.push((rect, galley, false, response.hovered()));
+                            } else {
+                                drawn.push((rect, galley, true, false));
+                            }
+                        }
+                    }
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        let mut title = display_name(&track.name, track.first_track_index);
+                        if let Some((name, _)) = clip {
+                            title = format!("{title}  ›  {name}");
+                        }
+                        let label = ui.add(
+                            Label::new(RichText::new(title).size(font_size::SMALL).color(ink))
+                                .truncate()
+                                .selectable(false),
+                        );
+                        if let Some((_, path)) = clip {
+                            label.on_hover_text(path.display().to_string());
+                        }
+                    });
                 });
-            });
+            })
+            .response
+            .rect;
+        // The selected tab in the panel's colour, open onto it: the view
+        // under the header is that tab's. The others in the header's ink,
+        // tinted with it under the pointer.
+        let painter = ui.painter();
+        // The selected one first: nothing of it over the others.
+        drawn.sort_by_key(|(.., selected, _)| !selected);
+        for (rect, galley, selected, hovered) in drawn {
+            let text = if selected {
+                paint_tab(painter, rect.x_range(), header, theme.bg_panel);
+                theme.text
+            } else {
+                if hovered {
+                    painter.rect_filled(rect, TAB_RADIUS, with_alpha(ink, 50));
+                }
+                ink
+            };
+            let pos = rect.center() - galley.size() / 2.;
+            painter.galley(pos, galley, text);
+        }
+        picked
     }
+}
+
+/// A selected tab across `x`, from near the top of `header` down to its
+/// bottom edge, in `fill`: rounded on top, its foot curving out on each
+/// side, so it reads as part of the panel below. One shape, kept inside
+/// the header, its curved edges smoothed by a thin line along them.
+fn paint_tab(painter: &Painter, x: Rangef, header: Rect, fill: Color32) {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    const STEPS: usize = 8;
+    let r = TAB_RADIUS;
+    let (top, bottom) = (header.top() + 2., header.bottom());
+    // A quarter circle around `centre`, from angle `from` to `to` (y down).
+    let arc = |centre: Pos2, from: f32, to: f32| {
+        (0..=STEPS).map(move |i| {
+            let a = from + (to - from) * i as f32 / STEPS as f32;
+            centre + r * vec2(a.cos(), a.sin())
+        })
+    };
+    // Its outline left to right: the left foot, the top corners, the
+    // right foot. Each x has one point on it, the bottom being flat.
+    let edge: Vec<Pos2> = arc(pos2(x.min - r, bottom - r), FRAC_PI_2, 0.)
+        .chain(arc(pos2(x.min + r, top + r), PI, 1.5 * PI))
+        .chain(arc(pos2(x.max - r, top + r), 1.5 * PI, 2. * PI))
+        .chain(arc(pos2(x.max + r, bottom - r), PI, FRAC_PI_2))
+        .collect();
+    let mut mesh = Mesh::default();
+    for pair in edge.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let i = mesh.vertices.len() as u32;
+        for p in [a, b, pos2(b.x, bottom), pos2(a.x, bottom)] {
+            mesh.colored_vertex(p, fill);
+        }
+        mesh.add_triangle(i, i + 1, i + 2);
+        mesh.add_triangle(i, i + 2, i + 3);
+    }
+    let painter = painter.with_clip_rect(header);
+    painter.add(mesh);
+    painter.add(Shape::line(edge, Stroke::new(1., fill)));
 }
 
 /// Muted text in the middle of `rect`.
@@ -424,6 +583,18 @@ mod tests {
             bottom_panel_open: true,
             ..Default::default()
         };
+        run_in(ctx, panel, state, &mut workspace, events, actions)
+    }
+
+    /// [`run`] with the panel laid out as in `workspace`.
+    fn run_in(
+        ctx: &egui::Context,
+        panel: &mut BottomPanel,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        events: Vec<egui::Event>,
+        actions: &[Action],
+    ) -> Vec<Action> {
         let mut left = Vec::new();
         for (events, actions) in [(vec![], &[][..]), (events, actions)] {
             let mut commands = Commands::default();
@@ -438,9 +609,8 @@ mod tests {
                 time: Some(ctx.input(|i| i.time) + 1.),
                 ..Default::default()
             };
-            let mut output = ctx.run_ui(input, |ui| {
-                panel.show(ui, state, &mut workspace, &mut commands)
-            });
+            let mut output =
+                ctx.run_ui(input, |ui| panel.show(ui, state, workspace, &mut commands));
             output.textures_delta.clear();
             left = commands.take_all();
         }
@@ -467,6 +637,37 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::ui::font::fonts());
         (ctx, BottomPanel::new(), state, track)
+    }
+
+    /// Showing a clip, the panel has no use for Delete and the like: they
+    /// go on to the timeline, even after a click in it.
+    #[test]
+    fn shortcuts_in_the_clip_view_are_for_the_timeline() {
+        let (ctx, mut panel, mut state, track) = setup();
+        let clip = state.new_clip_id();
+        state.add_clips(
+            &track,
+            vec![crate::core::clip::AudioClip::new(
+                clip,
+                crate::analysis::AudioInfo::silent(1.),
+                tonique_engine::time::BeatPos(0.),
+                120.,
+            )],
+        );
+        let mut workspace = Workspace::default();
+        workspace.show_clip_details(&mut state, clip);
+        let actions = [Action::Delete, Action::SelectAll, Action::Duplicate];
+        let left = run_in(
+            &ctx,
+            &mut panel,
+            &mut state,
+            &mut workspace,
+            click(egui::pos2(600., 760.)),
+            &actions,
+        );
+        assert_eq!(left, actions);
+        assert_eq!(workspace.bottom_view, BottomView::Clip(clip));
+        assert_eq!(state.effects(&track).len(), 2, "effects untouched");
     }
 
     /// Delete removes the selected effects; it's left for the timeline

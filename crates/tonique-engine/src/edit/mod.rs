@@ -68,6 +68,9 @@ pub struct Parameter {
     pub automation: Vec<BeatPoint>,
 }
 
+/// Loudest a clip can be made: +12 dB.
+pub const CLIP_GAIN_MAX: f32 = 3.981;
+
 /// Ramp applied to manual parameter changes, so UI moves never zipper.
 pub const PARAM_RAMP_MS: f32 = 20.0;
 
@@ -202,12 +205,35 @@ pub enum ClipContent {
     Audio {
         source: SourceId,
         source_offset_s: f64,
-        gain: f32,
+        /// Linear: heard as soon as it's set, like a fader.
+        gain: Parameter,
+        /// Balance, -1 (left only) to 1 (right only): turning to a side
+        /// lowers the other, keeping a stereo file's image.
+        pan: Parameter,
+        /// Once reading reaches the loop's end, it goes on from its start,
+        /// for as long as the clip lasts.
+        looped: Option<ClipLoop>,
+        /// Where bar 1 of the clip's own grid is in the source, in seconds:
+        /// for editing it, not heard.
+        origin_s: f64,
     },
     Midi {
         notes: Vec<Note>,
         channel: u8,
     },
+}
+
+/// The part of an audio clip's source that loops, in seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClipLoop {
+    pub start_s: f64,
+    pub end_s: f64,
+}
+
+impl ClipLoop {
+    pub fn is_valid(&self) -> bool {
+        self.start_s >= 0.0 && self.end_s > self.start_s && self.end_s.is_finite()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -243,13 +269,57 @@ impl Clip {
             content: ClipContent::Audio {
                 source,
                 source_offset_s: 0.0,
-                gain: 1.0,
+                gain: Parameter::new(ParamId(edit.next_id()), "gain", 0.0, CLIP_GAIN_MAX, 1.0),
+                pan: Parameter::new(ParamId(edit.next_id()), "pan", -1.0, 1.0, 0.0),
+                looped: None,
+                origin_s: 0.0,
             },
         }
     }
 
     pub fn end(&self) -> BeatPos {
         BeatPos(self.start.0 + self.length)
+    }
+
+    /// The audio clip's gain, if it is one.
+    pub fn gain(&self) -> Option<&Parameter> {
+        match &self.content {
+            ClipContent::Audio { gain, .. } => Some(gain),
+            ClipContent::Midi { .. } => None,
+        }
+    }
+
+    /// The audio clip's pan (balance), if it is one.
+    pub fn pan(&self) -> Option<&Parameter> {
+        match &self.content {
+            ClipContent::Audio { pan, .. } => Some(pan),
+            ClipContent::Midi { .. } => None,
+        }
+    }
+
+    /// Its parameters: an audio clip's gain and pan.
+    fn params(&self) -> impl Iterator<Item = &Parameter> {
+        self.gain().into_iter().chain(self.pan())
+    }
+
+    fn params_mut(&mut self) -> impl Iterator<Item = &mut Parameter> {
+        match &mut self.content {
+            ClipContent::Audio { gain, pan, .. } => vec![gain, pan],
+            ClipContent::Midi { .. } => Vec::new(),
+        }
+        .into_iter()
+    }
+
+    /// Copy with fresh IDs (the clip's and its parameters').
+    pub fn duplicate(&self, edit: &mut Edit) -> Self {
+        let mut copy = Self {
+            id: ClipId(edit.next_id()),
+            ..self.clone()
+        };
+        for param in copy.params_mut() {
+            *param = param.duplicate(edit);
+        }
+        copy
     }
 }
 
@@ -371,14 +441,7 @@ impl Track {
     /// Deep copy with fresh IDs throughout (track, clips, plugins, params).
     /// Sends are not copied.
     pub fn duplicate(&self, edit: &mut Edit) -> Self {
-        let clips = self
-            .clips
-            .iter()
-            .map(|c| Clip {
-                id: ClipId(edit.next_id()),
-                ..c.clone()
-            })
-            .collect();
+        let clips = self.clips.iter().map(|c| c.duplicate(edit)).collect();
         Self {
             id: TrackId(edit.next_id()),
             name: self.name.clone(),
@@ -548,7 +611,12 @@ impl Edit {
     fn all_params(&self) -> impl Iterator<Item = &Parameter> {
         self.tracks
             .iter()
-            .flat_map(|t| t.channel.params().chain(t.sends.iter().map(|s| &s.level)))
+            .flat_map(|t| {
+                t.channel
+                    .params()
+                    .chain(t.sends.iter().map(|s| &s.level))
+                    .chain(t.clips.iter().flat_map(Clip::params))
+            })
             .chain(self.buses.iter().flat_map(|b| b.channel.params()))
             .chain(self.master.params())
     }
@@ -566,6 +634,7 @@ impl Edit {
                 t.channel
                     .params_mut()
                     .chain(t.sends.iter_mut().map(|s| &mut s.level))
+                    .chain(t.clips.iter_mut().flat_map(Clip::params_mut))
             })
             .chain(self.buses.iter_mut().flat_map(|b| b.channel.params_mut()))
             .chain(self.master.params_mut())

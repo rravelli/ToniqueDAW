@@ -20,7 +20,7 @@ use crate::{
         workspace::Workspace,
     },
 };
-use egui::{DragAndDrop, Pos2, Rangef, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{Color32, DragAndDrop, Rangef, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use tonique_engine::edit::{ClipId, TrackId};
 mod drag;
 mod keys;
@@ -34,20 +34,22 @@ const SILENCED_PREVIEW_ALPHA: u8 = 30;
 
 pub struct Timeline {
     clip_drag: Option<ClipDrag>,
-    press_pos: Option<Pos2>,
     rubber_band: Option<RubberBand>,
     /// Collapsed groups expanded by dragging over them, to collapse again once
     /// left.
     hover_expanded: Vec<TrackId>,
+    /// The colours of the tracks a drop would add, this frame: shown as
+    /// lanes here, and as headers by the track headers.
+    new_tracks: Vec<Color32>,
 }
 
 impl Timeline {
     pub fn new() -> Self {
         Self {
             clip_drag: None,
-            press_pos: None,
             rubber_band: None,
             hover_expanded: Vec::new(),
+            new_tracks: Vec::new(),
         }
     }
 
@@ -60,6 +62,8 @@ impl Timeline {
         layout: &mut RowLayout,
         viewport: Rect,
     ) {
+        self.new_tracks.clear();
+        let track_count = state.track_count();
         // First the actions on the selection
         self.run_actions(ui, state, commands, viewport);
         // Create timeline area
@@ -71,10 +75,13 @@ impl Timeline {
         // Rendering
         // First render the grid
         state.grid.paint_grid(&painter, viewport, &ui.app_theme());
-        // Render all clips (except dragged clips)
         if self.expand_on_hover(ui, state, layout, viewport) {
             layout.rebuild(state);
         }
+        // The multiselect zone: drawn, and its veil under the clips, which
+        // light up their own part of it.
+        self.rubber_band_ui(ui, state, layout, &timeline_res);
+        // Render all clips (except dragged clips)
         self.clips_ui(ui, state, workspace, layout, viewport);
 
         if let Some(drag) = dragged_audio(&timeline_res) {
@@ -83,12 +90,19 @@ impl Timeline {
 
         self.handle_dropped_audio(ui, viewport, state);
 
-        // Draw multiselect zone
-        self.rubber_band_ui(ui, state, layout, &timeline_res);
+        // The zone's outline, over the clips.
+        self.paint_zone_outline(ui, state, layout, viewport);
 
         let hovered_files = ui.input(|i| i.raw.hovered_files.clone());
         if !hovered_files.is_empty() {
             painter.rect_filled(viewport, 1.0, with_alpha(ui.app_theme().accent, 20));
+        }
+
+        // A drop added tracks: the headers, drawn next, show them this
+        // frame, in place of their ghosts.
+        if state.track_count() != track_count {
+            layout.rebuild(state);
+            self.new_tracks.clear();
         }
     }
 
@@ -206,25 +220,23 @@ impl Timeline {
             }
 
             // A group's lane: an overview of everything inside.
-            let clips = if track.kind == TrackKind::Group {
+            let mut clips = if track.kind == TrackKind::Group {
                 paint_group_overview(ui, state, track, track_rect);
                 Vec::new()
             } else {
                 track.clips.clone()
             };
-            for mut clip in clips {
-                if let Some((id, start, end, pos)) = &state.resized_clip
-                    && clip.id == *id
-                {
-                    clip.trim_start = *start;
-                    clip.trim_end = *end;
-                    clip.position = *pos;
-                }
+            // A clip being trimmed goes on top of its neighbours, so what it
+            // grows over shows (applying the trim cuts them there).
+            clips.sort_by_key(|c| state.is_resizing(c.id));
+            for clip in clips {
+                let clip = state.shown_clip(&clip);
                 let dragged = self.clip_ui(
                     track,
                     &clip,
                     ui,
                     state,
+                    workspace,
                     viewport,
                     row.y.min,
                     dragged_ids.contains(&clip.id),
@@ -286,14 +298,13 @@ impl Timeline {
         clip: &AudioClip,
         ui: &mut Ui,
         state: &mut ProjectState,
+        workspace: &mut Workspace,
         viewport: Rect,
         top: f32,
         dragged: bool,
     ) -> bool {
         let x = state.grid.beats_to_x(clip.position, viewport);
-        let width = state
-            .grid
-            .duration_to_width(clip.duration().unwrap_or_default(), state.bpm());
+        let width = state.grid.beats_to_width(clip.length);
 
         if x + width < viewport.left()
             || x > viewport.right()
@@ -315,11 +326,15 @@ impl Timeline {
             rect: Rect::from_min_size(pos, size),
             viewport,
             color,
-            // With a zone, only its part is selected: the zone shows it.
+            // With a zone, only its part is selected: lit inside the clip.
             selected: !dragged
                 && state.selection_bounds().is_none()
                 && state.is_clip_selected(clip.id),
-            show_waveform: !track.collapsed,
+            zone: state
+                .selection_bounds()
+                .filter(|_| !dragged && state.is_clip_selected(clip.id))
+                .map(|b| (b.start_pos, b.end_pos)),
+            collapsed: track.collapsed,
             silenced: track.is_silenced(),
         }
         .ui(ui, state);
@@ -332,6 +347,9 @@ impl Timeline {
                 state.select_clips(vec![clip.id]);
             }
             state.select_track(&track.id);
+        }
+        if response.double_clicked() {
+            workspace.show_clip_details(state, clip.id);
         }
 
         response.dragged()
@@ -366,7 +384,12 @@ impl Timeline {
                     let snapped_position = state.grid.snap_at_grid(position);
 
                     let track = state.add_track();
-                    let clip = AudioClip::new(state.new_clip_id(), audio_info, snapped_position);
+                    let clip = AudioClip::new(
+                        state.new_clip_id(),
+                        audio_info,
+                        snapped_position,
+                        state.bpm(),
+                    );
                     state.add_clips(&track, vec![clip]);
                 }
             }
@@ -402,17 +425,24 @@ impl Timeline {
             };
 
             let height = track.as_ref().map_or(DEFAULT_TRACK_HEIGHT, |t| t.height);
-            let show_waveform = track.as_ref().is_none_or(|t| !t.collapsed);
+            let collapsed = track.as_ref().is_some_and(|t| t.collapsed);
             let silenced = track.as_ref().is_some_and(|t| t.is_silenced());
-            let color = track
-                .as_ref()
-                .map_or(ui.app_theme().text_muted, |t| t.color);
+            // Past the last track: on the one dropping it will add, in the
+            // colour it will get.
+            let color = match &track {
+                Some(t) => t.color,
+                None => self
+                    .new_track_lanes(ui, state, layout, viewport, 1)
+                    .first()
+                    .copied()
+                    .unwrap_or(ui.app_theme().text_muted),
+            };
             let width = state.grid.duration_to_width(duration, state.bpm());
 
             let pos = pos2(x, y);
             let size = Vec2::new(width, height);
             // Placeholder ID: the clip only gets a real one when dropped
-            let clip = AudioClip::new(ClipId(0), audio_info, snapped_position);
+            let clip = AudioClip::new(ClipId(0), audio_info, snapped_position, state.bpm());
             // render clip
             ClipView {
                 clip: &clip,
@@ -420,10 +450,11 @@ impl Timeline {
                 viewport,
                 color,
                 selected: false,
-                show_waveform,
+                zone: None,
+                collapsed,
                 silenced,
             }
-            .ui(ui, state);
+            .preview(ui, state);
 
             if dropped {
                 state.begin_batch();
@@ -495,4 +526,53 @@ fn dragged_audio(response: &Response) -> Option<AudioDrag> {
         return Some(AudioDrag::Over(audio.clone()));
     }
     None
+}
+
+impl Timeline {
+    /// The colours of the tracks a drop would add past the last one, this
+    /// frame (none when not dragging there).
+    pub fn new_tracks(&self) -> &[Color32] {
+        &self.new_tracks
+    }
+
+    /// Where `count` tracks will be added below the last one (by a drop),
+    /// remembered for the headers: a faint lane each, in the colour it will
+    /// get. Returns their colours.
+    fn new_track_lanes(
+        &mut self,
+        ui: &Ui,
+        state: &ProjectState,
+        layout: &RowLayout,
+        viewport: Rect,
+        count: usize,
+    ) -> Vec<Color32> {
+        let colors = paint_new_track_lanes(ui, state, layout, viewport, count);
+        self.new_tracks.clone_from(&colors);
+        colors
+    }
+}
+
+/// A faint lane for each of `count` tracks a drop will add below the last
+/// one, in the colour it will get.
+/// Returns their colours.
+fn paint_new_track_lanes(
+    ui: &Ui,
+    state: &ProjectState,
+    layout: &RowLayout,
+    viewport: Rect,
+    count: usize,
+) -> Vec<Color32> {
+    let colors = state.new_track_colors(count);
+    let painter = ui.painter_at(viewport);
+    for (i, color) in colors.iter().enumerate() {
+        let top = layout.track_top(state.track_count() + i);
+        let lane = Rect::from_x_y_ranges(viewport.x_range(), top..=top + DEFAULT_TRACK_HEIGHT);
+        painter.rect_filled(lane, 1., with_alpha(*color, 20));
+        painter.hline(
+            viewport.x_range(),
+            lane.bottom() + ROW_GAP / 2.,
+            Stroke::new(ROW_GAP, ui.app_theme().separator),
+        );
+    }
+    colors
 }

@@ -1,5 +1,4 @@
-# Inspired by Pro Tools: dark blue-grey mixing-console panels with a
-# periwinkle accent.
+# Dark blue-grey mixing-console panels with a periwinkle accent.
 
 name = "Console"
 
@@ -31,8 +30,8 @@ shadow = "#0000008c"
 
 playhead = "#e5e8f1"
 edit_cursor = "#e5e8f1"
-selection_fill = "#e5e8f10d"
-selection_stroke = "#e5e8f166"
+selection_fill = "#e5e8f126"
+selection_stroke = "#e5e8f1b3"
 loop_region = "#8c8cff30"
 grid_bar = "#ffffff16"
 grid_beat = "#ffffff09"

@@ -82,7 +82,7 @@ impl RowLayout {
         }
     }
 
-    /// Lay out again, after rows were collapsed or expanded.
+    /// Lay out again, after rows changed (collapsed, expanded or added).
     pub fn rebuild(&mut self, state: &ProjectState) {
         *self = Self::new(state, self.view_top, self.scroll);
     }

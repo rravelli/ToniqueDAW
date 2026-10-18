@@ -7,7 +7,7 @@ use egui_phosphor::{
     fill::SIDEBAR_SIMPLE,
     regular::{CPU, GRAPH, RECORD, SPEAKER_SLASH},
 };
-use tonique_engine::time::{BeatPos, TimeSignature};
+use tonique_engine::time::TimeSignature;
 
 use crate::{
     config::keymap::Action,
@@ -20,6 +20,7 @@ use crate::{
         widget::{flat_button::FlatButton, input::NumberInput, select::Select},
         workspace::{MainView, Workspace},
     },
+    utils::{format_bars, format_time},
 };
 const BUTTON_SIZE: f32 = 22.;
 /// Between the buttons of a group.
@@ -437,18 +438,9 @@ fn position_ui(ui: &mut Ui, state: &ProjectState) {
 /// them) and `m:ss.mmm`.
 fn position_text(beats: f64, signature: TimeSignature, bpm: f32) -> (String, String) {
     let beats = beats.max(0.);
-    let at = signature.locate(BeatPos(beats));
-    let (bar, beat) = (at.bar + 1, at.beat + 1);
-    let sixteenth = (at.offset * 4.).floor() as u64 + 1;
-    let millis = (beats * 60. / bpm as f64 * 1000.).floor() as u64;
     (
-        format!("{bar}.{beat}.{sixteenth}"),
-        format!(
-            "{}:{:02}.{:03}",
-            millis / 60_000,
-            millis / 1000 % 60,
-            millis % 1000
-        ),
+        format_bars(beats, signature),
+        format_time(beats * 60. / bpm as f64),
     )
 }
 

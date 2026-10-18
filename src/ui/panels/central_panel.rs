@@ -18,13 +18,15 @@ use crate::{
         workspace::{MainView, Workspace},
     },
 };
-use egui::{Align2, Color32, FontId, Frame, Margin, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{
+    Align2, Color32, FontId, Frame, Margin, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
+};
 
 /// Empty bars after the end of the arrangement.
 const TIMELINE_SLACK_BARS: f64 = 16.;
 const EMPTY_LOGO_SIZE: f32 = 80.;
-/// Half the width of the edit cursor's caps.
-const EDIT_CURSOR_CAP: f32 = 3.;
+/// The edit cursor's arrow on the ruler: width and height.
+const EDIT_CURSOR_ARROW: Vec2 = vec2(9., 6.);
 /// The master's output scope, in the footer.
 const SCOPE_WIDTH: f32 = 120.;
 
@@ -113,8 +115,10 @@ impl CentralPanel {
             timeline_viewport,
         );
         // Draw tracks
+        // With the tracks a drop on the timeline would add.
+        let new_tracks = self.timeline.new_tracks();
         self.tracks
-            .ui(ui, state, workspace, &layout, viewport, footer);
+            .ui(ui, state, workspace, &layout, viewport, footer, new_tracks);
         if state.track_count() == 0 {
             empty_project_ui(ui, state, timeline_viewport);
         }
@@ -154,7 +158,7 @@ impl CentralPanel {
             available_rect.min,
             pos2(timeline_viewport.right(), timeline_viewport.bottom()),
         );
-        self.cursors_ui(ui, state, &layout, cursors, timeline_viewport);
+        self.cursors_ui(ui, state, cursors, timeline_viewport);
     }
 
     /// Keep the playhead in the middle of the view during playback. Near the
@@ -230,18 +234,11 @@ impl CentralPanel {
         scrolled_x
     }
 
-    /// Loop bounds (while looping), edit cursor (only while it differs from
-    /// the playhead, over the selected tracks) and playhead with its
+    /// Loop bounds (while looping), edit cursor (an arrow on the ruler,
+    /// only while it differs from the playhead) and playhead with its
     /// draggable handle. `rect` spans the ruler and the timeline, `lanes`
     /// the timeline alone.
-    fn cursors_ui(
-        &self,
-        ui: &mut Ui,
-        state: &mut ProjectState,
-        layout: &RowLayout,
-        rect: Rect,
-        lanes: Rect,
-    ) {
+    fn cursors_ui(&self, ui: &mut Ui, state: &mut ProjectState, rect: Rect, lanes: Rect) {
         ui.set_clip_rect(rect);
         let theme = ui.app_theme();
         let painter = ui.painter();
@@ -253,17 +250,13 @@ impl CentralPanel {
             }
         }
         if state.edit_cursor() != state.playhead() {
+            // An arrow on the ruler, pointing down at the timeline.
             let x = state.grid.beats_to_x(state.edit_cursor(), rect);
-            let stroke = Stroke::new(1.0, theme.edit_cursor);
-            let lane_painter = painter.with_clip_rect(lanes);
-            for row in layout.rows().iter().filter(|r| r.track.selected) {
-                // An I-beam: the caps tell it from the playhead.
-                let y = row.y.shrink(1.);
-                lane_painter.vline(x, y, stroke);
-                for cap in [y.min, y.max] {
-                    lane_painter.hline((x - EDIT_CURSOR_CAP)..=(x + EDIT_CURSOR_CAP), cap, stroke);
-                }
-            }
+            painter.add(Shape::convex_polygon(
+                edit_cursor_arrow(x, lanes.top()).to_vec(),
+                theme.edit_cursor,
+                Stroke::NONE,
+            ));
         }
         let playhead_x = state.grid.beats_to_x(state.playhead(), rect);
         let line_stroke = Stroke::new(2.0, with_alpha(theme.playhead, 160));
@@ -426,9 +419,24 @@ fn empty_project_ui(ui: &Ui, state: &ProjectState, viewport: Rect) {
     );
 }
 
+/// The edit cursor's arrow at `x`, its tip on the ruler's bottom (`bottom`).
+fn edit_cursor_arrow(x: f32, bottom: f32) -> [Pos2; 3] {
+    let half = EDIT_CURSOR_ARROW.x / 2.;
+    let top = bottom - EDIT_CURSOR_ARROW.y;
+    [pos2(x - half, top), pos2(x + half, top), pos2(x, bottom)]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_edit_cursor_points_down_at_the_timeline() {
+        let [left, right, tip] = edit_cursor_arrow(50., 30.);
+        assert_eq!(tip, pos2(50., 30.), "on the ruler's bottom");
+        assert!(left.y < tip.y && left.y == right.y);
+        assert_eq!((left.x + right.x) / 2., 50., "centred on the cursor");
+    }
     use tonique_engine::engine::{Engine, EngineConfig};
 
     /// The track list and timeline draw nested and collapsed groups without
@@ -548,6 +556,174 @@ mod tests {
         frame(&mut state, vec![Event::PointerMoved(over_group)]);
         frame(&mut state, vec![Event::PointerMoved(far_below)]);
         assert!(!collapsed(&state), "stays expanded after a drop inside");
+    }
+
+    /// Dragging a file below the last track shows the track a drop would
+    /// add: a header with the name it'll get.
+    #[test]
+    fn dragging_past_the_last_track_shows_a_ghost_track() {
+        use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
+        use egui::{Event, Pos2};
+
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        state.add_track();
+        state.add_track();
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let mut panel = CentralPanel::new();
+        let mut texts = |state: &mut ProjectState, events: Vec<Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(
+                    ui,
+                    state,
+                    &mut Workspace::default(),
+                    &mut Commands::default(),
+                )
+            });
+            output.textures_delta.clear();
+            output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        texts(&mut state, Vec::new()); // lay out once
+        egui::DragAndDrop::set_payload(&ctx, DragPayload::File(AudioInfo::silent(1.)));
+        let shown = texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
+        assert!(
+            shown.iter().any(|t| t == "3 Audio Track"),
+            "the header: {shown:?}"
+        );
+
+        egui::DragAndDrop::clear_payload(&ctx);
+        let shown = texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
+        assert!(!shown.iter().any(|t| t == "3 Audio Track"), "gone after");
+    }
+
+    /// On the frame a drop adds the track, its header is shown where its
+    /// ghost was, and the ghost is gone: no frame without it.
+    #[test]
+    fn dropping_past_the_last_track_shows_its_header_at_once() {
+        use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
+        use egui::{Event, PointerButton, Pos2};
+
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        state.add_track();
+        state.add_track();
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        // The app's spacing, which the headers stack with.
+        crate::ui::theme::Theme::default().install(&ctx);
+        let mut panel = CentralPanel::new();
+        // Where "3 Audio Track" is shown, each time.
+        let mut names = |state: &mut ProjectState, events: Vec<Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(
+                    ui,
+                    state,
+                    &mut Workspace::default(),
+                    &mut Commands::default(),
+                )
+            });
+            output.textures_delta.clear();
+            output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == "3 Audio Track" => Some(t.pos),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let below = Pos2::new(300., 500.);
+        names(&mut state, Vec::new()); // lay out once
+        egui::DragAndDrop::set_payload(&ctx, DragPayload::File(AudioInfo::silent(1.)));
+        let ghost = names(&mut state, vec![Event::PointerMoved(below)]);
+        assert_eq!(ghost.len(), 1, "the ghost");
+
+        let release = Event::PointerButton {
+            pos: below,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        };
+        let dropped = names(&mut state, vec![release]);
+        assert_eq!(state.track_count(), 3);
+        assert_eq!(dropped, ghost, "the real header, in the ghost's place");
+    }
+
+    /// A rubber band starts where the button went down, between grid lines
+    /// as much as on them.
+    #[test]
+    fn rubber_bands_start_where_pressed() {
+        use crate::ui::arrangement::ruler::RULER_HEIGHT;
+        use egui::{Event, PointerButton, Pos2};
+
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        state.add_track();
+        state.add_track();
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let mut panel = CentralPanel::new();
+        let mut time = 0.;
+        let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
+            time += 0.05;
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(
+                    ui,
+                    state,
+                    &mut Workspace::default(),
+                    &mut Commands::default(),
+                )
+            });
+            output.textures_delta.clear();
+        };
+        let button = |pos, pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut state, Vec::new()); // lay out once
+        // Halfway between two beats, in the first lane.
+        let ppb = state.grid.pixels_per_beat();
+        let from = Pos2::new(2.5 * ppb, RULER_HEIGHT + 20.);
+        frame(
+            &mut state,
+            vec![Event::PointerMoved(from), button(from, true)],
+        );
+        for step in 1..=5 {
+            let at = from + vec2(step as f32 * 30., 40.);
+            frame(&mut state, vec![Event::PointerMoved(at)]);
+        }
+        let bounds = state.selection_bounds().expect("a zone");
+        assert!(
+            (bounds.start_pos.0 - 2.5).abs() < 1e-3,
+            "starts at {:?}",
+            bounds.start_pos
+        );
     }
 
     /// The rename shortcut types a name in the selected track's header;

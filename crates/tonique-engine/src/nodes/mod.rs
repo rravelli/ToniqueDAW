@@ -10,7 +10,9 @@ mod tap;
 
 pub use automation::AutomationNode;
 pub use basic::{DelayNode, OscillatorNode, SumNode, ThroughNode, VolumePanNode, Waveform};
-pub use clip::{AudioClipNode, ClipPlacement, MidiClipNode, TimedMidi, TimelineNote};
+pub use clip::{
+    AudioClipNode, ClipPlacement, LoopPlacement, MidiClipNode, TimedMidi, TimelineNote, balance,
+};
 pub use fx::{EchoNode, FilterMode, FilterNode, UTILITY_SILENT_DB, UtilityNode};
 pub use metronome::MetronomeNode;
 pub use synth::{Envelope, SynthNode};

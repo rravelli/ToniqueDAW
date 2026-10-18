@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::graph::{ContentId, Node, NodeIdentity, NodeProperties, ProcessContext, StateTransfer};
 use crate::midi::{ActiveNotes, MidiMessage};
+use crate::param::{AtomicParam, Smoother};
 use crate::sample::SampleBuffer;
 use crate::time::SamplePos;
 
@@ -16,6 +17,49 @@ pub struct ClipPlacement {
     pub source_offset: SamplePos,
     pub fade_in: SamplePos,
     pub fade_out: SamplePos,
+    /// Reading reaches the loop's end, then goes on from its start.
+    pub looped: Option<LoopPlacement>,
+}
+
+/// A clip's loop, in source samples.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LoopPlacement {
+    pub start: SamplePos,
+    pub end: SamplePos,
+    /// How long before the end the source starts crossfading into what's
+    /// just before the loop's start, so the seam is continuous.
+    pub crossfade: SamplePos,
+}
+
+impl LoopPlacement {
+    /// The loop over `start..end`, crossfading over up to `crossfade` (less
+    /// on short loops, or with little before the start).
+    pub fn new(start: SamplePos, end: SamplePos, crossfade: SamplePos) -> Self {
+        let crossfade = crossfade.min((end - start) / 2).min(start).max(0);
+        Self {
+            start,
+            end,
+            crossfade,
+        }
+    }
+
+    /// Where `at` (in the source, going on past the end) reads, and when
+    /// crossfading, from where too and how much of it (0 to 1).
+    #[inline]
+    fn read(&self, at: SamplePos) -> (SamplePos, Option<(SamplePos, f32)>) {
+        let len = self.end - self.start;
+        let at = if at >= self.end && len > 0 {
+            self.start + (at - self.start).rem_euclid(len)
+        } else {
+            at
+        };
+        let into = at - (self.end - self.crossfade);
+        if self.crossfade > 0 && into >= 0 && at < self.end {
+            let t = (into as f32 + 0.5) / self.crossfade as f32;
+            return (at, Some((at - len, t)));
+        }
+        (at, None)
+    }
 }
 
 /// Reads a region of shared, pre-converted sample data at the transport
@@ -24,16 +68,29 @@ pub struct ClipPlacement {
 pub struct AudioClipNode {
     source: Arc<SampleBuffer>,
     place: ClipPlacement,
-    gain: f32,
+    /// Linear, shared with the clip's parameter: changes are heard at once.
+    gain: Arc<AtomicParam>,
+    gain_s: Smoother,
+    /// Balance, -1 to 1, shared with the clip's parameter too.
+    pan: Arc<AtomicParam>,
+    pan_s: Smoother,
     identity: Option<NodeIdentity>,
 }
 
 impl AudioClipNode {
-    pub fn new(source: Arc<SampleBuffer>, place: ClipPlacement, gain: f32) -> Self {
+    pub fn new(
+        source: Arc<SampleBuffer>,
+        place: ClipPlacement,
+        gain: Arc<AtomicParam>,
+        pan: Arc<AtomicParam>,
+    ) -> Self {
         Self {
             source,
             place,
+            gain_s: Smoother::new(gain.get()),
             gain,
+            pan_s: Smoother::new(pan.get()),
+            pan,
             identity: None,
         }
     }
@@ -61,10 +118,13 @@ impl AudioClipNode {
 impl Node for AudioClipNode {
     fn properties(&self) -> NodeProperties {
         // Same source data + placement + gain => same output: dedupable.
+        // The gain and pan change live, so they're the same only if they're
+        // the same parameters.
         let content = ContentId::of(&(
             Arc::as_ptr(&self.source) as usize,
             self.place,
-            self.gain.to_bits(),
+            Arc::as_ptr(&self.gain) as usize,
+            Arc::as_ptr(&self.pan) as usize,
         ));
         let p = NodeProperties::audio(2).with_content(content);
         match self.identity {
@@ -73,33 +133,70 @@ impl Node for AudioClipNode {
         }
     }
 
-    fn process(&mut self, ctx: &mut ProcessContext) {
-        if !ctx.playing {
-            return;
+    fn prepare(&mut self, sample_rate: f64, _max_block: usize) {
+        for (s, p) in [(&mut self.gain_s, &self.gain), (&mut self.pan_s, &self.pan)] {
+            s.set_sample_rate(sample_rate);
+            s.snap(p);
         }
+    }
+
+    fn process(&mut self, ctx: &mut ProcessContext) {
         let p = self.place;
         let block_start = ctx.timeline_pos;
         let block_end = block_start + ctx.block_len as SamplePos;
         let a = block_start.max(p.start);
         let b = block_end.min(p.start + p.length);
-        if a >= b {
+        // Silent: changes take effect at once, so none is ramped in when
+        // the clip next plays.
+        if !ctx.playing || a >= b {
+            self.gain_s.snap(&self.gain);
+            self.pan_s.snap(&self.pan);
             return;
         }
+        self.gain_s.retarget(&self.gain);
+        self.pan_s.retarget(&self.pan);
         let src_len = self.source.len() as SamplePos;
         let src_chans = self.source.num_channels();
-        for ch in 0..2 {
-            let src = self.source.channel(ch.min(src_chans - 1));
-            let out = ctx.audio_out.channel_mut(ch);
-            for t in a..b {
-                let rel = t - p.start;
-                let si = rel + p.source_offset;
-                if si < 0 || si >= src_len {
-                    continue;
-                }
-                out[(t - block_start) as usize] = src[si as usize] * self.gain * self.fade(rel);
+        let (left, right) = ctx.audio_out.channel_pair_mut(0, 1);
+        let (src_l, src_r) = (
+            self.source.channel(0),
+            self.source.channel(1.min(src_chans - 1)),
+        );
+        let in_source = |i: SamplePos| i >= 0 && i < src_len;
+        for t in a..b {
+            let gain = self.gain_s.next();
+            let (gain_l, gain_r) = balance(self.pan_s.next());
+            let rel = t - p.start;
+            let (si, blend) = match p.looped {
+                Some(looped) => looped.read(rel + p.source_offset),
+                None => (rel + p.source_offset, None),
+            };
+            if !in_source(si) {
+                continue;
             }
+            let g = gain * self.fade(rel);
+            let (mut l, mut r) = (src_l[si as usize], src_r[si as usize]);
+            if let Some((from, mix)) = blend
+                && in_source(from)
+            {
+                let from = from as usize;
+                l += (src_l[from] - l) * mix;
+                r += (src_r[from] - r) * mix;
+            }
+            let at = (t - block_start) as usize;
+            left[at] = l * g * gain_l;
+            right[at] = r * g * gain_r;
         }
     }
+}
+
+/// Left and right gains of a balance from -1 (left only) to 1 (right
+/// only): the side turned away from is lowered, the other stays as is, so
+/// the centre is unity and a stereo image stays whole.
+#[inline]
+pub fn balance(pan: f32) -> (f32, f32) {
+    let pan = pan.clamp(-1.0, 1.0);
+    ((1.0 - pan).min(1.0), (1.0 + pan).min(1.0))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
