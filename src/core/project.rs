@@ -9,6 +9,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use tonique_engine::time::TimeSignature;
 
 use crate::core::effect::EffectKind;
 
@@ -16,13 +17,17 @@ use crate::core::effect::EffectKind;
 pub const EXTENSION: &str = "tonique";
 /// Format version written; files from newer versions are refused.
 /// 2 added groups; 3 the echo, spectrum and utility effects, settings
-/// (filter `mode`, echo `time`) among effect parameters, and effect names.
-pub const VERSION: u32 = 3;
+/// (filter `mode`, echo `time`) among effect parameters, and effect names;
+/// 4 the time signature.
+pub const VERSION: u32 = 4;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
     pub version: u32,
     pub bpm: f32,
+    /// 4/4 in projects from before signatures.
+    #[serde(default)]
+    pub time_signature: TimeSignatureFile,
     /// Loop region in beats.
     pub loop_range: (f64, f64),
     pub looping: bool,
@@ -32,6 +37,34 @@ pub struct ProjectFile {
     pub groups: Vec<GroupFile>,
     /// In display order.
     pub tracks: Vec<TrackFile>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TimeSignatureFile {
+    pub numerator: u32,
+    pub denominator: u32,
+}
+
+impl Default for TimeSignatureFile {
+    fn default() -> Self {
+        TimeSignature::default().into()
+    }
+}
+
+impl From<TimeSignature> for TimeSignatureFile {
+    fn from(signature: TimeSignature) -> Self {
+        Self {
+            numerator: signature.numerator,
+            denominator: signature.denominator,
+        }
+    }
+}
+
+impl TimeSignatureFile {
+    /// `None` if the file holds a signature Tonique can't use.
+    pub fn signature(&self) -> Option<TimeSignature> {
+        TimeSignature::new(self.numerator, self.denominator)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -212,6 +245,10 @@ mod tests {
         let mut project = ProjectFile {
             version: VERSION,
             bpm: 128.,
+            time_signature: TimeSignatureFile {
+                numerator: 7,
+                denominator: 8,
+            },
             loop_range: (4., 12.),
             looping: true,
             master: ChannelFile {
