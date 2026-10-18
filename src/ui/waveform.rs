@@ -54,6 +54,9 @@ pub fn paint_waveform(
     {
         return;
     }
+    // Whole tiles are drawn: kept to `visible`, they don't spill over
+    // what's beside it (another pass of a clip's loop, say).
+    let painter = &painter.with_clip_rect(visible);
     let ppp = painter.pixels_per_point() as f64;
     let origin = (rect.left() as f64 * ppp).round();
     let columns = (rect.width() as f64 * ppp).ceil() as usize;
@@ -444,5 +447,43 @@ mod tests {
         // Louder than full scale: cut at the lane's edges.
         assert_eq!(lane(4.).y(0.5), 0.);
         assert_eq!(lane(4.).y(-0.5), 100.);
+    }
+
+    /// Only the visible part is drawn, though whole tiles are meshed: one
+    /// pass of a looped clip doesn't spill over the next.
+    #[test]
+    fn nothing_is_drawn_outside_the_visible_part() {
+        let audio = crate::analysis::AudioInfo::silent(1.);
+        let ctx = egui::Context::default();
+        // A few samples a column: meshed, in tiles wider than shown.
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(100., 100.));
+        let visible = Rect::from_x_y_ranges(30.0..=35., 0.0..=100.);
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            paint_waveform(
+                ui.painter(),
+                rect,
+                visible,
+                &audio.data,
+                0.0..480.,
+                true,
+                Color32::WHITE,
+                1.,
+                0.,
+            );
+        });
+        output.textures_delta.clear();
+        let meshes: Vec<_> = output
+            .shapes
+            .iter()
+            .filter(|s| matches!(s.shape, Shape::Mesh(_)))
+            .collect();
+        assert!(!meshes.is_empty());
+        for shape in meshes {
+            assert!(
+                visible.contains_rect(shape.clip_rect),
+                "{:?}",
+                shape.clip_rect
+            );
+        }
     }
 }
