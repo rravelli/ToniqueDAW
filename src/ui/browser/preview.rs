@@ -99,6 +99,7 @@ fn waveform_ui(ui: &mut Ui, audio: &AudioInfo, state: &mut ProjectState, width: 
             false,
             theme.accent,
             1.,
+            0.,
         );
     }
 

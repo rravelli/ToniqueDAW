@@ -445,6 +445,7 @@ impl ClipDetails {
                 clip.audio.channels >= 2,
                 track.color,
                 clip.gain,
+                clip.pan,
             );
         }
 

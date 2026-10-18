@@ -193,7 +193,7 @@ impl Node for AudioClipNode {
 /// only): the side turned away from is lowered, the other stays as is, so
 /// the centre is unity and a stereo image stays whole.
 #[inline]
-fn balance(pan: f32) -> (f32, f32) {
+pub fn balance(pan: f32) -> (f32, f32) {
     let pan = pan.clamp(-1.0, 1.0);
     ((1.0 - pan).min(1.0), (1.0 + pan).min(1.0))
 }

@@ -380,6 +380,7 @@ pub fn paint_clip_waveform(
             clip.audio.channels >= 2,
             color,
             clip.gain,
+            clip.pan,
         );
         if segment.start > 0. {
             painter.with_clip_rect(viewport).vline(

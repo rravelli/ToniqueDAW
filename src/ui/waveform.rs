@@ -5,6 +5,7 @@ use std::{
 
 use egui::{Color32, Id, Mesh, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use tonique_engine::{
+    nodes::balance,
     peaks::{BASE_BUCKET, WaveformPeaks},
     sample::SampleBuffer,
 };
@@ -27,9 +28,10 @@ const RAW_MAX_SPP: f64 = (4 * BASE_BUCKET) as f64;
 /// values are cached in tiles, so frames where only the position changes
 /// (scrolling, playback) don't touch the audio data.
 /// With `stereo`, each channel gets its own lane; otherwise channels are
-/// merged into one. Sample values are drawn multiplied by `gain` (linear),
-/// so the waveform shows what's heard; past full scale, they're cut at the
-/// lane's edges.
+/// merged into one. Sample values are drawn multiplied by `gain` (linear)
+/// and by the side's share of the `pan` balance (left lane, right lane; a
+/// merged lane gets their mean), so the waveform shows what's heard; past
+/// full scale, they're cut at the lane's edges.
 #[allow(clippy::too_many_arguments)]
 pub fn paint_waveform(
     painter: &Painter,
@@ -40,6 +42,7 @@ pub fn paint_waveform(
     stereo: bool,
     color: Color32,
     gain: f32,
+    pan: f32,
 ) {
     let (sample_start, sample_end) = (samples.start, samples.end);
     let peaks = data.peaks();
@@ -62,6 +65,7 @@ pub fn paint_waveform(
         .ceil()
         .clamp(0., columns as f64) as usize;
 
+    let (left, right) = balance(pan);
     let lanes: Vec<Lane> = if stereo {
         let height = rect.height() / num_channels as f32;
         (0..num_channels)
@@ -69,7 +73,12 @@ pub fn paint_waveform(
                 channels: ch..ch + 1,
                 top: rect.top() + ch as f32 * height,
                 height,
-                gain,
+                gain: gain
+                    * match ch {
+                        0 => left,
+                        1 => right,
+                        _ => 1.,
+                    },
             })
             .collect()
     } else {
@@ -77,7 +86,7 @@ pub fn paint_waveform(
             channels: 0..num_channels,
             top: rect.top(),
             height: rect.height(),
-            gain,
+            gain: gain * (left + right) / 2.,
         }]
     };
     let raw = data.samples().map(|s| s.as_ref());
@@ -140,6 +149,7 @@ pub fn paint_waveform(
         ppp: ppp.to_bits(),
         color,
         gain: gain.to_bits(),
+        pan: pan.to_bits(),
     };
     if let Some(mesh) = cache.mesh(&mesh_key) {
         painter.add(Shape::Mesh(mesh));
@@ -158,7 +168,7 @@ pub fn paint_waveform(
             channels: lane.channels.clone(),
             top: lane.top - rect.top(),
             height: lane.height,
-            gain,
+            gain: lane.gain,
         };
         for tile in first / TILE..last.div_ceil(TILE) {
             let tile_mesh_key = TileMeshKey {
@@ -167,7 +177,7 @@ pub fn paint_waveform(
                 lane_rect: [local_lane.top, local_lane.height].map(f32::to_bits),
                 ppp: ppp.to_bits(),
                 color,
-                gain: gain.to_bits(),
+                gain: local_lane.gain.to_bits(),
             };
             let tile_mesh = match cache.tile_mesh(&tile_mesh_key) {
                 Some(tile_mesh) => tile_mesh,
@@ -328,6 +338,8 @@ struct MeshKey {
     color: Color32,
     /// `f32` bits.
     gain: u32,
+    /// `f32` bits.
+    pan: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -338,7 +350,7 @@ struct TileMeshKey {
     lane_rect: [u32; 2],
     ppp: u64,
     color: Color32,
-    /// `f32` bits.
+    /// The lane's gain (with its side's pan), `f32` bits.
     gain: u32,
 }
 
