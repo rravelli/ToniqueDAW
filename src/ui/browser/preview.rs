@@ -175,7 +175,9 @@ fn waveform_ui(
         .on_hover_cursor(CursorIcon::PointingHand);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 3., theme.bg_deep);
-    if !audio.data.is_ready() {
+    // Only its waveform is decoded for it: not its samples.
+    audio.load_peaks();
+    if !audio.data.peaks_complete() {
         // The waveform grows while the file decodes.
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(100));

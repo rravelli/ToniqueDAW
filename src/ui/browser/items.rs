@@ -562,6 +562,8 @@ impl FileList {
             && is_audio
             && let Some(audio_info) = AUDIO_ANALYSIS_CACHE.get_or_analyze(file.path.clone())
         {
+            // Drawn on the timeline while dragged.
+            audio_info.load_peaks();
             res.dnd_set_drag_payload(DragPayload::File(audio_info));
         }
 
