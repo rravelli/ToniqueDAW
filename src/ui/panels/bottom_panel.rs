@@ -8,19 +8,24 @@ use crate::{
         dnd::DragPayload,
         effects::{EffectEdit, EffectRack},
         theme::{ThemeExt, with_alpha},
-        widget::flat_button::FlatButton,
         workspace::{BottomView, Workspace},
     },
     utils::display_name,
 };
 use egui::{
-    Align, Align2, Color32, CursorIcon, DragAndDrop, FontId, Frame, Label, Layout, Margin, Pos2,
-    Rangef, Rect, RichText, ScrollArea, Stroke, Ui, vec2,
+    Align, Align2, Color32, CornerRadius, CursorIcon, DragAndDrop, FontId, Frame, Galley, Label,
+    Layout, Margin, Painter, Pos2, Rangef, Rect, RichText, ScrollArea, Sense, Stroke, Ui, pos2,
+    vec2,
 };
+use std::sync::Arc;
 use tonique_engine::edit::{ClipId, TrackId};
 
 /// Height of the header's row: the track's name, and tabs.
 const HEADER_ROW: f32 = 14.;
+/// Space each side of a tab's name.
+const TAB_PADDING: f32 = 6.;
+/// Rounding of a tab's top corners, and of the curves at its foot.
+const TAB_RADIUS: f32 = 4.;
 /// Between effects, and around them.
 const GAP: f32 = 8.;
 
@@ -368,7 +373,9 @@ impl BottomPanel {
         let theme = ui.app_theme();
         let ink = theme.text_on(track.color);
         let mut picked = None;
-        Frame::new()
+        // Drawn once the header is: (where, name, selected, hovered).
+        let mut drawn: Vec<(Rect, Arc<Galley>, bool, bool)> = Vec::new();
+        let header = Frame::new()
             .fill(track.color)
             .stroke(Stroke::new(1.0, theme.border))
             .inner_margin(Margin {
@@ -381,7 +388,8 @@ impl BottomPanel {
                 ui.set_width(ui.available_width());
                 let row = vec2(ui.available_width(), HEADER_ROW);
                 ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 2.;
+                    // Room for the selected tab's feet, clear of its neighbour.
+                    ui.spacing_mut().item_spacing.x = TAB_RADIUS + 2.;
                     if let Some((shown, clip)) = tabs {
                         // Right to left: Effects, then Clip.
                         for (view, name) in [
@@ -389,19 +397,21 @@ impl BottomPanel {
                             (BottomView::Clip(clip), "Clip"),
                         ] {
                             let selected = view == shown;
-                            let tab = FlatButton::ghost(name)
-                                .size(vec2(0., HEADER_ROW))
-                                .padding(6.)
-                                .font(FontId::proportional(font_size::SMALL))
-                                .color(ink)
-                                .fill(if selected {
-                                    with_alpha(ink, 40)
-                                } else {
-                                    Color32::TRANSPARENT
-                                })
-                                .border_radius(2.);
-                            if ui.add(tab).clicked() && !selected {
-                                picked = Some(view);
+                            let galley = ui.painter().layout_no_wrap(
+                                name.into(),
+                                FontId::proportional(font_size::SMALL),
+                                Color32::PLACEHOLDER,
+                            );
+                            let size = vec2(galley.size().x + 2. * TAB_PADDING, HEADER_ROW);
+                            let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+                            if !selected {
+                                let response = response.on_hover_cursor(CursorIcon::PointingHand);
+                                if response.clicked() {
+                                    picked = Some(view);
+                                }
+                                drawn.push((rect, galley, false, response.hovered()));
+                            } else {
+                                drawn.push((rect, galley, true, false));
                             }
                         }
                     }
@@ -420,8 +430,53 @@ impl BottomPanel {
                         }
                     });
                 });
-            });
+            })
+            .response
+            .rect;
+        // The selected tab in the panel's colour, open onto it: the view
+        // under the header is that tab's. The others in the header's ink,
+        // tinted with it under the pointer.
+        let painter = ui.painter();
+        // The selected one first: nothing of it over the others.
+        drawn.sort_by_key(|(.., selected, _)| !selected);
+        for (rect, galley, selected, hovered) in drawn {
+            let text = if selected {
+                paint_tab(painter, rect.x_range(), header, theme.bg_panel, track.color);
+                theme.text
+            } else {
+                if hovered {
+                    painter.rect_filled(rect, TAB_RADIUS, with_alpha(ink, 50));
+                }
+                ink
+            };
+            let pos = rect.center() - galley.size() / 2.;
+            painter.galley(pos, galley, text);
+        }
         picked
+    }
+}
+
+/// A selected tab across `x`, from near the top of `header` down through
+/// its bottom edge, in `fill`: rounded on top, its foot curving out into
+/// `around` (the header's colour) on each side, so it reads as part of
+/// the panel below.
+fn paint_tab(painter: &Painter, x: Rangef, header: Rect, fill: Color32, around: Color32) {
+    let r = TAB_RADIUS;
+    let body = Rect::from_x_y_ranges(x, header.top() + 2.0..=header.bottom());
+    let top = CornerRadius {
+        nw: r as u8,
+        ne: r as u8,
+        sw: 0,
+        se: 0,
+    };
+    painter.rect_filled(body, top, fill);
+    for (edge, out) in [(x.min, -r), (x.max, r)] {
+        let foot = Rect::from_two_pos(
+            pos2(edge, header.bottom() - r),
+            pos2(edge + out, header.bottom()),
+        );
+        painter.rect_filled(foot, 0., fill);
+        painter.circle_filled(pos2(edge + out, header.bottom() - r), r, around);
     }
 }
 
