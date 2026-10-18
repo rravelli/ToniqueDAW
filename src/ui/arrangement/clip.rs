@@ -18,6 +18,9 @@ use tonique_engine::time::BeatPos;
 
 const PADDING_TEXT: f32 = 4.;
 const HEADER_HEIGHT: f32 = 16.;
+/// How opaque the line through a clip's header where its loop starts over
+/// is, in the header's ink: discreet, the header still reading as one.
+const LOOP_LINE_ALPHA: u8 = 70;
 /// Left bare at the end of each clip, so where one clip ends and the next
 /// starts (as after a split) shows as a cut through both.
 const CUT_GAP: f32 = 1.;
@@ -244,6 +247,16 @@ impl ClipView<'_> {
             se: 0,
         };
         painter.rect_filled(self.header_rect(drawn), radius, header);
+        // Where the loop starts over: a faint line through the header.
+        if clip.active_loop().is_some() {
+            let stroke = Stroke::new(1., with_alpha(header_ink, LOOP_LINE_ALPHA));
+            for segment in clip.segments(state.bpm()).iter().skip(1) {
+                let x = pos.x + segment.start as f32 * state.grid.pixels_per_beat();
+                if viewport.x_range().contains(x) {
+                    painter.vline(x, pos.y..=pos.y + HEADER_HEIGHT, stroke);
+                }
+            }
+        }
         painter.text(
             Pos2::new(pos.x + PADDING_TEXT, pos.y + 2.),
             Align2::LEFT_TOP,
