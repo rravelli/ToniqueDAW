@@ -22,7 +22,7 @@ use crate::{
     core::state::ProjectState,
     ui::browser::preview::details,
     ui::{
-        browser::file_tree::{FileNode, FileTree},
+        browser::file_tree::{FileNode, FileTree, pinned},
         dnd::DragPayload,
         font::PHOSPHOR_REGULAR,
         theme::{ThemeExt, with_alpha},
@@ -35,6 +35,8 @@ use crate::{
 };
 
 const PLAYABLE_FORMAT: &[&str] = &["mp3", "wav", "ogg"];
+/// Most rows pinned at the top while scrolled into folders.
+const MAX_PINNED: usize = 4;
 /// Height of a row, folders' headers included.
 const ROW_HEIGHT: f32 = 16.;
 
@@ -194,50 +196,85 @@ impl FileList {
                 })
                 .unwrap_or_default();
 
-            // Scrolled into a folder: its header stays at the top (pushed up
-            // by the next one's as it comes), in place of its own row.
+            // Scrolled into folders: the way down to the first row shown (a
+            // folder's header, the subfolders it's in) stays at the top.
             let view_top = ui.clip_rect().top();
-            let first_top = ui.next_widget_position().y;
-            let sticky = files_arc.lock().ok().and_then(|files| {
-                let index = files.items[..=row_range.start.min(files.items.len().checked_sub(1)?)]
-                    .iter()
-                    .rposition(|f| f.depth == 0)?;
-                let hidden = index < row_range.start || first_top < view_top;
-                let open = files
-                    .folders
-                    .get(&files.items[index].path)
-                    .is_some_and(|f| f.open);
-                hidden.then(|| (index, files.items[index].clone(), open))
-            });
-            let mut next_root_top = None;
+            let pinned: Vec<(usize, FileNode, bool)> = files_arc
+                .lock()
+                .map(|files| {
+                    pinned(&files.items, row_range.start, MAX_PINNED)
+                        .into_iter()
+                        .map(|i| {
+                            let file = files.items[i].clone();
+                            let open = files.folders.get(&file.path).is_some_and(|f| f.open);
+                            (i, file, open)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            // Where each row is: a pinned folder is pushed up by the first
+            // row after its contents.
+            let mut tops = HashMap::new();
             for (index, file, open) in visible_rows {
-                let toggled = if sticky.as_ref().is_some_and(|(i, ..)| *i == index) {
-                    ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
-                    false
-                } else if file.depth == 0 {
-                    next_root_top.get_or_insert(ui.next_widget_position().y);
+                tops.insert(index, ui.next_widget_position().y);
+                let toggled = if file.depth == 0 {
                     self.root_ui(ui, index, &file, open, &mut actions)
                 } else {
-                    self.item_ui(ui, index, &file, open, state, &mut actions)
+                    self.item_ui(ui, index, &file, open, state, &mut actions, false)
                 };
                 if toggled {
                     folder_toggles.push(index);
                 }
             }
-            if let Some((index, root, open)) = sticky {
-                let top = next_root_top.map_or(view_top, |next| view_top.min(next - ROW_HEIGHT));
+            let ends: Vec<Option<f32>> = files_arc
+                .lock()
+                .map(|files| {
+                    pinned
+                        .iter()
+                        .map(|(i, file, _)| {
+                            let end = (i + 1..files.items.len())
+                                .find(|&j| files.items[j].depth <= file.depth)?;
+                            tops.get(&end).copied()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut y: Vec<f32> = Vec::with_capacity(pinned.len());
+            for (level, end) in ends.iter().enumerate() {
+                let slot = view_top + level as f32 * ROW_HEIGHT;
+                let pushed = end.map_or(slot, |end| slot.min(end - ROW_HEIGHT));
+                // Under its parent, moved up with it.
+                let under = level
+                    .checked_sub(1)
+                    .map_or(pushed, |parent| pushed.min(y[parent] + ROW_HEIGHT));
+                y.push(under);
+            }
+            // Deepest first: a pushed up subfolder slides under its parent.
+            for (level, (index, file, open)) in pinned.iter().enumerate().rev() {
                 let rect = Rect::from_min_size(
-                    pos2(ui.max_rect().left(), top),
+                    pos2(ui.max_rect().left(), y[level]),
                     vec2(ui.max_rect().width(), ROW_HEIGHT),
                 );
-                ui.painter().rect_filled(rect, 0., ui.app_theme().bg_panel);
+                let theme = ui.app_theme();
+                ui.painter().rect_filled(rect, 0., theme.bg_panel);
+                if level + 1 == pinned.len() {
+                    ui.painter().hline(
+                        rect.x_range(),
+                        rect.bottom() - 0.5,
+                        Stroke::new(1., theme.separator),
+                    );
+                }
                 let toggled = ui
                     .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                        self.root_ui(ui, index, &root, open, &mut actions)
+                        if file.depth == 0 {
+                            self.root_ui(ui, *index, file, *open, &mut actions)
+                        } else {
+                            self.item_ui(ui, *index, file, *open, state, &mut actions, true)
+                        }
                     })
                     .inner;
                 if toggled {
-                    folder_toggles.push(index);
+                    folder_toggles.push(*index);
                 }
             }
         });
@@ -460,7 +497,9 @@ impl FileList {
         }
     }
 
-    pub fn item_ui(
+    /// `pinned`: drawn pinned at the top, over the list.
+    #[allow(clippy::too_many_arguments)]
+    fn item_ui(
         &mut self,
         ui: &mut Ui,
         index: usize,
@@ -468,6 +507,7 @@ impl FileList {
         open: bool,
         state: &mut ProjectState,
         actions: &mut Vec<FolderAction>,
+        pinned: bool,
     ) -> bool {
         let is_dir = file.is_dir;
         let selected = self.selected.is_some_and(|idx| idx == index);
@@ -567,7 +607,9 @@ impl FileList {
             res.dnd_set_drag_payload(DragPayload::File(audio_info));
         }
 
-        if selected {
+        // A pinned row is in view already: scrolling to it would drag the
+        // list along.
+        if selected && !pinned {
             ui.scroll_to_rect(
                 Rect::from_min_max(
                     pos2(res.rect.left(), res.rect.top() - 20.),

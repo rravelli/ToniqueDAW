@@ -285,6 +285,51 @@ impl Search {
     }
 }
 
+/// The folders pinned at the top of `items` scrolled to `first`: those it
+/// is in, root first, `max` at most (the outermost). Pinned rows cover the
+/// ones under them: an open folder covered inside the last one pinned is
+/// pinned too. A pin whose folder ends in view is pushed up by what's
+/// next, which is for the caller to draw.
+pub fn pinned(items: &[FileNode], first: usize, max: usize) -> Vec<usize> {
+    let Some(top) = items.get(first) else {
+        return Vec::new();
+    };
+    let mut chain = ancestors(items, first, top.depth);
+    let mut covered = 0;
+    while covered < chain.len() && chain.len() < max {
+        let row = first + covered;
+        let inside_last = chain
+            .last()
+            .is_some_and(|&last| items[row].depth == items[last].depth + 1);
+        let open_folder = items
+            .get(row + 1)
+            .is_some_and(|next| next.depth > items[row].depth);
+        if inside_last && open_folder {
+            chain.push(row);
+        }
+        covered += 1;
+    }
+    chain.truncate(max);
+    chain
+}
+
+/// The folders row `index` (at `depth`) is in, outermost first.
+fn ancestors(items: &[FileNode], index: usize, depth: usize) -> Vec<usize> {
+    let mut chain = Vec::new();
+    let mut want = depth;
+    for i in (0..index).rev() {
+        if want == 0 {
+            break;
+        }
+        if items[i].depth < want {
+            chain.push(i);
+            want = items[i].depth;
+        }
+    }
+    chain.reverse();
+    chain
+}
+
 pub fn is_audio_file(path: &Path) -> bool {
     path.extension()
         .and_then(OsStr::to_str)
@@ -456,6 +501,38 @@ mod tests {
         let _ = fs::remove_dir_all(base);
     }
 
+    /// Rows at these depths, as a tree shows them.
+    fn tree(depths: &[usize]) -> Vec<FileNode> {
+        depths
+            .iter()
+            .enumerate()
+            .map(|(i, &depth)| FileNode {
+                path: PathBuf::from(format!("/{i}")),
+                depth,
+                name_lower: String::new(),
+                is_dir: true,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_folders_scrolled_into_are_pinned_root_first() {
+        // 0 root, 1 a, 2 a/b, 3 a/b/file, 4 a/b/file, 5 c, 6 root2
+        let items = tree(&[0, 1, 2, 3, 3, 1, 0]);
+        assert_eq!(pinned(&items, 0, 4), [] as [usize; 0], "at the top");
+        // One row down: the root pinned covers a, pinned in turn covering
+        // b, and so on down to the first row left in view (a file of b).
+        assert_eq!(pinned(&items, 1, 4), [0, 1, 2]);
+        assert_eq!(pinned(&items, 3, 4), [0, 1, 2]);
+        // At c: only the root.
+        assert_eq!(pinned(&items, 5, 4), [0]);
+        assert_eq!(pinned(&items, 3, 2), [0, 1], "the outermost, at most");
+        // Into the next root: none of the first's.
+        assert_eq!(pinned(&items, 6, 4), [] as [usize; 0]);
+    }
+
+    /// A label's section gathers files and folders from anywhere; its
+    /// folders open as anywhere else, and a search looks through them.
     #[test]
     fn collapsing_all_closes_a_roots_folders_but_not_it() {
         let (base, drums, _) = folders("collapse");
