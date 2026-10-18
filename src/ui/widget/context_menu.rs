@@ -8,6 +8,28 @@ use egui::{
 use egui_phosphor::fill::CARET_RIGHT;
 
 const FONT_SIZE: f32 = font_size::LABEL;
+/// Narrowest a menu's items are.
+const MIN_WIDTH: f32 = 120.;
+/// Left of an item's text (its icon before it), and right of it.
+const TEXT_LEFT: f32 = 18.;
+const TEXT_RIGHT: f32 = 10.;
+/// Room for a submenu's caret.
+const CARET_WIDTH: f32 = 12.;
+
+/// How wide `ui`'s menu items are: wide enough for the widest text seen
+/// in it, remembered from frame to frame so every item gets that width
+/// (`needed`, this one's, may widen it).
+fn item_width(ui: &Ui, needed: f32) -> f32 {
+    let key = ui.id().with("menu-item-width");
+    let widest = ui.data(|d| d.get_temp::<f32>(key)).unwrap_or(0.);
+    let width = needed.max(widest).max(ui.available_width().min(MIN_WIDTH));
+    if width > widest {
+        ui.data_mut(|d| d.insert_temp(key, width));
+        // Items drawn before this one were narrower: draw them again.
+        ui.ctx().request_discard("menu items widened");
+    }
+    width
+}
 
 pub struct ContextMenuButton {
     icon: String,
@@ -55,9 +77,13 @@ impl ContextMenuButton {
 
 impl Widget for ContextMenuButton {
     fn ui(self, ui: &mut Ui) -> Response {
-        // Define the desired height and width for the entire button
         let height = 16.0;
-        let width = ui.available_width().min(120.); // Fill full width of the menu
+        let text_font = FontId::new(FONT_SIZE, egui::FontFamily::Proportional);
+        let galley =
+            ui.painter()
+                .layout_no_wrap(self.text.clone(), text_font.clone(), Color32::PLACEHOLDER);
+        let caret = if self.submenu { CARET_WIDTH } else { 0. };
+        let width = item_width(ui, TEXT_LEFT + galley.size().x + TEXT_RIGHT + caret);
         let desired_size = Vec2::new(width, height);
 
         // Allocate a rectangular region for interaction
@@ -77,10 +103,9 @@ impl Widget for ContextMenuButton {
 
         // Draw the icon + text manually inside that region
         let icon_font = FontId::new(FONT_SIZE, egui::FontFamily::Name(PHOSPHOR_REGULAR.into()));
-        let text_font = FontId::new(FONT_SIZE, egui::FontFamily::Proportional);
 
         let icon_x = rect.left() + 3.0;
-        let text_x = rect.left() + 18.0;
+        let text_x = rect.left() + TEXT_LEFT;
         let center_y = rect.center().y;
 
         let painter = ui.painter();
@@ -95,11 +120,9 @@ impl Widget for ContextMenuButton {
         );
 
         // Text
-        painter.text(
-            egui::pos2(text_x, center_y),
-            Align2::LEFT_CENTER,
-            self.text,
-            text_font.clone(),
+        painter.galley(
+            egui::pos2(text_x, center_y - galley.size().y / 2.),
+            galley,
             text_color,
         );
 
@@ -131,10 +154,8 @@ impl Widget for ContextMenuSeparator {
         // Add some vertical spacing before and after
         ui.add_space(2.0);
 
-        let (rect, response) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width().min(120.), 1.0),
-            egui::Sense::hover(),
-        );
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(item_width(ui, 0.), 1.0), egui::Sense::hover());
         let stroke_color = ui.visuals().widgets.noninteractive.bg_stroke.color;
         let stroke = Stroke::new(1.0, stroke_color);
 
