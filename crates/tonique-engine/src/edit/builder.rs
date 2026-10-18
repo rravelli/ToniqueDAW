@@ -141,6 +141,7 @@ impl Builder<'_> {
                     gain,
                     pan,
                     looped,
+                    ..
                 } => {
                     // Not loaded yet: silent until the source is set.
                     let Some(source) = self.edit.source(*source) else {

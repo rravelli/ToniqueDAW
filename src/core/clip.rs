@@ -32,6 +32,9 @@ pub struct AudioClip {
     pub gain: f32,
     /// Balance, -1 (left only) to 1 (right only).
     pub pan: f32,
+    /// Where bar 1 of the clip's own grid is in the file, in seconds: the
+    /// file's start unless set. Trims and slips leave it where it is.
+    pub origin: f64,
 }
 
 /// A stretch of a clip playing one stretch of its file, without a jump.
@@ -58,6 +61,7 @@ impl AudioClip {
             looped: None,
             gain: 1.,
             pan: 0.,
+            origin: 0.,
         };
         clip.length = clip.source_beats(bpm);
         clip

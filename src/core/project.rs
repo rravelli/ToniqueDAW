@@ -17,8 +17,8 @@ pub const EXTENSION: &str = "tonique";
 /// Format version written; files from newer versions are refused.
 /// 2 added groups; 3 the echo, spectrum and utility effects, settings
 /// (filter `mode`, echo `time`) among effect parameters, and effect names;
-/// 4 clip gain, pan and loops; clips saved by offset and length rather than
-/// by trims.
+/// 4 clip gain, pan, loops and bar 1; clips saved by offset and length
+/// rather than by trims.
 pub const VERSION: u32 = 4;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -111,6 +111,10 @@ pub struct ClipFile {
     /// (centred).
     #[serde(default, skip_serializing_if = "is_centred")]
     pub pan: f32,
+    /// Where bar 1 of the clip's own grid is in the file, in seconds; the
+    /// file's start (0) when absent.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub origin: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -130,6 +134,10 @@ fn is_unity(gain: &f32) -> bool {
 
 fn is_centred(pan: &f32) -> bool {
     *pan == 0.
+}
+
+fn is_zero(seconds: &f64) -> bool {
+    *seconds == 0.
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -294,6 +302,7 @@ mod tests {
                     trim_end: None,
                     gain: 0.5,
                     pan: -0.25,
+                    origin: 0.75,
                 }],
             }],
         };

@@ -44,8 +44,8 @@ use tonique_engine::{
         Parameter, Plugin, PluginId, Track, TrackId,
         commands::{
             AddClip, AddPlugin, AddTrack, EditCommand, MoveClip, RemoveClip, RemovePlugin,
-            RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetClipLoop, SetMute,
-            SetParam, SetSolo, SetTempoMap,
+            RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetClipLoop,
+            SetClipOrigin, SetMute, SetParam, SetSolo, SetTempoMap,
         },
     },
     engine::Engine,
@@ -835,6 +835,17 @@ impl ProjectState {
             ops.push(ClipOp::Resize(track, resized));
         });
     }
+    /// Move bar 1 of clip `id`'s own grid to `origin` seconds into its file,
+    /// as an undo step.
+    pub fn set_clip_origin(&mut self, id: ClipId, origin: f64) {
+        let Some((track, clip)) = self.find_clip(id) else {
+            return;
+        };
+        let origin = origin.clamp(0., clip.source_seconds() as f64);
+        if origin != clip.origin {
+            self.perform(SetClipOrigin::new(track, id, origin));
+        }
+    }
     /// Set an audio clip's gain (linear) or pan, heard at once. Not an
     /// undo step: see [`Self::commit_clip_param`].
     pub fn set_clip_param(&mut self, id: ClipId, which: ClipParam, value: f32) {
@@ -929,10 +940,12 @@ impl ProjectState {
             gain,
             pan,
             looped,
+            origin_s,
             ..
         } = &mut engine_clip.content
         {
             *source_offset_s = clip.offset;
+            *origin_s = clip.origin;
             // In range, whatever a project file says.
             gain.value.set(clip.gain.clamp(gain.min, gain.max), 0.);
             pan.value.set(clip.pan.clamp(pan.min, pan.max), 0.);
@@ -950,6 +963,7 @@ impl ProjectState {
             ref gain,
             ref pan,
             looped,
+            origin_s,
         } = clip.content
         else {
             return None;
@@ -966,6 +980,7 @@ impl ProjectState {
             looped,
             gain: gain.get(),
             pan: pan.get(),
+            origin: origin_s,
         })
     }
 

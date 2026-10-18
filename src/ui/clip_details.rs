@@ -1,8 +1,8 @@
 //! The bottom panel's view of one clip.
 
 use egui::{
-    Align2, Color32, CursorIcon, DragValue, FontId, Label, Rect, RichText, ScrollArea, Sense,
-    Shape, Stroke, Ui, UiBuilder, pos2, vec2,
+    Align2, Color32, CursorIcon, DragValue, FontId, Label, Rect, Response, RichText, ScrollArea,
+    Sense, Shape, Stroke, Ui, UiBuilder, pos2, vec2,
 };
 use tonique_engine::{
     edit::{ClipId, ClipLoop},
@@ -73,9 +73,9 @@ enum Handle {
     Loop,
 }
 
-/// Bottom panel view of one clip, as in other DAWs: an inspector of its
-/// properties on the left, and on the right its whole source file on a grid
-/// counted from its start marker (bar 1), zoomable and scrollable. Markers
+/// Bottom panel view of one clip: an inspector of its properties on the
+/// left, and on the right its whole source file on a grid counted from the
+/// clip's bar 1 (the file's start unless moved), zoomable and scrollable. Markers
 /// in the ruler show where playback starts and (without a loop) ends, and
 /// a bracket the loop; all can be dragged.
 pub struct ClipDetails {
@@ -83,8 +83,7 @@ pub struct ClipDetails {
     grid: GridService,
     /// The clip the view was fitted to: another one refits it.
     fitted: Option<ClipId>,
-    /// Where bar 1 is in the file, in seconds: the clip's start marker, as
-    /// in the edit (so it holds still while a marker is dragged).
+    /// Where bar 1 is in the file, in seconds: the clip's, as last drawn.
     origin: f64,
     /// The waveform's lane, as last drawn.
     #[cfg(test)]
@@ -127,21 +126,23 @@ impl ClipDetails {
         }
 
         let bpm = state.bpm();
-        if self.fitted == Some(clip.id) && clip.offset != self.origin {
-            // The start marker moved (a slip or a trim was applied): bar 1
-            // follows, and the audio stays where it was on screen.
+        if self.fitted == Some(clip.id) && clip.origin != self.origin {
+            // Bar 1 moved: the grid follows, and the audio stays where it
+            // was on screen.
             self.grid.offset.x -= self
                 .grid
-                .beats_to_width(to_beats(clip.offset - self.origin, bpm));
+                .beats_to_width(to_beats(clip.origin - self.origin, bpm));
         }
-        self.origin = clip.offset;
+        self.origin = clip.origin;
         if self.fitted != Some(clip.id) {
             self.fit(clip, bpm, lane.width());
             self.fitted = Some(clip.id);
         }
-        if let Some(at) = self.navigate(ui, ruler, lane, clip, bpm) {
+        let (seek, ruler_response) = self.navigate(ui, ruler, lane, clip, bpm);
+        if let Some(at) = seek {
             state.seek(at);
         }
+        self.bar_one_menu(ui, &ruler_response, lane, clip, state);
         self.scrollbar_ui(ui, scrollbar, lane, clip, bpm);
         self.handles(ui, ruler, lane, clip, state);
         // As being dragged, here or in the timeline.
@@ -208,6 +209,7 @@ impl ClipDetails {
     /// over the ruler. The wheel or a drag over the lane scrolls.
     /// Double-clicking the lane returns where to seek to: where that part of
     /// the file plays first; double-clicking the ruler fits the clip again.
+    /// Also returns the ruler's response.
     fn navigate(
         &mut self,
         ui: &Ui,
@@ -215,7 +217,7 @@ impl ClipDetails {
         lane: Rect,
         clip: &AudioClip,
         bpm: f32,
-    ) -> Option<BeatPos> {
+    ) -> (Option<BeatPos>, Response) {
         let response = ui
             .interact(lane, ui.id().with("clip-lane"), Sense::click_and_drag())
             .on_hover_cursor(CursorIcon::Grab);
@@ -241,7 +243,10 @@ impl ClipDetails {
         }
         let ruler_response = ui
             .interact(ruler, ui.id().with("clip-ruler"), Sense::click())
-            .on_hover_text("Bars from the start marker. Double-click to fit the clip.");
+            .on_hover_text(
+                "Bars from the clip's bar 1. Double-click to fit the clip, right-click to \
+                 move bar 1.",
+            );
         if ruler_response.double_clicked() {
             self.fit(clip, bpm, lane.width());
         }
@@ -253,7 +258,46 @@ impl ClipDetails {
 
         let (min, max) = self.scroll_range(clip, bpm, lane);
         self.grid.offset.x = self.grid.offset.x.clamp(min, max);
-        seek
+        (seek, ruler_response)
+    }
+
+    /// The ruler's menu: bar 1 where it was right-clicked, at the start
+    /// marker, or back at the file's start.
+    fn bar_one_menu(
+        &self,
+        ui: &Ui,
+        ruler: &Response,
+        lane: Rect,
+        clip: &AudioClip,
+        state: &mut ProjectState,
+    ) {
+        let bpm = state.bpm();
+        let clicked = ui.id().with("bar-one-at");
+        if ruler.secondary_clicked()
+            && let Some(pos) = ruler.interact_pointer_pos()
+        {
+            // Where the pointer is, not snapped: the grid being moved.
+            let at = self.origin + to_seconds(self.grid.x_to_beats(pos.x, lane).0, bpm);
+            ui.data_mut(|d| d.insert_temp(clicked, at));
+        }
+        ruler.context_menu(|ui| {
+            let mut origin = None;
+            if let Some(at) = ui.data(|d| d.get_temp::<f64>(clicked))
+                && ui.button("Bar 1 here").clicked()
+            {
+                origin = Some(at);
+            }
+            if ui.button("Bar 1 at the start marker").clicked() {
+                origin = Some(clip.offset);
+            }
+            if ui.button("Bar 1 at the file's start").clicked() {
+                origin = Some(0.);
+            }
+            if let Some(origin) = origin {
+                state.set_clip_origin(clip.id, origin);
+                ui.close();
+            }
+        });
     }
 
     /// How far the view scrolls: always keeping part of the file in view.
@@ -1137,16 +1181,29 @@ mod tests {
     }
 
     #[test]
-    fn the_start_marker_slips_the_audio_and_bar_one_follows() {
+    fn the_start_marker_slips_the_audio_and_bar_one_stays() {
         let mut h = Harness::new();
         let file_start = h.at(0.).x;
-        assert_eq!(h.details.origin, 0.5);
+        assert_eq!(h.details.origin, 0., "the file's start");
         let (from, to) = (h.at(0.5), h.at(0.75));
         h.drag(from, to);
         let clip = h.clip();
         assert_eq!((clip.offset, clip.position), (0.75, BeatPos(5.)), "slipped");
-        assert_eq!(h.details.origin, 0.75, "bar 1 is the start marker");
+        assert_eq!(h.details.origin, 0., "bar 1 stayed");
         assert!((h.at(0.).x - file_start).abs() < 0.01, "the audio stayed");
+    }
+
+    #[test]
+    fn moving_bar_one_keeps_the_audio_in_place_and_is_undone() {
+        let mut h = Harness::new();
+        let file_start = h.at(0.).x;
+        h.state.set_clip_origin(h.clip, 0.25);
+        h.frame(Vec::new());
+        assert_eq!(h.details.origin, 0.25);
+        assert!((h.at(0.).x - file_start).abs() < 0.01, "the audio stayed");
+        h.state.undo();
+        h.frame(Vec::new());
+        assert_eq!(h.details.origin, 0.);
     }
 
     #[test]

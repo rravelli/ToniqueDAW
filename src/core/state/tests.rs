@@ -1193,6 +1193,7 @@ mod projects {
         });
         clip.gain = 0.5;
         clip.pan = 0.75;
+        clip.origin = quarter / 2.;
         state.add_clips(&track, vec![clip]);
         state.commit_volume(track, 1.0, 0.5);
         state.commit_volume(MASTER_TRACK_ID, 1.0, 0.8);
@@ -1265,6 +1266,7 @@ mod projects {
                 trim_end: None,
                 gain: 1.,
                 pan: 0.,
+                origin: 0.,
             }],
         });
         let mut state = setup_state();
@@ -1300,6 +1302,7 @@ mod projects {
                 trim_end: None,
                 gain: 20.,
                 pan: 5.,
+                origin: 0.,
             }],
         });
         let mut state = setup_state();

@@ -339,6 +339,50 @@ impl EditCommand for SetClipLoop {
     }
 }
 
+/// Move bar 1 of an audio clip's own grid to `origin_s` seconds into its
+/// source. Not heard: nothing to rebuild.
+pub struct SetClipOrigin {
+    track: TrackId,
+    id: ClipId,
+    origin_s: f64,
+}
+
+impl SetClipOrigin {
+    pub fn new(track: TrackId, id: ClipId, origin_s: f64) -> Self {
+        Self {
+            track,
+            id,
+            origin_s,
+        }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        let c = edit
+            .track_mut(self.track)?
+            .clips
+            .iter_mut()
+            .find(|c| c.id == self.id)
+            .ok_or(EditError::ClipNotFound(self.id))?;
+        let ClipContent::Audio { origin_s, .. } = &mut c.content else {
+            return Err(EditError::Invalid("not an audio clip"));
+        };
+        std::mem::swap(origin_s, &mut self.origin_s);
+        Ok(Effects::none())
+    }
+}
+
+impl EditCommand for SetClipOrigin {
+    fn label(&self) -> &'static str {
+        "Clip bar 1"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+}
+
 /// Reorder a track. Moving tracks never changes the sound.
 pub struct MoveTrack {
     id: TrackId,

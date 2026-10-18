@@ -213,6 +213,9 @@ pub enum ClipContent {
         /// Once reading reaches the loop's end, it goes on from its start,
         /// for as long as the clip lasts.
         looped: Option<ClipLoop>,
+        /// Where bar 1 of the clip's own grid is in the source, in seconds:
+        /// for editing it, not heard.
+        origin_s: f64,
     },
     Midi {
         notes: Vec<Note>,
@@ -269,6 +272,7 @@ impl Clip {
                 gain: Parameter::new(ParamId(edit.next_id()), "gain", 0.0, CLIP_GAIN_MAX, 1.0),
                 pan: Parameter::new(ParamId(edit.next_id()), "pan", -1.0, 1.0, 0.0),
                 looped: None,
+                origin_s: 0.0,
             },
         }
     }

@@ -635,6 +635,22 @@ fn clip_loops_are_set_and_undone() {
 }
 
 #[test]
+fn a_clips_bar_1_is_set_and_undone_without_a_rebuild() {
+    let (mut s, _p, tid, cid) = playing_clip(sine(48000 * 2), None, 4.0);
+    let origin = |s: &EditSession| match &s.edit().track(tid).unwrap().clip(cid).unwrap().content {
+        ClipContent::Audio { origin_s, .. } => *origin_s,
+        ClipContent::Midi { .. } => unreachable!(),
+    };
+    assert_eq!(origin(&s), 0.0, "the file's start");
+    let graphs = s.engine().graphs_adopted();
+    s.perform(SetClipOrigin::new(tid, cid, 0.25)).unwrap();
+    assert_eq!(origin(&s), 0.25);
+    assert_eq!(s.engine().graphs_adopted(), graphs, "not heard");
+    s.undo().unwrap();
+    assert_eq!(origin(&s), 0.0);
+}
+
+#[test]
 fn tracks_can_be_reordered_renamed_and_duplicated() {
     let mut edit = Edit::new(120.0);
     let t = synth_track(&mut edit, vec![note(0.0, 1.0, 60)], 4.0);

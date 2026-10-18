@@ -134,6 +134,7 @@ impl ProjectState {
                             trim_end: None,
                             gain: clip.gain,
                             pan: clip.pan,
+                            origin: clip.origin,
                         })
                         .collect(),
                 }
@@ -267,6 +268,7 @@ impl ProjectState {
         let mut restored = AudioClip::new(self.new_clip_id(), audio, BeatPos(clip.position), bpm);
         restored.gain = clip.gain;
         restored.pan = clip.pan;
+        restored.origin = clip.origin;
         restored.looped = clip.looped.map(|l| ClipLoop {
             start_s: l.start,
             end_s: l.end,
