@@ -209,13 +209,25 @@ impl TrackHeaders {
             footer.top() + FOOTER_PADDING..=footer.bottom(),
         )));
         master.set_clip_rect(footer);
-        TrackHeader::new().ui(
+        let response = TrackHeader::new().ui(
             &mut master,
             &master_track,
             state,
             rename == Some(master_track.id),
         );
-        target
+        // The master's lane, in the footer, isn't the timeline's: its drops
+        // are taken here.
+        let lane = Rect::from_x_y_ranges(self.lanes.x_range(), response.rect.y_range());
+        let master_target = effect_drop(
+            &master,
+            state,
+            workspace,
+            master_track.id,
+            &response,
+            lane,
+            true,
+        );
+        target.or(master_target)
     }
 
     /// The grip along the list's left edge: dragging it resizes the list,
@@ -414,25 +426,10 @@ impl TrackHeaders {
                     }
                     workspace.bottom_view = BottomView::Effects;
                 }
-                // Effects dropped on the header or the lane: both lit while
-                // one's under the pointer. The lane takes the drop itself.
+                // The timeline takes drops on the lane itself.
                 let lane = Rect::from_x_y_ranges(self.lanes.x_range(), row.y);
-                if dragging_effect(ui)
-                    && ui
-                        .input(|i| i.pointer.hover_pos())
-                        .is_some_and(|p| lane.contains(p) || response.rect.contains(p))
-                {
-                    paint_drop_target(ui, response.rect);
-                    target = Some(row.y);
-                }
-                if let Some(payload) = response.dnd_release_payload::<DragPayload>()
-                    && let DragPayload::Effect(id) = *payload
-                {
-                    state.add_effect(&track.id, id, usize::MAX);
-                    state.select_track(&track.id);
-                    workspace.bottom_panel_open = true;
-                    workspace.bottom_view = BottomView::Effects;
-                }
+                target =
+                    effect_drop(ui, state, workspace, track.id, &response, lane, false).or(target);
             }
             paint_group_scopes(ui, layout.rows(), x);
             self.drop_rows(ui, state, layout.rows(), x);
@@ -519,6 +516,42 @@ impl TrackHeaders {
             ui.close();
         }
     }
+}
+
+/// An effect dropped on the header of track `id` (`header`), or on its
+/// `lane` when `on_lane`, goes at the end of its chain; it's selected, its
+/// effects shown. While an effect is dragged over either, the header is
+/// lit; returns the rows to light the lane over.
+fn effect_drop(
+    ui: &Ui,
+    state: &mut ProjectState,
+    workspace: &mut Workspace,
+    id: TrackId,
+    header: &egui::Response,
+    lane: Rect,
+    on_lane: bool,
+) -> Option<Rangef> {
+    if !dragging_effect(ui) {
+        return None;
+    }
+    let pointer = ui.input(|i| i.pointer.hover_pos())?;
+    let over_lane = lane.contains(pointer);
+    if !over_lane && !header.rect.contains(pointer) {
+        return None;
+    }
+    paint_drop_target(ui, header.rect);
+    let released = ui.input(|i| i.pointer.any_released());
+    if released
+        && (!over_lane || on_lane)
+        && let Some(payload) = egui::DragAndDrop::take_payload::<DragPayload>(ui.ctx())
+        && let DragPayload::Effect(kind) = *payload
+    {
+        state.add_effect(&id, kind, usize::MAX);
+        state.select_track(&id);
+        workspace.bottom_panel_open = true;
+        workspace.bottom_view = BottomView::Effects;
+    }
+    Some(header.rect.y_range())
 }
 
 /// Whether an effect is being dragged.

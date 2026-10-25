@@ -130,8 +130,13 @@ impl CentralPanel {
         self.tracks.set_lanes(timeline_viewport);
         // The lane of the track an effect would be dropped on, lit with
         // its header.
+        // Over the footer too, for the master.
         if let Some(rows) = drop_target {
+            let lanes = Rect::from_x_y_ranges(timeline_viewport.x_range(), area.y_range());
+            let clip = ui.clip_rect();
+            ui.set_clip_rect(lanes);
             paint_drop_target(ui, Rect::from_x_y_ranges(timeline_viewport.x_range(), rows));
+            ui.set_clip_rect(clip);
         }
         if state.track_count() == 0 {
             empty_project_ui(ui, state, timeline_viewport);
@@ -761,6 +766,53 @@ mod tests {
             "starts at {:?}",
             bounds.start_pos
         );
+    }
+
+    /// An effect dropped on the master's header, or on its lane in the
+    /// footer, goes on the master.
+    #[test]
+    fn effects_drop_on_the_master() {
+        use crate::{core::effect::EffectKind, ui::dnd::DragPayload};
+        use egui::{Event, PointerButton, Pos2};
+
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        state.add_track();
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        crate::ui::theme::Theme::default().install(&ctx);
+        let mut panel = CentralPanel::new();
+        let mut workspace = Workspace::default();
+        let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(ui, state, &mut workspace, &mut Commands::default())
+            });
+            output.textures_delta.clear();
+        };
+        // The master's row, at the bottom.
+        let y = 800. - state.master_track().height / 2.;
+        let effects = |state: &ProjectState| state.effects(&MASTER_TRACK_ID).len();
+        frame(&mut state, Vec::new()); // lay out once
+        for (x, what) in [(1100., "header"), (400., "lane")] {
+            let at = Pos2::new(x, y);
+            let before = effects(&state);
+            egui::DragAndDrop::set_payload(&ctx, DragPayload::Effect(EffectKind::Echo));
+            frame(&mut state, vec![Event::PointerMoved(at)]);
+            let release = Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            };
+            frame(&mut state, vec![release]);
+            frame(&mut state, Vec::new());
+            assert_eq!(effects(&state), before + 1, "dropped on the {what}");
+        }
     }
 
     /// The rename shortcut types a name in the selected track's header;
