@@ -39,13 +39,12 @@ const SELECTION_FILL: f32 = 0.8;
 /// How much a collapsed clip's waveform stands out from its body: a hint
 /// of where the sound is, the header being what's read.
 const COLLAPSED_WAVE: f32 = 0.4;
-/// How much a silenced clip's waveform stands out from its body.
-const SILENCED_WAVE: f32 = 0.45;
-/// How much of its track's colour a silenced clip's body, header and
-/// outline have: a faint wash of it.
+/// How much of its track's colour a silenced clip's body, header,
+/// waveform and outline have: a faint wash of it.
 const SILENCED_BODY_TINT: f32 = 0.16;
 const SILENCED_HEADER_TINT: f32 = 0.27;
 const SILENCED_BORDER_TINT: f32 = 0.43;
+const SILENCED_WAVE_TINT: f32 = 0.5;
 /// The least contrast a black waveform needs with what it's drawn on (the
 /// WCAG ratio for graphics); on anything darker, it's drawn light.
 const WAVE_CONTRAST: f32 = 3.;
@@ -195,13 +194,16 @@ impl ClipView<'_> {
             egui::StrokeKind::Inside,
         );
         let rect = Rect::from_min_max(pos2(pos.x, pos.y + HEADER_HEIGHT), pos + size);
-        // Black, faded on collapsed and silenced clips.
+        // Black, or a wash of the track's colour on silenced clips; faded
+        // on collapsed ones.
         let waveform = |painter: &Painter, bg: Color32| {
-            let ink = wave_ink(bg);
+            let ink = if self.silenced {
+                tint(color, SILENCED_WAVE_TINT)
+            } else {
+                wave_ink(bg)
+            };
             let ink = if self.collapsed {
                 bg.lerp_to_gamma(ink, COLLAPSED_WAVE)
-            } else if self.silenced {
-                bg.lerp_to_gamma(ink, SILENCED_WAVE)
             } else {
                 ink
             };
