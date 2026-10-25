@@ -1,4 +1,7 @@
-use std::{collections::HashMap, time::Instant};
+use std::{
+    collections::{HashMap, VecDeque},
+    time::Instant,
+};
 use tonique_engine::{
     edit::TrackId,
     meter::{ChannelMeter, SCOPE_LEN},
@@ -15,6 +18,11 @@ const RMS_TIME: f32 = 0.3;
 const IDLE: f32 = 0.1;
 /// Below this, a level shows as silence.
 pub const FLOOR_DB: f32 = -96.;
+/// The scope's history: columns of this many frames, the lowest and the
+/// highest sample of each...
+pub const SCOPE_COLUMN: usize = 256;
+/// ...this many of them: about 2 s at 48 kHz.
+pub const SCOPE_COLUMNS: usize = 400;
 
 /// A stereo channel's levels as a meter shows them: the peak, jumping up
 /// at once and falling back steadily; the highest recent peak, held a
@@ -34,8 +42,13 @@ pub struct AudioMetrics {
     last_update: Option<Instant>,
     /// Seconds since audio was last processed.
     idle: f32,
-    /// Most recent samples, for the scope (the master's only).
-    pub samples: [Vec<f32>; 2],
+    /// The scope's columns, oldest first (the master's only): the lowest
+    /// and highest sample of either channel over [`SCOPE_COLUMN`] frames.
+    scope: VecDeque<[f32; 2]>,
+    /// The column being filled, and the frames in it so far.
+    column: ([f32; 2], usize),
+    /// The scope's newest samples, as read: kept to read into.
+    scope_read: [Vec<f32>; 2],
 }
 
 impl AudioMetrics {
@@ -48,13 +61,15 @@ impl AudioMetrics {
             clipped: [false; 2],
             last_update: None,
             idle: 0.,
-            samples: [vec![], vec![]],
+            scope: VecDeque::new(),
+            column: ([0.; 2], 0),
+            scope_read: [vec![], vec![]],
         }
     }
 
-    /// Pull the latest levels from an engine channel meter, and its recent
-    /// samples if `scope`: only the master's are shown, and copying every
-    /// channel's each frame adds up.
+    /// Pull the latest levels from an engine channel meter, and its new
+    /// samples into the scope's history if `scope`: only the master's is
+    /// shown, and reading every channel's each frame adds up.
     pub fn update(&mut self, meter: &ChannelMeter, scope: bool) {
         let now = Instant::now();
         let dt = self
@@ -69,18 +84,48 @@ impl AudioMetrics {
         }
         // The UI can redraw faster than audio is processed: keep the last
         // levels a moment, then fall as if silent.
+        if scope && let Some([level, _]) = levels {
+            self.read_scope(meter, level.frames as usize);
+        }
         if levels.is_some() || self.idle > IDLE {
             let levels = levels.unwrap_or_default();
             self.apply(levels.map(|l| (l.peak, l.rms)), dt);
         } else {
             self.apply([(0., self.power[0].sqrt()), (0., self.power[1].sqrt())], dt);
         }
-        if scope {
-            for ch in 0..2 {
-                self.samples[ch].resize(SCOPE_LEN, 0.);
-                meter.read_scope(ch, &mut self.samples[ch]);
+    }
+
+    /// Fold the `frames` newest samples of `meter`'s scope into columns.
+    /// Past what the scope keeps (the UI stalled), the rest are lost.
+    fn read_scope(&mut self, meter: &ChannelMeter, frames: usize) {
+        let frames = frames.min(SCOPE_LEN);
+        for (ch, read) in self.scope_read.iter_mut().enumerate() {
+            read.resize(frames, 0.);
+            meter.read_scope(ch, read);
+        }
+        let [left, right] = &self.scope_read;
+        for (l, r) in left.iter().zip(right) {
+            let (range, count) = &mut self.column;
+            if *count == 0 {
+                *range = [l.min(*r), l.max(*r)];
+            } else {
+                *range = [range[0].min(*l).min(*r), range[1].max(*l).max(*r)];
+            }
+            *count += 1;
+            if *count == SCOPE_COLUMN {
+                self.scope.push_back(*range);
+                *count = 0;
+                if self.scope.len() > SCOPE_COLUMNS {
+                    self.scope.pop_front();
+                }
             }
         }
+    }
+
+    /// The scope's history, oldest first: each column's lowest and highest
+    /// sample (see [`SCOPE_COLUMN`]). Empty but for the master.
+    pub fn scope(&self) -> &VecDeque<[f32; 2]> {
+        &self.scope
     }
 
     /// Take in each channel's (peak, RMS), linear, over the last `dt`
@@ -197,5 +242,37 @@ mod tests {
             m.apply([(0.5, 0.5); 2], 0.01);
         }
         assert!((m.rms_db()[0] - to_db(0.5)).abs() < 0.1);
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+    use tonique_engine::audio::AudioBuffer;
+
+    #[test]
+    fn the_scope_keeps_columns_of_new_samples() {
+        let meter = ChannelMeter::default();
+        let mut m = AudioMetrics::new();
+        let block = |value: f32, frames: usize| {
+            let mut buffer = AudioBuffer::new(2, frames);
+            for ch in 0..2 {
+                buffer.channel_mut(ch).fill(value);
+            }
+            buffer
+        };
+        meter.record(&block(0.5, SCOPE_COLUMN * 3 / 2).block(SCOPE_COLUMN * 3 / 2));
+        m.update(&meter, true);
+        assert_eq!(m.scope().len(), 1, "a column and a half");
+        assert_eq!(m.scope()[0], [0.5, 0.5]);
+        meter.record(&block(-0.25, SCOPE_COLUMN / 2).block(SCOPE_COLUMN / 2));
+        m.update(&meter, true);
+        assert_eq!(m.scope().len(), 2);
+        assert_eq!(m.scope()[1], [-0.25, 0.5], "the half of each");
+        for _ in 0..SCOPE_COLUMNS + 10 {
+            meter.record(&block(0.1, SCOPE_COLUMN).block(SCOPE_COLUMN));
+            m.update(&meter, true);
+        }
+        assert_eq!(m.scope().len(), SCOPE_COLUMNS, "the oldest drop out");
     }
 }

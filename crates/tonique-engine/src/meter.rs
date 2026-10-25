@@ -19,6 +19,9 @@ const CHANNELS: usize = 2;
 pub struct Level {
     pub peak: f32,
     pub rms: f32,
+    /// How many frames they're over: the newest that many samples of the
+    /// scope are new since the last read.
+    pub frames: u32,
 }
 
 /// Levels and recent samples of a stereo channel strip.
@@ -106,6 +109,7 @@ impl ChannelMeter {
             Level {
                 peak,
                 rms: (sum / count as f32).sqrt(),
+                frames: count,
             }
         }))
     }

@@ -1,6 +1,11 @@
+use std::collections::VecDeque;
+
 use crate::{
     config::keymap::Action,
-    core::state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+    core::{
+        metrics::SCOPE_COLUMNS,
+        state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+    },
     ui::{
         arrangement::{
             row_layout::RowLayout,
@@ -29,7 +34,7 @@ const EMPTY_LOGO_SIZE: f32 = 80.;
 /// The edit cursor's arrow on the ruler: width and height.
 const EDIT_CURSOR_ARROW: Vec2 = vec2(9., 6.);
 /// The master's output scope, in the footer.
-const SCOPE_WIDTH: f32 = 120.;
+const SCOPE_WIDTH: f32 = 180.;
 
 pub struct CentralPanel {
     timeline: Timeline,
@@ -354,41 +359,61 @@ fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect) {
         return;
     }
     painter.rect_filled(scope, 2., theme.bg_deep);
-    painter.text(
+    painter.hline(
+        scope.x_range(),
+        scope.center().y,
+        Stroke::new(1.0, theme.separator),
+    );
+    if let Some(m) = state.metrics.tracks.get(&MASTER_TRACK_ID) {
+        paint_scope(&painter, m.scope(), scope, theme.accent);
+    }
+    // Over the waveform, on a veil.
+    let label = painter.text(
         scope.left_top() + vec2(4., 2.),
         Align2::LEFT_TOP,
         "OUT",
         FontId::proportional(font_size::SMALL),
-        theme.text_disabled,
+        theme.text_muted,
     );
-    let samples = state
-        .metrics
-        .tracks
-        .get(&MASTER_TRACK_ID)
-        .filter(|m| m.samples.len() >= 2 && m.samples[0].len() > 3);
-    let Some(m) = samples else {
-        painter.hline(
-            scope.x_range(),
-            scope.center().y,
-            Stroke::new(1.0, theme.separator),
-        );
-        return;
-    };
-    let len = m.samples[0].len() as f32;
-    let points: Vec<_> = m.samples[0]
-        .iter()
-        .zip(m.samples[1].iter())
-        .enumerate()
-        .map(|(i, (l, r))| {
-            pos2(
-                scope.left() + i as f32 * scope.width() / len,
-                scope.center().y - scope.height() * ((l + r) / 4.).clamp(-0.5, 0.5),
-            )
-        })
-        .collect();
-    painter.add(egui::Shape::line(points, Stroke::new(1.0, theme.accent)));
+    painter.rect_filled(label.expand(1.), 1., theme.shadow);
+    painter.text(
+        label.min,
+        Align2::LEFT_TOP,
+        "OUT",
+        FontId::proportional(font_size::SMALL),
+        theme.text_muted,
+    );
     ui.interact(scope, ui.id().with("master-scope"), Sense::hover())
-        .on_hover_text("Master output");
+        .on_hover_text("Master output, the last 3 seconds");
+}
+
+/// The master's output over the last few seconds, in `rect`, the newest at
+/// the right: for each pixel, a bar from the lowest to the highest sample.
+fn paint_scope(painter: &egui::Painter, columns: &VecDeque<[f32; 2]>, rect: Rect, color: Color32) {
+    let width = rect.width().floor().max(1.) as usize;
+    // The columns not yet filled are at the left.
+    let missing = SCOPE_COLUMNS - columns.len().min(SCOPE_COLUMNS);
+    let half = rect.height() / 2.;
+    let y = |v: f32| rect.center().y - v.clamp(-1., 1.) * half;
+    let mut mesh = egui::Mesh::default();
+    for px in 0..width {
+        let span = |px: usize| px * SCOPE_COLUMNS / width;
+        let (from, to) = (span(px).max(missing), span(px + 1).max(span(px) + 1));
+        let range = (from..to.min(SCOPE_COLUMNS))
+            .map(|c| columns[c - missing])
+            .reduce(|a, b| [a[0].min(b[0]), a[1].max(b[1])]);
+        let Some([low, high]) = range else {
+            continue;
+        };
+        let x = rect.left() + px as f32;
+        // At least a pixel tall, so silence shows as a line.
+        let (top, bottom) = (
+            y(high).min(rect.center().y - 0.5),
+            y(low).max(rect.center().y + 0.5),
+        );
+        mesh.add_colored_rect(Rect::from_x_y_ranges(x..=x + 1., top..=bottom), color);
+    }
+    painter.add(mesh);
 }
 
 /// What a project without tracks shows: the logo, faded, and how to start.
