@@ -33,7 +33,7 @@ const PADDING: f32 = 4.;
 /// Toggles (mute, solo, arm) and the caret.
 const BUTTON_SIZE: Vec2 = vec2(18., 16.);
 const CARET_WIDTH: f32 = 14.;
-const METER_WIDTH: f32 = 8.;
+const METER_WIDTH: f32 = 12.;
 /// Between controls on a line.
 const GAP: f32 = 3.;
 /// Between the lines of controls.
@@ -241,12 +241,11 @@ impl TrackHeader {
             });
             in_rect(ui, pan, |ui| pan_slider(ui, track, state, pan.size()));
         }
-        if let Some(metrics) = state.metrics.tracks.get_mut(&track.id) {
-            put(
-                ui,
-                layout.meter,
-                LevelMeter::new(layout.meter.size(), metrics.clone()).disabled(silenced),
-            );
+        if let Some(metrics) = state.metrics.tracks.get(&track.id) {
+            let meter = LevelMeter::new(layout.meter.size(), metrics).disabled(silenced);
+            if put(ui, layout.meter, meter).clicked() {
+                state.reset_meter_clip(track.id);
+            }
         }
         response.context_menu(|ui| {
             self.context_menu(ui, track, state);

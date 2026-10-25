@@ -39,9 +39,9 @@ const COLLAPSE_PAST: f32 = 60.;
 /// The grip resizing the list, inside its left edge.
 const HANDLE_WIDTH: f32 = 5.;
 /// Collapsed, the list is a strip of the tracks' colours and meters.
-const COLLAPSED_WIDTH: f32 = 26.;
+const COLLAPSED_WIDTH: f32 = 28.;
 const COLLAPSED_BAR_WIDTH: f32 = 4.;
-const COLLAPSED_METER_WIDTH: f32 = 8.;
+const COLLAPSED_METER_WIDTH: f32 = 10.;
 /// Between the panel's edges and the headers (the left one holds the
 /// handle).
 const PANEL_MARGIN: f32 = 3.;
@@ -360,9 +360,10 @@ impl TrackHeaders {
             if let Some(metrics) = state.metrics.tracks.get(&track.id) {
                 let mut meter_ui = ui.new_child(UiBuilder::new().max_rect(meter));
                 meter_ui.set_clip_rect(clip);
-                meter_ui.add(
-                    LevelMeter::new(meter.size(), metrics.clone()).disabled(track.is_silenced()),
-                );
+                let meter = LevelMeter::new(meter.size(), metrics).disabled(track.is_silenced());
+                if meter_ui.add(meter).clicked() {
+                    state.reset_meter_clip(track.id);
+                }
             }
         }
     }

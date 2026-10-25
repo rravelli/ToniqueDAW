@@ -1550,6 +1550,16 @@ impl ProjectState {
         self.session.undo_manager().can_redo()
     }
 
+    /// Forget the clips (and held peaks) a track's meter shows.
+    pub fn reset_meter_clip(&mut self, id: TrackId) {
+        if id == MASTER_TRACK_ID {
+            self.metrics.master.reset_clip();
+        }
+        if let Some(metrics) = self.metrics.tracks.get_mut(&id) {
+            metrics.reset_clip();
+        }
+    }
+
     fn update_metrics(&mut self) {
         let edit = self.session.edit();
         self.metrics.master.update(edit.master.meter(), true);

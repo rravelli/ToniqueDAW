@@ -456,8 +456,9 @@ fn clips_play_through_the_engine_once_loaded() {
     assert!(peak > 0.4, "clip never became audible (peak {peak})");
 
     state.update();
-    let [left, _] = state.metrics.tracks[&track].peak();
-    assert!(left > 0.4, "track meter shows {left}");
+    // 0.4, in dBFS.
+    let [left, _] = state.metrics.tracks[&track].peak_db();
+    assert!(left > -8., "track meter shows {left} dB");
     assert!(state.playhead().0 > 0.);
 }
 
