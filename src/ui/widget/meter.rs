@@ -1,6 +1,6 @@
 //! A stereo level meter: a bar per channel on a scale finer near the top,
-//! up to +6 dB, with a mark at full scale: green, turning yellow just
-//! under full scale, red over it. The peak shows lighter
+//! up to +6 dB, with a mark at full scale: green, warming to amber by
+//! -12 dB and towards orange at full scale, red over it. The peak shows lighter
 //! behind the RMS level, the highest recent peak as a line, and clips as a
 //! lamp above each bar until the meter is clicked.
 
@@ -19,15 +19,16 @@ const LAMP_GAP: f32 = 1.;
 const LAMP_MIN_HEIGHT: f32 = 30.;
 /// The mark at full scale (0 dBFS), on meters tall enough for it to read.
 const MARK_MIN_HEIGHT: f32 = 20.;
-/// Where the green starts turning yellow, in dBFS; it's yellow at full
-/// scale, and red above.
+/// Where the green starts turning (through yellow) to the theme's warm
+/// colour, and where it has, in dBFS.
 const TURN_DB: f32 = -18.;
-/// How the green turns: slowly at first, so most of the meter is green
-/// and only the last few dB are yellow.
-const TURN_CURVE: f32 = 2.;
+const WARM_DB: f32 = -12.;
+/// How far the warm colour has gone towards red at full scale: deepening
+/// to orange, red itself kept for overs.
+const HOT: f32 = 0.45;
 /// Levels where the colour is computed, in dBFS, the bar's colour blended
 /// between them.
-const STOPS: [f32; 9] = [-18., -12., -9., -6., -4.5, -3., -1.5, -0.5, 0.];
+const STOPS: [f32; 6] = [-18., -15., -12., -6., -3., 0.];
 /// The top of the scale, in dBFS: room above full scale to see overs.
 const TOP_DB: f32 = 6.;
 /// How much of its colour the peak, behind the RMS level, has over the
@@ -164,15 +165,19 @@ impl Zones {
         bounds.clone().zip(bounds.skip(1))
     }
 
-    /// Green, turning yellow towards full scale; red above it.
+    /// Green, warming to amber by [`WARM_DB`], deepening to orange at full
+    /// scale; red above it.
     fn color(&self, db: f32) -> Color32 {
         if db > 0. {
             self.high
         } else if db <= TURN_DB {
             self.low
-        } else {
-            let t = ((db - TURN_DB) / -TURN_DB).powf(TURN_CURVE);
+        } else if db < WARM_DB {
+            let t = (db - TURN_DB) / (WARM_DB - TURN_DB);
             self.low.lerp_to_gamma(self.mid, t)
+        } else {
+            let t = HOT * (db - WARM_DB) / -WARM_DB;
+            self.mid.lerp_to_gamma(self.high, t)
         }
     }
 }

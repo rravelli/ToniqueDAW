@@ -44,5 +44,5 @@ grid_bar = "#0000001e"
 grid_beat = "#0000000c"
 
 meter_low = "#278a41"
-meter_mid = "#c4b000"
+meter_mid = "#b38000"
 meter_high = "#d93538"

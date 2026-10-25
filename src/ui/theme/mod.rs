@@ -119,7 +119,7 @@ theme_colors! {
     }
     "Meters" {
         meter_low: "Normal", "Level meters, most of their range.",
-        meter_mid: "Near full scale", "Level meters, the last few dB below full scale, blended in from the normal colour.",
+        meter_mid: "Hot", "Level meters, from -12 dB to full scale (deepening towards the clipping colour), blended in from the normal colour.",
         meter_high: "Clipping", "Level meters, over full scale, and their clip lamps.",
     }
 }

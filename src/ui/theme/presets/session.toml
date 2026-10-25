@@ -41,7 +41,7 @@ grid_bar = "#0000002a"
 grid_beat = "#00000012"
 
 meter_low = "#23772f"
-meter_mid = "#b29c00"
+meter_mid = "#a77511"
 meter_high = "#bc2823"
 
 palette = [
