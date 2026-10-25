@@ -31,6 +31,8 @@ mod selection;
 const PREVIEW_ALPHA: u8 = 80;
 /// The same for a silenced track: fainter, but still its colour.
 const SILENCED_PREVIEW_ALPHA: u8 = 30;
+/// How much of its colour a selected track's lane is tinted with.
+const SELECTED_LANE_ALPHA: u8 = 24;
 
 pub struct Timeline {
     clip_drag: Option<ClipDrag>,
@@ -215,8 +217,11 @@ impl Timeline {
             }
 
             if track.selected {
-                ui.painter()
-                    .rect_filled(track_rect, 1.0, track.color.gamma_multiply_u8(10));
+                ui.painter().rect_filled(
+                    track_rect,
+                    1.0,
+                    with_alpha(track.color, SELECTED_LANE_ALPHA),
+                );
             }
 
             // A group's lane: an overview of everything inside.

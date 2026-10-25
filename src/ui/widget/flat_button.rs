@@ -128,7 +128,17 @@ impl Widget for FlatButton {
         let rect = res.rect;
         let mut curr_color = fill;
         let mut text_color = text_color;
-        let mut stroke = self.stroke;
+        // Outlined at rest, as the theme says, unless it has a fill of its
+        // own or an outline was asked for.
+        let mut stroke = if self.stroke == Stroke::NONE
+            && !self.ghost
+            && !self.selected
+            && self.fill.is_none()
+        {
+            Stroke::new(1., theme.control_border)
+        } else {
+            self.stroke
+        };
         if !enabled {
             curr_color = curr_color.gamma_multiply(0.5);
             text_color = text_color.gamma_multiply(0.5);

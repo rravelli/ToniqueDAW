@@ -122,7 +122,7 @@ impl<N: Numeric> Widget for ValueSlider<'_, N> {
         };
         let painter = ui.painter();
         let handle_x = track.left() + self.ratio() * track.width();
-        painter.rect_filled(track, TRACK_HEIGHT / 2., theme.bg_control);
+        painter.rect_filled(track, TRACK_HEIGHT / 2., theme.bg_deep);
         painter.rect_filled(track.with_max_x(handle_x), TRACK_HEIGHT / 2., fill);
         painter.circle_filled(
             pos2(handle_x, track.center().y),

@@ -16,6 +16,8 @@ bg_control_hover = "#42474e"
 # Lines
 border = "#464b53"
 separator = "#2f3338"
+# Controls stand out by their fill alone
+control_border = "#00000000"
 
 # Text and icons
 text = "#e8eaed"

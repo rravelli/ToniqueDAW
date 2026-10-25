@@ -85,6 +85,7 @@ theme_colors! {
     "Lines" {
         border: "Border", "Outlines of windows, inputs and cards.",
         separator: "Separator", "Dividers between sections and rows.",
+        control_border: "Control outline", "Around buttons, inputs and selects at rest, where their fill alone doesn't stand out (light themes); transparent for none.",
     }
     "Text" {
         text: "Text", "Text and icons.",
@@ -278,7 +279,7 @@ impl Theme {
             w.noninteractive,
         );
         visuals.widgets.inactive =
-            widget(self.bg_control, Color32::TRANSPARENT, self.text, w.inactive);
+            widget(self.bg_control, self.control_border, self.text, w.inactive);
         visuals.widgets.hovered = widget(self.bg_control_hover, self.border, self.text, w.hovered);
         // egui also draws "strong" text (window titles, `RichText::strong`)
         // in the pressed colour, so it must read on any surface: no accent
@@ -421,6 +422,27 @@ mod tests {
                 ("success", theme.success),
             ] {
                 assert!(contrast(color, theme.bg_raised) >= 4.5, "{name}: {role}");
+            }
+        }
+    }
+
+    /// Disabled text doubles as hints, ruler ticks and scrollbars: it
+    /// stays readable (3:1, as for large text) where it's shown. Meters
+    /// show in their wells.
+    #[test]
+    fn faint_marks_still_show() {
+        for theme in presets() {
+            let name = &theme.name;
+            for (surface, bg) in &surfaces(&theme)[..3] {
+                let ratio = contrast(theme.text_disabled, *bg);
+                assert!(ratio >= 3., "{name}: disabled on {surface}: {ratio:.2}");
+            }
+            for (role, color) in [
+                ("meter_low", theme.meter_low),
+                ("meter_high", theme.meter_high),
+            ] {
+                let ratio = contrast(color, theme.bg_deep);
+                assert!(ratio >= 2., "{name}: {role}: {ratio:.2}");
             }
         }
     }

@@ -75,7 +75,7 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
         let stroke = if open || response.has_focus() {
             Stroke::new(1., theme.accent)
         } else {
-            Stroke::NONE
+            Stroke::new(1., theme.control_border)
         };
         let text_color = if enabled {
             theme.text

@@ -91,7 +91,13 @@ impl NumberInput {
         let rect = res.rect;
         let theme = ui.app_theme();
         // Paint widget
-        painter.rect_filled(rect, 1.0, theme.bg_control);
+        painter.rect(
+            rect,
+            1.0,
+            theme.bg_control,
+            Stroke::new(1., theme.control_border),
+            StrokeKind::Inside,
+        );
 
         let mut text = self.format_value(self.value) + &self.suffix;
         // Text

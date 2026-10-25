@@ -164,7 +164,12 @@ impl Widget for Knob<'_> {
         } else {
             theme.bg_control
         };
-        painter.circle_filled(center, RADIUS - 3., fill);
+        painter.circle(
+            center,
+            RADIUS - 3.,
+            fill,
+            Stroke::new(1., theme.control_border),
+        );
         let pointer = Vec2::angled(START_ANGLE + ratio * SWEEP);
         painter.line_segment(
             [center + pointer * 2., center + pointer * (RADIUS - 3.)],
