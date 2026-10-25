@@ -50,8 +50,15 @@ const HEAD_BUTTON_SIZE: f32 = 22.;
 /// How opaque the accent is over a row an effect would be dropped on.
 const DROP_FILL_ALPHA: u8 = 40;
 const ADD_TRACK_HEIGHT: f32 = 24.;
+/// Empty room below the add button, to scroll the last track up.
+const ROOM_BELOW_ROWS: f32 = 200.;
 /// Above the master's header, below the footer's top line.
 pub const FOOTER_PADDING: f32 = 3.;
+
+/// How far the list scrolls: its rows, the add button and some room below.
+pub fn content_height(layout: &RowLayout) -> f32 {
+    layout.height() + ADD_TRACK_HEIGHT + ROOM_BELOW_ROWS
+}
 
 /// Share of a group header's height, from the top, where a drop goes above
 /// the group rather than into it.
