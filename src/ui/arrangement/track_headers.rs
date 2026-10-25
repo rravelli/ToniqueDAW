@@ -1,6 +1,6 @@
 use egui::{
-    Align, Color32, FontFamily, FontId, Frame, Layout, Panel, Rangef, Rect, Sense, Stroke,
-    StrokeKind, Ui, UiBuilder, pos2, vec2,
+    Align, Color32, CursorIcon, FontFamily, FontId, Frame, Layout, Panel, Rangef, Rect, Sense,
+    Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2,
 };
 use egui_phosphor::regular::{
     ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL, CARET_DOUBLE_LEFT, CARET_DOUBLE_RIGHT, PLUS,
@@ -24,18 +24,26 @@ use crate::{
         },
         dnd::DragPayload,
         font::PHOSPHOR_REGULAR,
-        widget::{context_menu::ContextMenuButton, flat_button::FlatButton},
+        widget::{context_menu::ContextMenuButton, flat_button::FlatButton, meter::LevelMeter},
         workspace::{BottomView, Workspace},
     },
     utils::display_name,
 };
 
 const DEFAULT_WIDTH: f32 = 190.;
-const WIDTH_RANGE: std::ops::RangeInclusive<f32> = 130.0..=480.;
-/// Collapsed, the list is a strip of the tracks' colours.
-const COLLAPSED_WIDTH: f32 = 22.;
-const COLLAPSED_BAR_WIDTH: f32 = 6.;
-/// Between the panel's edges and the headers.
+const MIN_WIDTH: f32 = 130.;
+const MAX_WIDTH: f32 = 480.;
+/// Dragging the edge this much narrower than the narrowest collapses the
+/// list.
+const COLLAPSE_PAST: f32 = 60.;
+/// The grip resizing the list, inside its left edge.
+const HANDLE_WIDTH: f32 = 5.;
+/// Collapsed, the list is a strip of the tracks' colours and meters.
+const COLLAPSED_WIDTH: f32 = 26.;
+const COLLAPSED_BAR_WIDTH: f32 = 4.;
+const COLLAPSED_METER_WIDTH: f32 = 8.;
+/// Between the panel's edges and the headers (the left one holds the
+/// handle).
 const PANEL_MARGIN: f32 = 3.;
 /// The buttons in the panel's head.
 const HEAD_BUTTON_SIZE: f32 = 22.;
@@ -63,8 +71,14 @@ pub struct TrackHeaders {
     lanes: Rect,
     /// Where the rows are shown, between the head and the footer.
     rows: Rect,
-    /// The head's button to collapse or expand the list was clicked.
+    /// The head's button to collapse or expand the list was clicked, or
+    /// its edge dragged past the narrowest.
     toggle: bool,
+    /// Expanded. Kept here, not left to egui's resizing: the timeline,
+    /// drawn after the list, would take the outer half of egui's handle.
+    width: f32,
+    /// The width when the handle's drag started.
+    drag_start: Option<f32>,
 }
 
 impl TrackHeaders {
@@ -75,6 +89,8 @@ impl TrackHeaders {
             lanes: Rect::NOTHING,
             rows: Rect::NOTHING,
             toggle: false,
+            width: DEFAULT_WIDTH,
+            drag_start: None,
         }
     }
 
@@ -108,9 +124,8 @@ impl TrackHeaders {
     ) -> Option<Rangef> {
         let frame = Frame::new().fill(ui.app_theme().bg_panel);
         let expanded = Panel::right("track-list")
-            .resizable(true)
-            .default_size(DEFAULT_WIDTH)
-            .size_range(WIDTH_RANGE)
+            .resizable(false)
+            .exact_size(self.width)
             .frame(frame);
         let collapsed = Panel::right("track-list-collapsed")
             .resizable(false)
@@ -156,6 +171,24 @@ impl TrackHeaders {
             self.collapsed_ui(ui, state, &layout, footer);
             return None;
         }
+        let target = self.headers_ui(ui, state, workspace, &layout, footer, new_tracks);
+        // Over the headers, so it gets the drag where they meet.
+        self.resize_handle(ui, rect);
+        target
+    }
+
+    /// The rows' headers, the ghosts of the tracks a drop would add, and
+    /// the master's header in the footer.
+    fn headers_ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        layout: &RowLayout,
+        footer: Rect,
+        new_tracks: &[Color32],
+    ) -> Option<Rangef> {
+        let rect = ui.max_rect();
         let rename = self.rename.take();
         let x = rect.left() + PANEL_MARGIN..=rect.right() - PANEL_MARGIN;
         let mut rows = ui.new_child(
@@ -167,8 +200,8 @@ impl TrackHeaders {
                 .id_salt("track-area"),
         );
         rows.set_clip_rect(self.rows);
-        let target = self.track_panel(&mut rows, state, workspace, &layout, rename);
-        paint_new_track_headers(&mut rows, state, &layout, new_tracks);
+        let target = self.track_panel(&mut rows, state, workspace, layout, rename);
+        paint_new_track_headers(&mut rows, state, layout, new_tracks);
         // The master, in the footer below the tracks.
         let master_track = state.master_track();
         let mut master = ui.new_child(UiBuilder::new().max_rect(Rect::from_x_y_ranges(
@@ -183,6 +216,44 @@ impl TrackHeaders {
             rename == Some(master_track.id),
         );
         target
+    }
+
+    /// The grip along the list's left edge: dragging it resizes the list,
+    /// past the narrowest collapses it.
+    fn resize_handle(&mut self, ui: &mut Ui, rect: Rect) {
+        let handle =
+            Rect::from_x_y_ranges(rect.left()..=rect.left() + HANDLE_WIDTH, rect.y_range());
+        let response = ui
+            .interact(handle, ui.id().with("track-list-resize"), Sense::drag())
+            .on_hover_and_drag_cursor(CursorIcon::ResizeHorizontal);
+        if response.drag_started() {
+            self.drag_start = Some(self.width);
+        }
+        if response.dragged()
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let wanted = rect.right() - pointer.x;
+            // The timeline keeps at least as much room as the list.
+            let max = MAX_WIDTH
+                .min(ui.ctx().content_rect().width() / 2.)
+                .max(MIN_WIDTH);
+            self.width = wanted.clamp(MIN_WIDTH, max);
+            if wanted < MIN_WIDTH - COLLAPSE_PAST {
+                // Collapsed, at the width it had: expanding finds it again.
+                self.width = self.drag_start.unwrap_or(DEFAULT_WIDTH);
+                self.toggle = true;
+            }
+        }
+        if response.drag_stopped() {
+            self.drag_start = None;
+        }
+        if response.hovered() || response.dragged() {
+            ui.painter().vline(
+                rect.left() + 1.,
+                rect.y_range(),
+                Stroke::new(2., ui.app_theme().accent),
+            );
+        }
     }
 
     /// Expand and collapse every row, and collapse the list; or, collapsed,
@@ -252,11 +323,15 @@ impl TrackHeaders {
             .iter()
             .map(|row| (&row.track, row.y, self.rows))
             .chain([(&master, footer_row, footer)]);
+        // A bar of the track's colour, and its meter.
+        let left =
+            ui.max_rect().center().x - (COLLAPSED_BAR_WIDTH + 3. + COLLAPSED_METER_WIDTH) / 2.;
         for (track, y, clip) in rows {
-            let x = ui.max_rect().center().x;
-            let bar = Rect::from_x_y_ranges(
-                x - COLLAPSED_BAR_WIDTH / 2.0..=x + COLLAPSED_BAR_WIDTH / 2.,
-                y.shrink(HEADER_INSET),
+            let bar =
+                Rect::from_x_y_ranges(left..=left + COLLAPSED_BAR_WIDTH, y.shrink(HEADER_INSET));
+            let meter = Rect::from_x_y_ranges(
+                bar.right() + 3.0..=bar.right() + 3. + COLLAPSED_METER_WIDTH,
+                bar.y_range(),
             );
             if !bar.intersects(clip) {
                 continue;
@@ -281,7 +356,14 @@ impl TrackHeaders {
             if track.selected || response.hovered() {
                 painter.rect_filled(row, 2., theme.hover_overlay);
             }
-            painter.rect_filled(bar, 2., color);
+            painter.rect_filled(bar, 1., color);
+            if let Some(metrics) = state.metrics.tracks.get(&track.id) {
+                let mut meter_ui = ui.new_child(UiBuilder::new().max_rect(meter));
+                meter_ui.set_clip_rect(clip);
+                meter_ui.add(
+                    LevelMeter::new(meter.size(), metrics.clone()).disabled(track.is_silenced()),
+                );
+            }
         }
     }
 
