@@ -413,25 +413,31 @@ pub fn is_audio_file(path: &Path) -> bool {
 }
 
 fn read_entries(dir: PathBuf, depth: usize) -> Vec<FileNode> {
-    let mut entries = read_dir(dir)
+    let mut entries: Vec<FileNode> = read_dir(dir)
         .map(|read_dir| {
             read_dir
                 .filter_map(|entry| entry.ok())
-                .map(|f| f.path())
-                .filter(|path| path.is_dir() || is_audio_file(path))
-                .map(|entry| {
-                    let name_lower = entry
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("")
-                        .to_lowercase();
-                    let is_dir = entry.is_dir();
-                    FileNode {
+                .filter_map(|entry| {
+                    let path = entry.path();
+                    // The listing tells a folder from a file: asking the disk
+                    // for each one is slow on some drives. A link is followed,
+                    // unless it's named as a sound: a file, then.
+                    let is_audio = is_audio_file(&path);
+                    let is_dir = match entry.file_type() {
+                        Ok(kind) if kind.is_symlink() => !is_audio && path.is_dir(),
+                        Ok(kind) => kind.is_dir(),
+                        Err(_) => path.is_dir(),
+                    };
+                    if !is_dir && !is_audio {
+                        return None;
+                    }
+                    let name_lower = entry.file_name().to_string_lossy().to_lowercase();
+                    Some(FileNode {
                         depth,
-                        path: entry,
+                        path,
                         name_lower,
                         is_dir,
-                    }
+                    })
                 })
                 .collect()
         })
