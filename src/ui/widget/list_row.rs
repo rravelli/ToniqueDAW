@@ -8,6 +8,9 @@ const FONT_SIZE: f32 = 12.;
 const PADDING: f32 = 6.;
 /// Width of the caret's and the icon's slots.
 pub const SLOT: f32 = 14.;
+/// The empty caret slot of a row without one: narrower than a slot, so
+/// leaves don't look further in than their siblings.
+const NO_CARET: f32 = 6.;
 /// Room for the dot at the row's end, and its size.
 const DOT_ROOM: f32 = 12.;
 const DOT_RADIUS: f32 = 3.;
@@ -82,11 +85,11 @@ impl ListRow {
         self
     }
 
-    /// Drawn in a slot before the icon; rows without one keep the slot
-    /// empty when given `None`, so tree rows line up.
+    /// Drawn in a slot before the icon; rows without one keep a narrower
+    /// gap when given `None`.
     pub fn caret(mut self, caret: Option<&'static str>) -> Self {
         self.caret = caret;
-        self.indent += if caret.is_none() { SLOT } else { 0. };
+        self.indent += if caret.is_none() { NO_CARET } else { 0. };
         self
     }
 
