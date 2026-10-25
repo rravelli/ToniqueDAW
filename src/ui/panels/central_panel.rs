@@ -12,7 +12,7 @@ use crate::{
             row_layout::RowLayout,
             ruler::Ruler,
             timeline::Timeline,
-            track_headers::{FOOTER_PADDING, TrackHeaders, paint_drop_target},
+            track_headers::{FOOTER_PADDING, TrackHeaders, content_height, paint_drop_target},
         },
         commands::Commands,
         graph::GraphView,
@@ -151,8 +151,9 @@ impl CentralPanel {
             .width_to_beats(state.grid.offset.x + timeline_viewport.width());
         let end = (state.arrangement_end() + slack).0.max(visible_end);
         ui.set_width(state.grid.beats_to_width(end));
-        // The footer isn't content to scroll to.
-        let content_size = ui.min_size() - vec2(0., footer_height);
+        // The track list is a panel of its own, so its rows don't size this
+        // ui: scroll as far down as they go. The footer isn't content.
+        let content_size = vec2(ui.min_size().x, viewport.top() + content_height(&layout));
 
         let mut scrolled_x = false;
         if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
@@ -517,6 +518,68 @@ mod tests {
             6,
             "outer, inner (collapsed), t3, t4, group, t5"
         );
+    }
+
+    /// The wheel scrolls the tracks down, over their lanes as over their
+    /// headers, as far as the last one and no further.
+    #[test]
+    fn the_wheel_scrolls_tracks_vertically() {
+        use egui::{Event, MouseWheelUnit, Pos2, TouchPhase};
+
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        for _ in 0..30 {
+            state.add_track();
+        }
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let mut panel = CentralPanel::new();
+        let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(
+                    ui,
+                    state,
+                    &mut Workspace::default(),
+                    &mut Commands::default(),
+                )
+            });
+            output.textures_delta.clear();
+        };
+        let mut scroll_over = |state: &mut ProjectState, pos: Pos2, delta: f32| {
+            frame(state, vec![Event::PointerMoved(pos)]);
+            frame(
+                state,
+                vec![Event::MouseWheel {
+                    unit: MouseWheelUnit::Point,
+                    delta: vec2(0., delta),
+                    phase: TouchPhase::Move,
+                    modifiers: Default::default(),
+                }],
+            );
+            // Let the smoothed scroll play out.
+            for _ in 0..60 {
+                frame(state, Vec::new());
+            }
+        };
+        let lanes = Pos2::new(300., 300.);
+        let headers = Pos2::new(1150., 300.);
+
+        scroll_over(&mut state, lanes, -200.);
+        assert!(state.grid.offset.y > 0., "scrolls over the lanes");
+        scroll_over(&mut state, lanes, 200.);
+        assert_eq!(state.grid.offset.y, 0., "and back up");
+        scroll_over(&mut state, headers, -200.);
+        assert!(state.grid.offset.y > 0., "scrolls over the headers");
+
+        scroll_over(&mut state, lanes, -100_000.);
+        let rows = RowLayout::new(&state, 0., 0.).height();
+        assert!(state.grid.offset.y > rows - 800., "down to the last track");
+        assert!(state.grid.offset.y < rows, "but no further");
     }
 
     /// Dragging a file over a collapsed group expands it; leaving collapses
