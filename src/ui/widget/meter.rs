@@ -38,6 +38,7 @@ const PEAK_SHADE: f32 = 0.5;
 pub struct LevelMeter<'a> {
     size: Vec2,
     disabled: bool,
+    clips: bool,
     metrics: &'a AudioMetrics,
 }
 
@@ -46,8 +47,16 @@ impl<'a> LevelMeter<'a> {
         Self {
             size,
             disabled: false,
+            clips: true,
             metrics,
         }
+    }
+
+    /// Without clip lamps: for a meter that's only a glance at the level,
+    /// as an effect's.
+    pub fn without_clips(mut self) -> Self {
+        self.clips = false;
+        self
     }
 
     /// Greyed, for a channel that's silenced or bypassed.
@@ -64,7 +73,7 @@ impl Widget for LevelMeter<'_> {
         let rect = response.rect;
         let theme = ui.app_theme();
         let m = self.metrics;
-        let lamps = rect.height() >= LAMP_MIN_HEIGHT;
+        let lamps = self.clips && rect.height() >= LAMP_MIN_HEIGHT;
         let bars = if lamps {
             rect.with_min_y(rect.top() + LAMP_HEIGHT + LAMP_GAP)
         } else {
@@ -102,7 +111,7 @@ impl Widget for LevelMeter<'_> {
                 let at = y(holds[ch]).max(column.top() + 1.);
                 painter.hline(column.x_range(), at - 0.5, (1., zones.color(holds[ch])));
             }
-            if clipped[ch] {
+            if self.clips && clipped[ch] {
                 let lamp = if lamps {
                     Rect::from_x_y_ranges(column.x_range(), rect.top()..=rect.top() + LAMP_HEIGHT)
                 } else {
@@ -120,7 +129,7 @@ impl Widget for LevelMeter<'_> {
                 format!("{label}  {}  {}", format_level(l), format_level(r))
             };
             let mut text = format!("{}\n{}", line("Peak", holds), line("RMS ", rms));
-            if clipped.contains(&true) {
+            if self.clips && clipped.contains(&true) {
                 text.push_str("\nClipped: click to reset");
             }
             ui.label(RichText::new(text).monospace().size(font_size::SMALL));

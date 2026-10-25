@@ -340,12 +340,11 @@ impl EffectRack {
                 .max_rect(meter),
         );
         meter_ui.set_clip_rect(meter.intersect(ui.clip_rect()));
-        let meter = LevelMeter::new(meter.size(), &levels).disabled(!effect.enabled());
-        if meter_ui.add(meter).clicked()
-            && let Some(slot) = self.editors.get_mut(&effect.plugin.id)
-        {
-            slot.levels.reset_clip();
-        }
+        meter_ui.add(
+            LevelMeter::new(meter.size(), &levels)
+                .disabled(!effect.enabled())
+                .without_clips(),
+        );
 
         let body = Rect::from_min_max(rect.min + vec2(0., HEADER_HEIGHT), rect.max).shrink(6.);
         // Salted by the plugin: what its controls keep in memory, like a
