@@ -1,3 +1,4 @@
+use crate::ui::font::semibold;
 use crate::ui::theme::font_size;
 use crate::{
     core::{
@@ -9,7 +10,6 @@ use crate::{
         font::PHOSPHOR_FILL,
         theme::{Theme, ThemeExt, with_alpha},
         widget::{
-            color_bar::ColorBar,
             color_select::ColorSelect,
             context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
             flat_button::FlatButton,
@@ -20,8 +20,8 @@ use crate::{
     utils::display_name,
 };
 use egui::{
-    Color32, FontId, Frame, Label, Margin, Rect, Response, RichText, Sense, Stroke, TextEdit, Ui,
-    Vec2, epaint::MarginF32, vec2,
+    Align, Color32, FontId, Frame, Label, Layout, Margin, Rect, Response, RichText, Sense, Stroke,
+    TextEdit, Ui, UiBuilder, Vec2, Widget, pos2, vec2,
 };
 use egui_phosphor::{
     fill::{COPY, FOLDER_MINUS, FOLDER_PLUS, PALETTE, PLUS, TRASH},
@@ -29,10 +29,20 @@ use egui_phosphor::{
 };
 use std::ops::RangeInclusive;
 
-const STROKE_WIDTH: f32 = 0.5;
-const PADDING: f32 = 2.;
-const BUTTON_SIZE: f32 = 15.;
-const METER_WIDTH: f32 = 8.;
+/// Space between a header's edges and its content.
+const PADDING: f32 = 4.;
+/// Toggles (mute, solo, arm) and the caret.
+const BUTTON_SIZE: Vec2 = vec2(18., 16.);
+const CARET_WIDTH: f32 = 14.;
+const METER_WIDTH: f32 = 12.;
+/// Between controls on a line.
+const GAP: f32 = 3.;
+/// Between the lines of controls.
+const LINE_GAP: f32 = 4.;
+const SLIDER_HEIGHT: f32 = 16.;
+const PAN_WIDTH: f32 = 34.;
+/// Wide enough for the volume to show its unit.
+const VOLUME_UNIT_WIDTH: f32 = 64.;
 pub const ROW_GAP: f32 = 3.0;
 /// Indentation per level of groups, up to [`MAX_INDENT_LEVELS`] (deeper
 /// rows line up with the deepest shown level).
@@ -42,18 +52,79 @@ const MAX_INDENT_LEVELS: usize = 6;
 pub const COLOR_BAR_WIDTH: f32 = 4.;
 /// Volume slider range, in dB: its bottom is silence.
 pub const VOLUME_RANGE: RangeInclusive<f32> = -40.0..=5.0;
-const SLIDER_SIZE: Vec2 = vec2(2. * BUTTON_SIZE + 1., 20.);
-/// Gap between the rows of controls.
-const CONTROLS_GAP: f32 = 4.;
 
 /// Left of the coloured bar of a row at `depth`, in a header starting at
 /// `left`. Groups extend theirs down to their last row from there.
 pub fn color_bar_x(left: f32, depth: usize) -> f32 {
-    left + STROKE_WIDTH + PADDING + depth.min(MAX_INDENT_LEVELS) as f32 * INDENT
+    left + PADDING + depth.min(MAX_INDENT_LEVELS) as f32 * INDENT
 }
 
 /// Space between a header's edge and its content, top and bottom.
-pub const HEADER_INSET: f32 = STROKE_WIDTH + PADDING;
+pub const HEADER_INSET: f32 = PADDING;
+
+/// Where everything in a header goes, from its rect: the same for tracks,
+/// groups, the master and ghost headers, at any height. The first line
+/// (caret, name, toggles) is at the top, or centred in a collapsed row;
+/// the volume and pan go below it when there's room; the meter runs down
+/// the right edge.
+struct HeaderLayout {
+    bar: Rect,
+    caret: Rect,
+    name: Rect,
+    /// Mute, solo, then arm when shown.
+    toggles: Vec<Rect>,
+    /// Volume and pan.
+    sliders: Option<(Rect, Rect)>,
+    meter: Rect,
+}
+
+impl HeaderLayout {
+    fn new(rect: Rect, depth: usize, collapsed: bool, toggles: usize) -> Self {
+        let inner = rect.shrink(PADDING);
+        let bar_left = color_bar_x(rect.left(), depth);
+        let bar = Rect::from_x_y_ranges(bar_left..=bar_left + COLOR_BAR_WIDTH, inner.y_range());
+        let meter =
+            Rect::from_x_y_ranges(inner.right() - METER_WIDTH..=inner.right(), inner.y_range());
+        let content =
+            Rect::from_x_y_ranges(bar.right() + GAP..=meter.left() - GAP, inner.y_range());
+        let has_sliders =
+            !collapsed && content.height() >= BUTTON_SIZE.y + LINE_GAP + SLIDER_HEIGHT;
+        let line_top = if has_sliders {
+            content.top()
+        } else {
+            content.center().y - BUTTON_SIZE.y / 2.
+        };
+        let line = Rect::from_x_y_ranges(content.x_range(), line_top..=line_top + BUTTON_SIZE.y);
+        let caret = Rect::from_min_size(line.min, vec2(CARET_WIDTH, BUTTON_SIZE.y));
+        let mut right = line.right();
+        let mut toggle_rects: Vec<Rect> = (0..toggles)
+            .map(|_| {
+                let toggle =
+                    Rect::from_min_size(pos2(right - BUTTON_SIZE.x, line.top()), BUTTON_SIZE);
+                right = toggle.left() - 1.;
+                toggle
+            })
+            .collect();
+        toggle_rects.reverse();
+        let name = Rect::from_x_y_ranges(caret.right() + 2.0..=right - GAP, line.y_range());
+        let sliders = has_sliders.then(|| {
+            let top = line.bottom() + LINE_GAP;
+            let y = top..=top + SLIDER_HEIGHT;
+            let pan =
+                Rect::from_x_y_ranges(content.right() - PAN_WIDTH..=content.right(), y.clone());
+            let volume = Rect::from_x_y_ranges(caret.left()..=pan.left() - GAP, y);
+            (volume, pan)
+        });
+        Self {
+            bar,
+            caret,
+            name,
+            toggles: toggle_rects,
+            sliders,
+            meter,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TrackHeader {
@@ -91,143 +162,103 @@ impl TrackHeader {
         let is_group = track.kind == TrackKind::Group;
         let silenced = track.is_silenced();
         let is_solo = matches!(track.solo, crate::core::track::TrackSoloState::Solo);
+        let is_master = track.id == MASTER_TRACK_ID;
+        // Groups and the master have no arm button; the master no solo.
+        let armable = RECORDING && !is_group && !is_master;
+        let toggle_count = if is_master { 1 } else { 2 + armable as usize };
 
         let theme = ui.app_theme();
-        let main_frame = Frame::new()
-            .inner_margin(MarginF32::same(PADDING))
-            .fill(if track.selected {
-                theme.bg_control
+        let (rect, _) =
+            ui.allocate_exact_size(vec2(ui.available_width(), track.height), Sense::hover());
+        let layout = HeaderLayout::new(rect, track.depth, track.collapsed, toggle_count);
+        let fill = if track.selected {
+            theme.bg_control
+        } else {
+            theme.bg_raised
+        };
+        ui.painter().rect_filled(rect, 2., fill);
+        let bar = if silenced {
+            theme.text_disabled
+        } else {
+            track.color
+        };
+        ui.painter().rect_filled(layout.bar, 1., bar);
+
+        // The header itself, under its controls: select, drag, double-click.
+        let response = ui.interact(
+            rect,
+            ui.make_persistent_id(format!("track-{:?}", track.id)),
+            Sense::click_and_drag(),
+        );
+        // Ctrl+click adds to the selection, Shift+click selects a range.
+        if response.clicked() {
+            let modifiers = ui.input(|i| i.modifiers);
+            if modifiers.command {
+                state.toggle_track_selected(track.id);
+            } else if modifiers.shift {
+                state.select_rows_to(track.id);
             } else {
-                theme.bg_raised
-            })
-            .stroke(Stroke::new(STROKE_WIDTH, theme.separator));
+                state.select_track(&track.id);
+            }
+        } else if response.drag_started() && !track.selected {
+            state.select_track(&track.id);
+        }
 
-        let res = main_frame
-            .show(ui, |ui| {
-                let actual_height = track.height - 2. * PADDING - 2. * STROKE_WIDTH;
-                ui.set_width(ui.available_width());
-                ui.set_height(actual_height);
-                ui.spacing_mut().interact_size.y = 18.0;
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
-
-                    // Indentation: the bars of the groups it's in run here (see
-                    // `color_bar_x`).
-                    let levels = track.depth.min(MAX_INDENT_LEVELS);
-                    if levels > 0 {
-                        ui.add_space(levels as f32 * INDENT);
-                    }
-
-                    // Left Side: ColorBar
-                    ui.add(
-                        ColorBar::new(Vec2::new(COLOR_BAR_WIDTH, actual_height)).color(
-                            if !silenced {
-                                track.color
-                            } else {
-                                theme.text_disabled
-                            },
-                        ),
-                    );
-                    let response = ui.interact(
-                        Rect::from_min_size(
-                            ui.next_widget_position(),
-                            Vec2::new(
-                                ui.available_width(),
-                                track.height - 2. * PADDING - 2. * STROKE_WIDTH,
-                            ),
-                        ),
-                        ui.make_persistent_id(format!("track-{:?}", track.id)),
-                        Sense::click_and_drag(),
-                    );
-
-                    // Ctrl+click adds to the selection, Shift+click selects a range.
-                    if response.clicked() {
-                        let modifiers = ui.input(|i| i.modifiers);
-                        if modifiers.command {
-                            state.toggle_track_selected(track.id);
-                        } else if modifiers.shift {
-                            state.select_rows_to(track.id);
-                        } else {
-                            state.select_track(&track.id);
-                        }
-                    } else if response.drag_started() && !track.selected {
-                        state.select_track(&track.id);
-                    }
-
-                    // Middle: Text & Controls
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = CONTROLS_GAP;
-                        ui.horizontal(|ui| {
-                            ui.set_height(BUTTON_SIZE);
-
-                            self.collapse_button(ui, track, state);
-
-                            // Groups and the master have no arm button.
-                            let armable = RECORDING && !is_group && track.id != MASTER_TRACK_ID;
-                            let buttons = if armable { 3. } else { 2. };
-                            let text_width = ui.available_width()
-                                - 4. * PADDING
-                                - buttons * BUTTON_SIZE
-                                - METER_WIDTH;
-                            // Track label
-                            if text_width > 0. {
-                                ui.scope(|ui| {
-                                    ui.set_width(text_width);
-                                    self.text_ui(ui, track, state);
-                                });
-                            }
-                            // Track controls
-                            let mute_res = self.mute_button(ui, is_solo, track);
-                            let solo_res = self.solo_button(ui, is_solo, track);
-                            let arm_res = armable.then(|| self.arm_button(ui, track));
-
-                            if mute_res.clicked() {
-                                state.set_mute(track.id, !track.muted);
-                            }
-                            if solo_res.clicked() {
-                                state.toggle_solo(track.id, ui.input(|i| i.modifiers.shift));
-                            }
-                            if arm_res.is_some_and(|r| r.clicked()) {
-                                state.set_armed(&track.id, !track.armed);
-                            }
-                        });
-                        // Volume and pan
-                        if !track.collapsed {
-                            ui.horizontal(|ui| {
-                                volume_slider(ui, track, state);
-                                pan_slider(ui, track, state);
-                            });
-                        };
-                    });
-
-                    // Right side: Meter
-                    if let Some(metrics) = state.metrics.tracks.get_mut(&track.id) {
-                        ui.vertical(|ui| {
-                            ui.add_sized(
-                                Vec2::new(6.0, ui.available_height()),
-                                LevelMeter::new(
-                                    Vec2::new(METER_WIDTH, actual_height),
-                                    metrics.clone(),
-                                )
-                                .disabled(silenced),
-                            );
-                        });
-                    }
-                    response.context_menu(|ui| {
-                        self.context_menu(ui, track, state);
-                    });
-
-                    response
-                })
-                .inner
-            })
-            .inner;
+        if put(ui, layout.caret, collapse_button(track.collapsed)).clicked() {
+            state.set_collapsed(&track.id, !track.collapsed);
+        }
+        in_rect(ui, layout.name, |ui| self.text_ui(ui, track, state));
+        let mut toggles = layout.toggles.iter();
+        if let Some(&r) = toggles.next()
+            && put(
+                ui,
+                r,
+                toggle_button("M", track.muted.then_some(theme.warning), &theme),
+            )
+            .clicked()
+        {
+            state.set_mute(track.id, !track.muted);
+        }
+        if let Some(&r) = toggles.next()
+            && put(ui, r, solo_button(is_solo, track, &theme)).clicked()
+        {
+            state.toggle_solo(track.id, ui.input(|i| i.modifiers.shift));
+        }
+        if let Some(&r) = toggles.next()
+            && put(
+                ui,
+                r,
+                toggle_button(
+                    MUSIC_NOTE_SIMPLE,
+                    track.armed.then_some(theme.record),
+                    &theme,
+                ),
+            )
+            .clicked()
+        {
+            state.set_armed(&track.id, !track.armed);
+        }
+        if let Some((volume, pan)) = layout.sliders {
+            in_rect(ui, volume, |ui| {
+                volume_slider(ui, track, state, volume.size())
+            });
+            in_rect(ui, pan, |ui| pan_slider(ui, track, state, pan.size()));
+        }
+        if let Some(metrics) = state.metrics.tracks.get(&track.id) {
+            let meter = LevelMeter::new(layout.meter.size(), metrics).disabled(silenced);
+            if put(ui, layout.meter, meter).clicked() {
+                state.reset_meter_clip(track.id);
+            }
+        }
+        response.context_menu(|ui| {
+            self.context_menu(ui, track, state);
+        });
         // Drag area
         self.resize_handle(ui, track, state);
 
         // Save temporary state
         ui.data_mut(|w| w.insert_temp(id, self.clone()));
-        res
+        response
     }
 
     fn text_ui(&mut self, ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
@@ -268,6 +299,12 @@ impl TrackHeader {
                     &track.name,
                     track.first_track_index,
                 )));
+                // The master can't be renamed, moved, grouped, copied or
+                // deleted: only its colour changes.
+                if track.id == MASTER_TRACK_ID {
+                    color_menu(ui, track, state);
+                    return;
+                }
                 if ui.add(ContextMenuButton::new(TEXT_T, "Rename")).clicked() {
                     self.edit = true;
                 };
@@ -300,14 +337,7 @@ impl TrackHeader {
                 } else if ui.add(ContextMenuButton::new(COPY, "Duplicate")).clicked() {
                     state.duplicate_track(&track.id);
                 };
-                ContextMenuButton::new(PALETTE, "Color").submenu(ui, |ui| {
-                    let mut color = track.color;
-                    let picker = ColorSelect::new(("track-color", track.id), &mut color);
-                    if ui.add(picker).changed() {
-                        state.track_view_mut(&track.id).color = color;
-                        state.commit_track_view(&track.id);
-                    }
-                });
+                color_menu(ui, track, state);
                 ui.add(ContextMenuSeparator::new());
                 let delete = if is_group {
                     "Delete group and contents"
@@ -322,46 +352,6 @@ impl TrackHeader {
                 };
             });
         });
-    }
-
-    fn mute_button(&mut self, ui: &mut Ui, solo: bool, track: &TrackRow) -> Response {
-        let theme = ui.app_theme();
-        // Dimmed when a solo already silences the track.
-        let fill = match (track.muted, solo) {
-            (false, _) => None,
-            (true, false) => Some(theme.warning),
-            (true, true) => Some(with_alpha(theme.warning, 90)),
-        };
-        ui.add(toggle_button("M", fill, &theme))
-    }
-
-    fn solo_button(&mut self, ui: &mut Ui, solo: bool, track: &TrackRow) -> Response {
-        let theme = ui.app_theme();
-        ui.add(toggle_button("S", solo.then_some(track.color), &theme))
-    }
-
-    fn arm_button(&mut self, ui: &mut Ui, track: &TrackRow) -> Response {
-        let theme = ui.app_theme();
-        ui.add(toggle_button(
-            MUSIC_NOTE_SIMPLE,
-            track.armed.then_some(theme.record),
-            &theme,
-        ))
-    }
-
-    fn collapse_button(
-        &mut self,
-        ui: &mut Ui,
-        track: &TrackRow,
-        state: &mut ProjectState,
-    ) -> Response {
-        let collapsed = state.track_view_mut(&track.id).collapsed;
-        let response = ui.add(collapse_button(collapsed));
-        if response.clicked() {
-            state.set_collapsed(&track.id, !collapsed);
-        }
-
-        response
     }
 
     fn resize_handle(&mut self, ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
@@ -379,11 +369,14 @@ impl TrackHeader {
     }
 }
 
-/// Volume in dB, filled from the left.
-fn volume_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
-    let slider = ParamSlider::gain(track.volume, VOLUME_RANGE)
+/// Volume in dB, filled from the left; with its unit when wide enough.
+fn volume_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState, size: Vec2) {
+    let mut slider = ParamSlider::gain(track.volume, VOLUME_RANGE)
         .color(track.color)
-        .size(SLIDER_SIZE);
+        .size(size);
+    if size.x >= VOLUME_UNIT_WIDTH {
+        slider = slider.suffix(" dB");
+    }
     match slider.show(ui).1 {
         SliderEdit::Moved(volume) => state.set_volume(track.id, volume),
         SliderEdit::Released { start, value } if value != start => {
@@ -395,10 +388,8 @@ fn volume_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
 }
 
 /// Pan, filled from the centre towards the side it leans to.
-fn pan_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
-    let slider = ParamSlider::pan(track.pan)
-        .color(track.color)
-        .size(SLIDER_SIZE);
+fn pan_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState, size: Vec2) {
+    let slider = ParamSlider::pan(track.pan).color(track.color).size(size);
     match slider.show(ui).1 {
         SliderEdit::Moved(pan) => state.set_pan(track.id, pan),
         SliderEdit::Released { start, value } if value != start => {
@@ -410,67 +401,53 @@ fn pan_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
 }
 
 /// A header as track `track` will have once added, faded and inert: for a
-/// track a drop would add. The same widgets as [`TrackHeader`], in the same
-/// places, so the real one takes its place without a jump.
+/// track a drop would add. Laid out as [`TrackHeader`], so the real one
+/// takes its place without a jump.
 pub fn ghost_header(ui: &mut Ui, track: &TrackRow) {
     let theme = ui.app_theme();
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(ui.available_width(), track.height), Sense::hover());
     // Opaque under the fading, as the real one is.
-    ui.painter().rect_filled(
-        Rect::from_min_size(
-            ui.next_widget_position(),
-            vec2(ui.available_width(), track.height),
-        ),
-        0.,
-        theme.bg_raised,
-    );
+    ui.painter().rect_filled(rect, 2., theme.bg_raised);
     ui.disable();
-    Frame::new()
-        .inner_margin(MarginF32::same(PADDING))
-        .fill(theme.bg_raised)
-        .stroke(Stroke::new(STROKE_WIDTH, theme.separator))
-        .show(ui, |ui| {
-            let actual_height = track.height - 2. * PADDING - 2. * STROKE_WIDTH;
-            ui.set_width(ui.available_width());
-            ui.set_height(actual_height);
-            ui.spacing_mut().interact_size.y = 18.0;
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
-                ui.add(ColorBar::new(Vec2::new(COLOR_BAR_WIDTH, actual_height)).color(track.color));
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = CONTROLS_GAP;
-                    ui.horizontal(|ui| {
-                        ui.set_height(BUTTON_SIZE);
-                        ui.add(collapse_button(false));
-                        let buttons = if RECORDING { 3. } else { 2. };
-                        let text_width = ui.available_width()
-                            - 4. * PADDING
-                            - buttons * BUTTON_SIZE
-                            - METER_WIDTH;
-                        if text_width > 0. {
-                            ui.scope(|ui| {
-                                ui.set_width(text_width);
-                                name_label(ui, track);
-                            });
-                        }
-                        ui.add(toggle_button("M", None, &theme));
-                        ui.add(toggle_button("S", None, &theme));
-                        if RECORDING {
-                            ui.add(toggle_button(MUSIC_NOTE_SIMPLE, None, &theme));
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ParamSlider::gain(track.volume, VOLUME_RANGE)
-                            .color(track.color)
-                            .size(SLIDER_SIZE)
-                            .show(ui);
-                        ParamSlider::pan(track.pan)
-                            .color(track.color)
-                            .size(SLIDER_SIZE)
-                            .show(ui);
-                    });
-                });
-            });
+    let layout = HeaderLayout::new(rect, track.depth, false, 2 + RECORDING as usize);
+    ui.painter().rect_filled(layout.bar, 1., track.color);
+    put(ui, layout.caret, collapse_button(false));
+    in_rect(ui, layout.name, |ui| name_label(ui, track));
+    for (rect, text) in layout.toggles.iter().zip(["M", "S", MUSIC_NOTE_SIMPLE]) {
+        put(ui, *rect, toggle_button(text, None, &theme));
+    }
+    if let Some((volume, pan)) = layout.sliders {
+        in_rect(ui, volume, |ui| {
+            ParamSlider::gain(track.volume, VOLUME_RANGE)
+                .color(track.color)
+                .size(volume.size())
+                .show(ui)
         });
+        in_rect(ui, pan, |ui| {
+            ParamSlider::pan(track.pan)
+                .color(track.color)
+                .size(pan.size())
+                .show(ui)
+        });
+    }
+}
+
+/// `widget` exactly over `rect`.
+fn put(ui: &mut Ui, rect: Rect, widget: impl Widget) -> Response {
+    in_rect(ui, rect, |ui| ui.add_sized(rect.size(), widget))
+}
+
+/// `add_contents` laid out left to right in `rect`, centred vertically.
+/// The header's rect is already taken: this takes no more space.
+fn in_rect<R>(ui: &mut Ui, rect: Rect, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    add_contents(
+        &mut ui.new_child(
+            UiBuilder::new()
+                .max_rect(rect)
+                .layout(Layout::left_to_right(Align::Center)),
+        ),
+    )
 }
 
 /// The track's name, as shown when not renaming it.
@@ -479,7 +456,7 @@ fn name_label(ui: &mut Ui, track: &TrackRow) {
         Label::new(
             RichText::new(display_name(&track.name, track.first_track_index))
                 .color(ui.app_theme().text)
-                .size(font_size::SMALL),
+                .font(semibold(font_size::LABEL)),
         )
         .truncate()
         .selectable(false),
@@ -493,16 +470,48 @@ fn collapse_button(collapsed: bool) -> FlatButton {
     } else {
         egui_phosphor::fill::CARET_DOWN
     };
-    FlatButton::new(icon)
-        .family(egui::FontFamily::Name(PHOSPHOR_FILL.into()))
-        .square(BUTTON_SIZE)
+    FlatButton::ghost(icon)
+        .font(FontId::new(
+            font_size::SMALL,
+            egui::FontFamily::Name(PHOSPHOR_FILL.into()),
+        ))
+        .size(vec2(CARET_WIDTH, BUTTON_SIZE.y))
 }
 
-/// Track header toggle: `fill` when on, the default control colour when off.
+/// "Color", opening a palette for the row's colour.
+fn color_menu(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
+    ContextMenuButton::new(PALETTE, "Color").submenu(ui, |ui| {
+        let mut color = track.color;
+        let picker = ColorSelect::new(("track-color", track.id), &mut color);
+        if ui.add(picker).changed() {
+            state.track_view_mut(&track.id).color = color;
+            state.commit_track_view(&track.id);
+        }
+    });
+}
+
+/// In the track's colour when soloed; dimmed when the track still isn't
+/// heard (muted, or in a muted group: mute wins over solo).
+fn solo_button(solo: bool, track: &TrackRow, theme: &Theme) -> FlatButton {
+    let fill = match (solo, track.is_silenced()) {
+        (false, _) => None,
+        (true, false) => Some(track.color),
+        (true, true) => Some(with_alpha(track.color, 90)),
+    };
+    toggle_button("S", fill, theme)
+}
+
+/// Track header toggle: `fill` when on, outlined when off.
 fn toggle_button(text: &str, fill: Option<Color32>, theme: &Theme) -> FlatButton {
-    let button = FlatButton::new(text).square(BUTTON_SIZE);
+    let button = FlatButton::new(text)
+        .size(BUTTON_SIZE)
+        .font(FontId::proportional(font_size::SMALL))
+        .border_radius(2.);
     match fill {
         Some(fill) => button.fill(fill).color(theme.text_on(fill)),
-        None => button,
+        None => button
+            .fill(Color32::TRANSPARENT)
+            .color(theme.text_muted)
+            .stroke(Stroke::new(1., theme.border)),
     }
 }

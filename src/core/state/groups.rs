@@ -198,6 +198,26 @@ impl ProjectState {
         self.group_ref(BusId(id.0), self.ancestors(id).len())
     }
 
+    /// Whether anything in group `bus` (whose tracks are `tracks`) is
+    /// heard; empty, whether it and the groups it's in are unmuted, and
+    /// nothing else is soloed.
+    fn group_heard(&self, bus: BusId, tracks: &[TrackId]) -> bool {
+        let edit = self.edit();
+        if tracks.is_empty() {
+            let Ok(group) = edit.bus(bus) else {
+                return false;
+            };
+            let muted = std::iter::once(bus)
+                .chain(edit.buses_along(group.output))
+                .any(|b| edit.bus(b).is_ok_and(|b| b.channel.muted));
+            return !muted && (!self.any_solo() || group.soloed);
+        }
+        tracks
+            .iter()
+            .filter_map(|t| edit.track(*t).ok())
+            .any(|t| self.track_heard(t))
+    }
+
     fn group_ref(&self, bus: BusId, depth: usize) -> Option<TrackRow> {
         let group = self.edit().bus(bus).ok()?;
         let id = TrackId(bus.0);
@@ -227,6 +247,7 @@ impl ProjectState {
             } else {
                 TrackSoloState::NotSoloing
             },
+            silenced: !self.group_heard(bus, &tracks),
             first_track_index: tracks
                 .first()
                 .and_then(|t| self.track_index(*t))

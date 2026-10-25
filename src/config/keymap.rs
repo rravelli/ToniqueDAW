@@ -35,13 +35,14 @@ pub enum Action {
     // View
     ToggleBrowser,
     ToggleEffectsPanel,
+    ToggleTrackList,
     ToggleGraphView,
     OpenSettings,
 }
 
 impl Action {
     /// In the order shown in the settings.
-    pub const ALL: [Action; 25] = [
+    pub const ALL: [Action; 26] = [
         Action::NewProject,
         Action::OpenProject,
         Action::SaveProject,
@@ -65,6 +66,7 @@ impl Action {
         Action::MoveTrackDown,
         Action::ToggleBrowser,
         Action::ToggleEffectsPanel,
+        Action::ToggleTrackList,
         Action::ToggleGraphView,
         Action::OpenSettings,
     ];
@@ -91,6 +93,7 @@ impl Action {
             Action::MoveTrackDown => "move_track_down",
             Action::ToggleBrowser => "toggle_browser",
             Action::ToggleEffectsPanel => "toggle_effects_panel",
+            Action::ToggleTrackList => "toggle_track_list",
             Action::ToggleGraphView => "toggle_graph_view",
             Action::OpenSettings => "open_settings",
             Action::NewProject => "new_project",
@@ -125,6 +128,7 @@ impl Action {
             Action::MoveTrackDown => "Move selection to track below",
             Action::ToggleBrowser => "Show / hide browser",
             Action::ToggleEffectsPanel => "Show / hide effects panel",
+            Action::ToggleTrackList => "Expand / collapse track list",
             Action::ToggleGraphView => "Switch timeline / audio graph",
             Action::OpenSettings => "Open / close settings",
             Action::NewProject => "New project",
@@ -146,6 +150,7 @@ impl Action {
             | Action::ToggleFollowPlayhead => "Transport",
             Action::ToggleBrowser
             | Action::ToggleEffectsPanel
+            | Action::ToggleTrackList
             | Action::ToggleGraphView
             | Action::OpenSettings => "View",
             _ => "Edit",
@@ -209,6 +214,7 @@ impl Action {
             Action::SaveProject => vec![cmd(Key::S)],
             Action::SaveProjectAs => vec![cmd_shift(Key::S)],
             Action::ToggleEffectsPanel => vec![cmd(Key::J)],
+            Action::ToggleTrackList => vec![cmd_shift(Key::J)],
             Action::ToggleGraphView => vec![cmd_shift(Key::G)],
             Action::OpenSettings => vec![cmd(Key::Comma)],
         }

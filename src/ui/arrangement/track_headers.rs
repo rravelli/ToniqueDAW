@@ -1,5 +1,10 @@
-use egui::{Color32, FontId, Rangef, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use egui_phosphor::regular::PLUS;
+use egui::{
+    Align, Color32, CursorIcon, FontFamily, FontId, Frame, Layout, Panel, Rangef, Rect, Sense,
+    Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2,
+};
+use egui_phosphor::regular::{
+    ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL, CARET_DOUBLE_LEFT, CARET_DOUBLE_RIGHT, PLUS,
+};
 use tonique_engine::edit::TrackId;
 
 use crate::{
@@ -8,22 +13,42 @@ use crate::{
         state::{ProjectState, RowTarget, TRACK_NAME},
         track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackRow, TrackSoloState},
     },
-    ui::theme::{ThemeExt, font_size},
+    ui::theme::{ThemeExt, font_size, with_alpha},
     ui::{
-        arrangement::row_layout::{Row, RowLayout},
         arrangement::track_header::{
             COLOR_BAR_WIDTH, HEADER_INSET, ROW_GAP, TrackHeader, color_bar_x, ghost_header,
         },
-        dnd::DragPayload,
-        widget::{
-            context_menu::ContextMenuButton, flat_button::FlatButton, scroll_bar::SCROLLBAR_WIDTH,
+        arrangement::{
+            row_layout::{Row, RowLayout},
+            ruler::RULER_HEIGHT,
         },
+        dnd::DragPayload,
+        font::PHOSPHOR_REGULAR,
+        widget::{context_menu::ContextMenuButton, flat_button::FlatButton, meter::LevelMeter},
         workspace::{BottomView, Workspace},
     },
+    utils::display_name,
 };
 
-pub const SPLITTER_WIDTH: f32 = 2.0;
-const DEFAULT_TRACK_WIDTH: f32 = 150.;
+const DEFAULT_WIDTH: f32 = 190.;
+const MIN_WIDTH: f32 = 130.;
+const MAX_WIDTH: f32 = 480.;
+/// Dragging the edge this much narrower than the narrowest collapses the
+/// list.
+const COLLAPSE_PAST: f32 = 60.;
+/// The grip resizing the list, inside its left edge.
+const HANDLE_WIDTH: f32 = 5.;
+/// Collapsed, the list is a strip of the tracks' colours and meters.
+const COLLAPSED_WIDTH: f32 = 28.;
+const COLLAPSED_BAR_WIDTH: f32 = 4.;
+const COLLAPSED_METER_WIDTH: f32 = 10.;
+/// Between the panel's edges and the headers (the left one holds the
+/// handle).
+const PANEL_MARGIN: f32 = 3.;
+/// The buttons in the panel's head.
+const HEAD_BUTTON_SIZE: f32 = 22.;
+/// How opaque the accent is over a row an effect would be dropped on.
+const DROP_FILL_ALPHA: u8 = 40;
 const ADD_TRACK_HEIGHT: f32 = 24.;
 /// Above the master's header, below the footer's top line.
 pub const FOOTER_PADDING: f32 = 3.;
@@ -32,20 +57,40 @@ pub const FOOTER_PADDING: f32 = 3.;
 /// the group rather than into it.
 const ABOVE_GROUP: f32 = 0.3;
 
+/// The track list: a panel on the right of the timeline, resizable and
+/// collapsible to a strip of the tracks' colours. A head in line with the
+/// ruler, the rows in line with the timeline's lanes (scrolled with them),
+/// and the master in a footer in line with the timeline's.
 pub struct TrackHeaders {
-    pub width: f32,
     /// The row being dragged to a new place.
     dragging: Option<TrackId>,
     /// The track to start renaming, next drawn.
     rename: Option<TrackId>,
+    /// The timeline's lanes, as last drawn: an effect dragged over one
+    /// lights its header too.
+    lanes: Rect,
+    /// Where the rows are shown, between the head and the footer.
+    rows: Rect,
+    /// The head's button to collapse or expand the list was clicked, or
+    /// its edge dragged past the narrowest.
+    toggle: bool,
+    /// Expanded. Kept here, not left to egui's resizing: the timeline,
+    /// drawn after the list, would take the outer half of egui's handle.
+    width: f32,
+    /// The width when the handle's drag started.
+    drag_start: Option<f32>,
 }
 
 impl TrackHeaders {
     pub fn new() -> Self {
         Self {
-            width: DEFAULT_TRACK_WIDTH,
             dragging: None,
             rename: None,
+            lanes: Rect::NOTHING,
+            rows: Rect::NOTHING,
+            toggle: false,
+            width: DEFAULT_WIDTH,
+            drag_start: None,
         }
     }
 
@@ -54,85 +99,299 @@ impl TrackHeaders {
         self.rename = Some(track);
     }
 
-    /// `new_tracks`: the colours of the tracks a drop on the timeline would
-    /// add, shown as ghost headers below the last.
-    #[allow(clippy::too_many_arguments)]
-    pub fn ui(
+    /// Where the rows were shown this frame: scrolling over them scrolls
+    /// the timeline's lanes too.
+    pub fn rows_rect(&self) -> Rect {
+        self.rows
+    }
+
+    /// The timeline's lanes, once drawn this frame.
+    pub fn set_lanes(&mut self, lanes: Rect) {
+        self.lanes = lanes;
+    }
+
+    /// Show the list, as a panel: before the central panel, which takes
+    /// what's left. `new_tracks`: the colours of the tracks a drop on the
+    /// timeline would add, shown as ghost headers below the last. Returns
+    /// the rows (on screen) of the track an effect would be dropped on,
+    /// whose lane the timeline lights.
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        new_tracks: &[Color32],
+    ) -> Option<Rangef> {
+        let frame = Frame::new().fill(ui.app_theme().bg_panel);
+        let expanded = Panel::right("track-list")
+            .resizable(false)
+            .exact_size(self.width)
+            .frame(frame);
+        let collapsed = Panel::right("track-list-collapsed")
+            .resizable(false)
+            .exact_size(COLLAPSED_WIDTH)
+            .frame(frame);
+        let mut open = workspace.track_list_open;
+        let target = Panel::show_switched(ui, &mut open, collapsed, expanded, |ui, expanded| {
+            self.panel_ui(ui, state, workspace, expanded, new_tracks)
+        })
+        .inner;
+        workspace.track_list_open = open != std::mem::take(&mut self.toggle);
+        target
+    }
+
+    fn panel_ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        workspace: &mut Workspace,
+        expanded: bool,
+        new_tracks: &[Color32],
+    ) -> Option<Rangef> {
+        let rect = ui.max_rect();
+        // Everything is drawn in children of fixed rects, which egui doesn't
+        // count: claim the panel, or it shrinks to its smallest.
+        ui.expand_to_include_rect(rect);
+        let head = Rect::from_x_y_ranges(rect.x_range(), rect.top()..=rect.top() + RULER_HEIGHT);
+        let footer_height = (state.master_track().height + FOOTER_PADDING)
+            .min(rect.height() - head.height())
+            .max(0.);
+        let footer_top = rect.bottom() - footer_height;
+        self.rows = Rect::from_x_y_ranges(rect.x_range(), head.bottom()..=footer_top);
+        let footer = Rect::from_x_y_ranges(rect.x_range(), footer_top..=rect.bottom());
+        let layout = RowLayout::new(state, self.rows.top(), state.grid.offset.y);
+
+        let theme = ui.app_theme();
+        for y in [head.bottom(), footer.top()] {
+            ui.painter()
+                .hline(rect.x_range(), y - 0.5, Stroke::new(1., theme.border));
+        }
+        self.head_ui(ui, state, head, expanded);
+        if !expanded {
+            self.collapsed_ui(ui, state, &layout, footer);
+            return None;
+        }
+        let target = self.headers_ui(ui, state, workspace, &layout, footer, new_tracks);
+        // Over the headers, so it gets the drag where they meet.
+        self.resize_handle(ui, rect);
+        target
+    }
+
+    /// The rows' headers, the ghosts of the tracks a drop would add, and
+    /// the master's header in the footer.
+    fn headers_ui(
         &mut self,
         ui: &mut Ui,
         state: &mut ProjectState,
         workspace: &mut Workspace,
         layout: &RowLayout,
-        viewport: Rect,
         footer: Rect,
         new_tracks: &[Color32],
-    ) {
-        let left = viewport.max.x - self.width;
+    ) -> Option<Rangef> {
+        let rect = ui.max_rect();
         let rename = self.rename.take();
-
-        let dragger_rect = Rect::from_min_size(
-            pos2(left, viewport.top()),
-            vec2(SPLITTER_WIDTH, viewport.height()),
-        );
-        let response = ui.allocate_rect(dragger_rect, Sense::drag());
-
-        let painter = ui.painter_at(dragger_rect);
-
-        let theme = ui.app_theme();
-        let color = if response.hovered() || response.dragged() {
-            theme.accent
-        } else {
-            theme.separator
-        };
-        painter.rect_filled(dragger_rect, 0., color);
-        if response.dragged() {
-            self.width -= response.drag_delta().x;
-            self.width = self.width.clamp(120., ui.available_width());
-        }
-        response.on_hover_and_drag_cursor(egui::CursorIcon::ResizeHorizontal);
-
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(left + SPLITTER_WIDTH, viewport.top() - state.grid.offset.y),
-                    pos2(viewport.right() - SCROLLBAR_WIDTH, viewport.bottom()),
+        let x = rect.left() + PANEL_MARGIN..=rect.right() - PANEL_MARGIN;
+        let mut rows = ui.new_child(
+            UiBuilder::new()
+                .max_rect(Rect::from_x_y_ranges(
+                    x.clone(),
+                    self.rows.top() - state.grid.offset.y..=self.rows.bottom(),
                 ))
                 .id_salt("track-area"),
-            |ui| {
-                self.track_panel(ui, state, workspace, layout, viewport, rename);
-                paint_new_track_headers(ui, state, layout, new_tracks);
-            },
         );
-        // The master, in the footer below the tracks, under the headers.
+        rows.set_clip_rect(self.rows);
+        let target = self.track_panel(&mut rows, state, workspace, layout, rename);
+        paint_new_track_headers(&mut rows, state, layout, new_tracks);
+        // The master, in the footer below the tracks.
         let master_track = state.master_track();
-        ui.scope_builder(
-            egui::UiBuilder::new().max_rect(Rect::from_min_max(
-                pos2(left + SPLITTER_WIDTH, footer.top() + FOOTER_PADDING),
-                pos2(viewport.right() - SCROLLBAR_WIDTH, footer.bottom()),
-            )),
-            |ui| {
-                ui.set_clip_rect(footer);
-                ui.horizontal(|ui| {
-                    TrackHeader::new().ui(
-                        ui,
-                        &master_track,
-                        state,
-                        rename == Some(master_track.id),
-                    );
-                })
-            },
+        let mut master = ui.new_child(UiBuilder::new().max_rect(Rect::from_x_y_ranges(
+            x,
+            footer.top() + FOOTER_PADDING..=footer.bottom(),
+        )));
+        master.set_clip_rect(footer);
+        let response = TrackHeader::new().ui(
+            &mut master,
+            &master_track,
+            state,
+            rename == Some(master_track.id),
         );
+        // The master's lane, in the footer, isn't the timeline's: its drops
+        // are taken here.
+        let lane = Rect::from_x_y_ranges(self.lanes.x_range(), response.rect.y_range());
+        let master_target = effect_drop(
+            &master,
+            state,
+            workspace,
+            master_track.id,
+            &response,
+            lane,
+            true,
+        );
+        target.or(master_target)
     }
 
-    pub fn track_panel(
+    /// The grip along the list's left edge: dragging it resizes the list,
+    /// past the narrowest collapses it.
+    fn resize_handle(&mut self, ui: &mut Ui, rect: Rect) {
+        let handle =
+            Rect::from_x_y_ranges(rect.left()..=rect.left() + HANDLE_WIDTH, rect.y_range());
+        let response = ui
+            .interact(handle, ui.id().with("track-list-resize"), Sense::drag())
+            .on_hover_and_drag_cursor(CursorIcon::ResizeHorizontal);
+        if response.drag_started() {
+            self.drag_start = Some(self.width);
+        }
+        if response.dragged()
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let wanted = rect.right() - pointer.x;
+            // The timeline keeps at least as much room as the list.
+            let max = MAX_WIDTH
+                .min(ui.ctx().content_rect().width() / 2.)
+                .max(MIN_WIDTH);
+            self.width = wanted.clamp(MIN_WIDTH, max);
+            if wanted < MIN_WIDTH - COLLAPSE_PAST {
+                // Collapsed, at the width it had: expanding finds it again.
+                self.width = self.drag_start.unwrap_or(DEFAULT_WIDTH);
+                self.toggle = true;
+            }
+        }
+        if response.drag_stopped() {
+            self.drag_start = None;
+        }
+        if response.hovered() || response.dragged() {
+            ui.painter().vline(
+                rect.left() + 1.,
+                rect.y_range(),
+                Stroke::new(2., ui.app_theme().accent),
+            );
+        }
+    }
+
+    /// Expand and collapse every row, and collapse the list; or, collapsed,
+    /// expand it.
+    fn head_ui(&mut self, ui: &mut Ui, state: &mut ProjectState, head: Rect, expanded: bool) {
+        let mut head_ui = ui.new_child(
+            UiBuilder::new()
+                .max_rect(head.shrink2(vec2(PANEL_MARGIN, 0.)))
+                .layout(Layout::right_to_left(Align::Center)),
+        );
+        let ui = &mut head_ui;
+        ui.spacing_mut().item_spacing = vec2(2., 0.);
+        let button = |icon: &str, tooltip: String| {
+            FlatButton::ghost(icon)
+                .square(HEAD_BUTTON_SIZE)
+                .font(FontId::new(14., FontFamily::Name(PHOSPHOR_REGULAR.into())))
+                .tooltip(tooltip)
+        };
+        let keymap = &state.settings().keymap;
+        let (icon, text) = if expanded {
+            (CARET_DOUBLE_RIGHT, "Collapse track list")
+        } else {
+            (CARET_DOUBLE_LEFT, "Expand track list")
+        };
+        let tooltip = keymap.with_shortcut(ui.ctx(), text, Action::ToggleTrackList);
+        if ui.add(button(icon, tooltip)).clicked() {
+            self.toggle = true;
+        }
+        if !expanded {
+            return;
+        }
+        ui.add_space(ui.available_width() - 2. * HEAD_BUTTON_SIZE - 2.);
+        if ui
+            .add(button(
+                ARROWS_IN_LINE_VERTICAL,
+                "Collapse all tracks".into(),
+            ))
+            .clicked()
+        {
+            state.set_all_collapsed(true);
+        }
+        if ui
+            .add(button(ARROWS_OUT_LINE_VERTICAL, "Expand all tracks".into()))
+            .clicked()
+        {
+            state.set_all_collapsed(false);
+        }
+    }
+
+    /// The list collapsed: each row a bar of its colour, named on hover;
+    /// clicking one selects it.
+    fn collapsed_ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        layout: &RowLayout,
+        footer: Rect,
+    ) {
+        let theme = ui.app_theme();
+        let master = state.master_track();
+        let footer_row = Rangef::new(
+            footer.top() + FOOTER_PADDING,
+            footer.top() + FOOTER_PADDING + master.height,
+        );
+        let rows = layout
+            .rows()
+            .iter()
+            .map(|row| (&row.track, row.y, self.rows))
+            .chain([(&master, footer_row, footer)]);
+        // A bar of the track's colour, and its meter.
+        let left =
+            ui.max_rect().center().x - (COLLAPSED_BAR_WIDTH + 3. + COLLAPSED_METER_WIDTH) / 2.;
+        for (track, y, clip) in rows {
+            let bar =
+                Rect::from_x_y_ranges(left..=left + COLLAPSED_BAR_WIDTH, y.shrink(HEADER_INSET));
+            let meter = Rect::from_x_y_ranges(
+                bar.right() + 3.0..=bar.right() + 3. + COLLAPSED_METER_WIDTH,
+                bar.y_range(),
+            );
+            if !bar.intersects(clip) {
+                continue;
+            }
+            let row = Rect::from_x_y_ranges(ui.max_rect().x_range(), y).intersect(clip);
+            let response = ui
+                .interact(
+                    row,
+                    ui.id().with(("collapsed-row", track.id)),
+                    Sense::click(),
+                )
+                .on_hover_text(display_name(&track.name, track.first_track_index));
+            if response.clicked() {
+                state.select_track(&track.id);
+            }
+            let color = if track.is_silenced() {
+                theme.text_disabled
+            } else {
+                track.color
+            };
+            let painter = ui.painter().with_clip_rect(clip);
+            if track.selected || response.hovered() {
+                painter.rect_filled(row, 2., theme.hover_overlay);
+            }
+            painter.rect_filled(bar, 1., color);
+            if let Some(metrics) = state.metrics.tracks.get(&track.id) {
+                let mut meter_ui = ui.new_child(UiBuilder::new().max_rect(meter));
+                meter_ui.set_clip_rect(clip);
+                let meter = LevelMeter::new(meter.size(), metrics).disabled(track.is_silenced());
+                if meter_ui.add(meter).clicked() {
+                    state.reset_meter_clip(track.id);
+                }
+            }
+        }
+    }
+
+    /// The rows' headers, and "Add track" below. Returns the rows of the
+    /// track an effect would be dropped on.
+    fn track_panel(
         &mut self,
         ui: &mut egui::Ui,
         state: &mut ProjectState,
         workspace: &mut Workspace,
         layout: &RowLayout,
-        viewport: Rect,
         rename: Option<TrackId>,
-    ) {
+    ) -> Option<Rangef> {
+        let viewport = self.rows;
+        let mut target = None;
         ui.vertical(|ui| {
             ui.set_width(ui.available_width());
 
@@ -167,12 +426,10 @@ impl TrackHeaders {
                     }
                     workspace.bottom_view = BottomView::Effects;
                 }
-                // Insert effects
-                if let Some(payload) = response.dnd_release_payload::<DragPayload>()
-                    && let DragPayload::Effect(id) = *payload
-                {
-                    state.add_effect(&track.id, id, usize::MAX);
-                }
+                // The timeline takes drops on the lane itself.
+                let lane = Rect::from_x_y_ranges(self.lanes.x_range(), row.y);
+                target =
+                    effect_drop(ui, state, workspace, track.id, &response, lane, false).or(target);
             }
             paint_group_scopes(ui, layout.rows(), x);
             self.drop_rows(ui, state, layout.rows(), x);
@@ -207,6 +464,7 @@ impl TrackHeaders {
         res.context_menu(|ui| {
             self.context_menu_ui(ui, state);
         });
+        target
     }
 
     /// While a row is dragged, show where it would land; move it there on
@@ -258,6 +516,57 @@ impl TrackHeaders {
             ui.close();
         }
     }
+}
+
+/// An effect dropped on the header of track `id` (`header`), or on its
+/// `lane` when `on_lane`, goes at the end of its chain; it's selected, its
+/// effects shown. While an effect is dragged over either, the header is
+/// lit; returns the rows to light the lane over.
+fn effect_drop(
+    ui: &Ui,
+    state: &mut ProjectState,
+    workspace: &mut Workspace,
+    id: TrackId,
+    header: &egui::Response,
+    lane: Rect,
+    on_lane: bool,
+) -> Option<Rangef> {
+    if !dragging_effect(ui) {
+        return None;
+    }
+    let pointer = ui.input(|i| i.pointer.hover_pos())?;
+    let over_lane = lane.contains(pointer);
+    if !over_lane && !header.rect.contains(pointer) {
+        return None;
+    }
+    paint_drop_target(ui, header.rect);
+    let released = ui.input(|i| i.pointer.any_released());
+    if released
+        && (!over_lane || on_lane)
+        && let Some(payload) = egui::DragAndDrop::take_payload::<DragPayload>(ui.ctx())
+        && let DragPayload::Effect(kind) = *payload
+    {
+        state.add_effect(&id, kind, usize::MAX);
+        state.select_track(&id);
+        workspace.bottom_panel_open = true;
+        workspace.bottom_view = BottomView::Effects;
+    }
+    Some(header.rect.y_range())
+}
+
+/// Whether an effect is being dragged.
+fn dragging_effect(ui: &Ui) -> bool {
+    egui::DragAndDrop::payload::<DragPayload>(ui.ctx())
+        .is_some_and(|p| matches!(*p, DragPayload::Effect(_)))
+}
+
+/// A row an effect would be dropped on, lit and outlined in the accent:
+/// its header here, its lane by the timeline.
+pub fn paint_drop_target(ui: &Ui, rect: Rect) {
+    let accent = ui.app_theme().accent;
+    let painter = ui.painter();
+    painter.rect_filled(rect, 2., with_alpha(accent, DROP_FILL_ALPHA));
+    painter.rect_stroke(rect, 2., Stroke::new(1.5, accent), StrokeKind::Inside);
 }
 
 /// Where a row dropped at `y` lands, and where to mark it: the row's rect
@@ -336,6 +645,7 @@ fn paint_new_track_headers(
             color: *color,
             selected: false,
             solo: TrackSoloState::NotSoloing,
+            silenced: false,
             first_track_index: index,
             kind: TrackKind::Audio,
             depth: 0,

@@ -1320,6 +1320,22 @@ impl ProjectState {
             }
         });
     }
+    /// Whether the engine lets `track` through, as it works it out (see
+    /// `Edit::refresh_mute_gains`): neither it nor a group it's in muted,
+    /// and, while anything is soloed, it or a group it's in soloed. Mute
+    /// wins over solo.
+    pub(super) fn track_heard(&self, track: &Track) -> bool {
+        let edit = self.edit();
+        let groups: Vec<_> = edit
+            .buses_along(track.output)
+            .into_iter()
+            .filter_map(|b| edit.bus(b).ok())
+            .collect();
+        !track.channel.muted
+            && !groups.iter().any(|g| g.channel.muted)
+            && (!self.any_solo() || track.soloed || groups.iter().any(|g| g.soloed))
+    }
+
     /// Whether any track or group is soloed.
     fn any_solo(&self) -> bool {
         let edit = self.edit();
@@ -1387,6 +1403,7 @@ impl ProjectState {
             color: view.color,
             selected: self.selected_tracks.contains(&MASTER_TRACK_ID),
             solo: TrackSoloState::NotSoloing,
+            silenced: master.muted,
             first_track_index: 0,
             kind: TrackKind::Audio,
             depth: 0,
@@ -1482,6 +1499,7 @@ impl ProjectState {
             } else {
                 TrackSoloState::NotSoloing
             },
+            silenced: !self.track_heard(track),
             first_track_index: index,
             kind: TrackKind::Audio,
             depth: self.edit().buses_along(track.output).len(),
@@ -1548,6 +1566,16 @@ impl ProjectState {
     /// Whether there is still actions to redo
     pub fn can_redo(&self) -> bool {
         self.session.undo_manager().can_redo()
+    }
+
+    /// Forget the clips (and held peaks) a track's meter shows.
+    pub fn reset_meter_clip(&mut self, id: TrackId) {
+        if id == MASTER_TRACK_ID {
+            self.metrics.master.reset_clip();
+        }
+        if let Some(metrics) = self.metrics.tracks.get_mut(&id) {
+            metrics.reset_clip();
+        }
     }
 
     fn update_metrics(&mut self) {

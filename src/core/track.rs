@@ -38,6 +38,9 @@ pub struct TrackRow {
     pub color: Color32,
     pub selected: bool,
     pub solo: TrackSoloState,
+    /// Not heard, as the engine plays it: muted, in a muted group, or left
+    /// out by a solo elsewhere; a group, when nothing inside is heard.
+    pub silenced: bool,
     /// Position in the engine's track list of its first track: the track
     /// itself, or a group's first.
     pub first_track_index: usize,
@@ -48,8 +51,7 @@ pub struct TrackRow {
 
 impl TrackRow {
     pub fn is_silenced(&self) -> bool {
-        self.muted && !matches!(self.solo, TrackSoloState::Solo)
-            || matches!(self.solo, TrackSoloState::Soloing)
+        self.silenced
     }
 }
 

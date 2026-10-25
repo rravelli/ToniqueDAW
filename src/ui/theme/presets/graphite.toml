@@ -14,7 +14,7 @@ separator = "#262626"
 
 text = "#e3e3e3"
 text_muted = "#a3a3a3"
-text_disabled = "#666666"
+text_disabled = "#6b6b6b"
 text_on_accent = "#140800"
 
 accent = "#ff6a13"

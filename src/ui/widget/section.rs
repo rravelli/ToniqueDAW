@@ -1,5 +1,6 @@
+use crate::ui::font::semibold;
 use crate::ui::theme::font_size;
-use egui::{Align2, FontId, Response, Sense, Stroke, Ui, Widget, pos2, vec2};
+use egui::{Align2, Response, Sense, Stroke, Ui, Widget, pos2, vec2};
 
 use crate::ui::theme::ThemeExt;
 
@@ -29,7 +30,7 @@ impl Widget for SectionHeader {
             rect.left_center(),
             Align2::LEFT_CENTER,
             self.title,
-            FontId::proportional(font_size::BODY),
+            semibold(font_size::BODY),
             theme.accent,
         );
         if text.right() + GAP < rect.right() {

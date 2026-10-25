@@ -11,12 +11,14 @@ bg_raised = "#f5f6f8"
 bg_control = "#ffffff"
 bg_control_hover = "#e6e9ed"
 
-border = "#b9bec6"
-separator = "#d9dce1"
+border = "#999da4"
+separator = "#c3c5ca"
+# White controls on near-white surfaces: outlined
+control_border = "#999da4"
 
 text = "#1b1e23"
 text_muted = "#4f5560"
-text_disabled = "#8d939c"
+text_disabled = "#747981"
 text_on_accent = "#ffffff"
 
 # A deeper teal, so it stays readable on light surfaces
@@ -28,7 +30,7 @@ warning = "#9a5b00"
 success = "#1c7a37"
 record = "#d92d33"
 
-hover_overlay = "#0000000f"
+hover_overlay = "#00000016"
 # Behind floating labels: a light veil rather than a shadow
 shadow = "#ffffffd2"
 
@@ -36,11 +38,11 @@ playhead = "#1b1e23"
 edit_cursor = "#1b1e23"
 selection_fill = "#1b1e2326"
 selection_stroke = "#1b1e23b3"
-clip_selected = "#1b1e23"
-loop_region = "#00805f28"
+clip_selected = "#ffffff"
+loop_region = "#00805f92"
 grid_bar = "#0000001e"
 grid_beat = "#0000000c"
 
-meter_low = "#2fa84f"
-meter_mid = "#e0a100"
-meter_high = "#e5383b"
+meter_low = "#278a41"
+meter_mid = "#b38000"
+meter_high = "#d93538"

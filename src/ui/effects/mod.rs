@@ -3,6 +3,7 @@
 //! low at its right, a meter of its output. A collapsed effect
 //! is a strip with its name up it.
 
+use crate::ui::font::semibold;
 use crate::ui::theme::font_size;
 use crate::{
     core::{
@@ -339,7 +340,11 @@ impl EffectRack {
                 .max_rect(meter),
         );
         meter_ui.set_clip_rect(meter.intersect(ui.clip_rect()));
-        meter_ui.add(LevelMeter::new(meter.size(), levels).disabled(!effect.enabled()));
+        meter_ui.add(
+            LevelMeter::new(meter.size(), &levels)
+                .disabled(!effect.enabled())
+                .without_clips(),
+        );
 
         let body = Rect::from_min_max(rect.min + vec2(0., HEADER_HEIGHT), rect.max).shrink(6.);
         // Salted by the plugin: what its controls keep in memory, like a
@@ -439,7 +444,7 @@ impl EffectRack {
                 name.left_center(),
                 Align2::LEFT_CENTER,
                 effect.name(),
-                FontId::proportional(font_size::LABEL),
+                semibold(font_size::LABEL),
                 color,
             );
         }
@@ -500,7 +505,7 @@ impl EffectRack {
         };
         let galley = ui.painter().layout_no_wrap(
             effect.name().to_string(),
-            FontId::proportional(font_size::LABEL),
+            semibold(font_size::LABEL),
             color,
         );
         let at = pos2(rect.center().x - galley.size().y / 2., rect.bottom() - 6.);

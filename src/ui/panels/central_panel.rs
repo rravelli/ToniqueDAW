@@ -1,12 +1,18 @@
+use crate::ui::font::semibold;
+use std::collections::VecDeque;
+
 use crate::{
     config::keymap::Action,
-    core::state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+    core::{
+        metrics::SCOPE_COLUMNS,
+        state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+    },
     ui::{
         arrangement::{
             row_layout::RowLayout,
             ruler::Ruler,
             timeline::Timeline,
-            track_headers::{FOOTER_PADDING, TrackHeaders},
+            track_headers::{FOOTER_PADDING, TrackHeaders, paint_drop_target},
         },
         commands::Commands,
         graph::GraphView,
@@ -19,7 +25,8 @@ use crate::{
     },
 };
 use egui::{
-    Align2, Color32, FontId, Frame, Margin, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
+    Align2, Color32, FontId, Frame, Margin, Pos2, Rangef, Rect, Sense, Shape, Stroke, Ui, Vec2,
+    pos2, vec2,
 };
 
 /// Empty bars after the end of the arrangement.
@@ -28,7 +35,7 @@ const EMPTY_LOGO_SIZE: f32 = 80.;
 /// The edit cursor's arrow on the ruler: width and height.
 const EDIT_CURSOR_ARROW: Vec2 = vec2(9., 6.);
 /// The master's output scope, in the footer.
-const SCOPE_WIDTH: f32 = 120.;
+const SCOPE_WIDTH: f32 = 180.;
 
 pub struct CentralPanel {
     timeline: Timeline,
@@ -60,6 +67,13 @@ impl CentralPanel {
         workspace: &mut Workspace,
         commands: &mut Commands,
     ) {
+        // The track list, as a panel of its own beside the timeline.
+        let drop_target = if workspace.main_view == MainView::Timeline {
+            self.tracks
+                .show(ui, state, workspace, self.timeline.new_tracks())
+        } else {
+            None
+        };
         egui::CentralPanel::default()
             .frame(
                 Frame::central_panel(ui.style())
@@ -67,7 +81,7 @@ impl CentralPanel {
                     .fill(ui.app_theme().bg_base),
             )
             .show(ui, |ui| {
-                self.ui(ui, state, workspace, commands);
+                self.ui(ui, state, workspace, commands, drop_target);
             });
     }
 
@@ -77,33 +91,33 @@ impl CentralPanel {
         state: &mut ProjectState,
         workspace: &mut Workspace,
         commands: &mut Commands,
+        drop_target: Option<Rangef>,
     ) {
         if workspace.main_view == MainView::Graph {
             self.graph.ui(ui, state);
             return;
         }
         // Rename the selected track, unless the effects panel took it.
+        // The master keeps its name.
         if !commands.take(|a| a == Action::Rename).is_empty()
             && let Some(track) = state.selected_track()
+            && track.id != MASTER_TRACK_ID
         {
             self.tracks.rename(track.id);
         }
         let available_rect = ui.available_rect_before_wrap();
         // Draw navigation bar on top
-        self.ruler.ui(ui, state, self.tracks.width);
+        self.ruler.ui(ui, state);
 
         let (area, _) = ui.allocate_exact_size(ui.available_size(), Sense::all());
         // The tracks scroll above a footer holding the master.
         let footer_height = (state.master_track().height + FOOTER_PADDING).min(area.height());
         let viewport = Rect::from_min_max(area.min, pos2(area.max.x, area.max.y - footer_height));
         let footer = Rect::from_min_max(pos2(area.min.x, viewport.max.y), area.max);
-        master_lane_ui(ui, state, footer, footer.max.x - self.tracks.width);
+        master_lane_ui(ui, state, footer);
         ui.set_clip_rect(viewport);
 
-        let timeline_viewport = Rect::from_min_max(
-            viewport.min,
-            pos2(viewport.max.x - self.tracks.width, viewport.max.y),
-        );
+        let timeline_viewport = viewport;
         let mut layout = RowLayout::new(state, viewport.top(), state.grid.offset.y);
         // Draw timeline
         self.timeline.ui(
@@ -114,11 +128,17 @@ impl CentralPanel {
             &mut layout,
             timeline_viewport,
         );
-        // Draw tracks
-        // With the tracks a drop on the timeline would add.
-        let new_tracks = self.timeline.new_tracks();
-        self.tracks
-            .ui(ui, state, workspace, &layout, viewport, footer, new_tracks);
+        self.tracks.set_lanes(timeline_viewport);
+        // The lane of the track an effect would be dropped on, lit with
+        // its header.
+        // Over the footer too, for the master.
+        if let Some(rows) = drop_target {
+            let lanes = Rect::from_x_y_ranges(timeline_viewport.x_range(), area.y_range());
+            let clip = ui.clip_rect();
+            ui.set_clip_rect(lanes);
+            paint_drop_target(ui, Rect::from_x_y_ranges(timeline_viewport.x_range(), rows));
+            ui.set_clip_rect(clip);
+        }
         if state.track_count() == 0 {
             empty_project_ui(ui, state, timeline_viewport);
         }
@@ -145,7 +165,7 @@ impl CentralPanel {
                 let max_x = (content_size.x - timeline_viewport.right()).max(0.);
                 state.grid.offset.x = state.grid.offset.x.clamp(0., max_x);
             }
-            if viewport.contains(mouse_pos) {
+            if viewport.contains(mouse_pos) || self.tracks.rows_rect().contains(mouse_pos) {
                 state.grid.offset.y -= delta.y;
                 let max_y = (content_size.y - viewport.bottom()).max(0.);
                 state.grid.offset.y = state.grid.offset.y.clamp(0., max_y);
@@ -200,11 +220,12 @@ impl CentralPanel {
         content_size: Vec2,
         offset: &mut Vec2,
     ) -> bool {
+        let lanes_right = viewport.right();
         let mut scrolled_x = false;
         if content_size.x > viewport.max.x {
             let track = Rect::from_min_max(
                 pos2(viewport.left(), viewport.bottom() - SCROLLBAR_WIDTH),
-                pos2(viewport.right() - self.tracks.width, viewport.bottom()),
+                pos2(lanes_right - SCROLLBAR_WIDTH, viewport.bottom()),
             );
             scrolled_x = ui
                 .add(ScrollBar::new(
@@ -219,8 +240,8 @@ impl CentralPanel {
         }
         if content_size.y > viewport.max.y {
             let track = Rect::from_min_max(
-                pos2(viewport.right() - SCROLLBAR_WIDTH, viewport.top()),
-                pos2(viewport.right(), viewport.bottom()),
+                pos2(lanes_right - SCROLLBAR_WIDTH, viewport.top()),
+                pos2(lanes_right, viewport.bottom()),
             );
             ui.add(ScrollBar::new(
                 "vscroll",
@@ -322,9 +343,9 @@ impl CentralPanel {
     }
 }
 
-/// The footer's background, and the master's output scope at the end of
-/// its timeline part (up to `timeline_right`), next to the master's header.
-fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect, timeline_right: f32) {
+/// The footer's background, and the master's output scope at its end, next
+/// to the master's header.
+fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect) {
     let theme = ui.app_theme();
     let painter = ui.painter_at(footer);
     painter.rect_filled(footer, 0., theme.bg_panel);
@@ -333,7 +354,7 @@ fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect, timeline_right: f
         footer.top() + 0.5,
         Stroke::new(1.0, theme.border),
     );
-    let lane = Rect::from_min_max(footer.min, pos2(timeline_right, footer.max.y));
+    let lane = footer;
 
     let scope = Rect::from_min_max(
         pos2(
@@ -346,41 +367,59 @@ fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect, timeline_right: f
         return;
     }
     painter.rect_filled(scope, 2., theme.bg_deep);
-    painter.text(
+    painter.hline(
+        scope.x_range(),
+        scope.center().y,
+        Stroke::new(1.0, theme.separator),
+    );
+    if let Some(m) = state.metrics.tracks.get(&MASTER_TRACK_ID) {
+        paint_scope(&painter, m.scope(), scope, theme.accent);
+    }
+    // Over the waveform, on a veil.
+    let label = painter.text(
         scope.left_top() + vec2(4., 2.),
         Align2::LEFT_TOP,
         "OUT",
         FontId::proportional(font_size::SMALL),
-        theme.text_disabled,
+        theme.text_muted,
     );
-    let samples = state
-        .metrics
-        .tracks
-        .get(&MASTER_TRACK_ID)
-        .filter(|m| m.samples.len() >= 2 && m.samples[0].len() > 3);
-    let Some(m) = samples else {
-        painter.hline(
-            scope.x_range(),
-            scope.center().y,
-            Stroke::new(1.0, theme.separator),
+    painter.rect_filled(label.expand(1.), 1., theme.shadow);
+    painter.text(
+        label.min,
+        Align2::LEFT_TOP,
+        "OUT",
+        FontId::proportional(font_size::SMALL),
+        theme.text_muted,
+    );
+}
+
+/// The master's output over the last few seconds, in `rect`, the newest at
+/// the right: for each pixel, a bar from the lowest to the highest sample.
+fn paint_scope(painter: &egui::Painter, columns: &VecDeque<[f32; 2]>, rect: Rect, color: Color32) {
+    let width = rect.width().floor().max(1.) as usize;
+    // The columns not yet filled are at the left.
+    let missing = SCOPE_COLUMNS - columns.len().min(SCOPE_COLUMNS);
+    let half = rect.height() / 2.;
+    let y = |v: f32| rect.center().y - v.clamp(-1., 1.) * half;
+    let mut mesh = egui::Mesh::default();
+    for px in 0..width {
+        let span = |px: usize| px * SCOPE_COLUMNS / width;
+        let (from, to) = (span(px).max(missing), span(px + 1).max(span(px) + 1));
+        let range = (from..to.min(SCOPE_COLUMNS))
+            .map(|c| columns[c - missing])
+            .reduce(|a, b| [a[0].min(b[0]), a[1].max(b[1])]);
+        let Some([low, high]) = range else {
+            continue;
+        };
+        let x = rect.left() + px as f32;
+        // At least a pixel tall, so silence shows as a line.
+        let (top, bottom) = (
+            y(high).min(rect.center().y - 0.5),
+            y(low).max(rect.center().y + 0.5),
         );
-        return;
-    };
-    let len = m.samples[0].len() as f32;
-    let points: Vec<_> = m.samples[0]
-        .iter()
-        .zip(m.samples[1].iter())
-        .enumerate()
-        .map(|(i, (l, r))| {
-            pos2(
-                scope.left() + i as f32 * scope.width() / len,
-                scope.center().y - scope.height() * ((l + r) / 4.).clamp(-0.5, 0.5),
-            )
-        })
-        .collect();
-    painter.add(egui::Shape::line(points, Stroke::new(1.0, theme.accent)));
-    ui.interact(scope, ui.id().with("master-scope"), Sense::hover())
-        .on_hover_text("Master output");
+        mesh.add_colored_rect(Rect::from_x_y_ranges(x..=x + 1., top..=bottom), color);
+    }
+    painter.add(mesh);
 }
 
 /// What a project without tracks shows: the logo, faded, and how to start.
@@ -398,7 +437,7 @@ fn empty_project_ui(ui: &Ui, state: &ProjectState, viewport: Rect) {
         logo_rect.center_bottom() + vec2(0., 12.),
         Align2::CENTER_TOP,
         "Tonique",
-        FontId::proportional(font_size::HEADING),
+        semibold(font_size::HEADING),
         theme.text_muted,
     );
     let add_track = state
@@ -559,7 +598,8 @@ mod tests {
     }
 
     /// Dragging a file below the last track shows the track a drop would
-    /// add: a header with the name it'll get.
+    /// add: a header with the name it'll get. The track list, a panel shown
+    /// before the timeline, shows what the timeline found the frame before.
     #[test]
     fn dragging_past_the_last_track_shows_a_ghost_track() {
         use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
@@ -598,6 +638,7 @@ mod tests {
         };
         texts(&mut state, Vec::new()); // lay out once
         egui::DragAndDrop::set_payload(&ctx, DragPayload::File(AudioInfo::silent(1.)));
+        texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
         let shown = texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
         assert!(
             shown.iter().any(|t| t == "3 Audio Track"),
@@ -605,6 +646,7 @@ mod tests {
         );
 
         egui::DragAndDrop::clear_payload(&ctx);
+        texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
         let shown = texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
         assert!(!shown.iter().any(|t| t == "3 Audio Track"), "gone after");
     }
@@ -653,6 +695,7 @@ mod tests {
         let below = Pos2::new(300., 500.);
         names(&mut state, Vec::new()); // lay out once
         egui::DragAndDrop::set_payload(&ctx, DragPayload::File(AudioInfo::silent(1.)));
+        names(&mut state, vec![Event::PointerMoved(below)]);
         let ghost = names(&mut state, vec![Event::PointerMoved(below)]);
         assert_eq!(ghost.len(), 1, "the ghost");
 
@@ -724,6 +767,53 @@ mod tests {
             "starts at {:?}",
             bounds.start_pos
         );
+    }
+
+    /// An effect dropped on the master's header, or on its lane in the
+    /// footer, goes on the master.
+    #[test]
+    fn effects_drop_on_the_master() {
+        use crate::{core::effect::EffectKind, ui::dnd::DragPayload};
+        use egui::{Event, PointerButton, Pos2};
+
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        state.add_track();
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        crate::ui::theme::Theme::default().install(&ctx);
+        let mut panel = CentralPanel::new();
+        let mut workspace = Workspace::default();
+        let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(ui, state, &mut workspace, &mut Commands::default())
+            });
+            output.textures_delta.clear();
+        };
+        // The master's row, at the bottom.
+        let y = 800. - state.master_track().height / 2.;
+        let effects = |state: &ProjectState| state.effects(&MASTER_TRACK_ID).len();
+        frame(&mut state, Vec::new()); // lay out once
+        for (x, what) in [(1100., "header"), (400., "lane")] {
+            let at = Pos2::new(x, y);
+            let before = effects(&state);
+            egui::DragAndDrop::set_payload(&ctx, DragPayload::Effect(EffectKind::Echo));
+            frame(&mut state, vec![Event::PointerMoved(at)]);
+            let release = Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            };
+            frame(&mut state, vec![release]);
+            frame(&mut state, Vec::new());
+            assert_eq!(effects(&state), before + 1, "dropped on the {what}");
+        }
     }
 
     /// The rename shortcut types a name in the selected track's header;

@@ -1,3 +1,4 @@
+use crate::ui::font::semibold;
 use crate::ui::theme::font_size;
 use crate::{
     config::keymap::Action,
@@ -420,9 +421,13 @@ impl BottomPanel {
                             title = format!("{title}  ›  {name}");
                         }
                         let label = ui.add(
-                            Label::new(RichText::new(title).size(font_size::SMALL).color(ink))
-                                .truncate()
-                                .selectable(false),
+                            Label::new(
+                                RichText::new(title)
+                                    .font(semibold(font_size::SMALL))
+                                    .color(ink),
+                            )
+                            .truncate()
+                            .selectable(false),
                         );
                         if let Some((_, path)) = clip {
                             label.on_hover_text(path.display().to_string());

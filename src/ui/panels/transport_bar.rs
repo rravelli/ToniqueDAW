@@ -17,7 +17,7 @@ use crate::{
         commands::Commands,
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::{ThemeExt, with_alpha},
-        widget::{flat_button::FlatButton, input::NumberInput, select::Select},
+        widget::{flat_button::FlatButton, input::NumberInput},
         workspace::{MainView, Workspace},
     },
     utils::{format_bars, format_time},
@@ -29,12 +29,18 @@ const BUTTON_GAP: f32 = 2.;
 const GROUP_GAP: f32 = 8.;
 /// The playhead's position: bars and time.
 const POSITION_WIDTH: f32 = 140.;
+/// The position in bars alone, when the bar is too narrow for the time.
+const POSITION_BARS_WIDTH: f32 = 72.;
 const USAGE_WIDTH: f32 = 46.;
+/// Each of the time signature's two fields.
+const TIME_SIGNATURE_FIELD_WIDTH: f32 = 22.;
 
 pub struct TransportBar {
     bpm_input: NumberInput,
     /// The time signature's beats per bar.
     numerator_input: NumberInput,
+    /// The time signature's note value.
+    denominator_input: NumberInput,
 }
 
 impl TransportBar {
@@ -44,8 +50,12 @@ impl TransportBar {
                 .range(Rangef::new(10., 1000.))
                 .suffix(" BPM")
                 .draggable(),
-            numerator_input: NumberInput::new(Vec2::new(28., BUTTON_SIZE))
+            numerator_input: NumberInput::new(Vec2::new(TIME_SIGNATURE_FIELD_WIDTH, BUTTON_SIZE))
                 .range(Rangef::new(1., TimeSignature::MAX_NUMERATOR as f32))
+                .decimals(0)
+                .draggable(),
+            denominator_input: NumberInput::new(Vec2::new(TIME_SIGNATURE_FIELD_WIDTH, BUTTON_SIZE))
+                .values(TimeSignature::DENOMINATORS.map(|d| d as f32))
                 .decimals(0)
                 .draggable(),
         }
@@ -89,10 +99,36 @@ impl TransportBar {
                 commands.push(Action::ToggleGraphView);
             }
 
+            let left = ui.min_rect().right();
+
+            // The right group first: the transport keeps clear of it.
+            let right = ui
+                .with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    self.right_ui(ui, state, commands);
+                    ui.min_rect().left()
+                })
+                .inner;
+
+            // Centred in the bar, unless that would run into either side:
+            // then as near the centre as fits, the time left out if even
+            // that's too narrow.
+            let room = right - left - 2. * GROUP_GAP;
             let buttons = if RECORDING { 5. } else { 4. };
-            let width = buttons * (BUTTON_SIZE + BUTTON_GAP) + GROUP_GAP + POSITION_WIDTH;
+            let buttons_width = buttons * (BUTTON_SIZE + BUTTON_GAP) + GROUP_GAP;
+            let with_time = buttons_width + POSITION_WIDTH <= room;
+            let position_width = if with_time {
+                POSITION_WIDTH
+            } else {
+                POSITION_BARS_WIDTH
+            };
+            let width = buttons_width + position_width;
+            let center_x = full
+                .center()
+                .x
+                .min(right - GROUP_GAP - width / 2.)
+                .max(left + GROUP_GAP + width / 2.);
             let center = Rect::from_center_size(
-                pos2(full.center().x, ui.max_rect().center().y),
+                pos2(center_x, ui.max_rect().center().y),
                 vec2(width, BUTTON_SIZE),
             );
             ui.scope_builder(
@@ -100,6 +136,8 @@ impl TransportBar {
                     .max_rect(center)
                     .layout(Layout::left_to_right(Align::Center)),
                 |ui| {
+                    // Under the right group when there's no room at all.
+                    ui.set_clip_rect(ui.clip_rect().with_max_x(right - GROUP_GAP / 2.));
                     if self.metronome_ui(ui, state).clicked() {
                         commands.push(Action::ToggleMetronome);
                     }
@@ -114,54 +152,50 @@ impl TransportBar {
                         commands.push(Action::ToggleFollowPlayhead);
                     }
                     ui.add_space(GROUP_GAP - BUTTON_GAP);
-                    position_ui(ui, state);
+                    position_ui(ui, state, with_time);
                 },
             );
-
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if self.redo_ui(ui, state).clicked() {
-                    commands.push(Action::Redo);
-                }
-                if self.undo_ui(ui, state).clicked() {
-                    commands.push(Action::Undo);
-                }
-                ui.add_space(GROUP_GAP);
-                self.usage_ui(ui, state);
-                if cfg!(debug_assertions) {
-                    self.fps_ui(ui);
-                }
-                if state.audio_lost() && self.no_audio_ui(ui, state).clicked() {
-                    commands.push(Action::OpenSettings);
-                }
-                ui.add_space(GROUP_GAP);
-                self.bpm_input.value = state.bpm();
-                self.bpm_input
-                    .ui(ui)
-                    .on_hover_text("Tempo: drag or double-click to edit");
-                if self.bpm_input.value != state.bpm() {
-                    state.set_bpm(self.bpm_input.value);
-                }
-                ui.add_space(BUTTON_GAP);
-                self.time_signature_ui(ui, state);
-            });
         });
     }
 
-    /// Beats per bar (typed or dragged) over the note that counts them.
+    /// Undo and redo, the status, the tempo and the time signature, laid
+    /// out right to left.
+    fn right_ui(&mut self, ui: &mut Ui, state: &mut ProjectState, commands: &mut Commands) {
+        if self.redo_ui(ui, state).clicked() {
+            commands.push(Action::Redo);
+        }
+        if self.undo_ui(ui, state).clicked() {
+            commands.push(Action::Undo);
+        }
+        ui.add_space(GROUP_GAP);
+        self.usage_ui(ui, state);
+        if cfg!(debug_assertions) {
+            self.fps_ui(ui);
+        }
+        if state.audio_lost() && self.no_audio_ui(ui, state).clicked() {
+            commands.push(Action::OpenSettings);
+        }
+        ui.add_space(GROUP_GAP);
+        self.bpm_input.value = state.bpm();
+        self.bpm_input
+            .ui(ui)
+            .on_hover_text("Tempo: drag or double-click to edit");
+        if self.bpm_input.value != state.bpm() {
+            state.set_bpm(self.bpm_input.value);
+        }
+        ui.add_space(BUTTON_GAP);
+        self.time_signature_ui(ui, state);
+    }
+
+    /// Beats per bar over the note that counts them, each typed or dragged.
     /// Laid out right to left, like the rest of this side of the bar.
     fn time_signature_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let current = state.time_signature();
-        let mut denominator = current.denominator;
-        ui.add(
-            Select::new("time-signature-denominator", &mut denominator)
-                .options(
-                    TimeSignature::DENOMINATORS
-                        .iter()
-                        .map(|d| (*d, d.to_string())),
-                )
-                .width(44.),
-        )
-        .on_hover_text("Note value of a beat");
+        self.denominator_input.value = current.denominator as f32;
+        self.denominator_input
+            .ui(ui)
+            .on_hover_text("Note value of a beat: drag or double-click to edit");
+        let denominator = self.denominator_input.value as u32;
         ui.label(RichText::new("/").color(ui.app_theme().text_muted));
         self.numerator_input.value = current.numerator as f32;
         self.numerator_input
@@ -410,14 +444,20 @@ impl TransportBar {
     }
 }
 
-/// Where the playhead is, in bars.beats.sixteenths and in time.
-fn position_ui(ui: &mut Ui, state: &ProjectState) {
-    let (rect, _) = ui.allocate_exact_size(vec2(POSITION_WIDTH, BUTTON_SIZE), Sense::hover());
+/// Where the playhead is, in bars.beats.sixteenths and, `with_time`, in
+/// time.
+fn position_ui(ui: &mut Ui, state: &ProjectState, with_time: bool) {
+    let width = if with_time {
+        POSITION_WIDTH
+    } else {
+        POSITION_BARS_WIDTH
+    };
+    let (rect, _) = ui.allocate_exact_size(vec2(width, BUTTON_SIZE), Sense::hover());
     let theme = ui.app_theme();
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 2.0, theme.bg_deep);
     let (bars, time) = position_text(state.playhead().0, state.time_signature(), state.bpm());
-    let font = FontId::monospace(font_size::BODY);
+    let font = FontId::proportional(font_size::BODY);
     painter.text(
         rect.left_center() + vec2(8., 0.),
         Align2::LEFT_CENTER,
@@ -425,6 +465,9 @@ fn position_ui(ui: &mut Ui, state: &ProjectState) {
         font.clone(),
         theme.text,
     );
+    if !with_time {
+        return;
+    }
     painter.text(
         rect.right_center() - vec2(8., 0.),
         Align2::RIGHT_CENTER,

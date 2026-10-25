@@ -28,6 +28,9 @@ pub struct Workspace {
     pub left_panel_open: bool,
     /// The selected track's effects, at the bottom.
     pub bottom_panel_open: bool,
+    /// The track headers, right of the timeline; a strip of the tracks'
+    /// colours when collapsed.
+    pub track_list_open: bool,
     pub bottom_view: BottomView,
     pub main_view: MainView,
 }
@@ -37,6 +40,7 @@ impl Default for Workspace {
         Self {
             left_panel_open: true,
             bottom_panel_open: false,
+            track_list_open: true,
             bottom_view: BottomView::Effects,
             main_view: MainView::Timeline,
         }
