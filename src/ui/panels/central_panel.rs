@@ -385,8 +385,6 @@ fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect) {
         FontId::proportional(font_size::SMALL),
         theme.text_muted,
     );
-    ui.interact(scope, ui.id().with("master-scope"), Sense::hover())
-        .on_hover_text("Master output, the last 3 seconds");
 }
 
 /// The master's output over the last few seconds, in `rect`, the newest at
