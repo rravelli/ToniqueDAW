@@ -3,7 +3,7 @@ use crate::{
     core::{clip::AudioClip, state::ProjectState},
     ui::arrangement::grid::PaintGrid,
     ui::{
-        theme::{ThemeExt, with_alpha},
+        theme::{ThemeExt, contrast, with_alpha},
         waveform::paint_waveform,
         widget::context_menu::ContextMenuButton,
     },
@@ -28,10 +28,10 @@ const CUT_GAP: f32 = 1.;
 const TRIM_HANDLE_WIDTH: f32 = 7.;
 const MIN_TRIM_HANDLE_WIDTH: f32 = 2.;
 /// How much of its track's colour a clip's body has, mixed into the
-/// timeline's background: a tint, unlike its solid header, so the header
-/// reads as the clip to grab and the body as time. Opaque, so clips dragged
-/// over others hide them.
-const BODY_TINT: f32 = 0.4;
+/// timeline's background: most of it, so its black waveform reads, but
+/// set off from its solid header, so the header reads as the clip to grab
+/// and the body as time. Opaque, so clips dragged over others hide them.
+const BODY_TINT: f32 = 0.7;
 /// The selected part of a clip's body (all of it, or a selection zone's
 /// part): lit towards the theme's neutral selection colour,
 /// keeping a hint of the clip's, its waveform and grid in contrasting ink.
@@ -39,12 +39,16 @@ const SELECTION_FILL: f32 = 0.8;
 /// How much a collapsed clip's waveform stands out from its body: a hint
 /// of where the sound is, the header being what's read.
 const COLLAPSED_WAVE: f32 = 0.4;
-/// How much of its track's colour a silenced clip's body, header, waveform
-/// and outline have: a faint wash of it.
+/// How much a silenced clip's waveform stands out from its body.
+const SILENCED_WAVE: f32 = 0.45;
+/// How much of its track's colour a silenced clip's body, header and
+/// outline have: a faint wash of it.
 const SILENCED_BODY_TINT: f32 = 0.16;
 const SILENCED_HEADER_TINT: f32 = 0.27;
 const SILENCED_BORDER_TINT: f32 = 0.43;
-const SILENCED_WAVE_TINT: f32 = 0.5;
+/// The least contrast a black waveform needs with what it's drawn on (the
+/// WCAG ratio for graphics); on anything darker, it's drawn light.
+const WAVE_CONTRAST: f32 = 3.;
 #[derive(Clone, Copy)]
 enum Edge {
     Start,
@@ -166,25 +170,17 @@ impl ClipView<'_> {
         // the selected part of the body is lit, the header stays as is.
         // Mixed into the background rather than see-through.
         let tint = |color: Color32, amount: f32| theme.bg_base.lerp_to_gamma(color, amount);
-        let (body, header, header_ink, wave, outline) = if self.silenced {
+        let (body, header, header_ink, outline) = if self.silenced {
             (
                 tint(color, SILENCED_BODY_TINT),
                 tint(color, SILENCED_HEADER_TINT),
                 theme.text_muted,
-                tint(color, SILENCED_WAVE_TINT),
                 tint(color, SILENCED_BORDER_TINT),
             )
         } else {
-            (
-                tint(color, BODY_TINT),
-                color,
-                theme.text_on(color),
-                color,
-                tint(color, 0.67),
-            )
+            (tint(color, BODY_TINT), color, theme.text_on(color), color)
         };
         let selection = color.lerp_to_gamma(theme.clip_selected, SELECTION_FILL);
-        let selection_ink = theme.text_on(selection);
         // The selected beats: the zone's part of the clip, or all of it.
         let end = clip.end(state.bpm());
         let lit_range = match self.zone {
@@ -199,9 +195,13 @@ impl ClipView<'_> {
             egui::StrokeKind::Inside,
         );
         let rect = Rect::from_min_max(pos2(pos.x, pos.y + HEADER_HEIGHT), pos + size);
-        let waveform = |painter: &Painter, bg: Color32, ink: Color32| {
+        // Black, faded on collapsed and silenced clips.
+        let waveform = |painter: &Painter, bg: Color32| {
+            let ink = wave_ink(bg);
             let ink = if self.collapsed {
                 bg.lerp_to_gamma(ink, COLLAPSED_WAVE)
+            } else if self.silenced {
+                bg.lerp_to_gamma(ink, SILENCED_WAVE)
             } else {
                 ink
             };
@@ -218,9 +218,9 @@ impl ClipView<'_> {
                 ink,
             );
         };
-        waveform(&painter, body, wave);
+        waveform(&painter, body);
         // The selected part: lit, inside the outline, its waveform drawn
-        // again over it in ink that reads on it.
+        // again over it.
         if let Some((start, stop)) = lit_range {
             let x = |beats: BeatPos| state.grid.beats_to_x(beats, viewport);
             let lit = Rect::from_x_y_ranges(x(start)..=x(stop), rect.top()..=rect.bottom())
@@ -230,7 +230,6 @@ impl ClipView<'_> {
                 waveform(
                     &painter.with_clip_rect(painter.clip_rect().intersect(lit)),
                     selection,
-                    selection_ink,
                 );
             }
         }
@@ -341,6 +340,16 @@ impl ClipView<'_> {
                 state.delete_clips(&[clip.id]);
             };
         });
+    }
+}
+
+/// The ink of a waveform on `bg`: black, unless `bg` is too dark for it to
+/// read (a dark track colour, a selection lit towards black), then white.
+fn wave_ink(bg: Color32) -> Color32 {
+    if contrast(Color32::BLACK, bg) >= WAVE_CONTRAST {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
     }
 }
 

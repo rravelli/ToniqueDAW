@@ -44,7 +44,7 @@ impl Widget for ColorSelect<'_> {
                             let (rect, response) =
                                 ui.allocate_exact_size(vec2(SWATCH, SWATCH), Sense::click());
                             let outline = if current {
-                                Stroke::new(2., theme.clip_selected)
+                                Stroke::new(2., theme.text)
                             } else if response.hovered() {
                                 Stroke::new(1., theme.text_muted)
                             } else {
