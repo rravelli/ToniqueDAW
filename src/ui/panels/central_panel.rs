@@ -6,7 +6,7 @@ use crate::{
             row_layout::RowLayout,
             ruler::Ruler,
             timeline::Timeline,
-            track_headers::{FOOTER_PADDING, TrackHeaders},
+            track_headers::{FOOTER_PADDING, TrackHeaders, paint_drop_target},
         },
         commands::Commands,
         graph::GraphView,
@@ -19,7 +19,8 @@ use crate::{
     },
 };
 use egui::{
-    Align2, Color32, FontId, Frame, Margin, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
+    Align2, Color32, FontId, Frame, Margin, Pos2, Rangef, Rect, Sense, Shape, Stroke, Ui, Vec2,
+    pos2, vec2,
 };
 
 /// Empty bars after the end of the arrangement.
@@ -60,6 +61,13 @@ impl CentralPanel {
         workspace: &mut Workspace,
         commands: &mut Commands,
     ) {
+        // The track list, as a panel of its own beside the timeline.
+        let drop_target = if workspace.main_view == MainView::Timeline {
+            self.tracks
+                .show(ui, state, workspace, self.timeline.new_tracks())
+        } else {
+            None
+        };
         egui::CentralPanel::default()
             .frame(
                 Frame::central_panel(ui.style())
@@ -67,7 +75,7 @@ impl CentralPanel {
                     .fill(ui.app_theme().bg_base),
             )
             .show(ui, |ui| {
-                self.ui(ui, state, workspace, commands);
+                self.ui(ui, state, workspace, commands, drop_target);
             });
     }
 
@@ -77,6 +85,7 @@ impl CentralPanel {
         state: &mut ProjectState,
         workspace: &mut Workspace,
         commands: &mut Commands,
+        drop_target: Option<Rangef>,
     ) {
         if workspace.main_view == MainView::Graph {
             self.graph.ui(ui, state);
@@ -90,20 +99,17 @@ impl CentralPanel {
         }
         let available_rect = ui.available_rect_before_wrap();
         // Draw navigation bar on top
-        self.ruler.ui(ui, state, self.tracks.width);
+        self.ruler.ui(ui, state);
 
         let (area, _) = ui.allocate_exact_size(ui.available_size(), Sense::all());
         // The tracks scroll above a footer holding the master.
         let footer_height = (state.master_track().height + FOOTER_PADDING).min(area.height());
         let viewport = Rect::from_min_max(area.min, pos2(area.max.x, area.max.y - footer_height));
         let footer = Rect::from_min_max(pos2(area.min.x, viewport.max.y), area.max);
-        master_lane_ui(ui, state, footer, footer.max.x - self.tracks.width);
+        master_lane_ui(ui, state, footer);
         ui.set_clip_rect(viewport);
 
-        let timeline_viewport = Rect::from_min_max(
-            viewport.min,
-            pos2(viewport.max.x - self.tracks.width, viewport.max.y),
-        );
+        let timeline_viewport = viewport;
         let mut layout = RowLayout::new(state, viewport.top(), state.grid.offset.y);
         // Draw timeline
         self.timeline.ui(
@@ -114,20 +120,12 @@ impl CentralPanel {
             &mut layout,
             timeline_viewport,
         );
-        // Draw tracks
-        // With the tracks a drop on the timeline would add.
-        let new_tracks = self.timeline.new_tracks();
-        self.tracks.ui(
-            ui,
-            state,
-            workspace,
-            &layout,
-            viewport,
-            timeline_viewport,
-            available_rect.top(),
-            footer,
-            new_tracks,
-        );
+        self.tracks.set_lanes(timeline_viewport);
+        // The lane of the track an effect would be dropped on, lit with
+        // its header.
+        if let Some(rows) = drop_target {
+            paint_drop_target(ui, Rect::from_x_y_ranges(timeline_viewport.x_range(), rows));
+        }
         if state.track_count() == 0 {
             empty_project_ui(ui, state, timeline_viewport);
         }
@@ -154,7 +152,7 @@ impl CentralPanel {
                 let max_x = (content_size.x - timeline_viewport.right()).max(0.);
                 state.grid.offset.x = state.grid.offset.x.clamp(0., max_x);
             }
-            if viewport.contains(mouse_pos) {
+            if viewport.contains(mouse_pos) || self.tracks.rows_rect().contains(mouse_pos) {
                 state.grid.offset.y -= delta.y;
                 let max_y = (content_size.y - viewport.bottom()).max(0.);
                 state.grid.offset.y = state.grid.offset.y.clamp(0., max_y);
@@ -209,8 +207,7 @@ impl CentralPanel {
         content_size: Vec2,
         offset: &mut Vec2,
     ) -> bool {
-        // On the timeline's edge, beside the track list.
-        let lanes_right = viewport.right() - self.tracks.width;
+        let lanes_right = viewport.right();
         let mut scrolled_x = false;
         if content_size.x > viewport.max.x {
             let track = Rect::from_min_max(
@@ -333,9 +330,9 @@ impl CentralPanel {
     }
 }
 
-/// The footer's background, and the master's output scope at the end of
-/// its timeline part (up to `timeline_right`), next to the master's header.
-fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect, timeline_right: f32) {
+/// The footer's background, and the master's output scope at its end, next
+/// to the master's header.
+fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect) {
     let theme = ui.app_theme();
     let painter = ui.painter_at(footer);
     painter.rect_filled(footer, 0., theme.bg_panel);
@@ -344,7 +341,7 @@ fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect, timeline_right: f
         footer.top() + 0.5,
         Stroke::new(1.0, theme.border),
     );
-    let lane = Rect::from_min_max(footer.min, pos2(timeline_right, footer.max.y));
+    let lane = footer;
 
     let scope = Rect::from_min_max(
         pos2(
@@ -570,7 +567,8 @@ mod tests {
     }
 
     /// Dragging a file below the last track shows the track a drop would
-    /// add: a header with the name it'll get.
+    /// add: a header with the name it'll get. The track list, a panel shown
+    /// before the timeline, shows what the timeline found the frame before.
     #[test]
     fn dragging_past_the_last_track_shows_a_ghost_track() {
         use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
@@ -609,6 +607,7 @@ mod tests {
         };
         texts(&mut state, Vec::new()); // lay out once
         egui::DragAndDrop::set_payload(&ctx, DragPayload::File(AudioInfo::silent(1.)));
+        texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
         let shown = texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
         assert!(
             shown.iter().any(|t| t == "3 Audio Track"),
@@ -616,6 +615,7 @@ mod tests {
         );
 
         egui::DragAndDrop::clear_payload(&ctx);
+        texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
         let shown = texts(&mut state, vec![Event::PointerMoved(Pos2::new(300., 500.))]);
         assert!(!shown.iter().any(|t| t == "3 Audio Track"), "gone after");
     }
@@ -664,6 +664,7 @@ mod tests {
         let below = Pos2::new(300., 500.);
         names(&mut state, Vec::new()); // lay out once
         egui::DragAndDrop::set_payload(&ctx, DragPayload::File(AudioInfo::silent(1.)));
+        names(&mut state, vec![Event::PointerMoved(below)]);
         let ghost = names(&mut state, vec![Event::PointerMoved(below)]);
         assert_eq!(ghost.len(), 1, "the ghost");
 

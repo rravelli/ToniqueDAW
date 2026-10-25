@@ -174,6 +174,7 @@ impl ToniqueApp {
             Action::ToggleEffectsPanel => {
                 workspace.bottom_panel_open = !workspace.bottom_panel_open
             }
+            Action::ToggleTrackList => workspace.track_list_open = !workspace.track_list_open,
             Action::ToggleGraphView => workspace.toggle_graph(),
             Action::OpenSettings => self.setting_window.toggle(state),
             Action::NewProject => self.project.request(ProjectAction::New, state),

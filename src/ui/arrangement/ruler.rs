@@ -1,15 +1,7 @@
-use egui::{CursorIcon, FontFamily, FontId, Painter, Rect, Sense, Stroke, Ui, Vec2, vec2};
-use egui_phosphor::regular::{ARROWS_IN_LINE_VERTICAL, ARROWS_OUT_LINE_VERTICAL};
+use egui::{CursorIcon, Painter, Rect, Sense, Stroke, Ui, vec2};
 use tonique_engine::time::BeatPos;
 
-use crate::{
-    core::state::ProjectState,
-    ui::arrangement::grid::PaintGrid,
-    ui::{
-        arrangement::track_headers::SPLITTER_WIDTH, font::PHOSPHOR_REGULAR, theme::ThemeExt,
-        widget::flat_button::FlatButton,
-    },
-};
+use crate::{core::state::ProjectState, ui::arrangement::grid::PaintGrid, ui::theme::ThemeExt};
 
 /// The loop lane, then the bars, then the time: a row each.
 pub const RULER_HEIGHT: f32 = 3. * ROW_HEIGHT;
@@ -22,8 +14,6 @@ const EDGE_GRAB: f32 = LOOP_GRIP_WIDTH;
 const LOOP_INSET: f32 = 1.5;
 /// The loop bar's end caps.
 const LOOP_GRIP_WIDTH: f32 = 6.;
-/// The buttons over the track headers.
-const HEADER_BUTTON_SIZE: f32 = 22.;
 
 /// What a drag in the loop lane is doing.
 #[derive(Clone, Copy)]
@@ -49,16 +39,16 @@ impl Ruler {
         Self { loop_drag: None }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, track_width: f32) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         ui.spacing_mut().interact_size.y = 0.;
         ui.horizontal(|ui| {
             // ColorBar for zoom control
             let ruler_rect = egui::Rect::from_min_size(
                 egui::pos2(ui.min_rect().left(), ui.min_rect().top()),
-                egui::vec2(ui.available_width() - track_width, RULER_HEIGHT),
+                egui::vec2(ui.available_width(), RULER_HEIGHT),
             );
             let (nav_bar_response, painter) = ui.allocate_painter(
-                vec2(ui.available_width() - track_width, RULER_HEIGHT),
+                vec2(ui.available_width(), RULER_HEIGHT),
                 Sense::click_and_drag(),
             );
 
@@ -87,14 +77,6 @@ impl Ruler {
                 let delta = ui.input(|i| i.smooth_scroll_delta.y);
                 state.grid.zoom_around(delta, mouse_pos.x, ruler_rect);
             }
-            // The track list's head, above its headers.
-            let head = Rect::from_x_y_ranges(
-                ruler_rect.right()..=ui.max_rect().right(),
-                ruler_rect.y_range(),
-            );
-            ui.painter().rect_filled(head, 0., ui.app_theme().bg_panel);
-            ui.add_space(SPLITTER_WIDTH + 4.0);
-            self.right_ui(ui, state);
         });
     }
 
@@ -260,29 +242,5 @@ impl Ruler {
                 painter.vline(cap.center().x + dx, grip, Stroke::new(1., on_color));
             }
         }
-    }
-
-    fn right_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
-        ui.scope(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(2.0, 4.0);
-            let button = |icon: &str, tooltip: &str| {
-                FlatButton::ghost(icon)
-                    .square(HEADER_BUTTON_SIZE)
-                    .font(FontId::new(14., FontFamily::Name(PHOSPHOR_REGULAR.into())))
-                    .tooltip(tooltip)
-            };
-            if ui
-                .add(button(ARROWS_OUT_LINE_VERTICAL, "Expand all tracks"))
-                .clicked()
-            {
-                state.set_all_collapsed(false);
-            };
-            if ui
-                .add(button(ARROWS_IN_LINE_VERTICAL, "Collapse all tracks"))
-                .clicked()
-            {
-                state.set_all_collapsed(true);
-            };
-        });
     }
 }
