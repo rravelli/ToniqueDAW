@@ -161,13 +161,15 @@ impl TrackHeader {
         let is_group = track.kind == TrackKind::Group;
         let silenced = track.is_silenced();
         let is_solo = matches!(track.solo, crate::core::track::TrackSoloState::Solo);
-        // Groups and the master have no arm button.
-        let armable = RECORDING && !is_group && track.id != MASTER_TRACK_ID;
+        let is_master = track.id == MASTER_TRACK_ID;
+        // Groups and the master have no arm button; the master no solo.
+        let armable = RECORDING && !is_group && !is_master;
+        let toggle_count = if is_master { 1 } else { 2 + armable as usize };
 
         let theme = ui.app_theme();
         let (rect, _) =
             ui.allocate_exact_size(vec2(ui.available_width(), track.height), Sense::hover());
-        let layout = HeaderLayout::new(rect, track.depth, track.collapsed, 2 + armable as usize);
+        let layout = HeaderLayout::new(rect, track.depth, track.collapsed, toggle_count);
         let fill = if track.selected {
             theme.bg_control
         } else {
@@ -207,17 +209,17 @@ impl TrackHeader {
         in_rect(ui, layout.name, |ui| self.text_ui(ui, track, state));
         let mut toggles = layout.toggles.iter();
         if let Some(&r) = toggles.next()
-            && put(ui, r, mute_button(is_solo, track, &theme)).clicked()
+            && put(
+                ui,
+                r,
+                toggle_button("M", track.muted.then_some(theme.warning), &theme),
+            )
+            .clicked()
         {
             state.set_mute(track.id, !track.muted);
         }
         if let Some(&r) = toggles.next()
-            && put(
-                ui,
-                r,
-                toggle_button("S", is_solo.then_some(track.color), &theme),
-            )
-            .clicked()
+            && put(ui, r, solo_button(is_solo, track, &theme)).clicked()
         {
             state.toggle_solo(track.id, ui.input(|i| i.modifiers.shift));
         }
@@ -296,6 +298,12 @@ impl TrackHeader {
                     &track.name,
                     track.first_track_index,
                 )));
+                // The master can't be renamed, moved, grouped, copied or
+                // deleted: only its colour changes.
+                if track.id == MASTER_TRACK_ID {
+                    color_menu(ui, track, state);
+                    return;
+                }
                 if ui.add(ContextMenuButton::new(TEXT_T, "Rename")).clicked() {
                     self.edit = true;
                 };
@@ -328,14 +336,7 @@ impl TrackHeader {
                 } else if ui.add(ContextMenuButton::new(COPY, "Duplicate")).clicked() {
                     state.duplicate_track(&track.id);
                 };
-                ContextMenuButton::new(PALETTE, "Color").submenu(ui, |ui| {
-                    let mut color = track.color;
-                    let picker = ColorSelect::new(("track-color", track.id), &mut color);
-                    if ui.add(picker).changed() {
-                        state.track_view_mut(&track.id).color = color;
-                        state.commit_track_view(&track.id);
-                    }
-                });
+                color_menu(ui, track, state);
                 ui.add(ContextMenuSeparator::new());
                 let delete = if is_group {
                     "Delete group and contents"
@@ -476,14 +477,27 @@ fn collapse_button(collapsed: bool) -> FlatButton {
         .size(vec2(CARET_WIDTH, BUTTON_SIZE.y))
 }
 
-/// Dimmed when a solo already silences the track.
-fn mute_button(solo: bool, track: &TrackRow, theme: &Theme) -> FlatButton {
-    let fill = match (track.muted, solo) {
+/// "Color", opening a palette for the row's colour.
+fn color_menu(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
+    ContextMenuButton::new(PALETTE, "Color").submenu(ui, |ui| {
+        let mut color = track.color;
+        let picker = ColorSelect::new(("track-color", track.id), &mut color);
+        if ui.add(picker).changed() {
+            state.track_view_mut(&track.id).color = color;
+            state.commit_track_view(&track.id);
+        }
+    });
+}
+
+/// In the track's colour when soloed; dimmed when the track still isn't
+/// heard (muted, or in a muted group: mute wins over solo).
+fn solo_button(solo: bool, track: &TrackRow, theme: &Theme) -> FlatButton {
+    let fill = match (solo, track.is_silenced()) {
         (false, _) => None,
-        (true, false) => Some(theme.warning),
-        (true, true) => Some(with_alpha(theme.warning, 90)),
+        (true, false) => Some(track.color),
+        (true, true) => Some(with_alpha(track.color, 90)),
     };
-    toggle_button("M", fill, theme)
+    toggle_button("S", fill, theme)
 }
 
 /// Track header toggle: `fill` when on, outlined when off.

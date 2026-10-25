@@ -97,8 +97,10 @@ impl CentralPanel {
             return;
         }
         // Rename the selected track, unless the effects panel took it.
+        // The master keeps its name.
         if !commands.take(|a| a == Action::Rename).is_empty()
             && let Some(track) = state.selected_track()
+            && track.id != MASTER_TRACK_ID
         {
             self.tracks.rename(track.id);
         }

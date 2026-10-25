@@ -612,6 +612,7 @@ fn paint_new_track_headers(
             color: *color,
             selected: false,
             solo: TrackSoloState::NotSoloing,
+            silenced: false,
             first_track_index: index,
             kind: TrackKind::Audio,
             depth: 0,

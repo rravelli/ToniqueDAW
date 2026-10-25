@@ -1525,6 +1525,56 @@ mod groups {
         assert!(!state.selected_clips().contains(&clip));
     }
 
+    /// What the track list shows as silenced is what the engine leaves
+    /// out: mute wins over solo, a muted group silences what's inside, and
+    /// a group with nothing heard inside is silenced.
+    #[test]
+    fn silenced_rows_match_the_engine() {
+        let mut state = setup_state();
+        let [a, b, c] = ["a", "b", "c"].map(|n| track(&mut state, n));
+        let group = state.group(&[a, b]).unwrap();
+        let silenced = |s: &ProjectState, id| {
+            s.rows()
+                .into_iter()
+                .find(|r| r.id == id)
+                .unwrap()
+                .is_silenced()
+        };
+        // Through its own channel and its groups'.
+        let heard = |s: &ProjectState, id| {
+            let edit = s.edit();
+            let track = edit.track(id).unwrap();
+            track.channel.audible()
+                && edit
+                    .buses_along(track.output)
+                    .iter()
+                    .all(|b| edit.bus(*b).unwrap().channel.audible())
+        };
+        let check = |s: &ProjectState, what: &str| {
+            for t in [a, b, c] {
+                assert_eq!(silenced(s, t), !heard(s, t), "{what}: track {t:?}");
+            }
+        };
+        check(&state, "nothing");
+
+        state.toggle_solo(c, false);
+        check(&state, "c soloed");
+        assert!(silenced(&state, group), "nothing heard inside");
+        state.set_mute(c, true);
+        check(&state, "c soloed and muted");
+        assert!(silenced(&state, c), "mute wins over solo");
+
+        state.toggle_solo(c, false);
+        state.set_mute(c, false);
+        state.set_mute(group, true);
+        check(&state, "group muted");
+        assert!(silenced(&state, a) && silenced(&state, group));
+        assert!(!silenced(&state, c));
+        assert!(!state.master_track().is_silenced());
+        state.set_mute(MASTER_TRACK_ID, true);
+        assert!(state.master_track().is_silenced());
+    }
+
     #[test]
     fn soloing_and_muting_a_group() {
         let mut state = setup_state();
