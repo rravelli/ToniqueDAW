@@ -29,6 +29,9 @@ pub struct NumberInput {
     draggable: bool,
     /// Drag not yet turned into a step.
     drag_rest: f32,
+    /// The only values taken, in ascending order, each step moving to the
+    /// next; any value in `range` when empty.
+    values: Vec<f32>,
 }
 
 impl NumberInput {
@@ -44,6 +47,7 @@ impl NumberInput {
             suffix: String::new(),
             draggable: false,
             drag_rest: 0.,
+            values: Vec::new(),
         }
     }
 
@@ -70,11 +74,42 @@ impl NumberInput {
         self
     }
 
+    /// Only these values, in ascending order: a step moves to the next,
+    /// and a typed value snaps to the nearest.
+    pub fn values(mut self, values: impl IntoIterator<Item = f32>) -> Self {
+        self.values = values.into_iter().collect();
+        self
+    }
+
     fn commit_buffer(&mut self) {
         let result = self.buffer.parse::<f32>();
         if let Ok(number) = result {
-            self.value = number.clamp(self.range.min, self.range.max)
+            self.value = match self.nearest_index(number) {
+                Some(index) => self.values[index],
+                None => number.clamp(self.range.min, self.range.max),
+            };
         }
+    }
+
+    /// Index of the value in `values` nearest `value`.
+    fn nearest_index(&self, value: f32) -> Option<usize> {
+        (0..self.values.len()).min_by(|a, b| {
+            (self.values[*a] - value)
+                .abs()
+                .total_cmp(&(self.values[*b] - value).abs())
+        })
+    }
+
+    /// `steps` steps up (down when negative): whole units, or from one of
+    /// `values` to another.
+    fn step(&mut self, steps: f32) {
+        self.value = match self.nearest_index(self.value) {
+            Some(index) => {
+                let last = self.values.len() as f32 - 1.;
+                self.values[(index as f32 + steps).clamp(0., last) as usize]
+            }
+            None => (self.value + steps).clamp(self.range.min, self.range.max),
+        };
     }
 
     fn format_value(&self, value: f32) -> String {
@@ -179,12 +214,12 @@ impl NumberInput {
         }
         if res1.clicked() || (focused && ui.input(|i| i.key_pressed(egui::Key::ArrowUp))) {
             res1.request_focus();
-            self.value = (self.value + 1.0).clamp(self.range.min, self.range.max);
+            self.step(1.);
         }
         if res2.clicked() || (focused && ui.input(|i| i.key_pressed(egui::Key::ArrowDown))) {
             ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
             res1.request_focus();
-            self.value = (self.value - 1.0).clamp(self.range.min, self.range.max);
+            self.step(-1.);
         }
         // Make sure the input has the correct size
         ui.allocate_rect(rect, Sense::empty());
@@ -230,7 +265,9 @@ impl NumberInput {
             self.drag_rest -= res.drag_delta().y / DRAG_PIXELS_PER_STEP;
             let steps = self.drag_rest.trunc();
             self.drag_rest -= steps;
-            if steps != 0. {
+            if steps != 0. && !self.values.is_empty() {
+                self.step(steps);
+            } else if steps != 0. {
                 // Back on the step grid, so Shift's tenths don't linger.
                 let value = ((self.value / step).round() + steps) * step;
                 self.value = value.clamp(self.range.min, self.range.max);
@@ -246,7 +283,9 @@ impl NumberInput {
                     0.0
                 }
             });
-            self.value = (self.value + delta).clamp(self.range.min, self.range.max);
+            if delta != 0. {
+                self.step(delta);
+            }
         }
         ui.allocate_rect(res.rect, Sense::empty());
         res.on_hover_cursor(egui::CursorIcon::ResizeVertical)

@@ -17,7 +17,7 @@ use crate::{
         commands::Commands,
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         theme::{ThemeExt, with_alpha},
-        widget::{flat_button::FlatButton, input::NumberInput, select::Select},
+        widget::{flat_button::FlatButton, input::NumberInput},
         workspace::{MainView, Workspace},
     },
     utils::{format_bars, format_time},
@@ -32,14 +32,15 @@ const POSITION_WIDTH: f32 = 140.;
 /// The position in bars alone, when the bar is too narrow for the time.
 const POSITION_BARS_WIDTH: f32 = 72.;
 const USAGE_WIDTH: f32 = 46.;
-/// The time signature's beats per bar; its note value's dropdown is as
-/// wide, its caret aside.
-const NUMERATOR_WIDTH: f32 = 28.;
+/// Each of the time signature's two fields.
+const TIME_SIGNATURE_FIELD_WIDTH: f32 = 22.;
 
 pub struct TransportBar {
     bpm_input: NumberInput,
     /// The time signature's beats per bar.
     numerator_input: NumberInput,
+    /// The time signature's note value.
+    denominator_input: NumberInput,
 }
 
 impl TransportBar {
@@ -49,8 +50,12 @@ impl TransportBar {
                 .range(Rangef::new(10., 1000.))
                 .suffix(" BPM")
                 .draggable(),
-            numerator_input: NumberInput::new(Vec2::new(NUMERATOR_WIDTH, BUTTON_SIZE))
+            numerator_input: NumberInput::new(Vec2::new(TIME_SIGNATURE_FIELD_WIDTH, BUTTON_SIZE))
                 .range(Rangef::new(1., TimeSignature::MAX_NUMERATOR as f32))
+                .decimals(0)
+                .draggable(),
+            denominator_input: NumberInput::new(Vec2::new(TIME_SIGNATURE_FIELD_WIDTH, BUTTON_SIZE))
+                .values(TimeSignature::DENOMINATORS.map(|d| d as f32))
                 .decimals(0)
                 .draggable(),
         }
@@ -182,22 +187,15 @@ impl TransportBar {
         self.time_signature_ui(ui, state);
     }
 
-    /// Beats per bar (typed or dragged) over the note that counts them.
+    /// Beats per bar over the note that counts them, each typed or dragged.
     /// Laid out right to left, like the rest of this side of the bar.
     fn time_signature_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let current = state.time_signature();
-        let mut denominator = current.denominator;
-        ui.add(
-            Select::new("time-signature-denominator", &mut denominator)
-                .options(
-                    TimeSignature::DENOMINATORS
-                        .iter()
-                        .map(|d| (*d, d.to_string())),
-                )
-                .value_width(NUMERATOR_WIDTH)
-                .height(BUTTON_SIZE),
-        )
-        .on_hover_text("Note value of a beat");
+        self.denominator_input.value = current.denominator as f32;
+        self.denominator_input
+            .ui(ui)
+            .on_hover_text("Note value of a beat: drag or double-click to edit");
+        let denominator = self.denominator_input.value as u32;
         ui.label(RichText::new("/").color(ui.app_theme().text_muted));
         self.numerator_input.value = current.numerator as f32;
         self.numerator_input
