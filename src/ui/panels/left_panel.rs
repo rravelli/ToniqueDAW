@@ -213,13 +213,9 @@ impl LeftPanel {
                             );
                         });
                     }
+                    // One icon for all, the tab's: they're told apart by name.
+                    let icon = BrowserSource::Effects.icon();
                     for kind in found {
-                        let icon = match kind {
-                            EffectKind::Filter => egui_phosphor::regular::FUNNEL_SIMPLE,
-                            EffectKind::Echo => egui_phosphor::regular::WAVES,
-                            EffectKind::Spectrum => egui_phosphor::regular::CHART_LINE,
-                            EffectKind::Utility => egui_phosphor::regular::SLIDERS,
-                        };
                         let res = ui
                             .add(ListRow::new(kind.name()).icon(icon))
                             .on_hover_text("Drag onto a track or the effects panel");
