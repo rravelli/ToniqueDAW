@@ -269,15 +269,7 @@ impl Timeline {
         track: &TrackRow,
         track_rect: Rect,
     ) {
-        if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
-            && track_rect.contains(mouse_pos)
-            && let Some(payload) = DragAndDrop::payload::<DragPayload>(ui.ctx())
-            && let DragPayload::Effect(_) = *payload
-        {
-            ui.painter()
-                .rect_filled(track_rect, 1.0, ui.app_theme().hover_overlay);
-        }
-
+        // Highlighted as a drop target with its header, by the track list.
         if let Some(pointer) = ui.input(|r| r.pointer.hover_pos())
             && ui.input(|i| i.pointer.any_released())
             && track_rect.contains(pointer)

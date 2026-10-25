@@ -1,4 +1,3 @@
-pub mod color_bar;
 pub mod color_select;
 pub mod context_menu;
 pub mod dialog;

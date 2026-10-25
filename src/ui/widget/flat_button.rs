@@ -1,7 +1,5 @@
 use crate::ui::theme::font_size;
-use egui::{
-    Align2, Color32, CursorIcon, FontFamily, FontId, RichText, Sense, Stroke, Vec2, Widget, vec2,
-};
+use egui::{Align2, Color32, CursorIcon, FontId, RichText, Sense, Stroke, Vec2, Widget, vec2};
 
 use crate::ui::theme::ThemeExt;
 
@@ -15,6 +13,8 @@ pub struct FlatButton {
     border_radius: f32,
     /// Horizontal padding around the text when the width fits the text.
     padding: Option<f32>,
+    /// Outline, inside its edge.
+    stroke: Stroke,
     // Text
     text: String,
     text_color: Option<Color32>,
@@ -36,6 +36,7 @@ impl FlatButton {
             tooltip_text: "".to_string(),
             border_radius: 1.0,
             padding: None,
+            stroke: Stroke::NONE,
         }
     }
     /// No fill until hovered; muted text, accent text when selected.
@@ -70,16 +71,18 @@ impl FlatButton {
         self.size = size;
         self
     }
-    pub fn family(mut self, family: FontFamily) -> Self {
-        self.font.family = family;
-        self
-    }
     pub fn tooltip(mut self, text: impl ToString) -> Self {
         self.tooltip_text = text.to_string();
         self
     }
     pub fn border_radius(mut self, border_radius: f32) -> Self {
         self.border_radius = border_radius;
+        self
+    }
+    /// Outline it, as for a toggle that's off: it shows as a control
+    /// without a fill.
+    pub fn stroke(mut self, stroke: Stroke) -> Self {
+        self.stroke = stroke;
         self
     }
     /// Size the width to the text plus `padding` on each side (the height
@@ -125,7 +128,7 @@ impl Widget for FlatButton {
         let rect = res.rect;
         let mut curr_color = fill;
         let mut text_color = text_color;
-        let mut stroke = Stroke::NONE;
+        let mut stroke = self.stroke;
         if !enabled {
             curr_color = curr_color.gamma_multiply(0.5);
             text_color = text_color.gamma_multiply(0.5);

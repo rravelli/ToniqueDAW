@@ -188,13 +188,25 @@ impl ParamSlider {
         } else {
             painter.rect_filled(rect, 1.0, theme.bg_deep);
             painter.rect_filled(fill, 1.0, self.color);
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                text,
-                FontId::proportional(font_size::SMALL),
-                theme.text,
-            );
+            // In ink that reads on the level where it's over it, and on the
+            // well elsewhere.
+            let galley =
+                painter.layout_no_wrap(text, FontId::proportional(font_size::SMALL), theme.text);
+            let pos = Align2::CENTER_CENTER
+                .align_size_within_rect(galley.size(), rect)
+                .min;
+            let clip = painter.clip_rect();
+            let fill = fill.intersect(rect);
+            for well in [rect.with_max_x(fill.left()), rect.with_min_x(fill.right())] {
+                painter.with_clip_rect(clip.intersect(well)).galley(
+                    pos,
+                    galley.clone(),
+                    theme.text,
+                );
+            }
+            painter
+                .with_clip_rect(clip.intersect(fill))
+                .galley_with_override_text_color(pos, galley, theme.text_on(self.color));
         }
         (response, edit)
     }

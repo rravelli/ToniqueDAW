@@ -8,22 +8,25 @@ use crate::{
         state::{ProjectState, RowTarget, TRACK_NAME},
         track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackRow, TrackSoloState},
     },
-    ui::theme::{ThemeExt, font_size},
+    ui::theme::{ThemeExt, font_size, with_alpha},
     ui::{
         arrangement::row_layout::{Row, RowLayout},
         arrangement::track_header::{
             COLOR_BAR_WIDTH, HEADER_INSET, ROW_GAP, TrackHeader, color_bar_x, ghost_header,
         },
         dnd::DragPayload,
-        widget::{
-            context_menu::ContextMenuButton, flat_button::FlatButton, scroll_bar::SCROLLBAR_WIDTH,
-        },
+        widget::{context_menu::ContextMenuButton, flat_button::FlatButton},
         workspace::{BottomView, Workspace},
     },
 };
 
 pub const SPLITTER_WIDTH: f32 = 2.0;
-const DEFAULT_TRACK_WIDTH: f32 = 150.;
+const DEFAULT_TRACK_WIDTH: f32 = 190.;
+const MIN_WIDTH: f32 = 130.;
+/// Between the panel's edges and the headers.
+const PANEL_MARGIN: f32 = 3.;
+/// How opaque the accent is over a row an effect would be dropped on.
+const DROP_FILL_ALPHA: u8 = 40;
 const ADD_TRACK_HEIGHT: f32 = 24.;
 /// Above the master's header, below the footer's top line.
 pub const FOOTER_PADDING: f32 = 3.;
@@ -54,8 +57,13 @@ impl TrackHeaders {
         self.rename = Some(track);
     }
 
-    /// `new_tracks`: the colours of the tracks a drop on the timeline would
-    /// add, shown as ghost headers below the last.
+    /// The track list: a panel of its own at the right of `viewport` (the
+    /// tracks' part of the central panel, timeline and headers), from the
+    /// ruler's top (`top`) to the footer's bottom, resized by dragging its
+    /// left edge. `lanes` is the timeline's part, where the row an effect
+    /// would be dropped on is lit with its header. `new_tracks`: the
+    /// colours of the tracks a drop on the timeline would add, shown as
+    /// ghost headers below the last.
     #[allow(clippy::too_many_arguments)]
     pub fn ui(
         &mut self,
@@ -64,51 +72,62 @@ impl TrackHeaders {
         workspace: &mut Workspace,
         layout: &RowLayout,
         viewport: Rect,
+        lanes: Rect,
+        top: f32,
         footer: Rect,
         new_tracks: &[Color32],
     ) {
         let left = viewport.max.x - self.width;
         let rename = self.rename.take();
-
-        let dragger_rect = Rect::from_min_size(
-            pos2(left, viewport.top()),
-            vec2(SPLITTER_WIDTH, viewport.height()),
-        );
-        let response = ui.allocate_rect(dragger_rect, Sense::drag());
-
-        let painter = ui.painter_at(dragger_rect);
-
         let theme = ui.app_theme();
+        // Behind the headers, showing between them.
+        ui.painter().rect_filled(
+            Rect::from_x_y_ranges(left..=viewport.right(), viewport.y_range()),
+            0.,
+            theme.bg_panel,
+        );
+
+        let dragger_rect =
+            Rect::from_x_y_ranges(left..=left + SPLITTER_WIDTH, top..=footer.bottom());
+        let response = ui.interact(
+            dragger_rect,
+            ui.id().with("track-list-splitter"),
+            Sense::drag(),
+        );
         let color = if response.hovered() || response.dragged() {
             theme.accent
         } else {
-            theme.separator
+            theme.border
         };
-        painter.rect_filled(dragger_rect, 0., color);
+        ui.painter()
+            .with_clip_rect(dragger_rect)
+            .rect_filled(dragger_rect, 0., color);
         if response.dragged() {
             self.width -= response.drag_delta().x;
-            self.width = self.width.clamp(120., ui.available_width());
+            // Not clamp: the window may be too narrow for both bounds.
+            self.width = self.width.min(viewport.width() / 2.).max(MIN_WIDTH);
         }
         response.on_hover_and_drag_cursor(egui::CursorIcon::ResizeHorizontal);
 
+        let x = left + SPLITTER_WIDTH + PANEL_MARGIN..=viewport.right() - PANEL_MARGIN;
         ui.scope_builder(
             egui::UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(left + SPLITTER_WIDTH, viewport.top() - state.grid.offset.y),
-                    pos2(viewport.right() - SCROLLBAR_WIDTH, viewport.bottom()),
+                .max_rect(Rect::from_x_y_ranges(
+                    x.clone(),
+                    viewport.top() - state.grid.offset.y..=viewport.bottom(),
                 ))
                 .id_salt("track-area"),
             |ui| {
-                self.track_panel(ui, state, workspace, layout, viewport, rename);
+                self.track_panel(ui, state, workspace, layout, viewport, lanes, rename);
                 paint_new_track_headers(ui, state, layout, new_tracks);
             },
         );
         // The master, in the footer below the tracks, under the headers.
         let master_track = state.master_track();
         ui.scope_builder(
-            egui::UiBuilder::new().max_rect(Rect::from_min_max(
-                pos2(left + SPLITTER_WIDTH, footer.top() + FOOTER_PADDING),
-                pos2(viewport.right() - SCROLLBAR_WIDTH, footer.bottom()),
+            egui::UiBuilder::new().max_rect(Rect::from_x_y_ranges(
+                x,
+                footer.top() + FOOTER_PADDING..=footer.bottom(),
             )),
             |ui| {
                 ui.set_clip_rect(footer);
@@ -124,13 +143,15 @@ impl TrackHeaders {
         );
     }
 
-    pub fn track_panel(
+    #[allow(clippy::too_many_arguments)]
+    fn track_panel(
         &mut self,
         ui: &mut egui::Ui,
         state: &mut ProjectState,
         workspace: &mut Workspace,
         layout: &RowLayout,
         viewport: Rect,
+        lanes: Rect,
         rename: Option<TrackId>,
     ) {
         ui.vertical(|ui| {
@@ -167,11 +188,23 @@ impl TrackHeaders {
                     }
                     workspace.bottom_view = BottomView::Effects;
                 }
-                // Insert effects
+                // Effects dropped on the header or the lane: both lit while
+                // one's under the pointer. The lane takes the drop itself.
+                let lane = Rect::from_x_y_ranges(lanes.x_range(), row.y);
+                if dragging_effect(ui)
+                    && ui
+                        .input(|i| i.pointer.hover_pos())
+                        .is_some_and(|p| lane.contains(p) || response.rect.contains(p))
+                {
+                    paint_drop_target(ui, response.rect, lane);
+                }
                 if let Some(payload) = response.dnd_release_payload::<DragPayload>()
                     && let DragPayload::Effect(id) = *payload
                 {
                     state.add_effect(&track.id, id, usize::MAX);
+                    state.select_track(&track.id);
+                    workspace.bottom_panel_open = true;
+                    workspace.bottom_view = BottomView::Effects;
                 }
             }
             paint_group_scopes(ui, layout.rows(), x);
@@ -257,6 +290,30 @@ impl TrackHeaders {
             state.add_track();
             ui.close();
         }
+    }
+}
+
+/// Whether an effect is being dragged.
+fn dragging_effect(ui: &Ui) -> bool {
+    egui::DragAndDrop::payload::<DragPayload>(ui.ctx())
+        .is_some_and(|p| matches!(*p, DragPayload::Effect(_)))
+}
+
+/// A row an effect would be dropped on: its header and its lane, lit and
+/// outlined in the accent.
+fn paint_drop_target(ui: &Ui, header: Rect, lane: Rect) {
+    let accent = ui.app_theme().accent;
+    let (fill, stroke) = (
+        with_alpha(accent, DROP_FILL_ALPHA),
+        Stroke::new(1.5, accent),
+    );
+    for (rect, clip) in [
+        (header, ui.clip_rect()),
+        (lane, ui.clip_rect().intersect(lane)),
+    ] {
+        let painter = ui.painter().with_clip_rect(clip);
+        painter.rect_filled(rect, 2., fill);
+        painter.rect_stroke(rect, 2., stroke, StrokeKind::Inside);
     }
 }
 

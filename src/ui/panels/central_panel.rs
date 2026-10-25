@@ -117,8 +117,17 @@ impl CentralPanel {
         // Draw tracks
         // With the tracks a drop on the timeline would add.
         let new_tracks = self.timeline.new_tracks();
-        self.tracks
-            .ui(ui, state, workspace, &layout, viewport, footer, new_tracks);
+        self.tracks.ui(
+            ui,
+            state,
+            workspace,
+            &layout,
+            viewport,
+            timeline_viewport,
+            available_rect.top(),
+            footer,
+            new_tracks,
+        );
         if state.track_count() == 0 {
             empty_project_ui(ui, state, timeline_viewport);
         }
@@ -200,11 +209,13 @@ impl CentralPanel {
         content_size: Vec2,
         offset: &mut Vec2,
     ) -> bool {
+        // On the timeline's edge, beside the track list.
+        let lanes_right = viewport.right() - self.tracks.width;
         let mut scrolled_x = false;
         if content_size.x > viewport.max.x {
             let track = Rect::from_min_max(
                 pos2(viewport.left(), viewport.bottom() - SCROLLBAR_WIDTH),
-                pos2(viewport.right() - self.tracks.width, viewport.bottom()),
+                pos2(lanes_right - SCROLLBAR_WIDTH, viewport.bottom()),
             );
             scrolled_x = ui
                 .add(ScrollBar::new(
@@ -219,8 +230,8 @@ impl CentralPanel {
         }
         if content_size.y > viewport.max.y {
             let track = Rect::from_min_max(
-                pos2(viewport.right() - SCROLLBAR_WIDTH, viewport.top()),
-                pos2(viewport.right(), viewport.bottom()),
+                pos2(lanes_right - SCROLLBAR_WIDTH, viewport.top()),
+                pos2(lanes_right, viewport.bottom()),
             );
             ui.add(ScrollBar::new(
                 "vscroll",

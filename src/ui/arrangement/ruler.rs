@@ -87,6 +87,12 @@ impl Ruler {
                 let delta = ui.input(|i| i.smooth_scroll_delta.y);
                 state.grid.zoom_around(delta, mouse_pos.x, ruler_rect);
             }
+            // The track list's head, above its headers.
+            let head = Rect::from_x_y_ranges(
+                ruler_rect.right()..=ui.max_rect().right(),
+                ruler_rect.y_range(),
+            );
+            ui.painter().rect_filled(head, 0., ui.app_theme().bg_panel);
             ui.add_space(SPLITTER_WIDTH + 4.0);
             self.right_ui(ui, state);
         });
