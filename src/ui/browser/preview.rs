@@ -88,14 +88,6 @@ fn channels(n: u16) -> String {
     }
 }
 
-/// `audio`'s format and length, for a tooltip.
-pub fn details(audio: &AudioInfo) -> String {
-    match length(audio) {
-        Some(length) => format!("{} · {}", format(audio), minutes(length.ceil())),
-        None => format(audio),
-    }
-}
-
 /// `m:ss`.
 fn minutes(seconds: f64) -> String {
     let seconds = seconds.max(0.) as u64;
@@ -125,13 +117,6 @@ fn short_format(audio: &AudioInfo) -> String {
         khz.trim_end_matches(".0"),
         channels(audio.channels)
     )
-}
-
-/// In seconds; some files don't say how long they are until decoded.
-fn length(audio: &AudioInfo) -> Option<f64> {
-    audio
-        .total_frames()
-        .map(|frames| frames / audio.sample_rate as f64)
 }
 
 pub fn preview_ui(
@@ -455,8 +440,6 @@ mod tests {
         audio.sample_rate = 48000;
         assert_eq!(format(&audio), "48 kHz · Mono", "a depth only if known");
         assert_eq!(short_format(&audio), "48k · Mono");
-        // 480 frames at 48 kHz: a part of a second, counted as one.
-        assert_eq!(details(&audio), "48 kHz · Mono · 0:01");
         assert_eq!(minutes(75.), "1:15");
     }
 

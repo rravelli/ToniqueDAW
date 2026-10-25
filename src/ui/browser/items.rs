@@ -21,7 +21,6 @@ use crate::{
     config::keymap::Action,
     config::labels as label_colors,
     core::state::ProjectState,
-    ui::browser::preview::details,
     ui::{
         browser::file_tree::{FileNode, FileTree, pinned},
         dnd::DragPayload,
@@ -576,11 +575,6 @@ impl FileList {
             }
         }
         response.context_menu(|ui| menu(ui, actions));
-        let response = if section.is_none() {
-            response.on_hover_text(file.path.display().to_string())
-        } else {
-            response
-        };
         let pressed = !over_button
             && (response.clicked()
                 || (selected && self.focused && ui.input(|i| i.key_pressed(Key::Enter))));
@@ -820,28 +814,8 @@ impl FileList {
             row = row.icon_color(ui.app_theme().accent);
         }
         let res = ui.add(row);
-        // Details of an audio file on hover; what a folder can do on a
-        // right-click.
-        let res = if is_audio {
-            res.on_hover_ui(|ui| {
-                if let Some(audio) = AUDIO_ANALYSIS_CACHE.get_or_analyze(file.path.clone()) {
-                    ui.label(RichText::new(details(&audio)).size(font_size::SMALL));
-                }
-            })
-        } else {
-            res
-        };
-        // In the labels' list, an item's folder on disk; what an item can
-        // be given, a right-click away.
+        // What an item can be given, a right-click away.
         let in_section = file.depth == 1 && !self.sections.is_empty();
-        let res = if in_section {
-            match file.path.parent() {
-                Some(parent) => res.on_hover_text(parent.display().to_string()),
-                None => res,
-            }
-        } else {
-            res
-        };
         res.context_menu(|ui| {
             self.label_submenu(ui, &file.path, actions);
             if is_dir
