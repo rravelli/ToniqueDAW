@@ -1,6 +1,7 @@
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::analysis::{AudioInfo, read_audio_info};
 
@@ -15,6 +16,10 @@ impl AudioAnalysisCache {
             return Some(result.clone());
         }
 
+        // Forget files nothing uses anymore (e.g. browsed past) so their
+        // data can be freed; they're cheap to analyze again.
+        self.inner
+            .retain(|_, info| Arc::strong_count(&info.data) > 1);
         let result = read_audio_info(path.clone());
 
         match result {

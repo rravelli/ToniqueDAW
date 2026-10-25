@@ -3,7 +3,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::sync::Weak;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::FormatOptions;
@@ -88,9 +88,10 @@ fn normalize_buffer(audio_buf: &AudioBufferRef, sample_buffer: &mut Vec<f32>, ch
 }
 
 /// Decode `path` into `data`: peaks are published progressively (unless
-/// they came from the disk cache), samples once the whole file is decoded.
-pub fn load_audio(path: &Path, data: &AudioData) -> Result<(), String> {
-    let start = Instant::now();
+/// they're already complete), samples once the whole file is decoded if
+/// `keep_samples`. Stops early once `data` is dropped, or for a peaks-only
+/// decode, once a decode keeping the samples takes over.
+pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Result<(), String> {
     // Open the audio file
     let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
@@ -116,39 +117,59 @@ pub fn load_audio(path: &Path, data: &AudioData) -> Result<(), String> {
         .codec_params
         .sample_rate
         .ok_or("Missing sample rate")? as f64;
+    // Only an estimate for some formats; the buffers are trimmed at the end.
+    let expected_frames = track.codec_params.n_frames.unwrap_or(0) as usize;
 
     // Create a decoder for the track
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| format!("Failed to create decoder: {}", e))?;
 
-    let cached_peaks = data.peaks().frames() > 0;
+    let Some(peaks_complete) = data.upgrade().map(|d| d.peaks_complete()) else {
+        return Ok(());
+    };
     let mut channels: Vec<Vec<f32>> = Vec::new();
     let mut scratch: Vec<Vec<f32>> = Vec::new();
     let mut builder: Option<PeakBuilder> = None;
     let mut next_publish = CHUNK_SIZE;
+    // Packets that couldn't be decoded, or changed channel count: told
+    // once, at the end, however many.
+    let mut skipped = 0usize;
 
     // Decode the audio packets
     while let Ok(packet) = format.next_packet() {
+        // Only hold `data` for an instant: while held, the file looks in use
+        // and the cache won't let go of it.
+        let superseded = match data.upgrade() {
+            None => true,
+            Some(data) => !keep_samples && data.samples_requested(),
+        };
+        if superseded {
+            return Ok(());
+        }
         if packet.track_id() != track_id {
             continue;
         }
 
         let audio_buf = match decoder.decode(&packet) {
             Ok(audio_buf) => audio_buf,
-            Err(e) => {
-                eprintln!("Error decoding audio packet: {}", e);
+            Err(_) => {
+                skipped += 1;
                 continue;
             }
         };
         let num_channels = audio_buf.spec().channels.count();
-        if channels.is_empty() {
-            channels = vec![Vec::new(); num_channels];
+        if scratch.is_empty() {
+            if keep_samples {
+                channels = (0..num_channels)
+                    .map(|_| Vec::with_capacity(expected_frames))
+                    .collect();
+            }
             scratch = vec![Vec::new(); num_channels];
-            builder = (!cached_peaks).then(|| PeakBuilder::new(num_channels, sample_rate));
+            builder = (!peaks_complete).then(|| PeakBuilder::new(num_channels, sample_rate));
         }
-        if num_channels != channels.len() {
-            eprintln!("Skipping packet with a different channel count");
+        if num_channels != scratch.len() {
+            skipped += 1;
             continue;
         }
         for (ch, buf) in scratch.iter_mut().enumerate() {
@@ -163,22 +184,35 @@ pub fn load_audio(path: &Path, data: &AudioData) -> Result<(), String> {
             builder.push(&block);
             // Geometric spacing keeps the total snapshot copying linear.
             if builder.frames() >= next_publish {
-                data.publish_peaks(builder.snapshot());
+                if let Some(data) = data.upgrade() {
+                    data.publish_peaks(builder.snapshot());
+                }
                 next_publish = builder.frames() + CHUNK_SIZE.max(builder.frames() / 2);
             }
         }
     }
-    if channels.is_empty() {
+    if skipped > 0 {
+        eprintln!(
+            "Skipped {skipped} packets of {} that couldn't be decoded",
+            path.display()
+        );
+    }
+    if scratch.is_empty() {
         return Err("No audio decoded".into());
     }
+    let Some(data) = data.upgrade() else {
+        return Ok(());
+    };
     if let Some(builder) = builder {
         let peaks = builder.snapshot();
         store_cached_peaks(path, &peaks);
-        data.publish_peaks(peaks);
+        data.complete_peaks(peaks);
     }
-    data.finish(SampleBuffer::new(channels, sample_rate));
-    println!("Finished {} in: {:?}", path.display(), start.elapsed());
-
+    if keep_samples {
+        // Drop the slack left by an estimated length or by growing.
+        channels.iter_mut().for_each(Vec::shrink_to_fit);
+        data.finish(SampleBuffer::new(channels, sample_rate));
+    }
     Ok(())
 }
 

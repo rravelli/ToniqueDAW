@@ -4,50 +4,117 @@ use crate::{
     core::state::{PlaybackState, ProjectState},
     ui::{
         browser::{
-            items::FileList,
-            preview::{PREVIEW_HEIGHT, preview_ui},
+            items::{FileList, FolderAction, LabelView},
+            preview::{PREVIEW_HEIGHT, PreviewSettings, preview_ui},
         },
         commands::Commands,
         font::PHOSPHOR_FILL,
-        theme::ThemeExt,
-        widget::{context_menu::ContextMenuButton, flat_button::FlatButton},
+        theme::{ThemeExt, with_alpha},
+        widget::flat_button::FlatButton,
     },
 };
-use egui::{Button, FontId, RichText, Ui, Widget};
-use egui_phosphor::{
-    fill::{FOLDER_PLUS, TRASH},
-    regular::FOLDER,
-};
+use egui::{Color32, FontId, Rect, RichText, Stroke, Ui};
+use egui_phosphor::fill::FOLDER_PLUS;
 use rfd::FileDialog;
-use std::{ffi::OsStr, path::PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 mod file_tree;
 mod items;
 mod preview;
 
+/// Side of the button adding a folder.
+pub const ADD_FOLDER_SIZE: f32 = 22.;
+
+/// The files of the folders added to it, each a section of one tree,
+/// searchable together or one at a time; the files and folders given a
+/// label, by label, in a tab of their own; and a preview of the audio file
+/// selected.
 pub struct FileBrowser {
-    root: Option<PathBuf>,
     items: FileList,
+    /// The labels' tab.
+    labelled: FileList,
+    /// Its sections closed.
+    labels_collapsed: Vec<PathBuf>,
     config: Config,
+    preview: PreviewSettings,
+    /// The preview's volume was handed to the engine.
+    gain_sent: bool,
+    /// The app's window had the focus last frame: getting it back, files
+    /// may have changed meanwhile.
+    window_focused: bool,
 }
 
 impl FileBrowser {
     pub fn new() -> Self {
         let config = Config::load();
         let mut items = FileList::new();
-        let dirs = config.list_dirs();
-        let root = if !dirs.is_empty() {
-            items.init(dirs[0].clone());
-            Some(dirs[0].clone())
-        } else {
-            None
+        items.set_roots(config.list_dirs(), config.collapsed_dirs());
+        items.auto_preview = config.auto_preview();
+        let mut labelled = FileList::new();
+        labelled.auto_preview = config.auto_preview();
+        let preview = PreviewSettings {
+            auto_preview: config.auto_preview(),
+            volume: config.preview_volume(),
+            muted: false,
         };
-
-        Self {
-            root,
+        let mut browser = Self {
             items,
+            labelled,
+            labels_collapsed: Vec::new(),
             config,
+            preview,
+            gain_sent: false,
+            window_focused: true,
+        };
+        browser.refresh_labels();
+        browser
+    }
+
+    /// Read the folders from disk again when the app's window gets the
+    /// focus back (files are often added from elsewhere meanwhile), or on
+    /// F5 while the browser has the keyboard.
+    fn refresh_when_due(&mut self, ui: &Ui, focused: bool) {
+        let window_focused = ui.input(|i| i.focused);
+        let regained = window_focused && !self.window_focused;
+        self.window_focused = window_focused;
+        let asked = focused
+            && !ui.ctx().egui_wants_keyboard_input()
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F5));
+        if regained || asked {
+            self.refresh();
         }
+    }
+
+    /// Read both tabs' folders from disk again; labelled files gone are
+    /// left out.
+    fn refresh(&mut self) {
+        self.items.refresh();
+        self.refresh_labels();
+        self.labelled.refresh();
+    }
+
+    /// Show the labels as configured, in both tabs.
+    fn refresh_labels(&mut self) {
+        let labels = self.config.labels();
+        let views: Vec<LabelView> = labels
+            .all()
+            .iter()
+            .map(|label| LabelView {
+                name: label.name.clone(),
+                color: Color32::from_hex(&label.color).unwrap_or(Color32::GRAY),
+            })
+            .collect();
+        let assigned: HashMap<PathBuf, usize> = labels
+            .assigned()
+            .map(|(path, label)| (path.clone(), label))
+            .collect();
+        let sections = (0..views.len()).map(|i| (i, labels.items(i))).collect();
+        self.items.set_labels(views.clone(), assigned.clone());
+        self.labelled.set_labels(views, assigned);
+        self.labelled.set_sections(sections, &self.labels_collapsed);
     }
 
     /// `focused`: the browser has the keyboard, and takes the selection
@@ -60,98 +127,269 @@ impl FileBrowser {
         focused: bool,
     ) {
         let moves = take_moves(commands, focused);
+        self.refresh_when_due(ui, focused);
         ui.spacing_mut().scroll.bar_width = 5.0;
-        // The folders wrap: a long list never hides any.
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
-            self.choose_dir_button(ui);
-            let paths = self.config.list_dirs();
-            for path in paths {
-                let name = path.file_name().unwrap_or(OsStr::new("")).to_string_lossy();
+        let area = ui.available_rect_before_wrap();
+        self.folder_drop(ui, area);
 
-                let res = Button::new(
-                    RichText::new(format!("{} {}", FOLDER, name)).size(font_size::SMALL),
-                )
-                .selected(self.root.as_ref().is_some_and(|f| *f == path))
-                .ui(ui);
+        if self.config.list_dirs().is_empty() {
+            self.empty_ui(ui);
+            return;
+        }
 
-                if res.clicked() {
-                    self.set_dir(path.clone());
-                };
+        let mut preview = self.preview;
+        let actions = list_ui(&mut self.items, ui, state, focused, &moves, &mut preview);
+        self.set_preview(ui, state, preview);
+        for action in actions {
+            self.act(action);
+        }
+        // Folders opened or closed: remembered for next time.
+        if let Some(collapsed) = self.items.collapsed_roots() {
+            self.config.set_collapsed_dirs(collapsed);
+        }
+    }
 
-                res.context_menu(|ui| {
-                    if ui
-                        .add(
-                            ContextMenuButton::new(TRASH, "Delete")
-                                .text_color(ui.app_theme().danger),
-                        )
-                        .clicked()
-                    {
-                        self.config.remove_dir(&path);
-                    }
-                });
+    /// The labels' tab: a section for each label, with what has it.
+    pub fn labels_ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        commands: &mut Commands,
+        focused: bool,
+    ) {
+        let moves = take_moves(commands, focused);
+        self.refresh_when_due(ui, focused);
+        ui.spacing_mut().scroll.bar_width = 5.0;
+        let mut preview = self.preview;
+        let actions = list_ui(&mut self.labelled, ui, state, focused, &moves, &mut preview);
+        self.set_preview(ui, state, preview);
+        for action in actions {
+            self.act(action);
+        }
+        if let Some(collapsed) = self.labelled.collapsed_roots() {
+            self.labels_collapsed = collapsed;
+        }
+    }
+
+    /// Folders dragged in from the system's file manager are added; while
+    /// they're over the browser, it says so.
+    fn folder_drop(&mut self, ui: &Ui, area: Rect) {
+        let over = ui
+            .input(|i| i.pointer.hover_pos())
+            .is_some_and(|pos| area.contains(pos));
+        if !over {
+            return;
+        }
+        let (hovered, dropped) =
+            ui.input(|i| (!i.raw.hovered_files.is_empty(), i.raw.dropped_files.clone()));
+        for file in dropped {
+            if file.path().is_dir() {
+                self.add_folder(file.path().to_path_buf());
+            }
+        }
+        if hovered {
+            let theme = ui.app_theme();
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                ui.id().with("folder-drop"),
+            ));
+            painter.rect(
+                area,
+                3.,
+                with_alpha(theme.accent, 25),
+                Stroke::new(1., theme.accent),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                area.center(),
+                egui::Align2::CENTER_CENTER,
+                "Drop folders to add them",
+                FontId::proportional(font_size::LABEL),
+                theme.text,
+            );
+        }
+    }
+
+    /// No folder yet: what the browser is for, and a button to add one.
+    fn empty_ui(&mut self, ui: &mut Ui) {
+        let theme = ui.app_theme();
+        ui.add_space(24.);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                RichText::new("Your sample folders show here")
+                    .size(font_size::LABEL)
+                    .color(theme.text_muted),
+            );
+            ui.label(
+                RichText::new("Drop one here, or")
+                    .size(font_size::SMALL)
+                    .color(theme.text_disabled),
+            );
+            ui.add_space(6.);
+            if ui.add(FlatButton::new("Add a folder")).clicked() {
+                self.pick_folder();
             }
         });
+    }
 
-        ui.add_space(5.0);
-
-        if ui.response().clicked_elsewhere() {
-            self.items.selected_audio = None;
-        }
-
-        let height = if self.items.selected_audio.is_some() {
-            ui.available_height() - PREVIEW_HEIGHT
-        } else {
-            ui.available_height()
-        };
-        ui.vertical(|ui| {
-            ui.set_height(height);
-
-            self.items.ui(ui, state, focused, &moves);
-        });
-
-        if let Some(audio) = &self.items.selected_audio {
-            preview_ui(ui, state, audio);
-        }
-
-        if state.preview_playback_state() == PlaybackState::Playing
-            && self.items.selected_audio.is_none()
-        {
-            state.pause_preview();
+    fn act(&mut self, action: FolderAction) {
+        match action {
+            FolderAction::Remove(dir) => {
+                self.config.remove_dir(&dir);
+                self.reload();
+            }
+            FolderAction::Reveal(dir) => reveal(&dir),
+            FolderAction::CollapseAll(dir) => self.items.collapse_all(&dir),
+            FolderAction::SearchIn(dir) => self.items.set_scope(Some(dir)),
+            FolderAction::SearchEverywhere => self.items.set_scope(None),
+            FolderAction::Refresh => self.refresh(),
+            FolderAction::Add(dir) => self.add_folder(dir),
+            FolderAction::SetLabel(path, label) => {
+                self.config.edit_labels(|labels| labels.set(path, label));
+                self.refresh_labels();
+            }
+            FolderAction::RenameLabel(index, name) => {
+                self.config.edit_labels(|labels| labels.rename(index, name));
+                self.refresh_labels();
+            }
+            FolderAction::RecolorLabel(index, color) => {
+                self.config
+                    .edit_labels(|labels| labels.recolor(index, color));
+                self.refresh_labels();
+            }
+            FolderAction::ClearLabel(index) => {
+                self.config.edit_labels(|labels| labels.clear(index));
+                self.refresh_labels();
+            }
         }
     }
 
-    fn set_dir(&mut self, dir: PathBuf) {
-        let root = dir;
-        self.root = Some(root.clone());
-        self.items.init(root);
+    /// Show the folders as configured.
+    fn reload(&mut self) {
+        self.items
+            .set_roots(self.config.list_dirs(), self.config.collapsed_dirs());
     }
 
-    fn choose_dir_button(&mut self, ui: &mut Ui) {
-        if ui
-            .add(FlatButton::ghost(FOLDER_PLUS).square(20.).font(FontId::new(
+    /// The button adding a folder, beside the search bar.
+    pub fn add_folder_button(&mut self, ui: &mut Ui) {
+        let button = FlatButton::ghost(FOLDER_PLUS)
+            .square(ADD_FOLDER_SIZE)
+            .font(FontId::new(
                 15.,
                 egui::FontFamily::Name(PHOSPHOR_FILL.into()),
-            )))
-            .clicked()
-        {
-            let picked_dir = FileDialog::new().pick_folder();
-            if let Some(path) = picked_dir {
-                self.config.add_dir(path.clone());
-                self.set_dir(path);
-            }
-        };
+            ))
+            .tooltip("Add a folder");
+        if ui.add(button).clicked() {
+            self.pick_folder();
+        }
+    }
+
+    /// Keep what the preview changed, and hand its volume to the engine.
+    fn set_preview(&mut self, ui: &Ui, state: &mut ProjectState, preview: PreviewSettings) {
+        if preview.auto_preview != self.preview.auto_preview {
+            self.items.auto_preview = preview.auto_preview;
+            self.labelled.auto_preview = preview.auto_preview;
+            self.config.set_auto_preview(preview.auto_preview);
+        }
+        if preview.gain() != self.preview.gain() || !self.gain_sent {
+            state.set_preview_gain(preview.gain());
+            self.gain_sent = true;
+        }
+        self.preview = preview;
+        // Saved once the slider is let go, not on every step of a drag.
+        let held = ui.input(|i| i.pointer.any_down());
+        if !held && self.config.preview_volume() != preview.volume {
+            self.config.set_preview_volume(preview.volume);
+        }
+    }
+
+    fn pick_folder(&mut self) {
+        if let Some(path) = FileDialog::new().pick_folder() {
+            self.add_folder(path);
+        }
+    }
+
+    /// Add `dir` last, open.
+    fn add_folder(&mut self, dir: PathBuf) {
+        self.config.add_dir(dir);
+        self.reload();
+    }
+
+    /// The name of the folder the search is kept to, if it is.
+    pub fn search_scope(&self) -> Option<String> {
+        self.items.scope_name()
+    }
+
+    pub fn is_searching(&self) -> bool {
+        self.items.is_searching()
     }
 
     pub fn trigger_search(&mut self, query: &str) {
-        let Some(root) = self.root.clone() else {
-            return;
-        };
-        if query.is_empty() {
-            self.items.clear_search(root);
-        } else {
-            self.items.search(query, root);
-        }
+        search(&mut self.items, query);
+    }
+
+    pub fn is_searching_labels(&self) -> bool {
+        self.labelled.is_searching()
+    }
+
+    /// Search what has a label.
+    pub fn trigger_label_search(&mut self, query: &str) {
+        search(&mut self.labelled, query);
+    }
+}
+
+fn search(list: &mut FileList, query: &str) {
+    if query.is_empty() {
+        list.clear_search();
+    } else {
+        list.search(query);
+    }
+}
+
+/// `list`, and under it a preview of its file selected. Returns what was
+/// asked of its sections.
+fn list_ui(
+    list: &mut FileList,
+    ui: &mut Ui,
+    state: &mut ProjectState,
+    focused: bool,
+    moves: &[Action],
+    preview: &mut PreviewSettings,
+) -> Vec<FolderAction> {
+    if ui.response().clicked_elsewhere() {
+        list.selected_audio = None;
+    }
+    let height = if list.selected_audio.is_some() {
+        ui.available_height() - PREVIEW_HEIGHT
+    } else {
+        ui.available_height()
+    };
+    let actions = ui
+        .vertical(|ui| {
+            ui.set_height(height);
+            list.ui(ui, state, focused, moves)
+        })
+        .inner;
+    if let Some(audio) = &list.selected_audio {
+        preview_ui(ui, state, audio, preview);
+    }
+    if state.preview_playback_state() == PlaybackState::Playing && list.selected_audio.is_none() {
+        state.pause_preview();
+    }
+    actions
+}
+
+/// Open `dir` in the system's file manager.
+fn reveal(dir: &Path) {
+    let program = if cfg!(target_os = "windows") {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    if let Err(e) = std::process::Command::new(program).arg(dir).spawn() {
+        eprintln!("Couldn't open {}: {e}", dir.display());
     }
 }
 

@@ -5,6 +5,7 @@ use symphonia::default::get_probe;
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
@@ -34,14 +35,24 @@ impl From<symphonia::core::errors::Error> for AudioInfoError {
     }
 }
 
-/// Decoded content of a file, filled in by a background thread and shared
+/// Decoded content of a file, filled in by background threads and shared
 /// by every clip (and the engine source) using that file.
+///
+/// Nothing is decoded up front: [`AudioInfo::load_peaks`] decodes only to
+/// draw the waveform (browsing), [`AudioInfo::load_samples`] keeps the
+/// samples too (the file is used by a clip).
 #[derive(Default)]
 pub struct AudioData {
     /// Grows while the file decodes.
     peaks: RwLock<Arc<WaveformPeaks>>,
+    /// Set once `peaks` covers the whole file.
+    peaks_complete: AtomicBool,
     /// Set once the whole file is decoded.
     samples: OnceLock<Arc<SampleBuffer>>,
+    peaks_requested: AtomicBool,
+    samples_requested: AtomicBool,
+    /// Set when a decode gave up: the peaks won't grow anymore.
+    failed: AtomicBool,
 }
 
 impl AudioData {
@@ -49,7 +60,7 @@ impl AudioData {
     #[cfg(test)]
     pub fn from_samples(buffer: SampleBuffer) -> Self {
         let data = Self::default();
-        data.publish_peaks(WaveformPeaks::from_buffer(&buffer));
+        data.complete_peaks(WaveformPeaks::from_buffer(&buffer));
         data.finish(buffer);
         data
     }
@@ -67,10 +78,34 @@ impl AudioData {
         self.samples.get().is_some()
     }
 
+    pub fn peaks_complete(&self) -> bool {
+        self.peaks_complete.load(Ordering::Acquire)
+    }
+
+    /// Whether the peaks may still grow: not complete, and no decode failed.
+    pub fn peaks_pending(&self) -> bool {
+        !self.peaks_complete() && !self.failed.load(Ordering::Acquire)
+    }
+
+    /// Whether a decode that keeps the samples has been started.
+    pub fn samples_requested(&self) -> bool {
+        self.samples_requested.load(Ordering::Acquire)
+    }
+
+    /// Replace the peaks, unless they'd cover less of the file: two decodes
+    /// may publish concurrently (browsing, then using the file in a clip).
     pub fn publish_peaks(&self, peaks: WaveformPeaks) {
-        if let Ok(mut current) = self.peaks.write() {
+        if let Ok(mut current) = self.peaks.write()
+            && !self.peaks_complete()
+            && peaks.frames() >= current.frames()
+        {
             *current = Arc::new(peaks);
         }
+    }
+
+    pub fn complete_peaks(&self, peaks: WaveformPeaks) {
+        self.publish_peaks(peaks);
+        self.peaks_complete.store(true, Ordering::Release);
     }
 
     pub fn finish(&self, samples: SampleBuffer) {
@@ -119,12 +154,48 @@ impl AudioInfo {
         }
     }
 
+    /// Decode the file in the background to draw its waveform, without
+    /// keeping its samples. Stops early once nothing uses the file anymore.
+    pub fn load_peaks(&self) {
+        let data = &self.data;
+        if data.peaks_complete()
+            || data.samples_requested()
+            || data.peaks_requested.swap(true, Ordering::AcqRel)
+        {
+            return;
+        }
+        self.spawn_decode(false);
+    }
+
+    /// Decode the whole file in the background and keep its samples.
+    pub fn load_samples(&self) {
+        if !self.data.samples_requested.swap(true, Ordering::AcqRel) {
+            self.spawn_decode(true);
+        }
+    }
+
+    fn spawn_decode(&self, keep_samples: bool) {
+        let data = Arc::downgrade(&self.data);
+        let path = self.path.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = load_audio(&path, &data, keep_samples) {
+                eprintln!("Failed to load {}: {e}", path.display());
+                if let Some(data) = data.upgrade() {
+                    data.failed.store(true, Ordering::Release);
+                }
+            }
+        });
+    }
+
     /// Length of the file in frames, at its own sample rate.
     pub fn total_frames(&self) -> Option<f64> {
         match (self.data.samples(), self.num_samples, self.duration) {
             (Some(samples), _, _) => Some(samples.len() as f64),
             (None, Some(n), _) => Some(n as f64),
             (None, None, Some(d)) => Some(d.as_secs_f64() * self.sample_rate as f64),
+            // Browsing keeps no samples: the peaks know the length once
+            // they cover the whole file.
+            _ if self.data.peaks_complete() => Some(self.data.peaks().frames() as f64),
             _ => None,
         }
     }
@@ -168,16 +239,8 @@ pub fn read_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoEr
 
     let data = Arc::new(AudioData::default());
     if let Some(peaks) = load_cached_peaks(path.as_ref()) {
-        data.publish_peaks(peaks);
+        data.complete_peaks(peaks);
     }
-    let data_ref = data.clone();
-    let p = path.as_ref().to_path_buf();
-
-    std::thread::spawn(move || {
-        if let Err(e) = load_audio(&p, &data) {
-            eprintln!("Failed to load {}: {e}", p.display());
-        }
-    });
 
     Ok(AudioInfo {
         name,
@@ -187,6 +250,71 @@ pub fn read_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoEr
         bit_depth: codec_params.bits_per_sample,
         num_samples: codec_params.n_frames,
         path: path.as_ref().to_path_buf(),
-        data: data_ref,
+        data,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cache::AUDIO_ANALYSIS_CACHE;
+    use std::time::Instant;
+    use tonique_engine::sample::WavWriter;
+
+    /// A fresh 1 s stereo WAV (fresh so no cached peaks exist for it).
+    fn write_wav(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tonique-load-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}.wav"));
+        let mut wav = WavWriter::create(&path, 2, 48000.).unwrap();
+        wav.write_interleaved(&vec![0.25; 2 * 48000]).unwrap();
+        wav.finalize().unwrap();
+        path
+    }
+
+    fn wait_for(what: &str, done: impl Fn() -> bool) {
+        let start = Instant::now();
+        while !done() {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "timed out: {what}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Browsing a file builds its waveform without keeping its samples;
+    /// only using it decodes them.
+    #[test]
+    fn samples_are_only_decoded_on_request() {
+        let info = read_audio_info(write_wav("lazy")).unwrap();
+        info.load_peaks();
+        wait_for("peaks", || info.data.peaks_complete());
+        assert_eq!(info.data.peaks().frames(), 48000);
+        assert!(info.data.samples().is_none());
+
+        info.load_samples();
+        wait_for("samples", || info.data.is_ready());
+        let samples = info.data.samples().unwrap();
+        assert_eq!(samples.len(), 48000);
+        assert_eq!(samples.channel(1)[100], 0.25);
+    }
+
+    /// The cache lets go of files nothing else holds.
+    #[test]
+    fn cache_forgets_unused_files() {
+        let (a, b) = (write_wav("a"), write_wav("b"));
+        let first = AUDIO_ANALYSIS_CACHE.get_or_analyze(a.clone()).unwrap();
+        let again = AUDIO_ANALYSIS_CACHE.get_or_analyze(a.clone()).unwrap();
+        assert!(Arc::ptr_eq(&first.data, &again.data));
+
+        // A running decode doesn't count as a use.
+        first.load_peaks();
+        let weak = Arc::downgrade(&first.data);
+        drop((first, again));
+        wait_for("forgotten", || {
+            let _other = AUDIO_ANALYSIS_CACHE.get_or_analyze(b.clone());
+            weak.upgrade().is_none()
+        });
+    }
 }

@@ -64,8 +64,10 @@ impl SourceRegistry {
         }
     }
 
-    /// Convert `audio` to the engine rate in the background.
+    /// Convert `audio` to the engine rate in the background, decoding it
+    /// first if no one has yet.
     fn convert(&self, id: SourceId, audio: AudioInfo) {
+        audio.load_samples();
         let (rate, tx) = (self.engine_rate, self.loaded_tx.clone());
         std::thread::spawn(move || {
             if let Some(buffer) = convert_when_ready(&audio, rate) {

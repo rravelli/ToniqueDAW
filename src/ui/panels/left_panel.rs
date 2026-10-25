@@ -2,7 +2,7 @@ use crate::ui::theme::font_size;
 use crate::{
     core::{effect::EffectKind, state::ProjectState},
     ui::{
-        browser::FileBrowser,
+        browser::{ADD_FOLDER_SIZE, FileBrowser},
         commands::Commands,
         dnd::DragPayload,
         theme::ThemeExt,
@@ -10,7 +10,7 @@ use crate::{
         workspace::Workspace,
     },
 };
-use egui::{Frame, Margin, RichText, Stroke, Ui, UiBuilder};
+use egui::{Frame, Margin, RichText, Stroke, Ui, UiBuilder, vec2};
 use egui_phosphor::regular as icons;
 
 /// Space around the search bar, and above the rail.
@@ -24,16 +24,19 @@ const RAIL_GAP: f32 = 2.;
 #[derive(Clone, Copy, PartialEq)]
 pub enum BrowserSource {
     Files,
+    /// What's been given a label, by label.
+    Labels,
     Effects,
 }
 
 impl BrowserSource {
     /// In the rail's order.
-    pub const ALL: [Self; 2] = [Self::Files, Self::Effects];
+    pub const ALL: [Self; 3] = [Self::Files, Self::Labels, Self::Effects];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Files => "Files",
+            Self::Labels => "Labels",
             Self::Effects => "Effects",
         }
     }
@@ -41,6 +44,7 @@ impl BrowserSource {
     pub fn icon(self) -> &'static str {
         match self {
             Self::Files => icons::FOLDER_SIMPLE,
+            Self::Labels => icons::TAG,
             Self::Effects => icons::MAGIC_WAND,
         }
     }
@@ -53,6 +57,7 @@ pub struct LeftPanel {
     source: BrowserSource,
     /// Each source its own, so searching one leaves the others' as they were.
     file_search: SearchBar,
+    label_search: SearchBar,
     effect_search: SearchBar,
 }
 
@@ -62,7 +67,8 @@ impl LeftPanel {
             file_browser: FileBrowser::new(),
             focused: false,
             source: BrowserSource::Files,
-            file_search: SearchBar::new("Search files"),
+            file_search: SearchBar::new("Search all folders"),
+            label_search: SearchBar::new("Search labelled files"),
             effect_search: SearchBar::new("Search effects"),
         }
     }
@@ -140,12 +146,41 @@ impl LeftPanel {
             Frame::new()
                 .inner_margin(Margin::symmetric(2, HEADER_SPACING as i8))
                 .show(ui, |ui| match self.source {
+                    // The search bar, and the button adding a folder.
                     BrowserSource::Files => {
-                        if let Some(query) = ui
-                            .push_id("file-search", |ui| self.file_search.ui(ui))
-                            .inner
-                        {
-                            self.file_browser.trigger_search(query);
+                        self.file_search
+                            .set_hint(match self.file_browser.search_scope() {
+                                Some(folder) => format!("Search in {folder}"),
+                                None => "Search all folders".into(),
+                            });
+                        self.file_search.set_busy(self.file_browser.is_searching());
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 2.;
+                            let width = ui.available_width() - ADD_FOLDER_SIZE - 2.;
+                            let query = ui
+                                .allocate_ui(vec2(width, ADD_FOLDER_SIZE), |ui| {
+                                    ui.push_id("file-search", |ui| {
+                                        self.file_search.ui(ui).map(str::to_owned)
+                                    })
+                                    .inner
+                                })
+                                .inner;
+                            self.file_browser.add_folder_button(ui);
+                            if let Some(query) = query {
+                                self.file_browser.trigger_search(&query);
+                            }
+                        });
+                    }
+                    BrowserSource::Labels => {
+                        self.label_search
+                            .set_busy(self.file_browser.is_searching_labels());
+                        let query = ui
+                            .push_id("label-search", |ui| {
+                                self.label_search.ui(ui).map(str::to_owned)
+                            })
+                            .inner;
+                        if let Some(query) = query {
+                            self.file_browser.trigger_label_search(&query);
                         }
                     }
                     // Filtered as typed, below.
@@ -157,6 +192,10 @@ impl LeftPanel {
             match self.source {
                 BrowserSource::Files => {
                     self.file_browser.ui(ui, state, commands, self.focused);
+                }
+                BrowserSource::Labels => {
+                    self.file_browser
+                        .labels_ui(ui, state, commands, self.focused);
                 }
                 BrowserSource::Effects => {
                     let query = self.effect_search.query();

@@ -8,6 +8,28 @@ use egui::{
 use egui_phosphor::fill::CARET_RIGHT;
 
 const FONT_SIZE: f32 = font_size::LABEL;
+/// Narrowest a menu's items are.
+const MIN_WIDTH: f32 = 120.;
+/// Left of an item's text (its icon before it), and right of it.
+const TEXT_LEFT: f32 = 18.;
+const TEXT_RIGHT: f32 = 10.;
+/// Room for a submenu's caret.
+const CARET_WIDTH: f32 = 12.;
+
+/// How wide `ui`'s menu items are: wide enough for the widest text seen
+/// in it, remembered from frame to frame so every item gets that width
+/// (`needed`, this one's, may widen it).
+fn item_width(ui: &Ui, needed: f32) -> f32 {
+    let key = ui.id().with("menu-item-width");
+    let widest = ui.data(|d| d.get_temp::<f32>(key)).unwrap_or(0.);
+    let width = needed.max(widest).max(ui.available_width().min(MIN_WIDTH));
+    if width > widest {
+        ui.data_mut(|d| d.insert_temp(key, width));
+        // Items drawn before this one were narrower: draw them again.
+        ui.ctx().request_discard("menu items widened");
+    }
+    width
+}
 
 pub struct ContextMenuButton {
     icon: String,
@@ -16,6 +38,11 @@ pub struct ContextMenuButton {
     submenu: bool,
     /// Highlighted while its submenu is open.
     open: bool,
+    /// A dot of this colour in the icon's place; transparent, an empty
+    /// ring (no colour).
+    swatch: Option<Color32>,
+    /// Ticked: what's chosen among items like it.
+    checked: bool,
 }
 
 impl ContextMenuButton {
@@ -26,7 +53,28 @@ impl ContextMenuButton {
             text_color: None,
             submenu: false,
             open: false,
+            swatch: None,
+            checked: false,
         }
+    }
+
+    /// An item for a colour (a label's): a dot of it in the icon's place.
+    pub fn swatch(color: Color32, text: &str) -> Self {
+        Self {
+            swatch: Some(color),
+            ..Self::new("", text)
+        }
+    }
+
+    /// An item for no colour (no label): an empty ring in the icon's place,
+    /// beside the swatches of the colours.
+    pub fn no_swatch(text: &str) -> Self {
+        Self::swatch(Color32::TRANSPARENT, text)
+    }
+
+    pub fn checked(mut self, checked: bool) -> Self {
+        self.checked = checked;
+        self
     }
 
     pub fn text_color(mut self, color: Color32) -> Self {
@@ -55,9 +103,17 @@ impl ContextMenuButton {
 
 impl Widget for ContextMenuButton {
     fn ui(self, ui: &mut Ui) -> Response {
-        // Define the desired height and width for the entire button
         let height = 16.0;
-        let width = ui.available_width().min(120.); // Fill full width of the menu
+        let text_font = FontId::new(FONT_SIZE, egui::FontFamily::Proportional);
+        let galley =
+            ui.painter()
+                .layout_no_wrap(self.text.clone(), text_font.clone(), Color32::PLACEHOLDER);
+        let caret = if self.submenu || self.checked {
+            CARET_WIDTH
+        } else {
+            0.
+        };
+        let width = item_width(ui, TEXT_LEFT + galley.size().x + TEXT_RIGHT + caret);
         let desired_size = Vec2::new(width, height);
 
         // Allocate a rectangular region for interaction
@@ -77,29 +133,40 @@ impl Widget for ContextMenuButton {
 
         // Draw the icon + text manually inside that region
         let icon_font = FontId::new(FONT_SIZE, egui::FontFamily::Name(PHOSPHOR_REGULAR.into()));
-        let text_font = FontId::new(FONT_SIZE, egui::FontFamily::Proportional);
 
         let icon_x = rect.left() + 3.0;
-        let text_x = rect.left() + 18.0;
+        let text_x = rect.left() + TEXT_LEFT;
         let center_y = rect.center().y;
 
         let painter = ui.painter();
 
-        // Icon
-        painter.text(
-            egui::pos2(icon_x, center_y),
-            Align2::LEFT_CENTER,
-            self.icon,
-            icon_font.clone(),
-            text_color,
-        );
+        // Icon, or a dot of a colour.
+        match self.swatch {
+            Some(Color32::TRANSPARENT) => {
+                painter.circle_stroke(
+                    egui::pos2(icon_x + 5., center_y),
+                    3.5,
+                    Stroke::new(1., theme.text_muted),
+                );
+            }
+            Some(color) => {
+                painter.circle_filled(egui::pos2(icon_x + 5., center_y), 4., color);
+            }
+            None => {
+                painter.text(
+                    egui::pos2(icon_x, center_y),
+                    Align2::LEFT_CENTER,
+                    self.icon,
+                    icon_font.clone(),
+                    text_color,
+                );
+            }
+        }
 
         // Text
-        painter.text(
-            egui::pos2(text_x, center_y),
-            Align2::LEFT_CENTER,
-            self.text,
-            text_font.clone(),
+        painter.galley(
+            egui::pos2(text_x, center_y - galley.size().y / 2.),
+            galley,
             text_color,
         );
 
@@ -111,7 +178,15 @@ impl Widget for ContextMenuButton {
                 icon_font,
                 text_color,
             );
-        };
+        } else if self.checked {
+            painter.text(
+                egui::pos2(rect.right() - 4., center_y),
+                Align2::RIGHT_CENTER,
+                egui_phosphor::regular::CHECK,
+                icon_font,
+                text_color,
+            );
+        }
         response
         // Change cursor on hover
         // response.on_hover_cursor(CursorIcon::PointingHand)
@@ -131,10 +206,8 @@ impl Widget for ContextMenuSeparator {
         // Add some vertical spacing before and after
         ui.add_space(2.0);
 
-        let (rect, response) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width().min(120.), 1.0),
-            egui::Sense::hover(),
-        );
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(item_width(ui, 0.), 1.0), egui::Sense::hover());
         let stroke_color = ui.visuals().widgets.noninteractive.bg_stroke.color;
         let stroke = Stroke::new(1.0, stroke_color);
 

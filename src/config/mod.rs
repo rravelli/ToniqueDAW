@@ -1,17 +1,38 @@
 pub mod keymap;
+pub mod labels;
 pub mod recent;
 pub mod settings;
 
 use directories::ProjectDirs;
+use labels::Labels;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Config {
+    /// The browser's folders, in its order.
     directories: Vec<PathBuf>,
+    /// Those of them shown collapsed.
+    collapsed: Vec<PathBuf>,
+    /// Selecting an audio file in the browser plays it.
+    auto_preview: bool,
+    preview_volume: f32,
+    labels: Labels,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            directories: Vec::new(),
+            collapsed: Vec::new(),
+            auto_preview: true,
+            preview_volume: 1.,
+            labels: Labels::default(),
+        }
+    }
 }
 
 // Helper functions for serde to convert PathBuf <-> String
@@ -44,6 +65,22 @@ mod serde_pathbuf_vec {
 struct ConfigSerdeHelper {
     #[serde(with = "serde_pathbuf_vec")]
     directories: Vec<PathBuf>,
+    #[serde(default, with = "serde_pathbuf_vec")]
+    collapsed: Vec<PathBuf>,
+    #[serde(default = "yes")]
+    auto_preview: bool,
+    #[serde(default = "full")]
+    preview_volume: f32,
+    #[serde(default)]
+    labels: Labels,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn full() -> f32 {
+    1.
 }
 
 impl Config {
@@ -55,6 +92,10 @@ impl Config {
         {
             return Config {
                 directories: helper.directories,
+                collapsed: helper.collapsed,
+                auto_preview: helper.auto_preview,
+                preview_volume: helper.preview_volume.clamp(0., 1.),
+                labels: helper.labels,
             };
         }
         Config::default()
@@ -63,13 +104,16 @@ impl Config {
     /// Save config to disk
     pub fn save(&self) {
         if let Some(path) = config_path() {
-            println!("{:?}", path);
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
 
             let helper = ConfigSerdeHelper {
                 directories: self.directories.clone(),
+                collapsed: self.collapsed.clone(),
+                auto_preview: self.auto_preview,
+                preview_volume: self.preview_volume,
+                labels: self.labels.clone(),
             };
 
             if let Ok(json) = serde_json::to_string_pretty(&helper) {
@@ -90,7 +134,51 @@ impl Config {
     /// Remove a directory
     pub fn remove_dir(&mut self, dir: &Path) {
         self.directories.retain(|d| d != dir);
+        self.collapsed.retain(|d| d != dir);
         self.save();
+    }
+
+    /// Whether selecting an audio file in the browser plays it.
+    pub fn auto_preview(&self) -> bool {
+        self.auto_preview
+    }
+
+    pub fn set_auto_preview(&mut self, on: bool) {
+        self.auto_preview = on;
+        self.save();
+    }
+
+    /// Where the browser's preview volume slider is, from 0 to 1.
+    pub fn preview_volume(&self) -> f32 {
+        self.preview_volume
+    }
+
+    pub fn set_preview_volume(&mut self, volume: f32) {
+        self.preview_volume = volume;
+        self.save();
+    }
+
+    pub fn labels(&self) -> &Labels {
+        &self.labels
+    }
+
+    /// Change the labels, and save them.
+    pub fn edit_labels(&mut self, edit: impl FnOnce(&mut Labels)) {
+        edit(&mut self.labels);
+        self.save();
+    }
+
+    /// The browser's folders shown collapsed.
+    pub fn collapsed_dirs(&self) -> &[PathBuf] {
+        &self.collapsed
+    }
+
+    /// Remember which folders are collapsed, saving if that changed.
+    pub fn set_collapsed_dirs(&mut self, collapsed: Vec<PathBuf>) {
+        if collapsed != self.collapsed {
+            self.collapsed = collapsed;
+            self.save();
+        }
     }
 
     /// Return a clone of all directories

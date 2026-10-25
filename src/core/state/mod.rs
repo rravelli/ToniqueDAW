@@ -115,6 +115,10 @@ pub struct ProjectState {
     follow_playhead: bool,
     preview_playback_state: PlaybackState,
     preview_position: usize,
+    /// The file last previewed.
+    preview_path: Option<PathBuf>,
+    /// Linear gain of the preview.
+    preview_gain: f32,
     pub metrics: GlobalMetrics,
     /// Live graph data for the graph view (measured only while it's shown).
     pub graph: GraphMonitor,
@@ -178,6 +182,8 @@ impl ProjectState {
             follow_playhead: false,
             preview_playback_state: PlaybackState::Paused,
             preview_position: 0,
+            preview_path: None,
+            preview_gain: 1.,
             metrics: GlobalMetrics::new(),
             graph: GraphMonitor::new(),
             monitor_graph: false,
@@ -563,13 +569,21 @@ impl ProjectState {
         if self.playback_state == PlaybackState::Playing {
             return;
         }
-        let Some(source) = FilePreview::open(path) else {
+        let Some(source) = FilePreview::open(path.clone()) else {
             return;
         };
         self.preview_position = 0;
+        self.preview_path = Some(path.clone());
         self.preview_playback_state = PlaybackState::Playing;
-        let result = self.session.engine_mut().preview_play(Box::new(source), 0);
+        let engine = self.session.engine_mut();
+        engine.preview_set_gain(self.preview_gain);
+        let result = engine.preview_play(Box::new(source), 0);
         report(result.map_err(EditError::from));
+    }
+    /// How loud the preview plays (linear), now and next time.
+    pub fn set_preview_gain(&mut self, gain: f32) {
+        self.preview_gain = gain;
+        self.session.engine_mut().preview_set_gain(gain);
     }
     /// Continue the last previewed file from `pos` (in frames of the file).
     pub fn seek_preview(&mut self, pos: usize) {
@@ -628,6 +642,12 @@ impl ProjectState {
     }
     pub fn preview_position(&self) -> usize {
         self.preview_position
+    }
+    /// The file the preview is playing, if it is.
+    pub fn previewing(&self) -> Option<&std::path::Path> {
+        self.preview_path
+            .as_deref()
+            .filter(|_| self.preview_playback_state == PlaybackState::Playing)
     }
     // Tracks
     /// Add track at the last position. Shortcut for `add_track_at`
