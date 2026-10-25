@@ -1,6 +1,6 @@
 //! A stereo level meter: a bar per channel on a scale finer near the top,
-//! up to +6 dB, with a mark at full scale: green, then amber, then red
-//! towards it. The peak shows lighter
+//! up to +6 dB, with a mark at full scale: green, turning yellow just
+//! under full scale, red over it. The peak shows lighter
 //! behind the RMS level, the highest recent peak as a line, and clips as a
 //! lamp above each bar until the meter is clicked.
 
@@ -8,7 +8,7 @@ use crate::{
     core::metrics::AudioMetrics,
     ui::theme::{Theme, ThemeExt, font_size},
 };
-use egui::{Color32, Rect, Response, RichText, Sense, Vec2, Widget};
+use egui::{Color32, Mesh, Rect, Response, RichText, Sense, Vec2, Widget};
 
 /// Between the two channels' bars.
 const CHANNEL_GAP: f32 = 1.;
@@ -19,10 +19,15 @@ const LAMP_GAP: f32 = 1.;
 const LAMP_MIN_HEIGHT: f32 = 30.;
 /// The mark at full scale (0 dBFS), on meters tall enough for it to read.
 const MARK_MIN_HEIGHT: f32 = 20.;
-/// Where the colours change, in dBFS: amber from the first, red from the
-/// second.
-const MID_DB: f32 = -12.;
-const HIGH_DB: f32 = -3.;
+/// Where the green starts turning yellow, in dBFS; it's yellow at full
+/// scale, and red above.
+const TURN_DB: f32 = -18.;
+/// How the green turns: slowly at first, so most of the meter is green
+/// and only the last few dB are yellow.
+const TURN_CURVE: f32 = 2.;
+/// Levels where the colour is computed, in dBFS, the bar's colour blended
+/// between them.
+const STOPS: [f32; 9] = [-18., -12., -9., -6., -4.5, -3., -1.5, -0.5, 0.];
 /// The top of the scale, in dBFS: room above full scale to see overs.
 const TOP_DB: f32 = 6.;
 /// How much of its colour the peak, behind the RMS level, has over the
@@ -77,18 +82,20 @@ impl Widget for LevelMeter<'_> {
             }
             // The peak, lighter, behind the RMS level.
             for (top, shade) in [(peaks[ch], PEAK_SHADE), (rms[ch], 1.)] {
-                for (from, to, color) in zones.spans() {
+                let shade = |c: Color32| theme.bg_deep.lerp_to_gamma(c, shade);
+                let mut mesh = Mesh::default();
+                for (from, to) in zones.spans() {
                     let to = to.min(top);
                     if to <= from {
                         continue;
                     }
-                    let color = theme.bg_deep.lerp_to_gamma(color, shade);
-                    painter.rect_filled(
-                        Rect::from_x_y_ranges(column.x_range(), y(to)..=y(from)),
-                        0.,
-                        color,
-                    );
+                    let segment = Rect::from_x_y_ranges(column.x_range(), y(to)..=y(from));
+                    let (bottom, top) = (shade(zones.color(from)), shade(zones.color(to)));
+                    // Red over full scale is flat; the rest a gradient.
+                    let top = if from >= 0. { bottom } else { top };
+                    gradient(&mut mesh, segment, bottom, top);
                 }
+                painter.add(mesh);
             }
             if scale(holds[ch]) > 0. {
                 let at = y(holds[ch]).max(column.top() + 1.);
@@ -148,24 +155,37 @@ impl Zones {
         }
     }
 
-    /// Each colour's range of levels, from the bottom up.
-    fn spans(&self) -> [(f32, f32, Color32); 3] {
-        [
-            (f32::NEG_INFINITY, MID_DB, self.low),
-            (MID_DB, HIGH_DB, self.mid),
-            (HIGH_DB, f32::INFINITY, self.high),
-        ]
+    /// Ranges of levels, from the bottom up, each a solid colour or a
+    /// gradient between its ends' colours.
+    fn spans(&self) -> impl Iterator<Item = (f32, f32)> {
+        let bounds = std::iter::once(f32::NEG_INFINITY)
+            .chain(STOPS)
+            .chain([f32::INFINITY]);
+        bounds.clone().zip(bounds.skip(1))
     }
 
+    /// Green, turning yellow towards full scale; red above it.
     fn color(&self, db: f32) -> Color32 {
-        if db >= HIGH_DB {
+        if db > 0. {
             self.high
-        } else if db >= MID_DB {
-            self.mid
-        } else {
+        } else if db <= TURN_DB {
             self.low
+        } else {
+            let t = ((db - TURN_DB) / -TURN_DB).powf(TURN_CURVE);
+            self.low.lerp_to_gamma(self.mid, t)
         }
     }
+}
+
+/// A vertical gradient over `rect`, `bottom` to `top`.
+fn gradient(mesh: &mut Mesh, rect: Rect, bottom: Color32, top: Color32) {
+    let i = mesh.vertices.len() as u32;
+    mesh.colored_vertex(rect.left_bottom(), bottom);
+    mesh.colored_vertex(rect.right_bottom(), bottom);
+    mesh.colored_vertex(rect.right_top(), top);
+    mesh.colored_vertex(rect.left_top(), top);
+    mesh.add_triangle(i, i + 1, i + 2);
+    mesh.add_triangle(i, i + 2, i + 3);
 }
 
 /// How far up the meter `db` (dBFS) is, 0 to 1 at [`TOP_DB`]: in steps

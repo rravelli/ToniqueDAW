@@ -118,9 +118,9 @@ theme_colors! {
         grid_beat: "Grid beats", "Grid lines on beats (half as strong between beats).",
     }
     "Meters" {
-        meter_low: "Normal", "Level meters, normal level.",
-        meter_mid: "Peak", "Level meters, peaks.",
-        meter_high: "Clipping", "Level meters, clipping.",
+        meter_low: "Normal", "Level meters, most of their range.",
+        meter_mid: "Near full scale", "Level meters, the last few dB below full scale, blended in from the normal colour.",
+        meter_high: "Clipping", "Level meters, over full scale, and their clip lamps.",
     }
 }
 

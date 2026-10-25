@@ -51,7 +51,7 @@ grid_beat = "#ffffff09"
 
 # Level meters
 meter_low = "#4cc864"
-meter_mid = "#f5c542"
+meter_mid = "#e8dc3c"
 meter_high = "#ff4d4f"
 
 # New tracks and graph node kinds
