@@ -32,6 +32,9 @@ const POSITION_WIDTH: f32 = 140.;
 /// The position in bars alone, when the bar is too narrow for the time.
 const POSITION_BARS_WIDTH: f32 = 72.;
 const USAGE_WIDTH: f32 = 46.;
+/// The time signature's beats per bar; its note value's dropdown is as
+/// wide, its caret aside.
+const NUMERATOR_WIDTH: f32 = 28.;
 
 pub struct TransportBar {
     bpm_input: NumberInput,
@@ -46,7 +49,7 @@ impl TransportBar {
                 .range(Rangef::new(10., 1000.))
                 .suffix(" BPM")
                 .draggable(),
-            numerator_input: NumberInput::new(Vec2::new(28., BUTTON_SIZE))
+            numerator_input: NumberInput::new(Vec2::new(NUMERATOR_WIDTH, BUTTON_SIZE))
                 .range(Rangef::new(1., TimeSignature::MAX_NUMERATOR as f32))
                 .decimals(0)
                 .draggable(),
@@ -191,7 +194,8 @@ impl TransportBar {
                         .iter()
                         .map(|d| (*d, d.to_string())),
                 )
-                .width(44.),
+                .value_width(NUMERATOR_WIDTH)
+                .height(BUTTON_SIZE),
         )
         .on_hover_text("Note value of a beat");
         ui.label(RichText::new("/").color(ui.app_theme().text_muted));

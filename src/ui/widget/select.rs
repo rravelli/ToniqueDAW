@@ -11,6 +11,10 @@ use crate::ui::{font::PHOSPHOR_FILL, theme::ThemeExt, widget::list_row::ListRow}
 
 const HEIGHT: f32 = 20.;
 const PADDING: f32 = 6.;
+/// The caret, at the right: its width, and the room it takes with the
+/// padding at its right.
+const CARET_WIDTH: f32 = 12.;
+const CARET_AREA: f32 = CARET_WIDTH + PADDING;
 const MAX_POPUP_HEIGHT: f32 = 240.;
 
 /// Dropdown picking one of `options`. The response is marked changed when
@@ -20,6 +24,9 @@ pub struct Select<'a, T> {
     value: &'a mut T,
     options: Vec<(T, String)>,
     width: f32,
+    height: f32,
+    /// The value centred left of the caret, rather than at the left.
+    centred: bool,
     placeholder: String,
 }
 
@@ -30,6 +37,8 @@ impl<'a, T: PartialEq + Clone> Select<'a, T> {
             value,
             options: Vec::new(),
             width: 160.,
+            height: HEIGHT,
+            centred: false,
             placeholder: "—".into(),
         }
     }
@@ -49,6 +58,19 @@ impl<'a, T: PartialEq + Clone> Select<'a, T> {
         self
     }
 
+    /// As wide as a field `width` wide beside it, plus the caret: the value
+    /// centred over that width, as in that field.
+    pub fn value_width(mut self, width: f32) -> Self {
+        self.width = width + CARET_AREA;
+        self.centred = true;
+        self
+    }
+
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = height;
+        self
+    }
+
     /// Shown when the value matches no option.
     pub fn placeholder(mut self, text: impl ToString) -> Self {
         self.placeholder = text.to_string();
@@ -62,7 +84,8 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
         let id = ui.make_persistent_id(self.id_salt);
         let popup_id = id.with("popup");
         let open = Popup::is_id_open(ui.ctx(), popup_id);
-        let (rect, mut response) = ui.allocate_exact_size(vec2(self.width, HEIGHT), Sense::click());
+        let (rect, mut response) =
+            ui.allocate_exact_size(vec2(self.width, self.height), Sense::click());
 
         let theme = ui.app_theme();
         let fill = if !enabled {
@@ -85,7 +108,6 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
         let painter = ui.painter();
         painter.rect(rect, 2., fill, stroke, StrokeKind::Inside);
 
-        let caret_width = 12.;
         let selected = self
             .options
             .iter()
@@ -96,12 +118,18 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
             FontId::proportional(font_size::BODY),
             text_color,
         );
-        job.wrap = TextWrapping::truncate_at_width(rect.width() - 2. * PADDING - caret_width);
+        job.wrap = TextWrapping::truncate_at_width(rect.width() - 2. * PADDING - CARET_WIDTH);
         let galley = painter.layout_job(job);
+        let (align, area) = if self.centred {
+            (
+                Align2::CENTER_CENTER,
+                rect.with_max_x(rect.right() - CARET_AREA),
+            )
+        } else {
+            (Align2::LEFT_CENTER, rect.shrink2(Vec2::new(PADDING, 0.)))
+        };
         painter.galley(
-            Align2::LEFT_CENTER
-                .align_size_within_rect(galley.size(), rect.shrink2(Vec2::new(PADDING, 0.)))
-                .min,
+            align.align_size_within_rect(galley.size(), area).min,
             galley,
             text_color,
         );
