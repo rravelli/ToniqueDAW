@@ -1,5 +1,6 @@
 //! A stereo level meter: a bar per channel on a scale finer near the top,
-//! green, then amber, then red towards full scale. The peak shows lighter
+//! up to +6 dB, with a mark at full scale: green, then amber, then red
+//! towards it. The peak shows lighter
 //! behind the RMS level, the highest recent peak as a line, and clips as a
 //! lamp above each bar until the meter is clicked.
 
@@ -16,13 +17,14 @@ const CHANNEL_GAP: f32 = 1.;
 const LAMP_HEIGHT: f32 = 3.;
 const LAMP_GAP: f32 = 1.;
 const LAMP_MIN_HEIGHT: f32 = 30.;
-/// Scale marks, in dBFS, on meters tall enough to space them out.
-const TICKS: [f32; 5] = [0., -6., -12., -24., -48.];
-const TICKS_MIN_HEIGHT: f32 = 40.;
+/// The mark at full scale (0 dBFS), on meters tall enough for it to read.
+const MARK_MIN_HEIGHT: f32 = 20.;
 /// Where the colours change, in dBFS: amber from the first, red from the
 /// second.
 const MID_DB: f32 = -12.;
 const HIGH_DB: f32 = -3.;
+/// The top of the scale, in dBFS: room above full scale to see overs.
+const TOP_DB: f32 = 6.;
 /// How much of its colour the peak, behind the RMS level, has over the
 /// well.
 const PEAK_SHADE: f32 = 0.5;
@@ -70,10 +72,8 @@ impl Widget for LevelMeter<'_> {
             let left = rect.left() + ch as f32 * (width + CHANNEL_GAP);
             let column = Rect::from_x_y_ranges(left..=left + width, bars.y_range());
             painter.rect_filled(column, 0., theme.bg_deep);
-            if bars.height() >= TICKS_MIN_HEIGHT {
-                for db in TICKS {
-                    painter.hline(column.x_range(), y(db).round() + 0.5, (1., zones.tick));
-                }
+            if bars.height() >= MARK_MIN_HEIGHT {
+                painter.hline(column.x_range(), y(0.).round() + 0.5, (1., zones.tick));
             }
             // The peak, lighter, behind the RMS level.
             for (top, shade) in [(peaks[ch], PEAK_SHADE), (rms[ch], 1.)] {
@@ -168,12 +168,14 @@ impl Zones {
     }
 }
 
-/// How far up the meter `db` (dBFS) is, 0 to 1 at full scale: in steps
+/// How far up the meter `db` (dBFS) is, 0 to 1 at [`TOP_DB`]: in steps
 /// that widen towards the top (as IEC 60268-18 meters), so the levels
-/// that matter get most of the height. -70 dB and below is the bottom.
+/// that matter get most of the height, and above full scale as near it.
+/// -70 dB and below is the bottom.
 fn scale(db: f32) -> f32 {
-    // (dB, share of the height) at each step's start, from the top.
-    const STEPS: [(f32, f32); 7] = [
+    // (dB, height) at each step's start, from the top, full scale at 1.
+    const STEPS: [(f32, f32); 8] = [
+        (TOP_DB, TOP),
         (0., 1.),
         (-20., 0.5),
         (-30., 0.3),
@@ -182,13 +184,15 @@ fn scale(db: f32) -> f32 {
         (-60., 0.025),
         (-70., 0.),
     ];
-    if db >= 0. {
+    // As steep above full scale as just under it.
+    const TOP: f32 = 1. + TOP_DB * 0.5 / 20.;
+    if db >= TOP_DB {
         return 1.;
     }
     for pair in STEPS.windows(2) {
         let ((top_db, top), (bottom_db, bottom)) = (pair[0], pair[1]);
         if db >= bottom_db {
-            return bottom + (db - bottom_db) / (top_db - bottom_db) * (top - bottom);
+            return (bottom + (db - bottom_db) / (top_db - bottom_db) * (top - bottom)) / TOP;
         }
     }
     0.
@@ -209,15 +213,17 @@ mod tests {
 
     #[test]
     fn the_scale_is_finer_near_the_top() {
-        assert_eq!(scale(0.), 1.);
-        assert_eq!(scale(3.), 1.);
-        assert_eq!(scale(-20.), 0.5);
+        assert_eq!(scale(TOP_DB), 1.);
+        assert_eq!(scale(10.), 1.);
+        // Full scale near the top, -20 dB at about half of it.
+        assert!((0.85..0.9).contains(&scale(0.)), "{}", scale(0.));
+        assert!((scale(-20.) - scale(0.) / 2.).abs() < 1e-6);
         assert_eq!(scale(-80.), 0.);
         // The top 20 dB get half the height: 6 dB there are more of it
         // than 20 dB near the bottom.
         assert!(scale(-6.) - scale(-12.) > scale(-40.) - scale(-60.));
         let mut last = 0.;
-        for db in (-75..=0).map(|d| d as f32) {
+        for db in (-75..=6).map(|d| d as f32) {
             assert!(scale(db) >= last, "rises with the level, at {db}");
             last = scale(db);
         }
