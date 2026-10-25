@@ -73,6 +73,18 @@ fn plays_the_source_while_the_transport_is_stopped() {
 }
 
 #[test]
+fn gain_scales_the_preview_and_outlasts_a_play() {
+    let (mut e, mut p) = engine();
+    e.preview_set_gain(0.5);
+    e.preview_play(ramp(10_000, SR), 0).unwrap();
+    settle(&mut p);
+    let out = render_offline(&mut p, 256, 2);
+    for (i, frame) in out.chunks(2).enumerate() {
+        assert!((frame[0] - i as f32 * STEP * 0.5).abs() < 1e-6, "frame {i}");
+    }
+}
+
+#[test]
 fn seek_drops_queued_audio_and_stop_silences() {
     let (mut e, mut p) = engine();
     e.preview_play(ramp(100_000, SR), 0).unwrap();

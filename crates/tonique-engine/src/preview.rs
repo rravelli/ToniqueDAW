@@ -15,7 +15,7 @@
 //! for the old position is dropped instead of played.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -40,8 +40,8 @@ const RING_FRAMES: usize = 16384;
 /// Source frames decoded per step.
 const CHUNK: usize = 1024;
 
-/// Written by the RT thread, read by the control side.
-#[derive(Default)]
+/// Written by the RT thread, read by the control side (but `gain`, the
+/// other way round).
 pub(crate) struct PreviewShared {
     /// Stream currently being played by the RT thread (0 = none).
     pub generation: AtomicU64,
@@ -49,6 +49,19 @@ pub(crate) struct PreviewShared {
     pub played: AtomicU64,
     /// Last generation that played to its end.
     pub finished: AtomicU64,
+    /// Linear gain applied to the preview, as `f32` bits.
+    pub gain: AtomicU32,
+}
+
+impl Default for PreviewShared {
+    fn default() -> Self {
+        Self {
+            generation: AtomicU64::default(),
+            played: AtomicU64::default(),
+            finished: AtomicU64::default(),
+            gain: AtomicU32::new(1.0f32.to_bits()),
+        }
+    }
 }
 
 enum FeederMsg {
@@ -148,6 +161,13 @@ impl PreviewControl {
     pub fn is_playing(&self) -> bool {
         self.playing
             .is_some_and(|g| self.shared.finished.load(Ordering::Relaxed) != g)
+    }
+
+    /// Linear gain of whatever plays, now and later.
+    pub fn set_gain(&self, gain: f32) {
+        self.shared
+            .gain
+            .store(gain.max(0.0).to_bits(), Ordering::Relaxed);
     }
 
     /// Position in source frames, while playing.

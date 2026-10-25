@@ -117,6 +117,8 @@ pub struct ProjectState {
     preview_position: usize,
     /// The file last previewed.
     preview_path: Option<PathBuf>,
+    /// Linear gain of the preview.
+    preview_gain: f32,
     pub metrics: GlobalMetrics,
     /// Live graph data for the graph view (measured only while it's shown).
     pub graph: GraphMonitor,
@@ -181,6 +183,7 @@ impl ProjectState {
             preview_playback_state: PlaybackState::Paused,
             preview_position: 0,
             preview_path: None,
+            preview_gain: 1.,
             metrics: GlobalMetrics::new(),
             graph: GraphMonitor::new(),
             monitor_graph: false,
@@ -572,8 +575,15 @@ impl ProjectState {
         self.preview_position = 0;
         self.preview_path = Some(path.clone());
         self.preview_playback_state = PlaybackState::Playing;
-        let result = self.session.engine_mut().preview_play(Box::new(source), 0);
+        let engine = self.session.engine_mut();
+        engine.preview_set_gain(self.preview_gain);
+        let result = engine.preview_play(Box::new(source), 0);
         report(result.map_err(EditError::from));
+    }
+    /// How loud the preview plays (linear), now and next time.
+    pub fn set_preview_gain(&mut self, gain: f32) {
+        self.preview_gain = gain;
+        self.session.engine_mut().preview_set_gain(gain);
     }
     /// Continue the last previewed file from `pos` (in frames of the file).
     pub fn seek_preview(&mut self, pos: usize) {

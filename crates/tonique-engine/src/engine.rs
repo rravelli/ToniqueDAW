@@ -387,6 +387,11 @@ impl Engine {
         })
     }
 
+    /// Linear gain of the preview, kept across plays.
+    pub fn preview_set_gain(&mut self, gain: f32) {
+        self.preview.set_gain(gain);
+    }
+
     /// True from `preview_play`/`preview_seek` until stopped or played to the end.
     pub fn is_previewing(&self) -> bool {
         self.preview.is_playing()
@@ -483,12 +488,13 @@ impl AudioProcessor {
         };
         let frames = out.len() / channels.max(1);
         let n = stream.slots().min(frames);
+        let gain = f32::from_bits(self.preview_shared.gain.load(Ordering::Relaxed));
         if let Ok(chunk) = stream.read_chunk(n) {
             let (a, b) = chunk.as_slices();
             for (frame, [l, r]) in out.chunks_exact_mut(channels).zip(a.iter().chain(b)) {
-                frame[0] += l;
+                frame[0] += l * gain;
                 if channels > 1 {
-                    frame[1] += r;
+                    frame[1] += r * gain;
                 }
             }
             chunk.commit_all();

@@ -872,8 +872,8 @@ impl FileList {
             }
         });
 
-        let pressed =
-            res.clicked() || (selected && self.focused && ui.input(|i| i.key_pressed(Key::Enter)));
+        let entered = selected && self.focused && ui.input(|i| i.key_pressed(Key::Enter));
+        let pressed = res.clicked() || entered;
 
         if pressed {
             self.selected = Some(index);
@@ -881,7 +881,16 @@ impl FileList {
 
         if is_audio && pressed {
             self.selected_audio = AUDIO_ANALYSIS_CACHE.get_or_analyze(file.path.clone());
-            self.preview(state, file.path.clone());
+            if entered {
+                // Enter plays or stops it, whether or not selecting plays.
+                if state.previewing() == Some(file.path.as_path()) {
+                    state.pause_preview();
+                } else {
+                    state.play_preview(file.path.clone());
+                }
+            } else {
+                self.preview(state, file.path.clone());
+            }
         }
 
         let toggle_folder = is_dir && pressed;

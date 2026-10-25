@@ -156,7 +156,7 @@ impl LeftPanel {
                         self.file_search.set_busy(self.file_browser.is_searching());
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 2.;
-                            let width = ui.available_width() - 2. * (ADD_FOLDER_SIZE + 2.);
+                            let width = ui.available_width() - ADD_FOLDER_SIZE - 2.;
                             let query = ui
                                 .allocate_ui(vec2(width, ADD_FOLDER_SIZE), |ui| {
                                     ui.push_id("file-search", |ui| {
@@ -165,33 +165,23 @@ impl LeftPanel {
                                     .inner
                                 })
                                 .inner;
-                            self.file_browser.preview_switch(ui);
                             self.file_browser.add_folder_button(ui);
                             if let Some(query) = query {
                                 self.file_browser.trigger_search(&query);
                             }
                         });
                     }
-                    // The search bar, and the preview's switch.
                     BrowserSource::Labels => {
                         self.label_search
                             .set_busy(self.file_browser.is_searching_labels());
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 2.;
-                            let width = ui.available_width() - ADD_FOLDER_SIZE - 2.;
-                            let query = ui
-                                .allocate_ui(vec2(width, ADD_FOLDER_SIZE), |ui| {
-                                    ui.push_id("label-search", |ui| {
-                                        self.label_search.ui(ui).map(str::to_owned)
-                                    })
-                                    .inner
-                                })
-                                .inner;
-                            self.file_browser.preview_switch(ui);
-                            if let Some(query) = query {
-                                self.file_browser.trigger_label_search(&query);
-                            }
-                        });
+                        let query = ui
+                            .push_id("label-search", |ui| {
+                                self.label_search.ui(ui).map(str::to_owned)
+                            })
+                            .inner;
+                        if let Some(query) = query {
+                            self.file_browser.trigger_label_search(&query);
+                        }
                     }
                     // Filtered as typed, below.
                     BrowserSource::Effects => {

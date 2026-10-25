@@ -19,6 +19,7 @@ pub struct Config {
     collapsed: Vec<PathBuf>,
     /// Selecting an audio file in the browser plays it.
     auto_preview: bool,
+    preview_volume: f32,
     labels: Labels,
 }
 
@@ -28,6 +29,7 @@ impl Default for Config {
             directories: Vec::new(),
             collapsed: Vec::new(),
             auto_preview: true,
+            preview_volume: 1.,
             labels: Labels::default(),
         }
     }
@@ -67,12 +69,18 @@ struct ConfigSerdeHelper {
     collapsed: Vec<PathBuf>,
     #[serde(default = "yes")]
     auto_preview: bool,
+    #[serde(default = "full")]
+    preview_volume: f32,
     #[serde(default)]
     labels: Labels,
 }
 
 fn yes() -> bool {
     true
+}
+
+fn full() -> f32 {
+    1.
 }
 
 impl Config {
@@ -86,6 +94,7 @@ impl Config {
                 directories: helper.directories,
                 collapsed: helper.collapsed,
                 auto_preview: helper.auto_preview,
+                preview_volume: helper.preview_volume.clamp(0., 1.),
                 labels: helper.labels,
             };
         }
@@ -103,6 +112,7 @@ impl Config {
                 directories: self.directories.clone(),
                 collapsed: self.collapsed.clone(),
                 auto_preview: self.auto_preview,
+                preview_volume: self.preview_volume,
                 labels: self.labels.clone(),
             };
 
@@ -135,6 +145,16 @@ impl Config {
 
     pub fn set_auto_preview(&mut self, on: bool) {
         self.auto_preview = on;
+        self.save();
+    }
+
+    /// Where the browser's preview volume slider is, from 0 to 1.
+    pub fn preview_volume(&self) -> f32 {
+        self.preview_volume
+    }
+
+    pub fn set_preview_volume(&mut self, volume: f32) {
+        self.preview_volume = volume;
         self.save();
     }
 

@@ -5,16 +5,16 @@ use crate::{
     ui::{
         browser::{
             items::{FileList, FolderAction, LabelView},
-            preview::{PREVIEW_HEIGHT, preview_ui},
+            preview::{PREVIEW_HEIGHT, PreviewSettings, preview_ui},
         },
         commands::Commands,
-        font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
+        font::PHOSPHOR_FILL,
         theme::{ThemeExt, with_alpha},
         widget::flat_button::FlatButton,
     },
 };
 use egui::{Color32, FontId, Rect, RichText, Stroke, Ui};
-use egui_phosphor::{fill::FOLDER_PLUS, regular::HEADPHONES};
+use egui_phosphor::fill::FOLDER_PLUS;
 use rfd::FileDialog;
 use std::{
     collections::HashMap,
@@ -39,6 +39,9 @@ pub struct FileBrowser {
     /// Its sections closed.
     labels_collapsed: Vec<PathBuf>,
     config: Config,
+    preview: PreviewSettings,
+    /// The preview's volume was handed to the engine.
+    gain_sent: bool,
     /// The app's window had the focus last frame: getting it back, files
     /// may have changed meanwhile.
     window_focused: bool,
@@ -52,11 +55,18 @@ impl FileBrowser {
         items.auto_preview = config.auto_preview();
         let mut labelled = FileList::new();
         labelled.auto_preview = config.auto_preview();
+        let preview = PreviewSettings {
+            auto_preview: config.auto_preview(),
+            volume: config.preview_volume(),
+            muted: false,
+        };
         let mut browser = Self {
             items,
             labelled,
             labels_collapsed: Vec::new(),
             config,
+            preview,
+            gain_sent: false,
             window_focused: true,
         };
         browser.refresh_labels();
@@ -127,7 +137,9 @@ impl FileBrowser {
             return;
         }
 
-        let actions = list_ui(&mut self.items, ui, state, focused, &moves);
+        let mut preview = self.preview;
+        let actions = list_ui(&mut self.items, ui, state, focused, &moves, &mut preview);
+        self.set_preview(ui, state, preview);
         for action in actions {
             self.act(action);
         }
@@ -148,7 +160,9 @@ impl FileBrowser {
         let moves = take_moves(commands, focused);
         self.refresh_when_due(ui, focused);
         ui.spacing_mut().scroll.bar_width = 5.0;
-        let actions = list_ui(&mut self.labelled, ui, state, focused, &moves);
+        let mut preview = self.preview;
+        let actions = list_ui(&mut self.labelled, ui, state, focused, &moves, &mut preview);
+        self.set_preview(ui, state, preview);
         for action in actions {
             self.act(action);
         }
@@ -270,25 +284,22 @@ impl FileBrowser {
         }
     }
 
-    /// Whether selecting a file plays it: a switch beside the search bar.
-    pub fn preview_switch(&mut self, ui: &mut Ui) {
-        let on = self.items.auto_preview;
-        let button = FlatButton::ghost(HEADPHONES)
-            .square(ADD_FOLDER_SIZE)
-            .selected(on)
-            .font(FontId::new(
-                14.,
-                egui::FontFamily::Name(PHOSPHOR_REGULAR.into()),
-            ))
-            .tooltip(if on {
-                "Preview on: selecting a file plays it"
-            } else {
-                "Preview off: play a file from its preview"
-            });
-        if ui.add(button).clicked() {
-            self.items.auto_preview = !on;
-            self.labelled.auto_preview = !on;
-            self.config.set_auto_preview(!on);
+    /// Keep what the preview changed, and hand its volume to the engine.
+    fn set_preview(&mut self, ui: &Ui, state: &mut ProjectState, preview: PreviewSettings) {
+        if preview.auto_preview != self.preview.auto_preview {
+            self.items.auto_preview = preview.auto_preview;
+            self.labelled.auto_preview = preview.auto_preview;
+            self.config.set_auto_preview(preview.auto_preview);
+        }
+        if preview.gain() != self.preview.gain() || !self.gain_sent {
+            state.set_preview_gain(preview.gain());
+            self.gain_sent = true;
+        }
+        self.preview = preview;
+        // Saved once the slider is let go, not on every step of a drag.
+        let held = ui.input(|i| i.pointer.any_down());
+        if !held && self.config.preview_volume() != preview.volume {
+            self.config.set_preview_volume(preview.volume);
         }
     }
 
@@ -343,6 +354,7 @@ fn list_ui(
     state: &mut ProjectState,
     focused: bool,
     moves: &[Action],
+    preview: &mut PreviewSettings,
 ) -> Vec<FolderAction> {
     if ui.response().clicked_elsewhere() {
         list.selected_audio = None;
@@ -359,7 +371,7 @@ fn list_ui(
         })
         .inner;
     if let Some(audio) = &list.selected_audio {
-        preview_ui(ui, state, audio);
+        preview_ui(ui, state, audio, preview);
     }
     if state.preview_playback_state() == PlaybackState::Playing && list.selected_audio.is_none() {
         state.pause_preview();
