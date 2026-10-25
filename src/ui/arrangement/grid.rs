@@ -120,7 +120,7 @@ impl PaintGrid for GridService {
                         pos2(x + 3.0, rect.center().y),
                         Align2::LEFT_CENTER,
                         bar.to_string(),
-                        FontId::new(font_size::SMALL, egui::FontFamily::Monospace),
+                        FontId::new(font_size::SMALL, egui::FontFamily::Proportional),
                         theme.text_muted,
                     );
                     painter.line_segment(
@@ -133,7 +133,7 @@ impl PaintGrid for GridService {
                         pos2(x + 3.0, rect.center().y),
                         Align2::LEFT_CENTER,
                         format!("{bar}.{beat}"),
-                        FontId::new(font_size::SMALL, egui::FontFamily::Monospace),
+                        FontId::new(font_size::SMALL, egui::FontFamily::Proportional),
                         theme.text_muted,
                     );
                     painter.line_segment(
@@ -173,7 +173,7 @@ fn paint_time_labels(grid: &GridService, painter: &Painter, rect: Rect, bpm: f32
             pos2(x + 3.0, rect.center().y),
             Align2::LEFT_CENTER,
             text,
-            FontId::new(font_size::SMALL, egui::FontFamily::Monospace),
+            FontId::new(font_size::SMALL, egui::FontFamily::Proportional),
             theme.text_disabled,
         );
         painter.line_segment(

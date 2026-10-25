@@ -1,6 +1,7 @@
 //! Dialogs and windows over the app: one look for every prompt, notice and
 //! window.
 
+use crate::ui::font::semibold;
 use crate::ui::{
     theme::{ThemeExt, font_size},
     widget::flat_button::FlatButton,
@@ -29,7 +30,11 @@ pub fn frame(ui: &Ui) -> Frame {
 
 /// The dialog's question or headline.
 pub fn title(ui: &mut Ui, text: impl Into<String>) {
-    ui.label(RichText::new(text).size(font_size::HEADING).strong());
+    ui.label(
+        RichText::new(text)
+            .font(semibold(font_size::HEADING))
+            .strong(),
+    );
 }
 
 /// Explanation under the title.

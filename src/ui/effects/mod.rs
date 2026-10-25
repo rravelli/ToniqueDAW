@@ -3,6 +3,7 @@
 //! low at its right, a meter of its output. A collapsed effect
 //! is a strip with its name up it.
 
+use crate::ui::font::semibold;
 use crate::ui::theme::font_size;
 use crate::{
     core::{
@@ -444,7 +445,7 @@ impl EffectRack {
                 name.left_center(),
                 Align2::LEFT_CENTER,
                 effect.name(),
-                FontId::proportional(font_size::LABEL),
+                semibold(font_size::LABEL),
                 color,
             );
         }
@@ -505,7 +506,7 @@ impl EffectRack {
         };
         let galley = ui.painter().layout_no_wrap(
             effect.name().to_string(),
-            FontId::proportional(font_size::LABEL),
+            semibold(font_size::LABEL),
             color,
         );
         let at = pos2(rect.center().x - galley.size().y / 2., rect.bottom() - 6.);

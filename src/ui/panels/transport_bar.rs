@@ -455,7 +455,7 @@ fn position_ui(ui: &mut Ui, state: &ProjectState, with_time: bool) {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 2.0, theme.bg_deep);
     let (bars, time) = position_text(state.playhead().0, state.time_signature(), state.bpm());
-    let font = FontId::monospace(font_size::BODY);
+    let font = FontId::proportional(font_size::BODY);
     painter.text(
         rect.left_center() + vec2(8., 0.),
         Align2::LEFT_CENTER,

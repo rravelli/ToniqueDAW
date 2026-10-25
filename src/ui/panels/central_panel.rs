@@ -1,3 +1,4 @@
+use crate::ui::font::semibold;
 use std::collections::VecDeque;
 
 use crate::{
@@ -436,7 +437,7 @@ fn empty_project_ui(ui: &Ui, state: &ProjectState, viewport: Rect) {
         logo_rect.center_bottom() + vec2(0., 12.),
         Align2::CENTER_TOP,
         "Tonique",
-        FontId::proportional(font_size::HEADING),
+        semibold(font_size::HEADING),
         theme.text_muted,
     );
     let add_track = state

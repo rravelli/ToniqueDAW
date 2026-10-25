@@ -1,5 +1,6 @@
 //! The bottom panel's view of one clip.
 
+use crate::ui::font::semibold;
 use egui::{
     Align2, Color32, CursorIcon, DragValue, FontId, Label, Rect, Response, RichText, ScrollArea,
     Sense, Shape, Stroke, Ui, UiBuilder, pos2, vec2,
@@ -860,7 +861,7 @@ fn section(ui: &mut Ui, title: &str, reserve: f32) -> Rect {
         rect.left_center(),
         Align2::LEFT_CENTER,
         title.to_uppercase(),
-        FontId::proportional(font_size::SMALL),
+        semibold(font_size::SMALL),
         theme.text_muted,
     );
     let rule_end = rect.right() - reserve;

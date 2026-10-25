@@ -1,3 +1,4 @@
+use crate::ui::font::semibold;
 use crate::ui::theme::font_size;
 use crate::{
     core::{
@@ -455,7 +456,7 @@ fn name_label(ui: &mut Ui, track: &TrackRow) {
         Label::new(
             RichText::new(display_name(&track.name, track.first_track_index))
                 .color(ui.app_theme().text)
-                .size(font_size::LABEL),
+                .font(semibold(font_size::LABEL)),
         )
         .truncate()
         .selectable(false),
