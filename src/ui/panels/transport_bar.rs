@@ -29,6 +29,8 @@ const BUTTON_GAP: f32 = 2.;
 const GROUP_GAP: f32 = 8.;
 /// The playhead's position: bars and time.
 const POSITION_WIDTH: f32 = 140.;
+/// The position in bars alone, when the bar is too narrow for the time.
+const POSITION_BARS_WIDTH: f32 = 72.;
 const USAGE_WIDTH: f32 = 46.;
 
 pub struct TransportBar {
@@ -89,10 +91,36 @@ impl TransportBar {
                 commands.push(Action::ToggleGraphView);
             }
 
+            let left = ui.min_rect().right();
+
+            // The right group first: the transport keeps clear of it.
+            let right = ui
+                .with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    self.right_ui(ui, state, commands);
+                    ui.min_rect().left()
+                })
+                .inner;
+
+            // Centred in the bar, unless that would run into either side:
+            // then as near the centre as fits, the time left out if even
+            // that's too narrow.
+            let room = right - left - 2. * GROUP_GAP;
             let buttons = if RECORDING { 5. } else { 4. };
-            let width = buttons * (BUTTON_SIZE + BUTTON_GAP) + GROUP_GAP + POSITION_WIDTH;
+            let buttons_width = buttons * (BUTTON_SIZE + BUTTON_GAP) + GROUP_GAP;
+            let with_time = buttons_width + POSITION_WIDTH <= room;
+            let position_width = if with_time {
+                POSITION_WIDTH
+            } else {
+                POSITION_BARS_WIDTH
+            };
+            let width = buttons_width + position_width;
+            let center_x = full
+                .center()
+                .x
+                .min(right - GROUP_GAP - width / 2.)
+                .max(left + GROUP_GAP + width / 2.);
             let center = Rect::from_center_size(
-                pos2(full.center().x, ui.max_rect().center().y),
+                pos2(center_x, ui.max_rect().center().y),
                 vec2(width, BUTTON_SIZE),
             );
             ui.scope_builder(
@@ -100,6 +128,8 @@ impl TransportBar {
                     .max_rect(center)
                     .layout(Layout::left_to_right(Align::Center)),
                 |ui| {
+                    // Under the right group when there's no room at all.
+                    ui.set_clip_rect(ui.clip_rect().with_max_x(right - GROUP_GAP / 2.));
                     if self.metronome_ui(ui, state).clicked() {
                         commands.push(Action::ToggleMetronome);
                     }
@@ -114,37 +144,39 @@ impl TransportBar {
                         commands.push(Action::ToggleFollowPlayhead);
                     }
                     ui.add_space(GROUP_GAP - BUTTON_GAP);
-                    position_ui(ui, state);
+                    position_ui(ui, state, with_time);
                 },
             );
-
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if self.redo_ui(ui, state).clicked() {
-                    commands.push(Action::Redo);
-                }
-                if self.undo_ui(ui, state).clicked() {
-                    commands.push(Action::Undo);
-                }
-                ui.add_space(GROUP_GAP);
-                self.usage_ui(ui, state);
-                if cfg!(debug_assertions) {
-                    self.fps_ui(ui);
-                }
-                if state.audio_lost() && self.no_audio_ui(ui, state).clicked() {
-                    commands.push(Action::OpenSettings);
-                }
-                ui.add_space(GROUP_GAP);
-                self.bpm_input.value = state.bpm();
-                self.bpm_input
-                    .ui(ui)
-                    .on_hover_text("Tempo: drag or double-click to edit");
-                if self.bpm_input.value != state.bpm() {
-                    state.set_bpm(self.bpm_input.value);
-                }
-                ui.add_space(BUTTON_GAP);
-                self.time_signature_ui(ui, state);
-            });
         });
+    }
+
+    /// Undo and redo, the status, the tempo and the time signature, laid
+    /// out right to left.
+    fn right_ui(&mut self, ui: &mut Ui, state: &mut ProjectState, commands: &mut Commands) {
+        if self.redo_ui(ui, state).clicked() {
+            commands.push(Action::Redo);
+        }
+        if self.undo_ui(ui, state).clicked() {
+            commands.push(Action::Undo);
+        }
+        ui.add_space(GROUP_GAP);
+        self.usage_ui(ui, state);
+        if cfg!(debug_assertions) {
+            self.fps_ui(ui);
+        }
+        if state.audio_lost() && self.no_audio_ui(ui, state).clicked() {
+            commands.push(Action::OpenSettings);
+        }
+        ui.add_space(GROUP_GAP);
+        self.bpm_input.value = state.bpm();
+        self.bpm_input
+            .ui(ui)
+            .on_hover_text("Tempo: drag or double-click to edit");
+        if self.bpm_input.value != state.bpm() {
+            state.set_bpm(self.bpm_input.value);
+        }
+        ui.add_space(BUTTON_GAP);
+        self.time_signature_ui(ui, state);
     }
 
     /// Beats per bar (typed or dragged) over the note that counts them.
@@ -410,9 +442,15 @@ impl TransportBar {
     }
 }
 
-/// Where the playhead is, in bars.beats.sixteenths and in time.
-fn position_ui(ui: &mut Ui, state: &ProjectState) {
-    let (rect, _) = ui.allocate_exact_size(vec2(POSITION_WIDTH, BUTTON_SIZE), Sense::hover());
+/// Where the playhead is, in bars.beats.sixteenths and, `with_time`, in
+/// time.
+fn position_ui(ui: &mut Ui, state: &ProjectState, with_time: bool) {
+    let width = if with_time {
+        POSITION_WIDTH
+    } else {
+        POSITION_BARS_WIDTH
+    };
+    let (rect, _) = ui.allocate_exact_size(vec2(width, BUTTON_SIZE), Sense::hover());
     let theme = ui.app_theme();
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 2.0, theme.bg_deep);
@@ -425,6 +463,9 @@ fn position_ui(ui: &mut Ui, state: &ProjectState) {
         font.clone(),
         theme.text,
     );
+    if !with_time {
+        return;
+    }
     painter.text(
         rect.right_center() - vec2(8., 0.),
         Align2::RIGHT_CENTER,
