@@ -51,6 +51,8 @@ pub struct AudioData {
     samples: OnceLock<Arc<SampleBuffer>>,
     peaks_requested: AtomicBool,
     samples_requested: AtomicBool,
+    /// Set when a decode gave up: the peaks won't grow anymore.
+    failed: AtomicBool,
 }
 
 impl AudioData {
@@ -78,6 +80,11 @@ impl AudioData {
 
     pub fn peaks_complete(&self) -> bool {
         self.peaks_complete.load(Ordering::Acquire)
+    }
+
+    /// Whether the peaks may still grow: not complete, and no decode failed.
+    pub fn peaks_pending(&self) -> bool {
+        !self.peaks_complete() && !self.failed.load(Ordering::Acquire)
     }
 
     /// Whether a decode that keeps the samples has been started.
@@ -173,6 +180,9 @@ impl AudioInfo {
         std::thread::spawn(move || {
             if let Err(e) = load_audio(&path, &data, keep_samples) {
                 eprintln!("Failed to load {}: {e}", path.display());
+                if let Some(data) = data.upgrade() {
+                    data.failed.store(true, Ordering::Release);
+                }
             }
         });
     }
@@ -183,6 +193,9 @@ impl AudioInfo {
             (Some(samples), _, _) => Some(samples.len() as f64),
             (None, Some(n), _) => Some(n as f64),
             (None, None, Some(d)) => Some(d.as_secs_f64() * self.sample_rate as f64),
+            // Browsing keeps no samples: the peaks know the length once
+            // they cover the whole file.
+            _ if self.data.peaks_complete() => Some(self.data.peaks().frames() as f64),
             _ => None,
         }
     }

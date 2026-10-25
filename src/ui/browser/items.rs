@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
 };
@@ -80,6 +80,9 @@ pub struct FileList {
     pub selected_audio: Option<AudioInfo>,
     files: Arc<Mutex<FileTree>>,
     loading: Arc<Mutex<bool>>,
+    /// Set when a background search put its results in: the row selected
+    /// was one of the rows before.
+    landed: Arc<AtomicBool>,
     search_generation: Arc<AtomicU64>,
     query: String,
     /// The folder searched in, or all of them.
@@ -107,6 +110,7 @@ impl FileList {
             selected_audio: None,
             files: Arc::new(Mutex::new(FileTree::new())),
             loading: Arc::new(Mutex::new(false)),
+            landed: Arc::new(AtomicBool::new(false)),
             search_generation: Arc::new(AtomicU64::new(0)),
             query: "".to_string(),
             scope: None,
@@ -227,8 +231,13 @@ impl FileList {
         self.focused = focused;
         self.ctx = Some(ui.ctx().clone());
         let mut actions = Vec::new();
-        // While a search runs, what was shown stays.
-        let item_count = self.files.lock().map_or(0, |files| files.items.len());
+        // While a search runs, what was shown stays, and can be selected.
+        let item_count = self.files.lock().map_or(0, |files| {
+            if self.landed.swap(false, Ordering::Relaxed) {
+                self.selected = None;
+            }
+            files.items.len()
+        });
         if !self.query.is_empty() && item_count == 0 && !self.is_searching() {
             ui.add_space(8.);
             let scope = self.scope_name();
@@ -353,6 +362,10 @@ impl FileList {
             }
         });
 
+        // A folder both in view and pinned is drawn twice: Enter reaches
+        // both, but opens or closes it once.
+        folder_toggles.sort_unstable();
+        folder_toggles.dedup();
         if let Ok(mut files) = self.files.lock() {
             for index in folder_toggles {
                 files.toggle_folder(index);
@@ -734,13 +747,16 @@ impl FileList {
             if up && *index > 0 {
                 *index -= 1;
                 updated = true;
-            } else if !up && *index < self.files.lock().map_or(0, |f| f.items.len() - 1) {
+            } else if !up && *index + 1 < self.files.lock().map_or(0, |f| f.items.len()) {
                 *index += 1;
                 updated = true;
             }
-            let file = if let Ok(files) = self.files.lock() {
-                files.items[*index].clone()
-            } else {
+            let Some(file) = self
+                .files
+                .lock()
+                .ok()
+                .and_then(|files| files.items.get(*index).cloned())
+            else {
                 return;
             };
 
@@ -912,6 +928,7 @@ impl FileList {
         let query_clone = query.to_string();
         let files_clone = self.files.clone();
         let loading_clone = self.loading.clone();
+        let landed = self.landed.clone();
         let generation = self.search_generation.fetch_add(1, Ordering::Relaxed) + 1;
         let generation_clone = self.search_generation.clone();
         if let Ok(mut loading) = self.loading.lock() {
@@ -933,6 +950,7 @@ impl FileList {
                 return;
             }
             files.finish_search(&query_clone, search);
+            landed.store(true, Ordering::Relaxed);
             drop(files);
             if let Ok(mut loading) = loading_clone.lock() {
                 *loading = false;

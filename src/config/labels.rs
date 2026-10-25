@@ -24,8 +24,21 @@ pub struct Label {
 pub struct Labels {
     labels: Vec<Label>,
     /// Each labelled file or folder, and its label's index.
-    #[serde(default)]
+    #[serde(default, serialize_with = "serialize_items")]
     items: BTreeMap<PathBuf, usize>,
+}
+
+/// Without the paths that aren't UTF-8: JSON can't hold them, and failing
+/// would keep every other setting from being saved.
+fn serialize_items<S: serde::Serializer>(
+    items: &BTreeMap<PathBuf, usize>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(
+        items
+            .iter()
+            .filter_map(|(path, label)| Some((path.to_str()?, label))),
+    )
 }
 
 impl Default for Labels {
@@ -129,5 +142,19 @@ mod tests {
         labels.set(a.clone(), Some(2));
         labels.clear(2);
         assert_eq!(labels.of(&a), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn paths_not_utf8_dont_keep_labels_from_saving() {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+        let mut labels = Labels::default();
+        labels.items.insert(PathBuf::from("/a.wav"), 1);
+        labels
+            .items
+            .insert(PathBuf::from(OsStr::from_bytes(b"/b\xff.wav")), 2);
+        let json = serde_json::to_string(&labels).expect("saves");
+        let back: Labels = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.items, BTreeMap::from([(PathBuf::from("/a.wav"), 1)]));
     }
 }

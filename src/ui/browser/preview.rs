@@ -326,7 +326,7 @@ fn waveform_ui(
     painter.rect_filled(rect, 2., theme.bg_deep);
     // Only its waveform is decoded for it: not its samples.
     audio.load_peaks();
-    if !audio.data.peaks_complete() {
+    if audio.data.peaks_pending() {
         // The waveform grows while the file decodes.
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(100));
@@ -337,14 +337,20 @@ fn waveform_ui(
     let lane = rect.shrink2(vec2(0., 2.));
     let to_x = |frame: f64| lane.left() + (frame / frames) as f32 * lane.width();
 
-    if (response.clicked() || response.dragged())
+    // Held still, the pointer doesn't seek again: that would replay the
+    // same instant every frame.
+    let moved = response.dragged() && response.drag_delta().x != 0.;
+    if (response.clicked() || response.drag_started() || moved)
         && let Some(pointer) = response.interact_pointer_pos()
     {
         let frame = ((pointer.x - lane.left()) / lane.width()).clamp(0., 1.) as f64 * frames;
         if !playing {
             state.play_preview(audio.path.clone());
         }
-        state.seek_preview(frame.round() as usize);
+        // Not started (the transport plays): nothing of this file to seek.
+        if state.previewing() == Some(audio.path.as_path()) {
+            state.seek_preview(frame.round() as usize);
+        }
     }
 
     let at = if playing {
