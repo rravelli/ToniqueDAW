@@ -225,8 +225,9 @@ impl ClipDetails {
             .interact(lane, ui.id().with("clip-lane"), Sense::click_and_drag())
             .on_hover_cursor(CursorIcon::Grab);
         let pointer = ui.input(|i| i.pointer.hover_pos());
-        let over_ruler = pointer.is_some_and(|p| ruler.contains(p));
-        let over_lane = pointer.is_some_and(|p| lane.contains(p));
+        // Not through a modal or menu above.
+        let over_ruler = ui.rect_contains_pointer(ruler);
+        let over_lane = ui.rect_contains_pointer(lane);
 
         let zoom = ui.input(|i| i.zoom_delta());
         let scroll = ui.input(|i| i.smooth_scroll_delta);
