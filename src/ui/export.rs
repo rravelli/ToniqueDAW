@@ -67,6 +67,8 @@ const LANE_GAP: f32 = 2.;
 const MAX_LANE_HEIGHT: f32 = 16.;
 /// Under the lanes, for the times.
 const LABEL_STRIP: f32 = 10.;
+/// The furthest a custom range can end, in bars.
+const MAX_BARS: f64 = 9999.;
 /// The effect tails offered, in seconds.
 const TAILS: [u32; 4] = [0, 2, 5, 10];
 
@@ -134,8 +136,11 @@ pub struct ExportWindow {
     /// What the files are named after: the project, at first.
     name: String,
     /// The custom range, kept while another is chosen; the whole project
-    /// at first.
-    custom: (BeatPos, BeatPos),
+    /// at first (`None` until the options are first shown).
+    custom: Option<(BeatPos, BeatPos)>,
+    /// Which of the files to write already exist, checked when the files
+    /// change and each time the window opens rather than every frame.
+    existing: Option<(Vec<PathBuf>, HashSet<PathBuf>)>,
     taskbar: TaskbarProgress,
 }
 
@@ -150,7 +155,8 @@ impl ExportWindow {
             },
             dir: String::new(),
             name: String::new(),
-            custom: (BeatPos::ZERO, BeatPos::ZERO),
+            custom: None,
+            existing: None,
             taskbar: TaskbarProgress::new(),
         }
     }
@@ -164,6 +170,7 @@ impl ExportWindow {
         if let Some(dir) = project.dir() {
             self.dir = dir.display().to_string();
         }
+        self.existing = None;
         self.step = Step::Options;
     }
 
@@ -195,15 +202,25 @@ impl ExportWindow {
         self.selection
             .tracks
             .retain(|id| rows.iter().any(|row| row.id == *id));
-        if self.custom.1.0 <= self.custom.0.0 {
-            self.custom = state.export_span(ExportRange::Project).unwrap_or((
+        // Seeded once only: an end typed before the start stays, with the
+        // problem shown, until the start or end is corrected.
+        let custom = self.custom.get_or_insert_with(|| {
+            state.export_span(ExportRange::Project).unwrap_or((
                 BeatPos::ZERO,
                 BeatPos(state.time_signature().beats_per_bar() * 4.),
-            ));
-        }
+            ))
+        });
         let sources = self.selection.sources(state);
         let dir = PathBuf::from(self.dir.trim());
         let files = state.export_files(&dir, &self.name, &sources);
+        let paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
+        let existing = match &mut self.existing {
+            Some((checked, existing)) if *checked == paths => &*existing,
+            slot => {
+                let existing = paths.iter().filter(|p| p.exists()).cloned().collect();
+                &slot.insert((paths, existing)).1
+            }
+        };
         let problem = state
             .export_span(self.options.range)
             .err()
@@ -237,7 +254,7 @@ impl ExportWindow {
             if let Some(dragged) =
                 arrangement_preview(ui, state, &rows, &self.selection, self.options.range)
             {
-                self.custom = dragged;
+                *custom = dragged;
                 self.options.range = ExportRange::Custom(dragged.0, dragged.1);
             }
             ui.add_space(2.);
@@ -251,8 +268,8 @@ impl ExportWindow {
                 });
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 8.;
-                    settings_ui(ui, state, &mut self.options, &mut self.custom, files.len());
-                    destination_ui(ui, &mut self.dir, &mut self.name, &files);
+                    settings_ui(ui, state, &mut self.options, custom, files.len());
+                    destination_ui(ui, &mut self.dir, &mut self.name, &files, existing);
                 });
             });
 
@@ -541,7 +558,7 @@ fn custom_range_ui(ui: &mut Ui, state: &ProjectState, custom: &mut (BeatPos, Bea
             vec2(POSITION_WIDTH, CHOICE_HEIGHT),
             DragValue::new(beats)
                 .speed(1. / 16.)
-                .range(min..=f64::MAX)
+                .range(min..=MAX_BARS * signature.beats_per_bar())
                 .custom_formatter(|v, _| format_bars(v, signature))
                 .custom_parser(|text| parse_bars(text, signature)),
         )
@@ -579,7 +596,13 @@ fn field_label(ui: &mut Ui, text: &str) {
 
 /// The folder and the name the files are named after, and the files that
 /// gives.
-fn destination_ui(ui: &mut Ui, dir: &mut String, name: &mut String, files: &[ExportFile]) {
+fn destination_ui(
+    ui: &mut Ui,
+    dir: &mut String,
+    name: &mut String,
+    files: &[ExportFile],
+    existing: &HashSet<PathBuf>,
+) {
     let theme = ui.app_theme();
     ui.add(SectionHeader::new("Destination"));
     ui.horizontal(|ui| {
@@ -630,7 +653,7 @@ fn destination_ui(ui: &mut Ui, dir: &mut String, name: &mut String, files: &[Exp
                         .color(theme.text_muted)
                         .size(font_size::LABEL),
                 );
-                if file.path.exists() {
+                if existing.contains(&file.path) {
                     ui.label(
                         RichText::new("replaces the existing file")
                             .color(theme.warning)
@@ -642,7 +665,7 @@ fn destination_ui(ui: &mut Ui, dir: &mut String, name: &mut String, files: &[Exp
         if files.len() > LISTED_FILES {
             let replaced = files[LISTED_FILES..]
                 .iter()
-                .filter(|f| f.path.exists())
+                .filter(|f| existing.contains(&f.path))
                 .count();
             let mut more = format!("and {} more", files.len() - LISTED_FILES);
             if replaced > 0 {
@@ -695,7 +718,7 @@ fn running_ui(ui: &Ui, export: &mut Export) -> Option<Step> {
     let progress = export.progress();
     // How far the file being rendered is.
     let file_progress = (progress * count as f32 - current as f32).clamp(0., 1.);
-    let waveforms = export.waveforms();
+    let waveform = export.waveform(current);
     dialog::modal(ui, "export-progress").show(ui.ctx(), |ui| {
         ui.set_width(NARROW_WIDTH);
         ui.spacing_mut().item_spacing = vec2(6., 8.);
@@ -711,7 +734,7 @@ fn running_ui(ui: &Ui, export: &mut Export) -> Option<Step> {
             None => String::new(),
         };
         header(ui, "Exporting…", &subtitle);
-        if let Some(waveform) = waveforms.get(current) {
+        if let Some(waveform) = &waveform {
             mix_waveform(ui, waveform, file_progress, WAVEFORM_HEIGHT);
         }
         progress_bar(ui, progress);

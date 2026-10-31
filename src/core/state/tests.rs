@@ -1991,6 +1991,33 @@ mod export {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// A track in a muted group still exports as heard when soloed: the
+    /// groups it plays through are unmuted for its file.
+    #[test]
+    fn stems_play_through_muted_groups() {
+        let mut state = setup_state();
+        let track = add_level_track(&mut state, 1, 0.5);
+        let group = state.group(&[track]).unwrap();
+        state.set_mute(group, true);
+        let state = loaded(state);
+        let dir = temp_dir("muted-group");
+        let export = state
+            .export(&dir, "Song", &[ExportSource::Track(track)], FLOAT)
+            .unwrap();
+        let path = export.files()[0].path.clone();
+        assert_eq!(finish(export), ExportOutcome::Done);
+        assert!(peak(&read(&path).1) > 0.3, "the track is in its file");
+        assert!(
+            state
+                .edit()
+                .bus(tonique_engine::edit::BusId(group.0))
+                .unwrap()
+                .channel
+                .muted
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// Files never share a name, and names fit any file system.
     #[test]
     fn file_names_are_unique_and_safe() {

@@ -34,7 +34,7 @@ pub fn parse_parts(text: &str) -> Option<Vec<f64>> {
     let parts: Vec<f64> = text
         .trim()
         .split('.')
-        .map(|p| p.trim().parse().ok())
+        .map(|p| p.trim().parse().ok().filter(|p: &f64| p.is_finite()))
         .collect::<Option<_>>()?;
     (parts.len() <= 3).then_some(parts)
 }

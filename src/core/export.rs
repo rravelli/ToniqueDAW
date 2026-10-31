@@ -177,6 +177,11 @@ impl Export {
         self.shared.current.load(Ordering::Relaxed)
     }
 
+    /// The audio of the file `index` rendered so far.
+    pub fn waveform(&self, index: usize) -> Option<Waveform> {
+        self.shared.waveforms.lock().ok()?.get(index).cloned()
+    }
+
     /// Each file's audio rendered so far.
     pub fn waveforms(&self) -> Vec<Waveform> {
         self.shared
@@ -203,6 +208,17 @@ impl Export {
             );
         }
         self.outcome.as_ref()
+    }
+}
+
+impl Drop for Export {
+    /// Cancel and wait (a chunk at most), so the thread removes its
+    /// temporaries even when the app quits mid-export.
+    fn drop(&mut self) {
+        self.cancel();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
@@ -233,11 +249,9 @@ impl Job {
             }
         }
         if outcome == ExportOutcome::Done {
-            for (render, temporary) in self.renders.iter().zip(&temporaries) {
-                if let Err(e) = fs::rename(temporary, &render.path) {
-                    outcome = ExportOutcome::Failed(e.to_string());
-                    break;
-                }
+            let destinations: Vec<&Path> = self.renders.iter().map(|r| r.path.as_path()).collect();
+            if let Err(e) = replace_all(&temporaries, &destinations) {
+                outcome = ExportOutcome::Failed(e.to_string());
             }
         }
         for temporary in &temporaries {
@@ -307,5 +321,80 @@ impl Job {
             Ok(()) => ExportOutcome::Done,
             Err(e) => failed(&e),
         }
+    }
+}
+
+/// Move each of `temporaries` over its destination, all or none: should one
+/// move fail, the files already moved are put back as they were.
+fn replace_all(temporaries: &[PathBuf], destinations: &[&Path]) -> std::io::Result<()> {
+    // Each destination moved, and where the file it replaced was kept.
+    let mut moved: Vec<(&Path, Option<PathBuf>)> = Vec::new();
+    let mut result = Ok(());
+    for (temporary, &destination) in temporaries.iter().zip(destinations) {
+        let backup = destination.with_extension("wav.replaced");
+        let kept = if destination.exists() {
+            if let Err(e) = fs::rename(destination, &backup) {
+                result = Err(e);
+                break;
+            }
+            Some(backup)
+        } else {
+            None
+        };
+        if let Err(e) = fs::rename(temporary, destination) {
+            // Nothing was moved there: only the old file goes back.
+            if let Some(kept) = kept {
+                let _ = fs::rename(kept, destination);
+            }
+            result = Err(e);
+            break;
+        }
+        moved.push((destination, kept));
+    }
+    for (destination, kept) in moved.into_iter().rev() {
+        match (&result, kept) {
+            (Ok(()), Some(kept)) => {
+                let _ = fs::remove_file(kept);
+            }
+            (Ok(()), None) => {}
+            (Err(_), Some(kept)) => {
+                let _ = fs::rename(kept, destination);
+            }
+            (Err(_), None) => {
+                let _ = fs::remove_file(destination);
+            }
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A move that fails puts the files already replaced back as they were.
+    #[test]
+    fn a_failed_replace_puts_everything_back() {
+        let dir = std::env::temp_dir().join(format!("tonique-replace-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (old, new) = (dir.join("old.wav"), dir.join("new.wav"));
+        fs::write(&old, "before").unwrap();
+        let temporaries = [dir.join("old.wav.exporting"), dir.join("new.wav.exporting")];
+        fs::write(&temporaries[0], "after").unwrap();
+        // The second temporary is missing, so its move fails.
+        assert!(replace_all(&temporaries, &[&old, &new]).is_err());
+        assert_eq!(fs::read_to_string(&old).unwrap(), "before");
+        assert!(!new.exists());
+        assert!(!old.with_extension("wav.replaced").exists());
+
+        for temporary in &temporaries {
+            fs::write(temporary, "after").unwrap();
+        }
+        assert!(replace_all(&temporaries, &[&old, &new]).is_ok());
+        assert_eq!(fs::read_to_string(&old).unwrap(), "after");
+        assert_eq!(fs::read_to_string(&new).unwrap(), "after");
+        assert!(!old.with_extension("wav.replaced").exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

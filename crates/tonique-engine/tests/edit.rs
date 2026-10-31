@@ -1002,8 +1002,9 @@ fn muted_channels_are_silent_from_the_start() {
     assert_eq!(peak(&render_offline(&mut p, 2048, 2)), 0.);
 }
 
-/// Soloing a track in a detached copy (an export's) leaves what the
-/// original plays alone, though the copy shares its parameters.
+/// Soloing a track in a detached copy (an export's), or moving its
+/// parameters (as its automation does), leaves what the original plays
+/// alone.
 #[test]
 fn soloing_a_detached_copy_leaves_the_original_alone() {
     let (edit, grouped, outside, _, _) = nested_groups();
@@ -1012,6 +1013,11 @@ fn soloing_a_detached_copy_leaves_the_original_alone() {
     copy.refresh_mute_gains();
     assert!(!copy.track(outside).unwrap().channel.audible());
     assert!(edit.track(outside).unwrap().channel.audible());
+
+    let volume = edit.track(grouped).unwrap().channel.volume.clone();
+    copy.param(volume.id).unwrap().value.set(0.25, 0.0);
+    assert_eq!(copy.param(volume.id).unwrap().get(), 0.25);
+    assert_eq!(volume.get(), volume.default);
 
     // A plain clone shares the gains (why `detached` exists).
     let mut clone = edit.clone();

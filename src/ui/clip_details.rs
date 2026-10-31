@@ -1050,6 +1050,8 @@ mod tests {
             "missing parts are the first"
         );
         assert_eq!(parse_bars("0.1.1", FOUR), None, "bars count from 1");
+        assert_eq!(parse_bars("inf", FOUR), None);
+        assert_eq!(parse_bars("1.NaN", FOUR), None);
         assert_eq!(parse_bars("1.2.3.4", FOUR), None);
         assert_eq!(parse_bars("x", FOUR), None);
         assert_eq!(parse_length("1.2.1", FOUR), Some(6.25));

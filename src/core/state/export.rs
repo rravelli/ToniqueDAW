@@ -75,6 +75,7 @@ impl ProjectState {
         name: &str,
         sources: &[ExportSource],
     ) -> Vec<ExportFile> {
+        let rows = self.all_rows();
         let mut taken: Vec<String> = Vec::new();
         sources
             .iter()
@@ -82,7 +83,12 @@ impl ProjectState {
                 let (label, stem) = match source {
                     ExportSource::Mix => ("Mix".to_string(), file_safe(name, "Untitled")),
                     ExportSource::Track(id) => {
-                        let track = self.track_name(*id);
+                        let track = rows
+                            .iter()
+                            .find(|row| row.id == *id)
+                            .map_or_else(String::new, |row| {
+                                display_name(&row.name, row.first_track_index)
+                            });
                         let stem = format!(
                             "{} - {}",
                             file_safe(name, "Untitled"),
@@ -156,18 +162,9 @@ impl ProjectState {
             })
     }
 
-    /// The name `id` is shown with.
-    fn track_name(&self, id: TrackId) -> String {
-        self.all_rows()
-            .into_iter()
-            .find(|row| row.id == id)
-            .map_or_else(String::new, |row| {
-                display_name(&row.name, row.first_track_index)
-            })
-    }
-
     /// A copy of `edit` with only the track or group `id` soloed, and
-    /// unmuted, apart from the project's own playback.
+    /// unmuted along with the groups it plays through, apart from the
+    /// project's own playback.
     fn solo_edit(&self, edit: &Edit, id: TrackId) -> Edit {
         let mut edit = edit.detached();
         for track in &mut edit.tracks {
@@ -176,14 +173,25 @@ impl ProjectState {
         for bus in &mut edit.buses {
             bus.soloed = false;
         }
-        if self.is_group(id) {
-            if let Ok(bus) = edit.bus_mut(BusId(id.0)) {
+        let output = if self.is_group(id) {
+            edit.bus_mut(BusId(id.0)).ok().map(|bus| {
                 bus.soloed = true;
                 bus.channel.muted = false;
+                bus.output
+            })
+        } else {
+            edit.track_mut(id).ok().map(|track| {
+                track.soloed = true;
+                track.channel.muted = false;
+                track.output
+            })
+        };
+        if let Some(output) = output {
+            for group in edit.buses_along(output) {
+                if let Ok(bus) = edit.bus_mut(group) {
+                    bus.channel.muted = false;
+                }
             }
-        } else if let Ok(track) = edit.track_mut(id) {
-            track.soloed = true;
-            track.channel.muted = false;
         }
         edit
     }

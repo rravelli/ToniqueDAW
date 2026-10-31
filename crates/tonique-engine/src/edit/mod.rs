@@ -627,7 +627,7 @@ impl Edit {
             .ok_or(EditError::ParamNotFound(id))
     }
 
-    pub fn param_mut(&mut self, id: ParamId) -> Result<&mut Parameter, EditError> {
+    fn all_params_mut(&mut self) -> impl Iterator<Item = &mut Parameter> {
         self.tracks
             .iter_mut()
             .flat_map(|t| {
@@ -638,6 +638,10 @@ impl Edit {
             })
             .chain(self.buses.iter_mut().flat_map(|b| b.channel.params_mut()))
             .chain(self.master.params_mut())
+    }
+
+    pub fn param_mut(&mut self, id: ParamId) -> Result<&mut Parameter, EditError> {
+        self.all_params_mut()
             .find(|p| p.id == id)
             .ok_or(EditError::ParamNotFound(id))
     }
@@ -663,12 +667,16 @@ impl Edit {
         }
     }
 
-    /// A copy to render apart from this edit (an export, say): its mute and
-    /// solo gains and its meters are its own, so changing its mute or solo
-    /// state leaves this edit's playback alone. Parameter values stay
-    /// shared.
+    /// A copy to render apart from this edit (an export, say): its
+    /// parameter values, mute and solo gains, meters and plugin taps are its
+    /// own, starting where this edit's are. Its automation and mute or solo
+    /// changes leave this edit's playback alone, and its audio never shows
+    /// in this edit's meters and scopes.
     pub fn detached(&self) -> Self {
         let mut edit = self.clone();
+        for param in edit.all_params_mut() {
+            param.value = Arc::new(AtomicParam::new(param.value.get()));
+        }
         let channels = edit
             .tracks
             .iter_mut()
@@ -678,6 +686,9 @@ impl Edit {
         for channel in channels {
             channel.mute_gain = Arc::new(AtomicParam::new(channel.mute_gain.get()));
             channel.meter = Arc::default();
+            for plugin in &mut channel.plugins {
+                plugin.tap = Arc::default();
+            }
         }
         edit
     }
