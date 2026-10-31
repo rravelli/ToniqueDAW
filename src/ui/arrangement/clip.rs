@@ -376,7 +376,8 @@ pub fn paint_clip_waveform(
         return;
     }
     let x = |beats: f64| rect.left() + beats as f32 * pixels_per_beat;
-    let file_width = (seconds * bpm as f64 / 60.) as f32 * pixels_per_beat;
+    // The whole file as the clip plays it: at its speed.
+    let file_width = clip.source_beats(bpm) as f32 * pixels_per_beat;
     for segment in clip.segments(bpm) {
         let (left, right) = (x(segment.start), x(segment.end));
         if right < viewport.left() || left > viewport.right() {

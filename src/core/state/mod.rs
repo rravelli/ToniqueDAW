@@ -41,11 +41,11 @@ pub use selection::SelectionBounds;
 use tonique_engine::{
     edit::{
         BusId, ChannelRef, Clip, ClipContent, ClipId, Edit, EditError, EditSession, Output,
-        Parameter, Plugin, PluginId, Track, TrackId,
+        Parameter, Plugin, PluginId, Track, TrackId, WarpMode,
         commands::{
             AddClip, AddPlugin, AddTrack, EditCommand, MoveClip, RemoveClip, RemovePlugin,
             RenameBus, RenamePlugin, RenameTrack, ResizeClip, SetBypass, SetClipLoop,
-            SetClipOrigin, SetMute, SetParam, SetSolo, SetTempoMap,
+            SetClipOrigin, SetClipWarp, SetMute, SetParam, SetSolo, SetTempoMap,
         },
     },
     engine::Engine,
@@ -152,6 +152,12 @@ pub struct ProjectState {
     looping: bool,
     /// Tempo the engine's loop (in samples) was computed with.
     loop_bpm: f32,
+    /// The tempo the playhead was last placed at: the engine counts in
+    /// samples, so after a tempo change it's placed again on its beat.
+    playhead_bpm: f32,
+    /// An undo step was opened for a clip edit heard as it's made (see
+    /// [`Self::edit_clip_live`]), to close when it's done.
+    live_edit: bool,
 
     /// A clip being trimmed, as it will be once committed: shown instead
     /// of the edit's (see [`Self::shown_clip`]).
@@ -205,6 +211,8 @@ impl ProjectState {
             ),
             looping: false,
             loop_bpm: DEFAULT_BPM as f32,
+            playhead_bpm: DEFAULT_BPM as f32,
+            live_edit: false,
             track_palette: Vec::new(),
             metronome: false,
         }
@@ -222,6 +230,12 @@ impl ProjectState {
         // Tempo changes (edits, undo, redo) move the loop in samples.
         if self.looping && self.bpm() != self.loop_bpm {
             self.sync_loop();
+        }
+        // The tempo changed (an edit, undo, redo): the playhead stays on its
+        // beat, where it would move in the engine's samples.
+        if self.bpm() != self.playhead_bpm {
+            self.playhead_bpm = self.bpm();
+            self.seek_playhead(self.playhead);
         }
         if self.playback_state == PlaybackState::Playing {
             self.playhead = self.session.position();
@@ -385,16 +399,20 @@ impl ProjectState {
         self.track_steps(steps);
     }
 
-    /// Run `f` as one undo step (or as part of the open batch).
+    /// Run `f` as one undo step (or as part of the open batch), its
+    /// changes reaching the engine at once.
     fn transaction(&mut self, label: &'static str, f: impl FnOnce(&mut Self)) {
+        self.session.hold_effects();
         if self.batching {
-            return f(self);
+            f(self);
+        } else {
+            let steps = self.steps_recorded();
+            self.session.begin_transaction(label);
+            f(self);
+            self.session.commit_transaction();
+            self.track_steps(steps);
         }
-        let steps = self.steps_recorded();
-        self.session.begin_transaction(label);
-        f(self);
-        self.session.commit_transaction();
-        self.track_steps(steps);
+        report(self.session.release_effects());
     }
 
     fn steps_recorded(&self) -> u64 {
@@ -459,8 +477,8 @@ impl ProjectState {
         if value <= 0. || value == old {
             return;
         }
-        // Audio clips keep their length in seconds, so their length in beats
-        // scales with the tempo.
+        // Unwarped audio clips keep their length in seconds, so their length
+        // in beats scales with the tempo; warped ones keep theirs in beats.
         let resized: Vec<_> = self
             .edit()
             .tracks
@@ -468,12 +486,14 @@ impl ProjectState {
             .flat_map(|t| t.clips.iter().map(move |c| (t.id, c)))
             .filter_map(|(t, c)| match c.content {
                 ClipContent::Audio {
-                    source_offset_s, ..
+                    source_offset_s,
+                    warp: WarpMode::Off,
+                    ..
                 } => {
                     let length = c.length * value as f64 / old as f64;
                     Some(ResizeClip::new(t, c.id, c.start, length, source_offset_s))
                 }
-                ClipContent::Midi { .. } => None,
+                ClipContent::Audio { .. } | ClipContent::Midi { .. } => None,
             })
             .collect();
         let mut tempo = self.edit().tempo.clone();
@@ -866,10 +886,13 @@ impl ProjectState {
             return;
         };
         let region = |c: &AudioClip| (c.position, c.length, c.offset, c.looped);
-        if region(&clip) == region(&resized) {
+        let warp = |c: &AudioClip| (c.warp, c.bpm, c.transpose, c.detune);
+        if region(&clip) == region(&resized) && warp(&clip) == warp(&resized) {
             return;
         }
-        let label = if clip.looped != resized.looped {
+        let label = if warp(&clip) != warp(&resized) {
+            "Clip warp"
+        } else if clip.looped != resized.looped {
             "Clip loop"
         } else {
             "Resize clip"
@@ -890,6 +913,20 @@ impl ProjectState {
         let origin = origin.clamp(0., clip.source_seconds() as f64);
         if origin != clip.origin {
             self.perform(SetClipOrigin::new(track, id, origin));
+        }
+    }
+    /// Apply `edited` at once, heard as it's made (a transposition being
+    /// dragged), as one undo step with the edits after it until one is
+    /// `done`.
+    pub fn edit_clip_live(&mut self, edited: AudioClip, done: bool) {
+        if !self.batching {
+            self.live_edit = true;
+            self.begin_batch();
+        }
+        self.commit_resize_clip(edited);
+        if done && self.live_edit {
+            self.commit_batch();
+            self.live_edit = false;
         }
     }
     /// Set an audio clip's gain (linear) or pan, heard at once. Not an
@@ -942,17 +979,31 @@ impl ProjectState {
             }
             ClipOp::Remove(track, id) => self.perform(RemoveClip::new(track, id)),
             ClipOp::Resize(track, clip) => {
-                let looped = self
+                let current = self
                     .edit()
                     .track(track)
                     .ok()
                     .and_then(|t| t.clip(clip.id))
                     .and_then(|c| match &c.content {
-                        ClipContent::Audio { looped, .. } => Some(*looped),
+                        ClipContent::Audio {
+                            looped,
+                            warp,
+                            source_bpm,
+                            transpose,
+                            ..
+                        } => Some((*looped, (*warp, *source_bpm, *transpose))),
                         ClipContent::Midi { .. } => None,
                     });
-                if looped.is_some_and(|l| l != clip.looped) {
-                    self.perform(SetClipLoop::new(track, clip.id, clip.looped));
+                if let Some((looped, warp)) = current {
+                    if looped != clip.looped {
+                        self.perform(SetClipLoop::new(track, clip.id, clip.looped));
+                    }
+                    let wanted = (clip.warp, clip.bpm, clip.pitch());
+                    if warp != wanted {
+                        self.perform(SetClipWarp::new(
+                            track, clip.id, wanted.0, wanted.1, wanted.2,
+                        ));
+                    }
                 }
                 self.perform(ResizeClip::new(
                     track,
@@ -987,11 +1038,19 @@ impl ProjectState {
             pan,
             looped,
             origin_s,
+            warp,
+            source_bpm,
+            transpose,
             ..
         } = &mut engine_clip.content
         {
             *source_offset_s = clip.offset;
             *origin_s = clip.origin;
+            *warp = clip.warp;
+            if clip.bpm > 0. {
+                *source_bpm = clip.bpm;
+            }
+            *transpose = clip.pitch();
             // In range, whatever a project file says.
             gain.value.set(clip.gain.clamp(gain.min, gain.max), 0.);
             pan.value.set(clip.pan.clamp(pan.min, pan.max), 0.);
@@ -1010,6 +1069,9 @@ impl ProjectState {
             ref pan,
             looped,
             origin_s,
+            warp,
+            source_bpm,
+            transpose,
         } = clip.content
         else {
             return None;
@@ -1027,6 +1089,11 @@ impl ProjectState {
             gain: gain.get(),
             pan: pan.get(),
             origin: origin_s,
+            warp,
+            bpm: source_bpm,
+            // Whole semitones, and what's left in cents (-50 to 50).
+            transpose: transpose.round() as i32,
+            detune: (transpose - transpose.round()) * 100.,
         })
     }
 
@@ -1507,8 +1574,12 @@ impl ProjectState {
     }
 
     // History management
-    /// Group the following changes into one undo step, until `commit_batch`.
+    /// Group the following changes into one undo step, until `commit_batch`,
+    /// reaching the engine then (but for a live edit's, heard as made).
     pub fn begin_batch(&mut self) {
+        if !self.live_edit {
+            self.session.hold_effects();
+        }
         self.batching = true;
         self.batch_steps = Some(self.steps_recorded());
         self.session.begin_transaction("Edit");
@@ -1519,6 +1590,9 @@ impl ProjectState {
         self.session.commit_transaction();
         if let Some(steps) = self.batch_steps.take() {
             self.track_steps(steps);
+        }
+        if !self.live_edit {
+            report(self.session.release_effects());
         }
     }
     /// Undo last action, and bring back the clip selection from before it.

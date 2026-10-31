@@ -20,7 +20,7 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tonique-engine = { path = "crates/tonique-engine", features = ["device"] }
+tonique-engine = { path = "crates/tonique-engine", features = ["device", "signalsmith"] }
 eframe = "0.36"
 cpal = "0.18"
 creek = { version = "1.2.2", features = ["decode-mp3"] }
@@ -54,4 +54,8 @@ opt-level = 1
 opt-level = 3
 
 [profile.dev.package.tonique-engine]
+opt-level = 3
+
+# Stretching runs on the audio thread too: as fast as in release.
+[profile.dev.package.signalsmith-stretch]
 opt-level = 3

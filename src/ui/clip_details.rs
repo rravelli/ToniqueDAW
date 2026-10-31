@@ -6,7 +6,7 @@ use egui::{
     Sense, Shape, Stroke, Ui, UiBuilder, pos2, vec2,
 };
 use tonique_engine::{
-    edit::{ClipId, ClipLoop},
+    edit::{ClipId, ClipLoop, MAX_TRANSPOSE, WarpMode},
     time::{BeatPos, TimeSignature},
 };
 
@@ -25,6 +25,8 @@ use crate::{
             flat_button::FlatButton,
             param_slider::{ParamSlider, SliderEdit},
             scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
+            select::Select,
+            tab_bar::TabBar,
         },
     },
     utils::{format_bars, format_time},
@@ -86,6 +88,9 @@ pub struct ClipDetails {
     fitted: Option<ClipId>,
     /// Where bar 1 is in the file, in seconds: the clip's, as last drawn.
     origin: f64,
+    /// Seconds of the file the clip plays per second, as last drawn: the
+    /// grid counts beats as heard.
+    speed: f64,
     /// The waveform's lane, as last drawn.
     #[cfg(test)]
     lane: Rect,
@@ -98,6 +103,7 @@ impl ClipDetails {
             grid: GridService::new().with_negative_offset(),
             fitted: None,
             origin: 0.,
+            speed: 1.,
             #[cfg(test)]
             lane: Rect::NOTHING,
         }
@@ -129,12 +135,19 @@ impl ClipDetails {
         let bpm = state.bpm();
         // Bars as the project counts them.
         self.grid.set_time_signature(state.time_signature());
+        // Played faster or slower: the file spans fewer or more beats, the
+        // view fitted to it again.
+        let speed = clip.speed(bpm);
+        if speed != self.speed {
+            self.speed = speed;
+            self.fitted = None;
+        }
         if self.fitted == Some(clip.id) && clip.origin != self.origin {
             // Bar 1 moved: the grid follows, and the audio stays where it
             // was on screen.
             self.grid.offset.x -= self
                 .grid
-                .beats_to_width(to_beats(clip.origin - self.origin, bpm));
+                .beats_to_width(clip.file_beats(clip.origin - self.origin, bpm));
         }
         self.origin = clip.origin;
         if self.fitted != Some(clip.id) {
@@ -173,10 +186,20 @@ impl ClipDetails {
         ui.allocate_rect(rect, Sense::hover());
     }
 
+    /// Beats the clip takes to play `seconds` of the file.
+    fn beats(&self, seconds: f64, bpm: f32) -> f64 {
+        to_beats(seconds / self.speed, bpm)
+    }
+
+    /// Seconds of the file the clip plays in `beats`.
+    fn seconds(&self, beats: f64, bpm: f32) -> f64 {
+        to_seconds(beats, bpm) * self.speed
+    }
+
     /// Where `file` seconds into the file are drawn.
     fn x(&self, file: f64, bpm: f32, lane: Rect) -> f32 {
         self.grid
-            .beats_to_x(BeatPos(to_beats(file - self.origin, bpm)), lane)
+            .beats_to_x(BeatPos(self.beats(file - self.origin, bpm)), lane)
     }
 
     /// The time in the file drawn at `x`, snapped to the grid (counted from
@@ -188,7 +211,7 @@ impl ClipDetails {
         } else {
             self.grid.snap_at_grid(beats)
         };
-        self.origin + to_seconds(beats.0, bpm)
+        self.origin + self.seconds(beats.0, bpm)
     }
 
     /// Where the whole file is drawn, left to right.
@@ -202,8 +225,8 @@ impl ClipDetails {
         let (start, end) = played(clip, bpm);
         let margin = (end - start) * FIT_MARGIN;
         self.grid.fit(
-            BeatPos(to_beats(start - self.origin, bpm) - margin),
-            BeatPos(to_beats(end - self.origin, bpm) + margin),
+            BeatPos(clip.file_beats(start - self.origin, bpm) - margin),
+            BeatPos(clip.file_beats(end - self.origin, bpm) + margin),
             width,
         );
     }
@@ -280,7 +303,7 @@ impl ClipDetails {
             && let Some(pos) = ruler.interact_pointer_pos()
         {
             // Where the pointer is, not snapped: the grid being moved.
-            let at = self.origin + to_seconds(self.grid.x_to_beats(pos.x, lane).0, bpm);
+            let at = self.origin + self.seconds(self.grid.x_to_beats(pos.x, lane).0, bpm);
             ui.data_mut(|d| d.insert_temp(clicked, at));
         }
         ruler.context_menu(|ui| {
@@ -305,7 +328,7 @@ impl ClipDetails {
 
     /// How far the view scrolls: always keeping part of the file in view.
     fn scroll_range(&self, clip: &AudioClip, bpm: f32, lane: Rect) -> (f32, f32) {
-        let file_start = to_beats(-self.origin, bpm);
+        let file_start = clip.file_beats(-self.origin, bpm);
         let half = lane.width() / 2.;
         let min = self.grid.beats_to_width(file_start) - half;
         let max = self
@@ -376,7 +399,11 @@ impl ClipDetails {
                 ));
             }
             None => {
-                let end = self.x(shown.offset + to_seconds(shown.length, bpm), bpm, lane);
+                let end = self.x(
+                    shown.offset + shown.file_seconds(shown.length, bpm),
+                    bpm,
+                    lane,
+                );
                 areas.push((Handle::EndMarker, marker(end)));
                 areas.push((Handle::EndMarker, flag_rect(TrimEdge::End, end, ruler)));
             }
@@ -423,7 +450,7 @@ impl ClipDetails {
                     }
                     Handle::EndMarker => {
                         let mut c = shown.clone();
-                        let length = to_beats(at - c.offset, bpm).max(MIN_LENGTH);
+                        let length = c.file_beats(at - c.offset, bpm).max(MIN_LENGTH);
                         c.trim_end_at(c.position + length, bpm);
                         Some(c)
                     }
@@ -545,7 +572,10 @@ impl ClipDetails {
         }
         let mut markers = vec![(TrimEdge::Start, clip.offset)];
         if clip.active_loop().is_none() {
-            markers.push((TrimEdge::End, clip.offset + to_seconds(clip.length, bpm)));
+            markers.push((
+                TrimEdge::End,
+                clip.offset + clip.file_seconds(clip.length, bpm),
+            ));
         }
         let ink = theme.text;
         for (edge, at) in markers {
@@ -584,7 +614,10 @@ impl ClipDetails {
 fn played(clip: &AudioClip, bpm: f32) -> (f64, f64) {
     match clip.active_loop() {
         Some(l) => (clip.offset.min(l.start_s), l.end_s.max(clip.offset)),
-        None => (clip.offset, clip.offset + to_seconds(clip.length, bpm)),
+        None => (
+            clip.offset,
+            clip.offset + clip.file_seconds(clip.length, bpm),
+        ),
     }
 }
 
@@ -592,7 +625,7 @@ fn played(clip: &AudioClip, bpm: f32) -> (f64, f64) {
 /// inside the file), its start marker no later than the loop's end.
 fn with_loop(clip: &AudioClip, start: f64, end: f64, bpm: f32) -> AudioClip {
     let source = clip.source_seconds() as f64;
-    let min = to_seconds(MIN_LENGTH, bpm);
+    let min = clip.file_seconds(MIN_LENGTH, bpm);
     let start = start.clamp(0., (source - min).max(0.));
     let end = end.clamp(start + min, source.max(start + min));
     let mut c = clip.clone();
@@ -613,8 +646,8 @@ fn with_loop(clip: &AudioClip, start: f64, end: f64, bpm: f32) -> AudioClip {
 /// that's too short.
 fn default_loop(clip: &AudioClip, bpm: f32) -> ClipLoop {
     let source = clip.source_seconds() as f64;
-    let end = (clip.offset + to_seconds(clip.length, bpm)).min(source);
-    if end - clip.offset >= to_seconds(MIN_LENGTH, bpm) {
+    let end = (clip.offset + clip.file_seconds(clip.length, bpm)).min(source);
+    if end - clip.offset >= clip.file_seconds(MIN_LENGTH, bpm) {
         ClipLoop {
             start_s: clip.offset,
             end_s: end,
@@ -681,152 +714,74 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
         }
     };
     let seconds = |beats: f64| format_time(beats * 60. / bpm as f64);
-    // The clip as edited, and whether the edit is done.
+    // The clip as edited, and whether the edit is done: shown as edited
+    // until then, or (`live`) heard as it's edited, one undo step either way.
     let mut change: Option<(AudioClip, bool)> = None;
+    let mut live: Option<(AudioClip, bool)> = None;
 
     ui.style_mut().override_font_id = Some(FontId::proportional(font_size::LABEL));
     ui.spacing_mut().item_spacing = vec2(CELL_GAP, 1.);
 
-    section(ui, "Clip", 0.);
-    ui.columns(3, |cells| {
-        let raw = cells[0].id().with("start-raw");
-        let mut beats = cells[0].data(|d| d.get_temp(raw)).unwrap_or(start);
-        let response = cell(
-            &mut cells[0],
-            "Start",
-            DragValue::new(&mut beats)
-                .speed(1. / 16.)
-                .range(0.0..=f64::MAX)
-                .custom_formatter(|v, _| format_bars(v, bpb))
-                .custom_parser(|text| parse_bars(text, bpb)),
-        )
-        .on_hover_text(format!("{} · bar.beat.sixteenth", seconds(start)));
-        keep_raw(&cells[0], raw, &response, beats);
-        if let Some(done) = gesture(&response) {
-            let mut moved = shown.clone();
-            moved.position = BeatPos(snap(beats).max(0.));
-            change = Some((moved, done));
-        }
+    // What's edited, in tabs: the last picked, whichever clip.
+    let tab_id = egui::Id::new("clip-inspector-tab");
+    let mut tab = ui
+        .data(|d| d.get_temp(tab_id))
+        .unwrap_or(InspectorTab::Clip);
+    ui.add(TabBar::new(
+        &mut tab,
+        [
+            (InspectorTab::Clip, "Clip"),
+            (InspectorTab::Audio, "Audio"),
+            (InspectorTab::Warp, "Warp"),
+            (InspectorTab::Loop, "Loop"),
+        ],
+    ));
+    ui.data_mut(|d| d.insert_temp(tab_id, tab));
+    ui.add_space(SECTION_GAP);
 
-        let raw = cells[1].id().with("end-raw");
-        let mut beats = cells[1].data(|d| d.get_temp(raw)).unwrap_or(end);
-        let response = cell(
-            &mut cells[1],
-            "End",
-            DragValue::new(&mut beats)
-                .speed(1. / 16.)
-                .range(start + MIN_LENGTH..=f64::MAX)
-                .custom_formatter(|v, _| format_bars(v, bpb))
-                .custom_parser(|text| parse_bars(text, bpb)),
-        )
-        .on_hover_text(format!("{} · bar.beat.sixteenth", seconds(end)));
-        keep_raw(&cells[1], raw, &response, beats);
-        if let Some(done) = gesture(&response) {
-            let at = BeatPos(snap(beats).max(start + MIN_LENGTH));
-            change = Some((trimmed(&shown, TrimEdge::End, at, bpm), done));
-        }
-
-        let raw = cells[2].id().with("length-raw");
-        let mut beats = cells[2].data(|d| d.get_temp(raw)).unwrap_or(length);
-        let response = cell(
-            &mut cells[2],
-            "Length",
-            DragValue::new(&mut beats)
-                .speed(1. / 16.)
-                .range(MIN_LENGTH..=f64::MAX)
-                .custom_formatter(|v, _| format_length(v, bpb))
-                .custom_parser(|text| parse_length(text, bpb)),
-        )
-        .on_hover_text(format!("{} · bars.beats.sixteenths", seconds(length)));
-        keep_raw(&cells[2], raw, &response, beats);
-        if let Some(done) = gesture(&response) {
-            let at = shown.position + snap(beats).max(MIN_LENGTH);
-            change = Some((trimmed(&shown, TrimEdge::End, at, bpm), done));
-        }
-    });
-
-    section(ui, "Audio", 0.);
-    ui.columns(3, |cells| {
-        let mut seconds = offset;
-        let response = cell(
-            &mut cells[0],
-            "Offset",
-            DragValue::new(&mut seconds)
-                .speed(0.005)
-                .range(0.0..=f64::MAX)
-                .custom_formatter(|v, _| format_time(v))
-                .custom_parser(parse_time),
-        )
-        .on_hover_text("Where in the file the clip starts playing");
-        if let Some(done) = gesture(&response) {
-            let mut slipped = shown.clone();
-            slipped.slip_to(seconds, bpm);
-            change = Some((slipped, done));
-        }
-
-        // As on tracks: a level in the clip's colour, reset by a
-        // double-click; heard as it moves, one undo step once released.
-        cell_label(&mut cells[1], "Gain");
-        let size = vec2(cells[1].available_width(), FIELD_HEIGHT);
-        let gain = ParamSlider::gain(shown.gain, CLIP_GAIN_RANGE)
-            .field()
-            .color(color)
-            .size(size)
-            .suffix(" dB");
-        apply_param(state, clip.id, ClipParam::Gain, gain.show(&mut cells[1]).1);
-
-        cell_label(&mut cells[2], "Pan");
-        let (response, edit) = ParamSlider::pan(shown.pan)
-            .field()
-            .color(color)
-            .size(size)
-            .show(&mut cells[2]);
-        response.on_hover_text("Balance: turning to a side lowers the other");
-        apply_param(state, clip.id, ClipParam::Pan, edit);
-    });
-
-    // Its switch on the title's row.
-    let looped = shown.active_loop();
-    let header = section(ui, "Loop", LOOP_SWITCH_WIDTH + CELL_GAP);
-    let switch = Rect::from_min_max(
-        pos2(header.right() - LOOP_SWITCH_WIDTH, header.top()),
-        header.max,
-    );
-    let toggle = FlatButton::new(if looped.is_some() { "On" } else { "Off" })
-        .size(switch.size())
-        .font(FontId::proportional(font_size::SMALL))
-        .selected(looped.is_some())
-        .tooltip("Play the loop over and over, for as long as the clip lasts");
-    if ui.put(switch, toggle).clicked() {
-        let mut toggled = shown.clone();
-        match looped {
-            Some(_) => toggled.set_loop(None, bpm),
-            None => toggled.set_loop(Some(default_loop(&shown, bpm)), bpm),
-        }
-        change = Some((toggled, true));
-    }
-    if let Some(l) = looped {
+    if tab == InspectorTab::Clip {
         ui.columns(3, |cells| {
-            let mut start = l.start_s;
+            let raw = cells[0].id().with("start-raw");
+            let mut beats = cells[0].data(|d| d.get_temp(raw)).unwrap_or(start);
             let response = cell(
                 &mut cells[0],
                 "Start",
-                DragValue::new(&mut start)
-                    .speed(0.005)
-                    .range(0.0..=source)
-                    .custom_formatter(|v, _| format_time(v))
-                    .custom_parser(parse_time),
+                DragValue::new(&mut beats)
+                    .speed(1. / 16.)
+                    .range(0.0..=f64::MAX)
+                    .custom_formatter(|v, _| format_bars(v, bpb))
+                    .custom_parser(|text| parse_bars(text, bpb)),
             )
-            .on_hover_text("Where in the file the loop starts");
+            .on_hover_text(format!("{} · bar.beat.sixteenth", seconds(start)));
+            keep_raw(&cells[0], raw, &response, beats);
             if let Some(done) = gesture(&response) {
-                change = Some((with_loop(&shown, start, l.end_s, bpm), done));
+                let mut moved = shown.clone();
+                moved.position = BeatPos(snap(beats).max(0.));
+                change = Some((moved, done));
             }
 
-            let raw = cells[1].id().with("loop-length-raw");
-            let loop_length = to_beats(l.end_s - l.start_s, bpm);
-            let mut beats = cells[1].data(|d| d.get_temp(raw)).unwrap_or(loop_length);
+            let raw = cells[1].id().with("end-raw");
+            let mut beats = cells[1].data(|d| d.get_temp(raw)).unwrap_or(end);
             let response = cell(
                 &mut cells[1],
+                "End",
+                DragValue::new(&mut beats)
+                    .speed(1. / 16.)
+                    .range(start + MIN_LENGTH..=f64::MAX)
+                    .custom_formatter(|v, _| format_bars(v, bpb))
+                    .custom_parser(|text| parse_bars(text, bpb)),
+            )
+            .on_hover_text(format!("{} · bar.beat.sixteenth", seconds(end)));
+            keep_raw(&cells[1], raw, &response, beats);
+            if let Some(done) = gesture(&response) {
+                let at = BeatPos(snap(beats).max(start + MIN_LENGTH));
+                change = Some((trimmed(&shown, TrimEdge::End, at, bpm), done));
+            }
+
+            let raw = cells[2].id().with("length-raw");
+            let mut beats = cells[2].data(|d| d.get_temp(raw)).unwrap_or(length);
+            let response = cell(
+                &mut cells[2],
                 "Length",
                 DragValue::new(&mut beats)
                     .speed(1. / 16.)
@@ -834,21 +789,249 @@ fn inspector_ui(ui: &mut Ui, clip: &AudioClip, color: Color32, state: &mut Proje
                     .custom_formatter(|v, _| format_length(v, bpb))
                     .custom_parser(|text| parse_length(text, bpb)),
             )
-            .on_hover_text(format!("{} · bars.beats.sixteenths", seconds(loop_length)));
-            keep_raw(&cells[1], raw, &response, beats);
+            .on_hover_text(format!("{} · bars.beats.sixteenths", seconds(length)));
+            keep_raw(&cells[2], raw, &response, beats);
             if let Some(done) = gesture(&response) {
-                let end = l.start_s + to_seconds(snap(beats).max(MIN_LENGTH), bpm);
-                change = Some((with_loop(&shown, l.start_s, end, bpm), done));
+                let at = shown.position + snap(beats).max(MIN_LENGTH);
+                change = Some((trimmed(&shown, TrimEdge::End, at, bpm), done));
             }
         });
     }
+    if tab == InspectorTab::Audio {
+        ui.columns(3, |cells| {
+            let mut seconds = offset;
+            let response = cell(
+                &mut cells[0],
+                "Offset",
+                DragValue::new(&mut seconds)
+                    .speed(0.005)
+                    .range(0.0..=f64::MAX)
+                    .custom_formatter(|v, _| format_time(v))
+                    .custom_parser(parse_time),
+            )
+            .on_hover_text("Where in the file the clip starts playing");
+            if let Some(done) = gesture(&response) {
+                let mut slipped = shown.clone();
+                slipped.slip_to(seconds, bpm);
+                change = Some((slipped, done));
+            }
 
+            // As on tracks: a level in the clip's colour, reset by a
+            // double-click; heard as it moves, one undo step once released.
+            cell_label(&mut cells[1], "Gain");
+            let size = vec2(cells[1].available_width(), FIELD_HEIGHT);
+            let gain = ParamSlider::gain(shown.gain, CLIP_GAIN_RANGE)
+                .field()
+                .color(color)
+                .size(size)
+                .suffix(" dB");
+            apply_param(state, clip.id, ClipParam::Gain, gain.show(&mut cells[1]).1);
+
+            cell_label(&mut cells[2], "Pan");
+            let (response, edit) = ParamSlider::pan(shown.pan)
+                .field()
+                .color(color)
+                .size(size)
+                .show(&mut cells[2]);
+            response.on_hover_text("Balance: turning to a side lowers the other");
+            apply_param(state, clip.id, ClipParam::Pan, edit);
+        });
+    }
+    // How it follows the tempo, picked on the first row; its file's tempo,
+    // and its transposition.
+    if tab == InspectorTab::Warp {
+        let header = section(ui, "Mode", WARP_MODE_WIDTH + CELL_GAP);
+        let picker = Rect::from_min_max(
+            pos2(header.right() - WARP_MODE_WIDTH, header.top()),
+            header.max,
+        );
+        let mut warp = shown.warp;
+        ui.put(
+            picker,
+            Select::new(("clip-warp", clip.id), &mut warp)
+                .option(WarpMode::Off, "Off")
+                .option(WarpMode::Stretch, "Stretch")
+                .width(WARP_MODE_WIDTH),
+        )
+        .on_hover_text(
+            "Off: plays at its own pace, transposing it changes its speed.\n\
+         Stretch: follows the project's tempo, transposing moves the pitch alone.",
+        );
+        if warp != shown.warp {
+            let mut edited = shown.clone();
+            edited.set_warp(warp, shown.bpm, shown.transpose, shown.detune, bpm);
+            live = Some((edited, true));
+        }
+        let warped = shown.warp == WarpMode::Stretch;
+        ui.columns(3, |cells| {
+            // Typed, applied on Enter: each change resizes the clip.
+            let typed = cells[0]
+                .add_enabled_ui(warped, |ui| {
+                    let id = ui.id().with(("clip-bpm", clip.id));
+                    let (response, typed) = typed_cell(ui, "BPM", id, shown.bpm);
+                    response
+                        .on_hover_text("The file's tempo: it plays at the project's over it")
+                        .on_disabled_hover_text("Followed with Stretch only");
+                    typed
+                })
+                .inner;
+            if let Some(file_bpm) = typed.filter(|b| (10.0..=999.0).contains(b)) {
+                let mut edited = shown.clone();
+                edited.set_warp(shown.warp, file_bpm, shown.transpose, shown.detune, bpm);
+                change = Some((edited, true));
+            }
+
+            let mut transpose = shown.transpose;
+            let limit = MAX_TRANSPOSE as i32;
+            let response = cell(
+                &mut cells[1],
+                "Transpose",
+                DragValue::new(&mut transpose)
+                    .speed(0.1)
+                    .range(-limit..=limit)
+                    .custom_formatter(|v, _| format!("{v:+.0} st"))
+                    .custom_parser(|text| text.trim().trim_end_matches("st").trim().parse().ok()),
+            )
+            .on_hover_text("In semitones, heard as it's dragged");
+            if let Some(done) = gesture(&response) {
+                let mut edited = shown.clone();
+                edited.set_warp(shown.warp, shown.bpm, transpose, shown.detune, bpm);
+                live = Some((edited, done));
+            }
+
+            let mut detune = shown.detune;
+            let response = cell(
+                &mut cells[2],
+                "Detune",
+                DragValue::new(&mut detune)
+                    .speed(0.5)
+                    .range(-50.0..=50.0)
+                    .max_decimals(0)
+                    .custom_formatter(|v, _| format!("{v:+.0} ct"))
+                    .custom_parser(|text| text.trim().trim_end_matches("ct").trim().parse().ok()),
+            )
+            .on_hover_text("In cents, heard as it's dragged");
+            if let Some(done) = gesture(&response) {
+                let mut edited = shown.clone();
+                edited.set_warp(shown.warp, shown.bpm, shown.transpose, detune, bpm);
+                live = Some((edited, done));
+            }
+        });
+    }
+    // Its switch on the title's row.
+    if tab == InspectorTab::Loop {
+        let looped = shown.active_loop();
+        let header = section(ui, "Loop", LOOP_SWITCH_WIDTH + CELL_GAP);
+        let switch = Rect::from_min_max(
+            pos2(header.right() - LOOP_SWITCH_WIDTH, header.top()),
+            header.max,
+        );
+        let toggle = FlatButton::new(if looped.is_some() { "On" } else { "Off" })
+            .size(switch.size())
+            .font(FontId::proportional(font_size::SMALL))
+            .selected(looped.is_some())
+            .tooltip("Play the loop over and over, for as long as the clip lasts");
+        if ui.put(switch, toggle).clicked() {
+            let mut toggled = shown.clone();
+            match looped {
+                Some(_) => toggled.set_loop(None, bpm),
+                None => toggled.set_loop(Some(default_loop(&shown, bpm)), bpm),
+            }
+            change = Some((toggled, true));
+        }
+        if let Some(l) = looped {
+            ui.columns(3, |cells| {
+                let mut start = l.start_s;
+                let response = cell(
+                    &mut cells[0],
+                    "Start",
+                    DragValue::new(&mut start)
+                        .speed(0.005)
+                        .range(0.0..=source)
+                        .custom_formatter(|v, _| format_time(v))
+                        .custom_parser(parse_time),
+                )
+                .on_hover_text("Where in the file the loop starts");
+                if let Some(done) = gesture(&response) {
+                    change = Some((with_loop(&shown, start, l.end_s, bpm), done));
+                }
+
+                let raw = cells[1].id().with("loop-length-raw");
+                let loop_length = shown.file_beats(l.end_s - l.start_s, bpm);
+                let mut beats = cells[1].data(|d| d.get_temp(raw)).unwrap_or(loop_length);
+                let response = cell(
+                    &mut cells[1],
+                    "Length",
+                    DragValue::new(&mut beats)
+                        .speed(1. / 16.)
+                        .range(MIN_LENGTH..=f64::MAX)
+                        .custom_formatter(|v, _| format_length(v, bpb))
+                        .custom_parser(|text| parse_length(text, bpb)),
+                )
+                .on_hover_text(format!("{} · bars.beats.sixteenths", seconds(loop_length)));
+                keep_raw(&cells[1], raw, &response, beats);
+                if let Some(done) = gesture(&response) {
+                    let end = l.start_s + shown.file_seconds(snap(beats).max(MIN_LENGTH), bpm);
+                    change = Some((with_loop(&shown, l.start_s, end, bpm), done));
+                }
+            });
+        }
+    }
+
+    if let Some((edited, done)) = live {
+        state.edit_clip_live(edited, done);
+    }
     match change {
         Some((edited, false)) => state.resize_clip(edited),
         Some((edited, true)) => state.commit_resize_clip(edited),
         None => {}
     }
 }
+
+/// The inspector's tabs.
+#[derive(Clone, Copy, PartialEq)]
+enum InspectorTab {
+    /// Where it is: start, end, length.
+    Clip,
+    /// What it plays: offset, gain, pan.
+    Audio,
+    /// How it follows the tempo, and its transposition.
+    Warp,
+    Loop,
+}
+
+/// A cell whose number is typed and applied on Enter, not as typed nor
+/// dragged: for values costly to apply at each keystroke. Returns the
+/// value typed, once entered.
+fn typed_cell(ui: &mut Ui, label: &str, id: egui::Id, value: f64) -> (egui::Response, Option<f64>) {
+    cell_label(ui, label);
+    let shown = format_number(value);
+    let mut text = ui
+        .data(|d| d.get_temp::<String>(id))
+        .unwrap_or_else(|| shown.clone());
+    let response = ui.add_sized(
+        vec2(ui.available_width(), FIELD_HEIGHT),
+        egui::TextEdit::singleline(&mut text).horizontal_align(egui::Align::Center),
+    );
+    let entered = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    if response.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text.clone()));
+    } else {
+        // Left without Enter: back to the value.
+        ui.data_mut(|d| d.remove::<String>(id));
+    }
+    let typed = entered.then(|| text.trim().parse::<f64>().ok()).flatten();
+    (response, typed)
+}
+
+/// `120`, `98.5`, `97.25`: no more decimals than needed, two at most.
+fn format_number(value: f64) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// Width of the warp mode's picker, on the Warp tab's first row.
+const WARP_MODE_WIDTH: f32 = 70.;
 
 /// A section's title, small and muted, with a rule after it up to
 /// `reserve` from the right (for something on its row). Returns its row.
