@@ -31,6 +31,9 @@ struct Recording {
 /// key press in its place; changes apply immediately.
 pub struct ShortcutsTab {
     recording: Option<Recording>,
+    /// The recorder takes the keyboard when next drawn: it can't before it
+    /// exists.
+    focus_recorder: bool,
     /// Outcome of the last change, e.g. a shortcut moved from another action.
     message: Option<String>,
 }
@@ -39,6 +42,7 @@ impl ShortcutsTab {
     pub fn new() -> Self {
         Self {
             recording: None,
+            focus_recorder: false,
             message: None,
         }
     }
@@ -143,7 +147,7 @@ impl ShortcutsTab {
                     .add(chip(ui.ctx().format_shortcut(shortcut)))
                     .on_hover_text("Click to change, right-click to remove.");
                 if response.clicked() {
-                    self.start(ui, recording);
+                    self.start(recording);
                 } else if response.secondary_clicked() {
                     keymap.remove(action, i);
                     self.cancel();
@@ -160,7 +164,7 @@ impl ShortcutsTab {
                 .add(icon_button(PLUS).tooltip("Add a shortcut"))
                 .clicked()
             {
-                self.start(ui, adding);
+                self.start(adding);
             }
 
             if !keymap.is_default(action)
@@ -174,11 +178,11 @@ impl ShortcutsTab {
         });
     }
 
-    fn start(&mut self, ui: &Ui, recording: Recording) {
+    fn start(&mut self, recording: Recording) {
         self.recording = Some(recording);
         self.message = None;
         // Holding focus keeps the timeline from acting on the key pressed.
-        ui.memory_mut(|m| m.request_focus(recorder_id()));
+        self.focus_recorder = true;
     }
 
     /// Placeholder shown while recording. It holds keyboard focus, and
@@ -186,7 +190,10 @@ impl ShortcutsTab {
     fn recorder(&mut self, ui: &mut Ui) {
         let response = ui.add(chip("Press a key…").selected(true));
         let id = recorder_id();
-        ui.interact(response.rect, id, Sense::focusable_noninteractive());
+        let focus = ui.interact(response.rect, id, Sense::focusable_noninteractive());
+        if std::mem::take(&mut self.focus_recorder) {
+            focus.request_focus();
+        }
         // Let arrows, Tab and Esc reach us instead of moving focus.
         ui.memory_mut(|m| {
             m.set_focus_lock_filter(
