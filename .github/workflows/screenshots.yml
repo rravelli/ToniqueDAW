@@ -1,0 +1,48 @@
+name: Screenshots
+
+# Renders the app headless and keeps the images, to look at a PR's UI
+# without building it.
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  render:
+    name: Render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Runners have no GPU: lavapipe renders with Vulkan on the CPU.
+      - name: Install system dependencies
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          libasound2-dev pkg-config mesa-vulkan-drivers vulkan-tools
+      - name: Vulkan devices
+        run: vulkaninfo --summary
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Render
+        env:
+          WGPU_BACKEND: vulkan
+        run: cargo test --bin tonique_daw ui::app::tests::screenshots -- --ignored --nocapture
+      # The test only warns when it can't render: no image is the failure.
+      - name: Check images
+        run: |
+          ls -l target/ui-screenshots
+          test -n "$(find target/ui-screenshots -name '*.png')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: target/ui-screenshots/*.png
+          if-no-files-found: error
