@@ -1567,6 +1567,12 @@ impl ProjectState {
     pub fn can_redo(&self) -> bool {
         self.session.undo_manager().can_redo()
     }
+    /// Steps there are to undo, and the last one's name.
+    #[cfg(test)]
+    pub fn undo_history(&self) -> (usize, Option<&'static str>) {
+        let undo = self.session.undo_manager();
+        (undo.undo_len(), undo.undo_label())
+    }
 
     /// Forget the clips (and held peaks) a track's meter shows.
     pub fn reset_meter_clip(&mut self, id: TrackId) {

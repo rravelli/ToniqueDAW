@@ -4,6 +4,7 @@
 mod appearance;
 mod shortcuts;
 
+use crate::audio::host::{open_output, output_devices};
 use crate::ui::theme::font_size;
 use crate::{
     config::settings::{Settings, UI_SCALE_RANGE},
@@ -22,7 +23,7 @@ use appearance::AppearanceTab;
 use egui::{Align, Align2, FontFamily, FontId, Grid, Layout, Rangef, RichText, Ui, Vec2, vec2};
 use egui_phosphor::regular::{ARROWS_CLOCKWISE, X};
 use shortcuts::ShortcutsTab;
-use tonique_engine::device::{DeviceInfo, DeviceOptions, OutputDevice, output_devices};
+use tonique_engine::device::{DeviceInfo, DeviceOptions};
 
 const BUFFER_SIZES: [u32; 8] = [32, 64, 128, 256, 512, 1024, 2048, 4096];
 const BLOCK_SIZES: [usize; 5] = [64, 128, 256, 512, 1024];
@@ -443,7 +444,7 @@ impl SettingsWindow {
                     device_id: self.draft.device_id.clone(),
                     ..Default::default()
                 };
-                let device = OutputDevice::open(&options).ok();
+                let device = open_output(&options).ok();
                 DeviceCapabilities {
                     device_id: self.draft.device_id.clone(),
                     sample_rates: device

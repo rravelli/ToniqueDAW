@@ -193,3 +193,6 @@ impl ToniqueApp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

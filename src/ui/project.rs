@@ -147,7 +147,7 @@ impl ProjectManager {
 
     /// Open `path`, or the project the user picks.
     fn open(&mut self, path: Option<PathBuf>, state: &mut ProjectState) {
-        let Some(path) = path.or_else(|| project_dialog(self.dir()).pick_file()) else {
+        let Some(path) = path.or_else(|| pick(project_dialog(self.dir()))) else {
             return;
         };
         let project = match ProjectFile::read(&path) {
@@ -187,10 +187,9 @@ impl ProjectManager {
     }
 
     fn save_as(&mut self, state: &ProjectState) -> bool {
-        let Some(mut path) = project_dialog(self.dir())
-            .set_file_name(format!("{}.{EXTENSION}", self.name()))
-            .save_file()
-        else {
+        let Some(mut path) = pick_save(
+            project_dialog(self.dir()).set_file_name(format!("{}.{EXTENSION}", self.name())),
+        ) else {
             return false;
         };
         if path.extension().is_none_or(|ext| ext != EXTENSION) {
@@ -345,6 +344,16 @@ impl ProjectManager {
             self.notice = None;
         }
     }
+}
+
+/// Picked in a native dialog; none in tests, where it would wait for a click.
+fn pick(dialog: FileDialog) -> Option<PathBuf> {
+    if cfg!(test) { None } else { dialog.pick_file() }
+}
+
+/// Picked in a native dialog; none in tests.
+fn pick_save(dialog: FileDialog) -> Option<PathBuf> {
+    if cfg!(test) { None } else { dialog.save_file() }
 }
 
 fn project_dialog(dir: Option<&Path>) -> FileDialog {

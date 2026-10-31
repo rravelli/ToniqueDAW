@@ -8,7 +8,7 @@ use std::{
 use egui::Vec2;
 use tonique_engine::{
     edit::{
-        Bus, BusId, Channel, ClipLoop, Edit, Output, TrackId,
+        Bus, BusId, Channel, ClipLoop, Edit, Output, Track, TrackId,
         commands::{AddBus, SetBypass, SetOutput, SetSolo},
     },
     time::BeatPos,
@@ -118,26 +118,7 @@ impl ProjectState {
                     soloed: track.soloed,
                     group: index_of(track.output),
                     channel: self.channel_file(&track.channel),
-                    clips: track
-                        .clips
-                        .iter()
-                        .filter_map(|clip| self.clip_view(clip))
-                        .map(|clip| ClipFile {
-                            path: store_path(&clip.audio.path, dir),
-                            position: clip.position.0,
-                            offset: clip.offset,
-                            length: Some(clip.length),
-                            looped: clip.looped.map(|l| LoopFile {
-                                start: l.start_s,
-                                end: l.end_s,
-                            }),
-                            trim_start: None,
-                            trim_end: None,
-                            gain: clip.gain,
-                            pan: clip.pan,
-                            origin: clip.origin,
-                        })
-                        .collect(),
+                    clips: self.clip_files(track, dir),
                 }
             })
             .collect();
@@ -151,6 +132,34 @@ impl ProjectState {
             groups,
             tracks,
         }
+    }
+
+    /// `track`'s clips as saved: in timeline order, so the same clips save
+    /// the same however they came about (undo and redo can leave them in
+    /// another order), and don't read as unsaved changes.
+    fn clip_files(&self, track: &Track, dir: Option<&Path>) -> Vec<ClipFile> {
+        let mut clips: Vec<ClipFile> = track
+            .clips
+            .iter()
+            .filter_map(|clip| self.clip_view(clip))
+            .map(|clip| ClipFile {
+                path: store_path(&clip.audio.path, dir),
+                position: clip.position.0,
+                offset: clip.offset,
+                length: Some(clip.length),
+                looped: clip.looped.map(|l| LoopFile {
+                    start: l.start_s,
+                    end: l.end_s,
+                }),
+                trim_start: None,
+                trim_end: None,
+                gain: clip.gain,
+                pan: clip.pan,
+                origin: clip.origin,
+            })
+            .collect();
+        clips.sort_by(|a, b| a.position.total_cmp(&b.position));
+        clips
     }
 
     fn channel_file(&self, channel: &Channel) -> ChannelFile {
