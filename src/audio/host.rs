@@ -5,9 +5,26 @@ use std::{
 
 use crate::config::settings::Settings;
 use tonique_engine::{
-    device::{DeviceError, OutputDevice, OutputStream},
+    device::{self, DeviceError, DeviceInfo, DeviceOptions, OutputDevice, OutputStream},
     engine::Engine,
 };
+
+/// Open an output device. Every device the app opens goes through here, so
+/// tests can't: they'd play through the user's speakers.
+pub fn open_output(options: &DeviceOptions) -> Result<OutputDevice, DeviceError> {
+    if cfg!(test) {
+        return Err("tests don't open audio devices".into());
+    }
+    OutputDevice::open(options)
+}
+
+/// The output devices there are; none in tests (see [`open_output`]).
+pub fn output_devices() -> Vec<DeviceInfo> {
+    if cfg!(test) {
+        return Vec::new();
+    }
+    device::output_devices()
+}
 
 /// The running audio output. Dropping it stops the stream.
 pub struct AudioHost {
@@ -37,7 +54,7 @@ pub fn engine_without_audio(settings: &Settings) -> Engine {
 
 /// Start the engine on the output device chosen in `settings`.
 pub fn start_audio(settings: &Settings) -> Result<(AudioHost, Engine), DeviceError> {
-    let device = OutputDevice::open(&settings.device_options())?;
+    let device = open_output(&settings.device_options())?;
     let (engine, processor) = Engine::new(settings.engine_config(device.sample_rate()));
     let (device_name, sample_rate, channels, buffer_frames) = (
         device.name(),
@@ -63,7 +80,21 @@ pub fn probe_output(settings: &Settings) -> Receiver<bool> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         // The receiver may be gone if audio came back meanwhile.
-        let _ = tx.send(OutputDevice::open(&options).is_ok());
+        let _ = tx.send(open_output(&options).is_ok());
     });
     rx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whatever a test does (the fuzz test changes the audio settings), it
+    /// can't reach the user's speakers.
+    #[test]
+    fn tests_open_no_audio_device() {
+        assert!(start_audio(&Settings::default()).is_err());
+        assert!(output_devices().is_empty());
+        assert!(!probe_output(&Settings::default()).recv().unwrap());
+    }
 }

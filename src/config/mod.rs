@@ -3,7 +3,6 @@ pub mod labels;
 pub mod recent;
 pub mod settings;
 
-use directories::ProjectDirs;
 use labels::Labels;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -194,5 +193,29 @@ fn config_path() -> Option<PathBuf> {
 
 /// Where Tonique keeps its configuration, settings and themes.
 pub fn config_dir() -> Option<PathBuf> {
-    ProjectDirs::from("com", "Bytenosis", "Tonique").map(|dirs| dirs.config_dir().to_path_buf())
+    #[cfg(test)]
+    return Some(test_config_dir());
+    #[cfg(not(test))]
+    directories::ProjectDirs::from("com", "Bytenosis", "Tonique")
+        .map(|dirs| dirs.config_dir().to_path_buf())
+}
+
+/// Tests keep their configuration away from the user's: an empty directory
+/// of their own for each thread (each test runs on one), made when first
+/// asked for.
+#[cfg(test)]
+pub fn test_config_dir() -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    thread_local! {
+        static DIR: PathBuf = {
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir()
+                .join(format!("tonique-tests-{}", std::process::id()))
+                .join(n.to_string());
+            let _ = std::fs::remove_dir_all(&dir);
+            dir
+        };
+    }
+    DIR.with(Clone::clone)
 }

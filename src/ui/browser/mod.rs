@@ -304,6 +304,10 @@ impl FileBrowser {
     }
 
     fn pick_folder(&mut self) {
+        // Tests get no dialog: it would wait for a click.
+        if cfg!(test) {
+            return;
+        }
         if let Some(path) = FileDialog::new().pick_folder() {
             self.add_folder(path);
         }
@@ -383,6 +387,9 @@ fn list_ui(
 
 /// Open `dir` in the system's file manager.
 fn reveal(dir: &Path) {
+    if cfg!(test) {
+        return;
+    }
     let program = if cfg!(target_os = "windows") {
         "explorer"
     } else if cfg!(target_os = "macos") {
