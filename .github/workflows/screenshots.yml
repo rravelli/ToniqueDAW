@@ -45,16 +45,14 @@ jobs:
       # binary, so without its own cache every push would build from
       # nothing. A pull request starts from master's.
       - uses: Swatinem/rust-cache@v2
+      # Into out/ alone: images/ holds the logos too.
       - name: Render
         env:
           WGPU_BACKEND: vulkan
+          TONIQUE_IMAGES_DIR: ${{ github.workspace }}/out
         run: >
           cargo test --bin tonique_daw -- --ignored --nocapture
           ui::app::tests::readme::readme_images
-      - name: Collect
-        run: |
-          mkdir -p out
-          cp images/*.png out/
       - name: Compare with master
         if: github.event_name == 'pull_request'
         run: .github/scripts/compare-screenshots.sh out

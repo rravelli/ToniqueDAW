@@ -1,6 +1,7 @@
 //! The README's images: the demo song (`scripts/make_demo.py`), as the app
 //! draws it. Run with `cargo test --bin tonique_daw readme_images -- --ignored`
-//! to write them to `images/`.
+//! to write them to `images/`, or to `TONIQUE_IMAGES_DIR` (CI keeps them
+//! apart from the folder's other images).
 
 use super::new_app;
 use crate::{
@@ -27,6 +28,11 @@ const AUDIO_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn repo() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// Where the images go: `images/`, unless `TONIQUE_IMAGES_DIR` says.
+fn images_dir() -> PathBuf {
+    std::env::var_os("TONIQUE_IMAGES_DIR").map_or_else(|| repo().join("images"), PathBuf::from)
 }
 
 /// The demo song, made afresh in the test's own folder.
@@ -107,13 +113,15 @@ fn readme_images() {
     save(&mut harness, "screenshot");
 }
 
-/// Saved to `images/{name}.png`, once the pointer has left: kittest draws
-/// it, and what it hovers.
+/// Saved as `{name}.png` in [`images_dir`], once the pointer has left:
+/// kittest draws it, and what it hovers.
 fn save(harness: &mut Harness<'_, ToniqueApp>, name: &str) {
     harness.event(Event::PointerGone);
     harness.run_steps(4);
     let image = harness.render().expect("the app renders");
-    let path = repo().join("images").join(format!("{name}.png"));
+    let dir = images_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{name}.png"));
     image.save(&path).unwrap();
     eprintln!("Wrote {}", path.display());
 }
