@@ -49,6 +49,12 @@ pub struct CentralPanel {
 }
 
 impl CentralPanel {
+    /// Where the timeline was last drawn.
+    #[cfg(test)]
+    pub fn timeline_rect(&self) -> Rect {
+        self.tracks.lanes()
+    }
+
     pub fn new() -> Self {
         Self {
             timeline: Timeline::new(),

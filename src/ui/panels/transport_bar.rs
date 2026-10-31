@@ -169,7 +169,8 @@ impl TransportBar {
         }
         ui.add_space(GROUP_GAP);
         self.usage_ui(ui, state);
-        if cfg!(debug_assertions) {
+        // Tests run on a clock of their own: their rate means nothing.
+        if cfg!(debug_assertions) && !cfg!(test) {
             self.fps_ui(ui);
         }
         if state.audio_lost() && self.no_audio_ui(ui, state).clicked() {

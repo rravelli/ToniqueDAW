@@ -1,0 +1,54 @@
+name: Publish screenshots
+
+# After a Screenshots run: its images go to the screenshots branch, and a
+# pull request gets a comment with what changed from master.
+#
+# workflow_run always runs this file as it is on master, never a pull
+# request's version, so it can hold the deploy key: the only way to write
+# the screenshots branch, which a ruleset closes to anyone else (bar
+# admins). The key lives in the `screenshots` environment, which only
+# master's jobs may use. What the run left (its artifact) is the pull
+# request's doing, so the script checks it before using any of it.
+on:
+  workflow_run:
+    workflows: [Screenshots]
+    types: [completed]
+
+permissions: {}
+
+# One publish at a time: each replaces the branch's commit.
+concurrency:
+  group: publish-screenshots
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: screenshots
+    permissions:
+      actions: read # the run's artifact
+      pull-requests: write # the comment
+    steps:
+      # master's scripts, not the pull request's.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: screenshots
+          path: artifact
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      # Values from the run go through the environment, never into the
+      # script's text: a branch name could be made to run commands.
+      - name: Publish
+        env:
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          DEPLOY_KEY: ${{ secrets.SCREENSHOTS_DEPLOY_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/publish-screenshots.sh artifact

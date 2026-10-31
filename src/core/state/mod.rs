@@ -258,6 +258,14 @@ impl ProjectState {
     pub fn audio_lost(&self) -> bool {
         self.reconnect_at.is_some()
     }
+    /// Stop retrying the output tests don't have, so the app shows no
+    /// warning about it (for screenshots).
+    #[cfg(test)]
+    pub fn ignore_missing_audio(&mut self) {
+        self.reconnect_at = None;
+        self.probe = None;
+        self.audio_error = None;
+    }
     /// Notice a lost output (e.g. an unplugged device) and reopen one
     /// every few seconds, falling back to the default device.
     fn watch_audio(&mut self) {

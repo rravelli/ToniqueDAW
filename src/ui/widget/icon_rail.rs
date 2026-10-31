@@ -1,5 +1,8 @@
 use crate::ui::theme::font_size;
-use egui::{Align2, CursorIcon, FontId, Rect, Response, RichText, Sense, Ui, Widget, pos2, vec2};
+use egui::{
+    Align2, CursorIcon, FontId, Rect, Response, RichText, Sense, Ui, Widget, WidgetInfo,
+    WidgetType, pos2, vec2,
+};
 
 use crate::ui::theme::ThemeExt;
 
@@ -49,6 +52,10 @@ impl<T: PartialEq + Copy> Widget for IconRail<'_, T> {
                     let selected = *self.value == item;
                     let (rect, res) =
                         ui.allocate_exact_size(vec2(self.size, self.size), Sense::click());
+                    // Named for screen readers: the icon alone says nothing.
+                    res.widget_info(|| {
+                        WidgetInfo::selected(WidgetType::SelectableLabel, true, selected, &name)
+                    });
                     let painter = ui.painter_at(rect);
                     if res.hovered() && !selected {
                         painter.rect_filled(rect, 2., theme.hover_overlay);
