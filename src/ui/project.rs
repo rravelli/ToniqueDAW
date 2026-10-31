@@ -76,7 +76,8 @@ impl ProjectManager {
         }
     }
 
-    fn dir(&self) -> Option<&Path> {
+    /// The project's folder, once saved or opened.
+    pub fn dir(&self) -> Option<&Path> {
         self.path.as_deref().and_then(Path::parent)
     }
 

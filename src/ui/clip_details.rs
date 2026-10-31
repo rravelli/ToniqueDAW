@@ -27,7 +27,7 @@ use crate::{
             scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
         },
     },
-    utils::{format_bars, format_time},
+    utils::{format_bars, format_time, parse_bars, parse_parts},
 };
 
 /// The clip's properties, left of the editor.
@@ -225,8 +225,9 @@ impl ClipDetails {
             .interact(lane, ui.id().with("clip-lane"), Sense::click_and_drag())
             .on_hover_cursor(CursorIcon::Grab);
         let pointer = ui.input(|i| i.pointer.hover_pos());
-        let over_ruler = pointer.is_some_and(|p| ruler.contains(p));
-        let over_lane = pointer.is_some_and(|p| lane.contains(p));
+        // Not through a modal or menu above.
+        let over_ruler = ui.rect_contains_pointer(ruler);
+        let over_lane = ui.rect_contains_pointer(lane);
 
         let zoom = ui.input(|i| i.zoom_delta());
         let scroll = ui.input(|i| i.smooth_scroll_delta);
@@ -931,21 +932,6 @@ fn gesture(response: &egui::Response) -> Option<bool> {
 /// engine's limit (+12 dB).
 const CLIP_GAIN_RANGE: std::ops::RangeInclusive<f32> = -40.0..=12.0;
 
-/// A position as typed, `bar.beat.sixteenth` from 1 (`3.2.1`; missing
-/// parts are the first), in beats.
-fn parse_bars(text: &str, signature: TimeSignature) -> Option<f64> {
-    let parts = parse_parts(text)?;
-    let part = |i: usize| parts.get(i).copied().unwrap_or(1.);
-    if parts.is_empty() || parts.iter().any(|p| *p < 1.) {
-        return None;
-    }
-    Some(
-        (part(0) - 1.) * signature.beats_per_bar()
-            + (part(1) - 1.) * signature.beat_length()
-            + (part(2) - 1.) / 4.,
-    )
-}
-
 /// A length as typed, `bars.beats.sixteenths` (`1.2.0`; missing parts are
 /// none), in beats.
 fn parse_length(text: &str, signature: TimeSignature) -> Option<f64> {
@@ -955,16 +941,6 @@ fn parse_length(text: &str, signature: TimeSignature) -> Option<f64> {
         return None;
     }
     Some(part(0) * signature.beats_per_bar() + part(1) * signature.beat_length() + part(2) / 4.)
-}
-
-/// Up to three numbers separated by dots.
-fn parse_parts(text: &str) -> Option<Vec<f64>> {
-    let parts: Vec<f64> = text
-        .trim()
-        .split('.')
-        .map(|p| p.trim().parse().ok())
-        .collect::<Option<_>>()?;
-    (parts.len() <= 3).then_some(parts)
 }
 
 /// A length as `bars.beats.sixteenths`, counting from 0, beats as
@@ -1074,6 +1050,8 @@ mod tests {
             "missing parts are the first"
         );
         assert_eq!(parse_bars("0.1.1", FOUR), None, "bars count from 1");
+        assert_eq!(parse_bars("inf", FOUR), None);
+        assert_eq!(parse_bars("1.NaN", FOUR), None);
         assert_eq!(parse_bars("1.2.3.4", FOUR), None);
         assert_eq!(parse_bars("x", FOUR), None);
         assert_eq!(parse_length("1.2.1", FOUR), Some(6.25));

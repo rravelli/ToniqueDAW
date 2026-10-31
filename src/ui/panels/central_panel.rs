@@ -162,17 +162,18 @@ impl CentralPanel {
         let content_size = vec2(ui.min_size().x, viewport.top() + content_height(&layout));
 
         let mut scrolled_x = false;
-        if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
-            && ui.input(|i| i.smooth_scroll_delta != Vec2::ZERO && !i.modifiers.ctrl)
-        {
+        if ui.input(|i| i.smooth_scroll_delta != Vec2::ZERO && !i.modifiers.ctrl) {
             let delta = ui.input(|i| i.smooth_scroll_delta);
-            if timeline_viewport.contains(mouse_pos) {
+            // Not through a modal or menu above (unclipped: the track
+            // list is beside this panel).
+            let over = |rect| ui.ctx().rect_contains_pointer(ui.layer_id(), rect);
+            if over(timeline_viewport) {
                 scrolled_x |= delta.x != 0.;
                 state.grid.offset.x -= delta.x;
                 let max_x = (content_size.x - timeline_viewport.right()).max(0.);
                 state.grid.offset.x = state.grid.offset.x.clamp(0., max_x);
             }
-            if viewport.contains(mouse_pos) || self.tracks.rows_rect().contains(mouse_pos) {
+            if over(viewport) || over(self.tracks.rows_rect()) {
                 state.grid.offset.y -= delta.y;
                 let max_y = (content_size.y - viewport.bottom()).max(0.);
                 state.grid.offset.y = state.grid.offset.y.clamp(0., max_y);
@@ -540,6 +541,8 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::ui::font::fonts());
         let mut panel = CentralPanel::new();
+        // A dialog over everything.
+        let modal = std::cell::Cell::new(false);
         let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
             let input = egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
@@ -552,7 +555,12 @@ mod tests {
                     state,
                     &mut Workspace::default(),
                     &mut Commands::default(),
-                )
+                );
+                if modal.get() {
+                    egui::Modal::new(egui::Id::new("dialog")).show(ui.ctx(), |ui| {
+                        ui.label("A dialog");
+                    });
+                }
             });
             output.textures_delta.clear();
         };
@@ -586,6 +594,13 @@ mod tests {
         let rows = RowLayout::new(&state, 0., 0.).height();
         assert!(state.grid.offset.y > rows - 800., "down to the last track");
         assert!(state.grid.offset.y < rows, "but no further");
+
+        // Not through a dialog.
+        modal.set(true);
+        let offset = state.grid.offset;
+        scroll_over(&mut state, lanes, 200.);
+        scroll_over(&mut state, headers, 200.);
+        assert_eq!(state.grid.offset, offset, "a dialog is open");
     }
 
     /// Dragging a file over a collapsed group expands it; leaving collapses

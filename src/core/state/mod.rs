@@ -1,5 +1,6 @@
 mod clip_ops;
 mod clipboard;
+mod export;
 mod groups;
 mod project;
 mod selection;
@@ -36,6 +37,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub use export::ExportSource;
 pub use groups::RowTarget;
 pub use selection::SelectionBounds;
 use tonique_engine::{

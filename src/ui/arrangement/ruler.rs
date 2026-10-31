@@ -71,7 +71,7 @@ impl Ruler {
             // the bar's own hover)
             if ui.input(|i| i.smooth_scroll_delta.y != 0.0)
                 && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
-                && ruler_rect.contains(mouse_pos)
+                && ui.rect_contains_pointer(ruler_rect)
             {
                 let delta = ui.input(|i| i.smooth_scroll_delta.y);
                 state.grid.zoom_around(delta, mouse_pos.x, ruler_rect);

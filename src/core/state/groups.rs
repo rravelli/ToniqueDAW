@@ -170,11 +170,7 @@ impl ProjectState {
                 }
                 hiding = None;
             }
-            let row = match node {
-                Node::Track(id) => self.track_index(id).and_then(|i| self.track_from_index(i)),
-                Node::Group(bus) => self.group_ref(bus, depth),
-            };
-            if let Some(row) = row {
+            if let Some(row) = self.row(node, depth) {
                 if row.kind == TrackKind::Group && row.collapsed {
                     hiding = Some(depth);
                 }
@@ -182,6 +178,22 @@ impl ProjectState {
             }
         }
         rows
+    }
+
+    /// The rows of the track list in display order, what's inside
+    /// collapsed groups included.
+    pub fn all_rows(&self) -> Vec<TrackRow> {
+        self.layout()
+            .into_iter()
+            .filter_map(|(node, depth)| self.row(node, depth))
+            .collect()
+    }
+
+    fn row(&self, node: Node, depth: usize) -> Option<TrackRow> {
+        match node {
+            Node::Track(id) => self.track_index(id).and_then(|i| self.track_from_index(i)),
+            Node::Group(bus) => self.group_ref(bus, depth),
+        }
     }
 
     /// Every group, collapsed ones and their subgroups included.
