@@ -1,12 +1,13 @@
-//! Rendering the project to an audio file, on a background thread with its
-//! own engine, so playback and editing go on meanwhile.
+//! Rendering the project to audio files (the mix, or tracks on their own),
+//! on a background thread with its own engine, so playback and editing go
+//! on meanwhile.
 
 use std::{
     fs,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
     },
     thread::{self, JoinHandle},
 };
@@ -21,19 +22,38 @@ use tonique_engine::{
 const CHUNK_FRAMES: usize = 8192;
 
 /// What part of the project to export.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum ExportRange {
-    /// From the start to the end of the last clip.
+    /// From the start of the first clip to the end of the last.
     #[default]
     Project,
     /// The loop region.
     Loop,
+    /// From one position to another.
+    Custom(BeatPos, BeatPos),
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ExportOptions {
     pub range: ExportRange,
     pub format: WavFormat,
+    /// Seconds rendered past the end, for reverbs and echoes to ring out.
+    pub tail_seconds: u32,
+}
+
+/// One file of an export: `edit` rendered into `path`.
+pub struct Render {
+    /// What the file holds, to show: the mix or a track's name.
+    pub label: String,
+    pub path: PathBuf,
+    pub edit: Edit,
+}
+
+/// A file an export writes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExportFile {
+    pub label: String,
+    pub path: PathBuf,
 }
 
 /// How an export ended.
@@ -44,10 +64,10 @@ pub enum ExportOutcome {
     Failed(String),
 }
 
-/// Columns of the mix's waveform gathered while rendering.
+/// Columns of each file's waveform gathered while rendering.
 pub const WAVEFORM_COLUMNS: usize = 480;
 
-/// What the render shows of itself as it goes.
+/// What a render shows of itself as it goes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Waveform {
     /// Lowest and highest sample of each column, over all channels. Columns
@@ -69,16 +89,19 @@ impl Default for Waveform {
 /// Between the export and its thread.
 #[derive(Default)]
 struct Shared {
-    /// Fraction done, as `f32` bits.
+    /// Fraction of all the files done, as `f32` bits.
     progress: AtomicU32,
+    /// The file being rendered.
+    current: AtomicUsize,
     cancel: AtomicBool,
-    waveform: Mutex<Waveform>,
+    /// One per file.
+    waveforms: Mutex<Vec<Waveform>>,
 }
 
-/// An export running in the background. The file only appears at `path`
-/// once complete.
+/// An export running in the background, one file after another. The files
+/// only appear once all of them are complete.
 pub struct Export {
-    path: PathBuf,
+    files: Vec<ExportFile>,
     seconds: f64,
     shared: Arc<Shared>,
     thread: Option<JoinHandle<ExportOutcome>>,
@@ -86,23 +109,35 @@ pub struct Export {
 }
 
 impl Export {
-    /// Render `span` of `edit` into a WAV file at `path`. `edit` must have
-    /// its audio at `config`'s sample rate.
+    /// Render `span` of each edit, plus `tail_seconds`, into a WAV file.
+    /// The edits must have their audio at `config`'s sample rate.
     pub fn start(
-        edit: Edit,
+        renders: Vec<Render>,
         config: EngineConfig,
         span: (BeatPos, BeatPos),
-        path: PathBuf,
         format: WavFormat,
+        tail_seconds: u32,
     ) -> Self {
-        let tempo = &edit.tempo;
-        let seconds = tempo.beats_to_seconds(span.1) - tempo.beats_to_seconds(span.0);
-        let shared = Arc::new(Shared::default());
+        let files = renders
+            .iter()
+            .map(|r| ExportFile {
+                label: r.label.clone(),
+                path: r.path.clone(),
+            })
+            .collect();
+        let seconds = renders.first().map_or(0., |r| {
+            let tempo = &r.edit.tempo;
+            tempo.beats_to_seconds(span.1) - tempo.beats_to_seconds(span.0)
+        }) + tail_seconds as f64;
+        let shared = Arc::new(Shared {
+            waveforms: Mutex::new(vec![Waveform::default(); renders.len()]),
+            ..Default::default()
+        });
         let job = Job {
-            edit,
+            renders,
             config,
             span,
-            path: path.clone(),
+            tail_seconds,
             format,
             shared: shared.clone(),
         };
@@ -115,7 +150,7 @@ impl Export {
             Err(e) => (None, Some(ExportOutcome::Failed(e))),
         };
         Self {
-            path,
+            files,
             seconds,
             shared,
             thread,
@@ -123,24 +158,29 @@ impl Export {
         }
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn files(&self) -> &[ExportFile] {
+        &self.files
     }
 
-    /// Length of the exported audio, in seconds.
+    /// Length of each exported file, in seconds.
     pub fn seconds(&self) -> f64 {
         self.seconds
     }
 
-    /// Fraction done, 0 to 1.
+    /// Fraction of all the files done, 0 to 1.
     pub fn progress(&self) -> f32 {
         f32::from_bits(self.shared.progress.load(Ordering::Relaxed))
     }
 
-    /// The mix rendered so far.
-    pub fn waveform(&self) -> Waveform {
+    /// The index of the file being rendered.
+    pub fn current(&self) -> usize {
+        self.shared.current.load(Ordering::Relaxed)
+    }
+
+    /// Each file's audio rendered so far.
+    pub fn waveforms(&self) -> Vec<Waveform> {
         self.shared
-            .waveform
+            .waveforms
             .lock()
             .map(|w| w.clone())
             .unwrap_or_default()
@@ -167,41 +207,57 @@ impl Export {
 }
 
 struct Job {
-    edit: Edit,
+    renders: Vec<Render>,
     config: EngineConfig,
     span: (BeatPos, BeatPos),
-    path: PathBuf,
+    tail_seconds: u32,
     format: WavFormat,
     shared: Arc<Shared>,
 }
 
 impl Job {
     fn run(self) -> ExportOutcome {
-        // Written next to the destination, then moved over it: a failed or
-        // cancelled export leaves no half-written file behind.
-        let temporary = self.path.with_extension("wav.exporting");
-        let outcome = self.render(&temporary);
-        if outcome == ExportOutcome::Done {
-            if let Err(e) = fs::rename(&temporary, &self.path) {
-                let _ = fs::remove_file(&temporary);
-                return ExportOutcome::Failed(e.to_string());
+        // Written next to their destination, then moved over it once all
+        // are rendered: a failed or cancelled export leaves no file behind.
+        let temporaries: Vec<PathBuf> = self
+            .renders
+            .iter()
+            .map(|r| r.path.with_extension("wav.exporting"))
+            .collect();
+        let mut outcome = ExportOutcome::Done;
+        for (index, (render, temporary)) in self.renders.iter().zip(&temporaries).enumerate() {
+            self.shared.current.store(index, Ordering::Relaxed);
+            outcome = self.render(index, &render.edit, temporary);
+            if outcome != ExportOutcome::Done {
+                break;
             }
-        } else {
-            let _ = fs::remove_file(&temporary);
+        }
+        if outcome == ExportOutcome::Done {
+            for (render, temporary) in self.renders.iter().zip(&temporaries) {
+                if let Err(e) = fs::rename(temporary, &render.path) {
+                    outcome = ExportOutcome::Failed(e.to_string());
+                    break;
+                }
+            }
+        }
+        for temporary in &temporaries {
+            let _ = fs::remove_file(temporary);
         }
         outcome
     }
 
-    fn render(&self, temporary: &Path) -> ExportOutcome {
+    /// Render the file `index` of the export.
+    fn render(&self, index: usize, edit: &Edit, temporary: &Path) -> ExportOutcome {
         let failed = |e: &dyn std::fmt::Display| ExportOutcome::Failed(e.to_string());
         let rate = self.config.sample_rate;
         let channels = self.config.output_channels;
         let (start, end) = self.span;
-        let first = self.edit.tempo.beats_to_samples(start, rate);
-        let frames = (self.edit.tempo.beats_to_samples(end, rate) - first).max(0) as usize;
+        let first = edit.tempo.beats_to_samples(start, rate);
+        let frames = (edit.tempo.beats_to_samples(end, rate) - first).max(0) as usize
+            + (self.tail_seconds as f64 * rate) as usize;
 
         let (engine, mut processor) = Engine::new(self.config);
-        let mut session = match EditSession::new(self.edit.clone(), engine) {
+        let mut session = match EditSession::new(edit.clone(), engine) {
             Ok(session) => session,
             Err(e) => return failed(&e),
         };
@@ -215,6 +271,7 @@ impl Job {
         let mut buffer = vec![0.; CHUNK_FRAMES * channels];
         let mut waveform = Waveform::default();
         let mut done = 0;
+        let files = self.renders.len() as f32;
         while done < frames {
             if self.shared.cancel.load(Ordering::Relaxed) {
                 return ExportOutcome::Cancelled;
@@ -236,10 +293,12 @@ impl Job {
                 }
             }
             done += n;
-            if let Ok(mut shared) = self.shared.waveform.lock() {
+            if let Ok(mut shared) = self.shared.waveforms.lock()
+                && let Some(shared) = shared.get_mut(index)
+            {
                 shared.clone_from(&waveform);
             }
-            let fraction = done as f32 / frames as f32;
+            let fraction = (index as f32 + done as f32 / frames as f32) / files;
             self.shared
                 .progress
                 .store(fraction.to_bits(), Ordering::Relaxed);

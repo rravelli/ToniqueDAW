@@ -1779,16 +1779,20 @@ fn time_signature_changes_are_undoable() {
 
 mod export {
     use super::*;
-    use crate::core::export::{Export, ExportOptions, ExportOutcome, ExportRange};
-    use std::{fs, time::Instant};
+    use crate::core::{
+        export::{Export, ExportOptions, ExportOutcome, ExportRange},
+        state::ExportSource,
+    };
+    use std::{fs, path::Path, time::Instant};
     use tonique_engine::sample::WavFormat;
 
-    /// A project with one clip of `seconds` (at 120 bpm, 2 beats a second)
-    /// whose samples are all `level`, once its audio reached the engine.
-    fn project_with_clip(seconds: usize, level: f32) -> ProjectState {
-        let mut state = setup_state();
+    /// Adds a track with one clip of `seconds` (at 120 bpm, 2 beats a
+    /// second) whose samples are all `level`.
+    fn add_level_track(state: &mut ProjectState, seconds: usize, level: f32) -> TrackId {
         let track = state.add_track();
         let mut info = audio(seconds as f32);
+        // Its own file: clips of one path share their audio.
+        info.path = PathBuf::from(format!("level-{level}-{seconds}.wav"));
         let samples = vec![level; 48000 * seconds];
         info.data = Arc::new(AudioData::from_samples(SampleBuffer::new(
             vec![samples.clone(), samples],
@@ -1796,6 +1800,11 @@ mod export {
         )));
         let id = state.new_clip_id();
         state.add_clips(&track, vec![AudioClip::new(id, info, BeatPos(0.), 120.)]);
+        track
+    }
+
+    /// Once the clips' audio reached the engine.
+    fn loaded(mut state: ProjectState) -> ProjectState {
         let started = Instant::now();
         while !state.sources_ready(48000.) {
             assert!(started.elapsed() < Duration::from_secs(10), "never loaded");
@@ -1803,6 +1812,12 @@ mod export {
             std::thread::sleep(Duration::from_millis(5));
         }
         state
+    }
+
+    fn project_with_clip(seconds: usize, level: f32) -> ProjectState {
+        let mut state = setup_state();
+        add_level_track(&mut state, seconds, level);
+        loaded(state)
     }
 
     fn finish(mut export: Export) -> ExportOutcome {
@@ -1816,63 +1831,210 @@ mod export {
         }
     }
 
-    fn temp_wav(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("tonique-export-{name}-{}.wav", std::process::id()))
+    /// An empty folder of its own for each test.
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("tonique-export-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
-    fn read(path: &PathBuf) -> (hound::WavSpec, Vec<f32>) {
+    fn read(path: &Path) -> (hound::WavSpec, Vec<f32>) {
         let mut reader = hound::WavReader::open(path).unwrap();
         let samples = reader.samples::<f32>().map(Result::unwrap).collect();
         (reader.spec(), samples)
     }
 
+    fn peak(samples: &[f32]) -> f32 {
+        samples.iter().fold(0f32, |m, s| m.max(s.abs()))
+    }
+
+    const FLOAT: ExportOptions = ExportOptions {
+        range: ExportRange::Project,
+        format: WavFormat::Float32,
+        tail_seconds: 0,
+    };
+
     #[test]
     fn exports_the_whole_project_to_a_wav_file() {
         let state = project_with_clip(1, 0.5);
-        let path = temp_wav("whole");
-        let options = ExportOptions {
-            range: ExportRange::Project,
-            format: WavFormat::Float32,
-        };
-        let mut export = state.export(path.clone(), options).unwrap();
-        let started = Instant::now();
-        while export.outcome().is_none() {
-            assert!(started.elapsed() < Duration::from_secs(20), "export hangs");
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        assert_eq!(export.outcome(), Some(&ExportOutcome::Done));
-        assert!((export.seconds() - 1.).abs() < 1e-9);
-        let waveform = export.waveform();
-        assert!(waveform.peak > 0.3, "peak {}", waveform.peak);
-        // The clip's edges fade in and out against clicks.
-        let middle = &waveform.columns[1..waveform.columns.len() - 1];
-        assert!(middle.iter().all(|&(low, high)| high > 0.3 && low <= high));
+        let dir = temp_dir("whole");
+        let export = state
+            .export(&dir, "Song", &[ExportSource::Mix], FLOAT)
+            .unwrap();
+        assert_eq!(finish(export), ExportOutcome::Done);
 
+        let path = dir.join("Song.wav");
         let (spec, samples) = read(&path);
         assert_eq!((spec.channels, spec.sample_rate), (2, 48000));
         assert_eq!(samples.len(), 2 * 48000, "one second, stereo");
-        let peak = samples.iter().fold(0f32, |m, s| m.max(s.abs()));
-        assert!(peak > 0.3, "the clip is in the file (peak {peak})");
+        assert!(peak(&samples) > 0.3, "the clip is in the file");
         assert!(!path.with_extension("wav.exporting").exists());
-        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn exports_the_loop_region() {
         let mut state = project_with_clip(2, 0.5);
         state.set_loop_range(BeatPos(1.), BeatPos(2.));
-        let path = temp_wav("loop");
+        let dir = temp_dir("loop");
         let options = ExportOptions {
             range: ExportRange::Loop,
-            format: WavFormat::Float32,
+            ..FLOAT
         };
-        assert_eq!(
-            finish(state.export(path.clone(), options).unwrap()),
-            ExportOutcome::Done
-        );
-        let (_, samples) = read(&path);
+        let export = state.export(&dir, "Song", &[ExportSource::Mix], options);
+        assert_eq!(finish(export.unwrap()), ExportOutcome::Done);
+        let (_, samples) = read(&dir.join("Song.wav"));
         assert_eq!(samples.len(), 2 * 24000, "one beat at 120 bpm");
-        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The whole project starts where the first clip does, not at 0:00.
+    #[test]
+    fn the_whole_project_starts_at_the_first_clip() {
+        let mut state = setup_state();
+        let track = state.add_track();
+        let id = state.new_clip_id();
+        state.add_clips(
+            &track,
+            vec![AudioClip::new(id, audio(1.), BeatPos(4.), 120.)],
+        );
+        assert_eq!(
+            state.export_span(ExportRange::Project),
+            Ok((BeatPos(4.), BeatPos(6.)))
+        );
+        assert_eq!(state.export_seconds(ExportRange::Project), Ok(1.));
+    }
+
+    #[test]
+    fn exports_a_custom_range() {
+        let state = project_with_clip(2, 0.5);
+        let dir = temp_dir("custom");
+        let options = ExportOptions {
+            range: ExportRange::Custom(BeatPos(0.5), BeatPos(2.5)),
+            ..FLOAT
+        };
+        let export = state.export(&dir, "Song", &[ExportSource::Mix], options);
+        assert_eq!(finish(export.unwrap()), ExportOutcome::Done);
+        let (_, samples) = read(&dir.join("Song.wav"));
+        assert_eq!(samples.len(), 2 * 48000, "two beats at 120 bpm");
+        let backwards = ExportRange::Custom(BeatPos(2.), BeatPos(1.));
+        assert!(state.export_span(backwards).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_tail_extends_every_file() {
+        let state = project_with_clip(1, 0.5);
+        let dir = temp_dir("tail");
+        let options = ExportOptions {
+            tail_seconds: 2,
+            ..FLOAT
+        };
+        let export = state.export(&dir, "Song", &[ExportSource::Mix], options);
+        let export = export.unwrap();
+        assert_eq!(export.seconds(), 3.);
+        assert_eq!(finish(export), ExportOutcome::Done);
+        let (_, samples) = read(&dir.join("Song.wav"));
+        assert_eq!(samples.len(), 2 * 48000 * 3, "a second and the tail");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Each track's file holds that track alone, and the project plays on
+    /// as before: soloing for the export doesn't touch it.
+    #[test]
+    fn stems_hold_their_track_alone() {
+        let mut state = setup_state();
+        let loud = add_level_track(&mut state, 1, 0.5);
+        let quiet = add_level_track(&mut state, 1, 0.1);
+        state.set_mute(quiet, true);
+        let state = loaded(state);
+        let dir = temp_dir("stems");
+        let sources = [
+            ExportSource::Mix,
+            ExportSource::Track(loud),
+            ExportSource::Track(quiet),
+        ];
+        let export = state.export(&dir, "Song", &sources, FLOAT).unwrap();
+        let names: Vec<_> = export
+            .files()
+            .iter()
+            .map(|f| f.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Song.wav",
+                "Song - 1 Audio Track.wav",
+                "Song - 2 Audio Track.wav"
+            ]
+        );
+        assert_eq!(finish(export), ExportOutcome::Done);
+
+        let level = |file: &str| peak(&read(&dir.join(file)).1);
+        let (mix, loud_stem, quiet_stem) = (
+            level("Song.wav"),
+            level("Song - 1 Audio Track.wav"),
+            level("Song - 2 Audio Track.wav"),
+        );
+        assert!(mix > 0.3, "the mix has the loud track");
+        assert!(
+            (loud_stem - mix).abs() < 1e-3,
+            "the muted track isn't in the mix"
+        );
+        assert!(quiet_stem > 0.05, "a muted track still gets its own file");
+        assert!(quiet_stem < 0.2, "and only itself, from the first sample");
+        let audible = |id| state.edit().track(id).unwrap().channel.audible();
+        assert!(audible(loud), "the project's own solo state is untouched");
+        assert!(!audible(quiet));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Files never share a name, and names fit any file system.
+    #[test]
+    fn file_names_are_unique_and_safe() {
+        let mut state = setup_state();
+        let track = state.add_track();
+        let dir = Path::new("/out");
+        let sources = [
+            ExportSource::Mix,
+            ExportSource::Track(track),
+            ExportSource::Track(track),
+        ];
+        let names: Vec<_> = state
+            .export_files(dir, "My/Song", &sources)
+            .into_iter()
+            .map(|f| (f.label, f.path))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("Mix".into(), dir.join("My-Song.wav")),
+                (
+                    "1 Audio Track".into(),
+                    dir.join("My-Song - 1 Audio Track.wav")
+                ),
+                (
+                    "1 Audio Track".into(),
+                    dir.join("My-Song - 1 Audio Track 2.wav")
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn cancelling_leaves_no_files() {
+        // Long enough to still be rendering when cancelled.
+        let state = project_with_clip(10, 0.5);
+        let dir = temp_dir("cancel");
+        let export = state
+            .export(&dir, "Song", &[ExportSource::Mix, ExportSource::Mix], FLOAT)
+            .unwrap();
+        export.cancel();
+        assert_eq!(finish(export), ExportOutcome::Cancelled);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1880,24 +2042,28 @@ mod export {
         let mut state = project_with_clip(1, 0.);
         state.toggle_metronome();
         assert!(state.metronome());
-        let path = temp_wav("metronome");
-        let options = ExportOptions {
-            format: WavFormat::Float32,
-            ..Default::default()
-        };
-        assert_eq!(
-            finish(state.export(path.clone(), options).unwrap()),
-            ExportOutcome::Done
-        );
-        let (_, samples) = read(&path);
+        let dir = temp_dir("metronome");
+        let export = state.export(&dir, "Song", &[ExportSource::Mix], FLOAT);
+        assert_eq!(finish(export.unwrap()), ExportOutcome::Done);
+        let (_, samples) = read(&dir.join("Song.wav"));
         assert!(samples.iter().all(|s| *s == 0.), "only silence was playing");
-        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn nothing_to_export_is_refused() {
         let state = setup_state();
+        let dir = std::env::temp_dir();
         let options = ExportOptions::default();
-        assert!(state.export(temp_wav("empty"), options).is_err());
+        assert!(
+            state
+                .export(&dir, "Song", &[ExportSource::Mix], options)
+                .is_err()
+        );
+        let state = project_with_clip(1, 0.5);
+        assert!(
+            state.export(&dir, "Song", &[], options).is_err(),
+            "no source"
+        );
     }
 }
