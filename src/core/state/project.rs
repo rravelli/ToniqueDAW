@@ -2,13 +2,14 @@
 
 use std::{
     collections::HashMap,
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
 };
 
 use egui::Vec2;
 use tonique_engine::{
     edit::{
-        Bus, BusId, Channel, ClipLoop, Edit, Output, Track, TrackId,
+        Bus, BusId, Channel, ClipLoop, Edit, Output, SourceId, Track, TrackId,
         commands::{AddBus, SetBypass, SetOutput, SetSolo},
     },
     time::BeatPos,
@@ -18,9 +19,10 @@ use super::{
     DEFAULT_BPM, DEFAULT_LOOP_BARS, MASTER_TRACK_ID, ProjectState, report, sources::SourceRegistry,
 };
 use crate::{
+    analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,
     core::{
-        clip::AudioClip,
+        clip::{AudioClip, MIN_LENGTH},
         effect::{EffectKind, Setting},
         project::{
             ChannelFile, ClipFile, EffectFile, GroupFile, LoopFile, ProjectFile, TrackFile,
@@ -190,8 +192,9 @@ impl ProjectState {
     }
 
     /// Replace the project with `project`, saved in `dir`. Returns what
-    /// couldn't be restored (missing audio files, unknown parameters); the
-    /// rest is loaded anyway. Loading isn't undoable.
+    /// couldn't be restored (unknown parameters); the rest is loaded anyway.
+    /// Clips of missing files are kept, silent: see [`Self::missing_files`].
+    /// Loading isn't undoable.
     pub fn load_project(&mut self, project: &ProjectFile, dir: &Path) -> Vec<String> {
         self.new_project();
         let mut problems = Vec::new();
@@ -206,6 +209,8 @@ impl ProjectState {
         self.set_loop_range(BeatPos(project.loop_range.0), BeatPos(project.loop_range.1));
         self.set_looping(project.looping);
         self.restore_channel(MASTER_TRACK_ID, &project.master, &mut problems);
+        let bar = self.grid.beats_per_bar();
+        let reach = reach_by_file(project, self.bpm(), bar);
 
         // Parents come first, so each group can go straight into its parent.
         let mut groups: Vec<TrackId> = Vec::new();
@@ -253,7 +258,10 @@ impl ProjectState {
             let clips = track
                 .clips
                 .iter()
-                .filter_map(|clip| self.restore_clip(clip, dir, &mut problems))
+                .zip(placeholder_lengths(track, bar))
+                .filter_map(|(clip, placeholder)| {
+                    self.restore_clip(clip, dir, &reach, placeholder, &mut problems)
+                })
                 .collect();
             self.add_clips(&id, clips);
         }
@@ -269,18 +277,20 @@ impl ProjectState {
         &mut self,
         clip: &ClipFile,
         dir: &Path,
+        reach: &HashMap<&Path, f64>,
+        placeholder: f64,
         problems: &mut Vec<String>,
     ) -> Option<AudioClip> {
         let path: PathBuf = resolve_path(&clip.path, dir);
-        // The cache remembers files by path, even ones deleted since.
-        let audio = path
-            .exists()
-            .then(|| AUDIO_ANALYSIS_CACHE.get_or_analyze(path))
-            .flatten()
-            .filter(|audio| audio.duration.is_some());
-        let Some(audio) = audio else {
-            problems.push(format!("Missing audio file: {}", clip.path.display()));
-            return None;
+        let found = analyze(&path);
+        let audio = match (&found, reach.get(clip.path.as_path())) {
+            (Some(audio), _) => audio.clone(),
+            // Kept as they were, to play once the file is located.
+            (None, Some(seconds)) => AudioInfo::missing(path, *seconds),
+            (None, None) => {
+                problems.push(format!("Missing audio file: {}", clip.path.display()));
+                return None;
+            }
         };
         let bpm = self.bpm();
         let mut restored = AudioClip::new(self.new_clip_id(), audio, BeatPos(clip.position), bpm);
@@ -292,6 +302,10 @@ impl ProjectState {
             end_s: l.end,
         });
         match (clip.length, clip.trim_start, clip.trim_end) {
+            // Older projects give the part of the file played, which can't
+            // be told without the file: from its start, for the
+            // placeholder's length.
+            (None, _, _) if found.is_none() => restored.length = placeholder,
             (Some(length), _, _) => {
                 restored.offset = clip.offset;
                 restored.length = length;
@@ -304,6 +318,59 @@ impl ProjectState {
             }
         }
         Some(restored)
+    }
+
+    /// Files used by clips that weren't found, by name: each clip using
+    /// one is kept, silent, until it's located.
+    pub fn missing_files(&self) -> Vec<(SourceId, &AudioInfo)> {
+        self.sources.missing()
+    }
+
+    /// Use the file at `path` for the missing file `source`: every clip
+    /// using it plays it from now on. Then look for the other missing
+    /// files in the same folder, by name. Returns how many files were
+    /// located, or why `path` can't be used. Not undoable, but the new
+    /// paths are unsaved changes.
+    pub fn locate_file(&mut self, source: SourceId, path: &Path) -> Result<usize, String> {
+        let audio = analyze(path).ok_or_else(|| {
+            format!(
+                "“{}” isn't an audio file Tonique can read.",
+                path.file_name()
+                    .unwrap_or(path.as_os_str())
+                    .to_string_lossy()
+            )
+        })?;
+        self.sources.relink(source, audio);
+        let others = path.parent().map_or(0, |dir| self.search_files(dir, false));
+        Ok(1 + others)
+    }
+
+    /// Look for the missing files in `dir` by name, in its subfolders too
+    /// when `recursive`, and use those found. Returns how many were.
+    pub fn search_files(&mut self, dir: &Path, recursive: bool) -> usize {
+        let names: Vec<(SourceId, OsString)> = self
+            .missing_files()
+            .into_iter()
+            .filter_map(|(id, audio)| Some((id, audio.path.file_name()?.to_owned())))
+            .collect();
+        if names.is_empty() {
+            return 0;
+        }
+        let found = find_files(dir, recursive, |name| {
+            names.iter().any(|(_, missing)| missing == name)
+        });
+        let mut located = 0;
+        for (id, name) in names {
+            let audio = found
+                .iter()
+                .filter(|path| path.file_name() == Some(name.as_os_str()))
+                .find_map(|path| analyze(path));
+            if let Some(audio) = audio {
+                self.sources.relink(id, audio);
+                located += 1;
+            }
+        }
+        located
     }
 
     fn restore_channel(&mut self, id: TrackId, channel: &ChannelFile, problems: &mut Vec<String>) {
@@ -341,4 +408,92 @@ impl ProjectState {
             self.set_effect_collapsed(plugin.id, effect.collapsed);
         }
     }
+}
+
+/// The file at `path`, if it's there and of known length. The cache
+/// remembers files by path, even ones deleted since: check first.
+fn analyze(path: &Path) -> Option<AudioInfo> {
+    path.is_file()
+        .then(|| AUDIO_ANALYSIS_CACHE.get_or_analyze(path.to_path_buf()))
+        .flatten()
+        .filter(|audio| audio.duration.is_some())
+}
+
+/// How far into each file (as stored) the project's clips read, in
+/// seconds at `bpm`: the least a missing file is known to last. Clips of
+/// older projects count from the file's start, at their placeholder's
+/// length.
+fn reach_by_file(project: &ProjectFile, bpm: f32, bar: f64) -> HashMap<&Path, f64> {
+    let mut reach: HashMap<&Path, f64> = HashMap::new();
+    let clips = project
+        .tracks
+        .iter()
+        .flat_map(|track| track.clips.iter().zip(placeholder_lengths(track, bar)));
+    for (clip, placeholder) in clips {
+        let (offset, length) = match clip.length {
+            Some(length) => (clip.offset, length),
+            None => (0., placeholder),
+        };
+        let end = offset + length * 60. / bpm as f64;
+        let read = match clip.looped {
+            // Round the loop rather than on through the file.
+            Some(looped) if offset < looped.end => looped.end,
+            _ => end,
+        };
+        let longest = reach.entry(clip.path.as_path()).or_default();
+        *longest = longest.max(read);
+    }
+    reach
+}
+
+/// Files in `dir` (and its subfolders when `recursive`, skipping hidden
+/// ones) whose name is `wanted`.
+fn find_files(dir: &Path, recursive: bool, wanted: impl Fn(&OsStr) -> bool) -> Vec<PathBuf> {
+    /// Enough for a sample library, not a whole disk.
+    const MAX_ENTRIES: usize = 100_000;
+    let mut found = Vec::new();
+    let mut folders = vec![dir.to_path_buf()];
+    let mut seen = 0;
+    while let Some(folder) = folders.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            seen += 1;
+            if seen > MAX_ENTRIES {
+                return found;
+            }
+            let name = entry.file_name();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                if recursive && !name.to_string_lossy().starts_with('.') {
+                    folders.push(entry.path());
+                }
+            } else if wanted(&name) {
+                found.push(entry.path());
+            }
+        }
+    }
+    found
+}
+
+/// For each of `track`'s clips, the length to show it at when its part of
+/// its file isn't known (older projects, file missing): up to the next
+/// clip, at most a `bar`, so it overlaps none.
+fn placeholder_lengths(track: &TrackFile, bar: f64) -> Vec<f64> {
+    track
+        .clips
+        .iter()
+        .map(|clip| {
+            let next = track
+                .clips
+                .iter()
+                .map(|other| other.position)
+                .filter(|position| *position > clip.position)
+                .fold(f64::INFINITY, f64::min);
+            (next - clip.position).min(bar).max(MIN_LENGTH)
+        })
+        .collect()
 }

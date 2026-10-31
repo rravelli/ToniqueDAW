@@ -16,7 +16,7 @@ use crate::{
         project::{EXTENSION, ProjectFile, project_name},
         state::ProjectState,
     },
-    ui::widget::dialog,
+    ui::{missing_files::MissingFiles, widget::dialog},
 };
 
 /// What the user asked for.
@@ -30,6 +30,8 @@ pub enum ProjectAction {
     Save,
     SaveAs,
     ClearRecent,
+    /// List the audio files that weren't found, to locate them.
+    LocateMissing,
 }
 
 /// Waiting for the unsaved-changes prompt.
@@ -54,6 +56,7 @@ pub struct ProjectManager {
     saved: ProjectFile,
     pending: Option<Pending>,
     notice: Option<Notice>,
+    missing: MissingFiles,
     recent: RecentProjects,
     /// Set once the user agreed to close, to let the next close through.
     closing: bool,
@@ -69,6 +72,7 @@ impl ProjectManager {
             saved: state.project(None),
             pending: None,
             notice: None,
+            missing: MissingFiles::default(),
             recent: RecentProjects::load(),
             closing: false,
             title: String::new(),
@@ -120,6 +124,7 @@ impl ProjectManager {
             ProjectAction::SaveAs => {
                 self.save_as(state);
             }
+            ProjectAction::LocateMissing => self.missing.open_if_any(state),
         }
     }
 
@@ -137,6 +142,7 @@ impl ProjectManager {
         match pending {
             Pending::New => {
                 state.new_project();
+                self.missing.close();
                 self.replaced = true;
                 self.path = None;
                 self.saved = state.project(None);
@@ -167,6 +173,7 @@ impl ProjectManager {
         };
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let problems = state.load_project(&project, &dir);
+        self.missing.open_if_any(state);
         self.replaced = true;
         self.saved = state.project(Some(&dir));
         if !problems.is_empty() {
@@ -278,6 +285,11 @@ impl ProjectManager {
             self.prompt(ui, pending, state);
         }
         self.notice(ui);
+        // After the notice, one dialog at a time.
+        if self.notice.is_none() {
+            let dir = self.dir().map(Path::to_path_buf);
+            self.missing.ui(ui, state, dir.as_deref());
+        }
     }
 
     fn prompt(&mut self, ui: &Ui, pending: Pending, state: &mut ProjectState) {

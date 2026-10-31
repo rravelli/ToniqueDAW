@@ -114,6 +114,17 @@ impl AppMenuBar {
             if menu_item(ui, "Export audio…", export) {
                 commands.push(Action::ExportAudio);
             }
+            let missing = state.missing_files().len();
+            if missing > 0 {
+                ui.separator();
+                let label = match missing {
+                    1 => "Locate missing file…".to_string(),
+                    n => format!("Locate {n} missing files…"),
+                };
+                if ui.button(label).clicked() {
+                    picked = Some(ProjectAction::LocateMissing);
+                }
+            }
         });
         picked
     }

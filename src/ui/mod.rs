@@ -12,6 +12,7 @@ mod effects;
 mod export;
 mod font;
 mod graph;
+mod missing_files;
 mod panels;
 mod project;
 mod settings;

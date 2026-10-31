@@ -148,6 +148,7 @@ mod tests {
             bit_depth: None,
             num_samples: None,
             path: PathBuf::from("test.wav"),
+            missing: false,
         };
         AudioClip::new(ClipId(id), audio, BeatPos(position), BPM)
     }

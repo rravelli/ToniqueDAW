@@ -155,9 +155,13 @@ impl ProjectState {
             .iter()
             .flat_map(|track| &track.clips)
             .all(|clip| match clip.content {
-                ClipContent::Audio { source, .. } => edit
-                    .source(source)
-                    .is_some_and(|data| data.sample_rate() == rate),
+                // Missing files are silent: nothing to wait for.
+                ClipContent::Audio { source, .. } => {
+                    self.sources.info(source).is_some_and(|audio| audio.missing)
+                        || edit
+                            .source(source)
+                            .is_some_and(|data| data.sample_rate() == rate)
+                }
                 ClipContent::Midi { .. } => true,
             })
     }

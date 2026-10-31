@@ -53,6 +53,31 @@ impl SourceRegistry {
         id
     }
 
+    /// Play `audio` for source `id` from now on: every clip using it does.
+    /// For a missing file found again.
+    pub fn relink(&mut self, id: SourceId, audio: AudioInfo) {
+        if let Some(old) = self.info.get(&id)
+            && self.by_path.get(&old.path) == Some(&id)
+        {
+            self.by_path.remove(&old.path);
+        }
+        self.by_path.entry(audio.path.clone()).or_insert(id);
+        self.info.insert(id, audio.clone());
+        self.convert(id, audio);
+    }
+
+    /// Sources whose file is missing, by file name.
+    pub fn missing(&self) -> Vec<(SourceId, &AudioInfo)> {
+        let mut missing: Vec<_> = self
+            .info
+            .iter()
+            .filter(|(_, audio)| audio.missing)
+            .map(|(id, audio)| (*id, audio))
+            .collect();
+        missing.sort_by(|a, b| (&a.1.name, &a.1.path).cmp(&(&b.1.name, &b.1.path)));
+        missing
+    }
+
     /// The engine now runs at `rate`: convert every file again.
     pub fn set_engine_rate(&mut self, rate: f64) {
         if rate == self.engine_rate {
@@ -67,6 +92,10 @@ impl SourceRegistry {
     /// Convert `audio` to the engine rate in the background, decoding it
     /// first if no one has yet.
     fn convert(&self, id: SourceId, audio: AudioInfo) {
+        // Silent until located.
+        if audio.missing {
+            return;
+        }
         audio.load_samples();
         let (rate, tx) = (self.engine_rate, self.loaded_tx.clone());
         std::thread::spawn(move || {

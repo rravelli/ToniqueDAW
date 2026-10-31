@@ -132,6 +132,9 @@ pub struct AudioInfo {
     pub bit_depth: Option<u32>,
     pub num_samples: Option<u64>,
     pub path: PathBuf,
+    /// The file wasn't found: a stand-in keeping its clips until it's
+    /// located (see [`AudioInfo::missing`]). Never decoded.
+    pub missing: bool,
 }
 
 impl AudioInfo {
@@ -151,6 +154,28 @@ impl AudioInfo {
             bit_depth: None,
             num_samples: None,
             path: std::path::PathBuf::from(format!("test-{seconds}.wav")),
+            missing: false,
+        }
+    }
+
+    /// A stand-in for a file that isn't at `path`, at least `seconds` long
+    /// (as far as its clips read): no waveform, silent.
+    pub fn missing(path: PathBuf, seconds: f64) -> Self {
+        let data = AudioData::default();
+        data.failed.store(true, Ordering::Release);
+        Self {
+            name: path
+                .file_name()
+                .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy())
+                .into_owned(),
+            duration: Some(Duration::from_secs_f64(seconds.max(0.))),
+            data: Arc::new(data),
+            sample_rate: 48000,
+            channels: 2,
+            bit_depth: None,
+            num_samples: None,
+            path,
+            missing: true,
         }
     }
 
@@ -175,6 +200,9 @@ impl AudioInfo {
     }
 
     fn spawn_decode(&self, keep_samples: bool) {
+        if self.missing {
+            return;
+        }
         let data = Arc::downgrade(&self.data);
         let path = self.path.clone();
         std::thread::spawn(move || {
@@ -251,6 +279,7 @@ pub fn read_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoEr
         num_samples: codec_params.n_frames,
         path: path.as_ref().to_path_buf(),
         data,
+        missing: false,
     })
 }
 
