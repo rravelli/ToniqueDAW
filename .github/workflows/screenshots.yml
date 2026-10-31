@@ -24,6 +24,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # No debug info: of no use to render, it makes the build (and the
+  # cache) several times bigger and linking slower.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
 
 jobs:
   render:
@@ -37,9 +41,10 @@ jobs:
         run: >
           sudo apt-get update && sudo apt-get install -y
           libasound2-dev pkg-config mesa-vulkan-drivers imagemagick
+      # Saved from pull requests too: no other job builds this test
+      # binary, so without its own cache every push would build from
+      # nothing. A pull request starts from master's.
       - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Render
         env:
           WGPU_BACKEND: vulkan
