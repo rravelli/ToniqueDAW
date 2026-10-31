@@ -34,7 +34,7 @@ rand = "0.9.2"
 sysinfo = "0.36.1"
 directories = "6.0.0"
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.141"
+serde_json = { version = "1.0.141", features = ["float_roundtrip"] }
 rustfft = "6.4.0"
 toml = "1"
 egui_extras = { version = "0.36", features = ["svg"] }
