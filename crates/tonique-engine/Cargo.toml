@@ -21,7 +21,9 @@ hound = "3.5"
 libc = "0.2"
 rtrb = "0.4"
 rustfft = "6.4"
-cpal = { version = "0.18", optional = true }
+# PulseAudio (pure Rust, also served by PipeWire) lists the real outputs on
+# Linux, Bluetooth ones included; plain ALSA only sees sound cards.
+cpal = { version = "0.18", optional = true, features = ["pulseaudio"] }
 
 [[example]]
 name = "play"

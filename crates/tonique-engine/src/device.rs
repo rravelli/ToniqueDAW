@@ -14,6 +14,10 @@ pub type DeviceError = Box<dyn std::error::Error + Send + Sync>;
 /// Sample rates offered when a device supports a continuous range.
 const COMMON_RATES: [u32; 8] = [22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000];
 
+/// Frames per callback through a sound server when none is asked for: left
+/// to itself, PulseAudio buffers about two seconds.
+const SERVER_BUFFER_FRAMES: u32 = 512;
+
 /// An output device of the default host.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceInfo {
@@ -43,6 +47,22 @@ fn device_name(device: &cpal::Device) -> String {
     device
         .description()
         .map_or_else(|_| "Unknown device".into(), |d| d.name().to_string())
+}
+
+/// Whether the device is reached through a sound server, which picks a
+/// large buffer when not given one.
+fn on_sound_server(device: &cpal::Device) -> bool {
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd"
+    ))]
+    return device
+        .id()
+        .is_ok_and(|id| id.host() == cpal::HostId::PulseAudio);
+    #[allow(unreachable_code)]
+    false
 }
 
 /// Which device to open and how. `None` fields use the device's defaults;
@@ -87,7 +107,10 @@ impl OutputDevice {
         {
             config.sample_rate = rate;
         }
-        if let Some(frames) = options.buffer_frames
+        let frames = options
+            .buffer_frames
+            .or_else(|| on_sound_server(&out.device).then_some(SERVER_BUFFER_FRAMES));
+        if let Some(frames) = frames
             && out
                 .buffer_size_range()
                 .is_none_or(|(min, max)| (min..=max).contains(&frames))
