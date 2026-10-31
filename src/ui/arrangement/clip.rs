@@ -160,7 +160,9 @@ impl ClipView<'_> {
             self.rect
         };
         let (pos, size) = (drawn.min, drawn.size());
-        let sample_rect = Rect::from_min_max(viewport.clamp(pos), viewport.clamp(pos + size));
+        // Not clamped into the viewport: it's upside down in a window too
+        // small (or zoomed in too far) to fit the timeline.
+        let sample_rect = Rect::from_min_size(pos, size).intersect(viewport);
         let painter = ui.painter_at(sample_rect);
         let theme = ui.app_theme();
         // The header is the clip, to select and move: solid in its track's

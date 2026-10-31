@@ -359,8 +359,10 @@ fn list_ui(
     if ui.response().clicked_elsewhere() {
         list.selected_audio = None;
     }
+    // A short browser (a small window, a tall effects panel) leaves the
+    // list no room under the preview.
     let height = if list.selected_audio.is_some() {
-        ui.available_height() - PREVIEW_HEIGHT
+        (ui.available_height() - PREVIEW_HEIGHT).max(0.)
     } else {
         ui.available_height()
     };

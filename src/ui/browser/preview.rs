@@ -232,7 +232,10 @@ fn controls_ui(
 /// volume.
 fn volume_ui(ui: &mut Ui, settings: &mut PreviewSettings) {
     let theme = ui.app_theme();
-    let width = VOLUME_WIDTH.min(ui.available_width() - BUTTON - BUTTON_GAP);
+    // None in a browser too narrow for it.
+    let width = VOLUME_WIDTH
+        .min(ui.available_width() - BUTTON - BUTTON_GAP)
+        .max(0.);
     let (rect, response) = ui.allocate_exact_size(vec2(width, BUTTON), Sense::click_and_drag());
     let silent = settings.muted || settings.volume <= 0.;
     let speaker = FlatButton::ghost(if silent { SPEAKER_SLASH } else { SPEAKER_LOW })

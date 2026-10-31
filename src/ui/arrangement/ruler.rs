@@ -42,15 +42,14 @@ impl Ruler {
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         ui.spacing_mut().interact_size.y = 0.;
         ui.horizontal(|ui| {
-            // ColorBar for zoom control
+            // ColorBar for zoom control. None in a window too narrow for it.
+            let width = ui.available_width().max(0.);
             let ruler_rect = egui::Rect::from_min_size(
                 egui::pos2(ui.min_rect().left(), ui.min_rect().top()),
-                egui::vec2(ui.available_width(), RULER_HEIGHT),
+                egui::vec2(width, RULER_HEIGHT),
             );
-            let (nav_bar_response, painter) = ui.allocate_painter(
-                vec2(ui.available_width(), RULER_HEIGHT),
-                Sense::click_and_drag(),
-            );
+            let (nav_bar_response, painter) =
+                ui.allocate_painter(vec2(width, RULER_HEIGHT), Sense::click_and_drag());
 
             // Draw rectangle
             painter.rect_filled(ruler_rect, 0.0, ui.app_theme().bg_raised);
