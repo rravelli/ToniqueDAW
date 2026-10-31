@@ -264,12 +264,7 @@ impl Source<'_> {
     /// peak pyramid otherwise (rounded to buckets of a quarter column).
     fn range(&self, ch: usize, start: usize, end: usize) -> Option<(f32, f32)> {
         match self.raw {
-            Some(raw) if self.spp < RAW_MAX_SPP => {
-                let samples = raw.channel(ch).get(start..end.min(raw.len()))?;
-                let min = samples.iter().copied().reduce(f32::min)?;
-                let max = samples.iter().copied().reduce(f32::max)?;
-                Some((min, max))
-            }
+            Some(raw) if self.spp < RAW_MAX_SPP => self.peaks.range_exact(raw, ch, start, end),
             _ => self
                 .peaks
                 .range_approx(ch, start, end, (self.spp / 4.) as usize),

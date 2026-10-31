@@ -71,6 +71,42 @@ impl WaveformPeaks {
         (min <= max).then_some((min, max))
     }
 
+    /// Exact `(min, max)` of channel `ch` of `samples` (the buffer these
+    /// peaks were built from) over `start..end`, or `None` if it's empty.
+    /// Whole level-0 buckets are read from the peaks, only the edges from
+    /// the samples.
+    pub fn range_exact(
+        &self,
+        samples: &SampleBuffer,
+        ch: usize,
+        start: usize,
+        end: usize,
+    ) -> Option<(f32, f32)> {
+        let data = samples.channel(ch);
+        let end = end.min(data.len());
+        if start >= end {
+            return None;
+        }
+        let scan = |from: usize, to: usize| {
+            data[from..to]
+                .iter()
+                .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
+                    (lo.min(v), hi.max(v))
+                })
+        };
+        let inner_start = start.next_multiple_of(BASE_BUCKET);
+        let inner_end = end / BASE_BUCKET * BASE_BUCKET;
+        let level = self.channels.get(ch).and_then(|levels| levels.first());
+        let (min, max) = match level {
+            Some(level) if inner_start < inner_end && inner_end <= self.frames => merge(
+                merge(scan(start, inner_start), scan(inner_end, end)),
+                reduce(level, inner_start / BASE_BUCKET, inner_end / BASE_BUCKET),
+            ),
+            _ => scan(start, end),
+        };
+        (min <= max).then_some((min, max))
+    }
+
     /// Like [`Self::range`], but reads a single level: the coarsest whose
     /// buckets hold at most `resolution` samples. Edges are rounded out to
     /// that level's buckets. Cheaper than `range` when drawing many
@@ -332,6 +368,36 @@ impl PeakBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn range_exact_matches_the_samples() {
+        let buffer = SampleBuffer::new(vec![noise(5000, 1), noise(5000, 2)], 48000.);
+        let peaks = WaveformPeaks::from_buffer(&buffer);
+        for ch in 0..2 {
+            let data = buffer.channel(ch);
+            for (start, end) in [
+                (0, 1),
+                (3, 60),
+                (10, 200),
+                (64, 128),
+                (63, 129),
+                (100, 4999),
+                (4990, 6000),
+            ] {
+                let slice = &data[start..end.min(data.len())];
+                let expected = (
+                    slice.iter().copied().fold(f32::INFINITY, f32::min),
+                    slice.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+                );
+                assert_eq!(
+                    peaks.range_exact(&buffer, ch, start, end),
+                    Some(expected),
+                    "{start}..{end}"
+                );
+            }
+        }
+        assert_eq!(peaks.range_exact(&buffer, 0, 5000, 5100), None);
+    }
 
     /// Deterministic pseudo-random samples in [-1, 1).
     fn noise(len: usize, seed: u64) -> Vec<f32> {
