@@ -14,6 +14,10 @@ pub struct Clipboard {
     /// Index of the topmost copied track, to paste back there when no
     /// track is selected.
     top_track: usize,
+    /// The tempo then: clips keep their length in seconds, so pasted at
+    /// another, their length in beats changes (as [`ProjectState::set_bpm`]
+    /// does to those in the arrangement).
+    bpm: f32,
 }
 
 impl ProjectState {
@@ -28,13 +32,16 @@ impl ProjectState {
             return false;
         };
         let bpm = self.bpm();
-        let cropped = self.selection_bounds().is_some();
+        let zone = self.selection_bounds();
         let clips: Vec<(usize, AudioClip)> = self
             .selected_clips()
             .iter()
             .filter_map(|id| self.find_clip(*id))
+            // A clip selected by the zone may have left it since (a slower
+            // tempo shortens it in beats): cropped, nothing would be left.
+            .filter(|(_, clip)| zone.is_none_or(|zone| zone.overlaps(clip, bpm)))
             .filter_map(|(track, mut clip)| {
-                if cropped {
+                if zone.is_some() {
                     clip.crop(start, end, bpm);
                 }
                 // From here, positions are relative to the copied range.
@@ -49,6 +56,7 @@ impl ProjectState {
             clips: clips.into_iter().map(|(t, c)| (t - top_track, c)).collect(),
             length: end - start,
             top_track,
+            bpm,
         };
         true
     }
@@ -101,6 +109,7 @@ impl ProjectState {
             .unwrap_or(self.clipboard.top_track);
         let at = self.edit_cursor;
         let clipboard = self.clipboard.clone();
+        let bpm = self.bpm();
         let mut pasted = Vec::new();
         // One undo step; each add sees the previous ones.
         self.begin_batch();
@@ -112,6 +121,7 @@ impl ProjectState {
             let track = self.edit().tracks[index].id;
             let mut copy = clip.with_id(self.new_clip_id());
             copy.position = at + copy.position.0;
+            copy.length *= (bpm / clipboard.bpm) as f64;
             pasted.push(copy.id);
             self.add_clips(&track, vec![copy]);
         }

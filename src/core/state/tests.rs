@@ -699,6 +699,35 @@ fn cutting_a_zone_removes_only_its_part() {
 }
 
 #[test]
+fn pasting_after_a_tempo_change_keeps_clips_their_length_in_seconds() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let clip = add_clip(&mut state, track, 0., 2.); // beats 0..4
+    state.select_clips(vec![clip]);
+    assert!(state.copy_selection());
+    // Half as fast: 2 s is 2 beats, not past the file's end.
+    state.set_bpm(60.);
+    state.set_edit_cursor(BeatPos(8.));
+    state.paste();
+    assert_eq!(spans(&state, track), vec![(0., 2.), (8., 10.)]);
+}
+
+#[test]
+fn copying_a_zone_leaves_out_clips_no_longer_in_it() {
+    use crate::core::state::SelectionBounds;
+
+    let mut state = setup_state();
+    let track = state.add_track();
+    add_clip(&mut state, track, 0., 2.); // beats 0..4
+    state.select_in_bounds(SelectionBounds::between((0, BeatPos(3.)), (0, BeatPos(4.))));
+    // Slower, the clip is shorter in beats: 0..1, before the zone.
+    state.set_bpm(30.);
+    assert!(!state.copy_selection(), "nothing of it is in the zone");
+    state.paste();
+    assert_eq!(spans(&state, track), vec![(0., 1.)], "no empty clip pasted");
+}
+
+#[test]
 fn a_zone_only_picks_clips_inside_it_not_touching_it() {
     use crate::core::state::SelectionBounds;
 
