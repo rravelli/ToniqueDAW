@@ -985,6 +985,41 @@ fn soloing_a_bus_solos_everything_inside() {
     assert!(s.perform(SetSolo::bus(inner, true)).is_ok());
 }
 
+/// A channel muted before the engine starts is silent from the first
+/// sample: its mute gain doesn't fade out from full.
+#[test]
+fn muted_channels_are_silent_from_the_start() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(sine(48000));
+    let mut t = Track::new(&mut edit, "muted");
+    let clip = Clip::audio(&mut edit, BeatPos(0.0), 1.0, src);
+    t.clips.push(clip);
+    t.channel.muted = true;
+    edit.tracks.push(t);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).unwrap();
+    s.play().unwrap();
+    assert_eq!(peak(&render_offline(&mut p, 2048, 2)), 0.);
+}
+
+/// Soloing a track in a detached copy (an export's) leaves what the
+/// original plays alone, though the copy shares its parameters.
+#[test]
+fn soloing_a_detached_copy_leaves_the_original_alone() {
+    let (edit, grouped, outside, _, _) = nested_groups();
+    let mut copy = edit.detached();
+    copy.track_mut(grouped).unwrap().soloed = true;
+    copy.refresh_mute_gains();
+    assert!(!copy.track(outside).unwrap().channel.audible());
+    assert!(edit.track(outside).unwrap().channel.audible());
+
+    // A plain clone shares the gains (why `detached` exists).
+    let mut clone = edit.clone();
+    clone.track_mut(grouped).unwrap().soloed = true;
+    clone.refresh_mute_gains();
+    assert!(!edit.track(outside).unwrap().channel.audible());
+}
+
 #[test]
 fn buses_cannot_feed_into_themselves() {
     let (edit, _, _, inner, outer) = nested_groups();

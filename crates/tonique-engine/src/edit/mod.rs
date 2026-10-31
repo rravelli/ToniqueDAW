@@ -663,6 +663,25 @@ impl Edit {
         }
     }
 
+    /// A copy to render apart from this edit (an export, say): its mute and
+    /// solo gains and its meters are its own, so changing its mute or solo
+    /// state leaves this edit's playback alone. Parameter values stay
+    /// shared.
+    pub fn detached(&self) -> Self {
+        let mut edit = self.clone();
+        let channels = edit
+            .tracks
+            .iter_mut()
+            .map(|t| &mut t.channel)
+            .chain(edit.buses.iter_mut().map(|b| &mut b.channel))
+            .chain([&mut edit.master]);
+        for channel in channels {
+            channel.mute_gain = Arc::new(AtomicParam::new(channel.mute_gain.get()));
+            channel.meter = Arc::default();
+        }
+        edit
+    }
+
     /// End of the last clip.
     pub fn length(&self) -> BeatPos {
         BeatPos(
