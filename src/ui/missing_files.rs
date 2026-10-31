@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use egui::{Align, Context, FontFamily, Id, Key, Layout, RichText, Ui, vec2};
+use egui::{Align, Context, FontFamily, Frame, Id, Key, Layout, Margin, RichText, Ui, vec2};
 use egui_phosphor::regular::{CHECK, WARNING};
 use rfd::FileDialog;
 
@@ -16,6 +16,9 @@ use crate::{
         widget::dialog,
     },
 };
+
+/// How much of the warning colour the bar over the arrangement has.
+const BAR_TINT: f32 = 0.14;
 
 /// Extensions offered when locating a file; any readable file is taken.
 const AUDIO_EXTENSIONS: &[&str] = &["wav", "mp3", "flac", "ogg", "aiff", "aif", "aac", "m4a"];
@@ -163,6 +166,41 @@ impl MissingFiles {
             self.status = Some(Status::Located(state.search_files(&folder, true)));
         }
     }
+}
+
+/// Across the window while any file is missing: how many, and a button
+/// to locate them.
+pub fn bar(ui: &mut Ui, state: &ProjectState) {
+    let missing = state.missing_files().len();
+    if missing == 0 {
+        return;
+    }
+    let theme = ui.app_theme();
+    egui::Panel::top("missing-files-bar")
+        .resizable(false)
+        .frame(
+            Frame::new()
+                .fill(theme.bg_panel.lerp_to_gamma(theme.warning, BAR_TINT))
+                .inner_margin(Margin::symmetric(10, 4)),
+        )
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.;
+                ui.label(
+                    RichText::new(WARNING)
+                        .family(FontFamily::Name(PHOSPHOR_REGULAR.into()))
+                        .color(theme.warning),
+                );
+                let text = match missing {
+                    1 => "An audio file is missing: its clips are silent.".to_string(),
+                    n => format!("{n} audio files are missing: their clips are silent."),
+                };
+                ui.label(RichText::new(text).size(font_size::BODY));
+                if ui.add(dialog::button("Locate…")).clicked() {
+                    MissingFiles::request(ui.ctx());
+                }
+            });
+        });
 }
 
 fn request_id() -> Id {
