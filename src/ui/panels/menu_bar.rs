@@ -5,6 +5,7 @@ use crate::{
     ui::{
         about::AboutWindow,
         commands::Commands,
+        missing_files,
         project::ProjectAction,
         theme::ThemeExt,
         workspace::{MainView, Workspace},
@@ -124,7 +125,7 @@ impl AppMenuBar {
                 .add_enabled(!state.missing_files().is_empty(), Button::new(label))
                 .clicked()
             {
-                picked = Some(ProjectAction::LocateMissing);
+                missing_files::request(ui.ctx(), None);
             }
         });
         picked

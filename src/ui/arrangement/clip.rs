@@ -4,7 +4,7 @@ use crate::{
     ui::arrangement::grid::PaintGrid,
     ui::{
         font::PHOSPHOR_REGULAR,
-        missing_files::MissingFiles,
+        missing_files,
         theme::{ThemeExt, contrast, with_alpha},
         waveform::paint_waveform,
         widget::context_menu::ContextMenuButton,
@@ -375,7 +375,7 @@ impl ClipView<'_> {
                     .add(ContextMenuButton::new(MAGNIFYING_GLASS, "Locate file…"))
                     .clicked()
             {
-                MissingFiles::request(ui.ctx());
+                missing_files::request(ui.ctx(), Some(clip.audio.path.clone()));
             }
             if ui
                 .add(ContextMenuButton::new(TRASH, "Delete").text_color(ui.app_theme().danger))

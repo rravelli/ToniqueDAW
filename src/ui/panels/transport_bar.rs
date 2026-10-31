@@ -5,7 +5,7 @@ use egui::{
 };
 use egui_phosphor::{
     fill::SIDEBAR_SIMPLE,
-    regular::{CPU, GRAPH, RECORD, SPEAKER_SLASH},
+    regular::{CPU, GRAPH, RECORD, SPEAKER_SLASH, WARNING},
 };
 use tonique_engine::time::TimeSignature;
 
@@ -16,6 +16,7 @@ use crate::{
         RECORDING,
         commands::Commands,
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
+        missing_files,
         theme::{ThemeExt, with_alpha},
         widget::{flat_button::FlatButton, input::NumberInput},
         workspace::{MainView, Workspace},
@@ -175,6 +176,11 @@ impl TransportBar {
         }
         if state.audio_lost() && self.no_audio_ui(ui, state).clicked() {
             commands.push(Action::OpenSettings);
+        }
+        if let Some(missing) = self.missing_files_ui(ui, state)
+            && missing.clicked()
+        {
+            missing_files::request(ui.ctx(), None);
         }
         ui.add_space(GROUP_GAP);
         self.bpm_input.value = state.bpm();
@@ -399,6 +405,25 @@ impl TransportBar {
                 .tooltip(format!(
                     "No audio output ({error}). Retrying… Click to choose a device."
                 )),
+        )
+    }
+
+    /// While audio files are missing: a warning, showing them when clicked.
+    fn missing_files_ui(&mut self, ui: &mut Ui, state: &ProjectState) -> Option<Response> {
+        let tooltip = match state.missing_files().len() {
+            0 => return None,
+            1 => "An audio file is missing: its clips are silent. Click to find it.".into(),
+            n => {
+                format!("{n} audio files are missing: their clips are silent. Click to find them.")
+            }
+        };
+        Some(
+            ui.add(
+                FlatButton::new(WARNING)
+                    .square(BUTTON_SIZE)
+                    .color(ui.app_theme().warning)
+                    .tooltip(tooltip),
+            ),
         )
     }
 

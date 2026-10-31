@@ -5,7 +5,6 @@ use crate::{
     ui::{
         commands::Commands,
         export::ExportWindow,
-        missing_files,
         panels::{
             bottom_panel::BottomPanel,
             central_panel::CentralPanel,
@@ -116,7 +115,6 @@ impl ToniqueApp {
             .menu_bar
             .show(ui, state, workspace, commands, self.project.recent());
         self.transport_bar.show(ui, state, workspace, commands);
-        missing_files::bar(ui, state);
         self.bottom_panel.show(ui, state, workspace, commands);
         self.left_panel.show(ui, state, workspace, commands);
         self.central_panel.show(ui, state, workspace, commands);

@@ -52,6 +52,13 @@ impl SearchBar {
         self.busy = busy;
     }
 
+    /// Replace what's typed, as if already reported.
+    pub fn set_query(&mut self, query: impl Into<String>) {
+        self.query = query.into();
+        self.submitted.clone_from(&self.query);
+        self.edited_at = None;
+    }
+
     /// What's typed, as typed: for searches cheap enough to run at every
     /// key, rather than once typing pauses.
     pub fn query(&self) -> &str {
