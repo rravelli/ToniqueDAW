@@ -1,11 +1,21 @@
 name: Screenshots
 
-# Renders the app headless and keeps the images, to look at a PR's UI
-# without building it.
+# Renders the README's images headless. On a pull request, compares them
+# with master's and keeps both, for the Publish screenshots workflow to
+# show in a comment; on master, keeps them as the next pull requests'
+# "before".
+#
+# This runs the pull request's code, so it gets no write access and no
+# secrets: publishing happens in publish-screenshots.yml, from master.
 on:
   pull_request:
     branches: [master]
+  push:
+    branches: [master]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -26,29 +36,26 @@ jobs:
       - name: Install system dependencies
         run: >
           sudo apt-get update && sudo apt-get install -y
-          libasound2-dev pkg-config mesa-vulkan-drivers vulkan-tools
-      - name: Vulkan devices
-        run: vulkaninfo --summary
+          libasound2-dev pkg-config mesa-vulkan-drivers imagemagick
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Render
         env:
           WGPU_BACKEND: vulkan
-        # The README's images, of the demo song, and a look at the app.
         run: >
           cargo test --bin tonique_daw -- --ignored --nocapture
-          ui::app::tests::screenshots ui::app::tests::readme::readme_images
-      # The screenshots test only warns when it can't render: no image is
-      # the failure.
-      - name: Check images
+          ui::app::tests::readme::readme_images
+      - name: Collect
         run: |
-          ls -l target/ui-screenshots images
-          test -n "$(find target/ui-screenshots -name '*.png')"
+          mkdir -p out
+          cp images/*.png out/
+      - name: Compare with master
+        if: github.event_name == 'pull_request'
+        run: .github/scripts/compare-screenshots.sh out
       - uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          path: |
-            target/ui-screenshots/*.png
-            images/*.png
+          path: out/
           if-no-files-found: error
+          retention-days: 7
