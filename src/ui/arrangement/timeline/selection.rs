@@ -86,7 +86,13 @@ impl Timeline {
             return;
         };
         let theme = ui.app_theme();
-        let edge = zone.shrink(0.5);
+        // Only what's on screen: zoomed in, the zone can be millions of
+        // points wide, and each dash is a shape. Edges cut off land just
+        // outside, where they aren't painted.
+        let edge = zone.intersect(viewport.expand(2.)).shrink(0.5);
+        if !edge.is_positive() {
+            return;
+        }
         let outline = [
             edge.left_top(),
             edge.right_top(),
