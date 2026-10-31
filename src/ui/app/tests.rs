@@ -63,19 +63,9 @@ fn app() -> Harness<'static, ToniqueApp> {
 }
 
 fn app_with(start: Start) -> Harness<'static, ToniqueApp> {
-    let samples = samples_folder();
-    let config = serde_json::json!({ "directories": [samples] });
-    let dir = config_dir().unwrap();
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("config.json"), config.to_string()).unwrap();
-
-    let mut harness = Harness::builder().with_size(SIZE).build_eframe(|cc| {
-        cc.egui_ctx.set_fonts(fonts());
-        egui_extras::install_image_loaders(&cc.egui_ctx);
-        let settings = Settings::default();
-        let engine = engine_without_audio(&settings);
-        ToniqueApp::new(engine, Err("no audio in tests".into()), settings, cc)
-    });
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .build_eframe(|cc| new_app(cc, &samples_folder(), Settings::default()));
     let state = &mut harness.state_mut().state;
     // Back to back, then overlapping.
     const MANY: &[(f32, f64)] = &[(1., 0.), (1., 2.), (0.5, 4.), (8., 3.)];
@@ -94,6 +84,20 @@ fn app_with(start: Start) -> Harness<'static, ToniqueApp> {
     }
     harness.run_steps(4);
     harness
+}
+
+/// The app as `main` makes it without an audio device, its browser showing
+/// `folder`.
+fn new_app(cc: &eframe::CreationContext<'_>, folder: &Path, settings: Settings) -> ToniqueApp {
+    let config = serde_json::json!({ "directories": [folder] });
+    let dir = config_dir().unwrap();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("config.json"), config.to_string()).unwrap();
+
+    cc.egui_ctx.set_fonts(fonts());
+    egui_extras::install_image_loaders(&cc.egui_ctx);
+    let engine = engine_without_audio(&settings);
+    ToniqueApp::new(engine, Err("no audio in tests".into()), settings, cc)
 }
 
 /// A folder of short sine waves (one in a subfolder, one mono), a file that
@@ -602,3 +606,5 @@ fn screenshots() {
     harness.run_steps(10);
     screenshot(&mut harness, "start");
 }
+
+mod readme;

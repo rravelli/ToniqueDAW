@@ -117,6 +117,12 @@ impl TrackHeaders {
         self.lanes = lanes;
     }
 
+    /// Where the timeline's lanes were last drawn.
+    #[cfg(test)]
+    pub fn lanes(&self) -> Rect {
+        self.lanes
+    }
+
     /// Show the list, as a panel: before the central panel, which takes
     /// what's left. `new_tracks`: the colours of the tracks a drop on the
     /// timeline would add, shown as ghost headers below the last. Returns

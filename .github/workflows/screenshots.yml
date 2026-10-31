@@ -35,14 +35,20 @@ jobs:
       - name: Render
         env:
           WGPU_BACKEND: vulkan
-        run: cargo test --bin tonique_daw ui::app::tests::screenshots -- --ignored --nocapture
-      # The test only warns when it can't render: no image is the failure.
+        # The README's images, of the demo song, and a look at the app.
+        run: >
+          cargo test --bin tonique_daw -- --ignored --nocapture
+          ui::app::tests::screenshots ui::app::tests::readme::readme_images
+      # The screenshots test only warns when it can't render: no image is
+      # the failure.
       - name: Check images
         run: |
-          ls -l target/ui-screenshots
+          ls -l target/ui-screenshots images
           test -n "$(find target/ui-screenshots -name '*.png')"
       - uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          path: target/ui-screenshots/*.png
+          path: |
+            target/ui-screenshots/*.png
+            images/*.png
           if-no-files-found: error
