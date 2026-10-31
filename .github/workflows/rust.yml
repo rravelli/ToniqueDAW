@@ -5,6 +5,9 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # Builds the week's caches (see below).
+  schedule:
+    - cron: "0 3 * * 1"
 
 # A new push to the same branch/PR cancels the run it supersedes.
 concurrency:
@@ -16,7 +19,11 @@ env:
   # Incremental artifacts are useless on fresh runners and bloat the cache.
   CARGO_INCREMENTAL: 0
 
-# Jobs run in parallel; each one caches its own build.
+# Jobs run in parallel; each one caches its own build, under a new key
+# each week: on a partial match (Cargo.toml or Cargo.lock changed),
+# rust-cache first deletes every artifact older than a week, so an older
+# cache is wiped and the build starts from nothing. Monday's scheduled
+# run builds the week's caches.
 jobs:
   fmt:
     name: Format
@@ -38,7 +45,11 @@ jobs:
           components: clippy
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ steps.week.outputs.week }}
       # Also enforces the workspace lints (no `unwrap()` outside tests).
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -53,12 +64,14 @@ jobs:
           components: llvm-tools-preview
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
         with:
           # Own key: the job id alone matched the old `cargo test` cache,
           # and an exact match is never re-saved, so the coverage build
           # (target/llvm-cov-target) was never cached.
-          key: llvm-cov
+          key: llvm-cov-${{ steps.week.outputs.week }}
           cache-on-failure: true
           # Only master writes the cache; PRs restore it without evicting it.
           save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -86,7 +99,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - id: week
+        shell: bash
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
         with:
+          key: ${{ steps.week.outputs.week }}
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: cargo check --workspace --all-targets --locked
