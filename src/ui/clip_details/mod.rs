@@ -1,12 +1,12 @@
 //! The bottom panel's view of one clip.
 
+mod audio;
 mod inspector;
 mod markers;
 #[cfg(test)]
 mod tests;
-mod warp;
 
-use egui::{CursorIcon, Rect, Response, ScrollArea, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
+use egui::{CursorIcon, Rect, Response, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 use crate::{
@@ -19,11 +19,9 @@ use crate::{
     },
 };
 
-use inspector::inspector_ui;
+use inspector::{Panels, inspector_ui};
 use markers::FLAG_SIZE;
 
-/// The clip's properties, left of the editor.
-const INSPECTOR_WIDTH: f32 = 210.;
 const PADDING: f32 = 8.;
 /// The ruler: the loop's bracket along its top, the bars, and the markers'
 /// flags along its bottom.
@@ -75,7 +73,7 @@ impl ClipDetails {
         state: &mut ProjectState,
     ) {
         let rect = ui.available_rect_before_wrap().shrink(PADDING);
-        let inspector_width = INSPECTOR_WIDTH.min(rect.width() / 2.);
+        let inspector_width = Panels::get(ui.ctx()).width().min(rect.width() / 2.);
         let inspector = Rect::from_min_size(rect.min, vec2(inspector_width, rect.height()));
         let view = Rect::from_min_max(pos2(inspector.right() + PADDING, rect.top()), rect.max);
         let ruler = Rect::from_min_max(view.min, pos2(view.right(), view.top() + RULER_HEIGHT));
@@ -136,10 +134,7 @@ impl ClipDetails {
         self.paint_markers(ui, ruler, lane, &shown, track.color, bpm, &theme);
 
         ui.scope_builder(UiBuilder::new().max_rect(inspector), |ui| {
-            ScrollArea::vertical()
-                .id_salt("clip-inspector")
-                .auto_shrink(false)
-                .show(ui, |ui| inspector_ui(ui, clip, track.color, state));
+            inspector_ui(ui, clip, track.color, state)
         });
         ui.allocate_rect(rect, Sense::hover());
     }
