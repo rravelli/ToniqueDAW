@@ -39,7 +39,7 @@ const TOGGLE_PADDING: f32 = 5.;
 pub(super) const FIELD_HEIGHT: f32 = 18.;
 /// The column of panel toggles, left of the panels.
 pub(super) const RAIL_WIDTH: f32 = 24.;
-const PANEL_WIDTH: f32 = 196.;
+const PANEL_WIDTH: f32 = 176.;
 /// Between the rail and the panels, and between panels: a rule in its
 /// middle.
 const PANEL_GAP: f32 = 9.;
