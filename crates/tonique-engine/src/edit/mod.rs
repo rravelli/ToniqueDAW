@@ -241,8 +241,10 @@ pub enum WarpMode {
     #[default]
     Off,
     /// Stretched to the edit's tempo over its source's, its pitch kept and
-    /// transposed on its own.
-    Stretch,
+    /// transposed on its own, by a [`crate::stretch::Stretcher`] working on
+    /// its spectrum: smooth on sustained, tonal sound (voices, chords, whole
+    /// mixes), softer on attacks.
+    Spectral,
 }
 
 /// Slowest and fastest a clip plays its source: past them, stretching
@@ -274,7 +276,7 @@ impl WarpMode {
             Self::Off => ClipWarp::Repitch {
                 speed: (2f64.powf(transpose as f64 / 12.0)).clamp(MIN_SPEED, MAX_SPEED),
             },
-            Self::Stretch => {
+            Self::Spectral => {
                 let speed = bpm / source_bpm;
                 let speed = if speed.is_nan() {
                     1.0

@@ -609,7 +609,7 @@ fn transposed_unwarped_clips_play_resampled() {
 #[test]
 fn stretched_clips_play_on_time() {
     let (mut s, mut p, tid, cid) = playing_clip(burst(3.0, 1.0), None, 6.0);
-    s.perform(SetClipWarp::new(tid, cid, WarpMode::Stretch, 240.0, 0.0))
+    s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 240.0, 0.0))
         .unwrap();
     let heard = loudest(&render_offline(&mut p, (3.0 * SR) as usize, 2));
     assert!((heard - 2.0).abs() < 0.01, "heard at {heard} s");
@@ -634,7 +634,7 @@ fn stretched_clips_transpose_without_changing_speed() {
             .collect();
         let (mut s, mut p, tid, cid) =
             playing_clip(Arc::new(SampleBuffer::new(vec![tone], SR)), None, 3.0);
-        s.perform(SetClipWarp::new(tid, cid, WarpMode::Stretch, 120.0, 12.0))
+        s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 120.0, 12.0))
             .unwrap();
         let stretch = StretchSettings {
             formants,
@@ -669,7 +669,7 @@ fn stretched_clips_transpose_without_changing_speed() {
 fn stretched_clips_play_on_time_whatever_their_window() {
     for window in tonique_engine::edit::StretchWindow::ALL {
         let (mut s, mut p, tid, cid) = playing_clip(burst(3.0, 1.0), None, 6.0);
-        s.perform(SetClipWarp::new(tid, cid, WarpMode::Stretch, 240.0, 0.0))
+        s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 240.0, 0.0))
             .unwrap();
         let stretch = StretchSettings {
             window,
@@ -698,7 +698,7 @@ fn stretched_clips_play_on_time_whatever_their_window() {
 #[test]
 fn stretched_clips_play_on_through_rebuilds() {
     let (mut s, mut p, tid, cid) = playing_clip(burst(3.0, 1.0), None, 6.0);
-    s.perform(SetClipWarp::new(tid, cid, WarpMode::Stretch, 240.0, 0.0))
+    s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 240.0, 0.0))
         .unwrap();
     let mut out = Vec::new();
     for _ in 0..30 {
@@ -718,7 +718,7 @@ fn stretched_clips_play_on_through_rebuilds() {
     for _ in 0..8 {
         s.rebuild().unwrap();
     }
-    s.perform(SetClipWarp::new(tid, cid, WarpMode::Stretch, 240.0, 0.0))
+    s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 240.0, 0.0))
         .unwrap();
     s.rebuild().unwrap();
     // The graphs queued play, then the one left waiting.
@@ -769,7 +769,7 @@ fn seeks_and_loops_land_on_their_beats_across_tempo_changes() {
 #[test]
 fn stretched_clips_stay_on_their_beats_when_the_tempo_changes() {
     let (mut s, mut p, tid, cid) = playing_clip(burst(3.0, 1.0), None, 6.0);
-    s.perform(SetClipWarp::new(tid, cid, WarpMode::Stretch, 240.0, 0.0))
+    s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 240.0, 0.0))
         .unwrap();
     let mut out = render_offline(&mut p, 24000, 2); // beat 1 at 120 bpm
     s.perform(SetTempoMap::new(TempoMap::new(200.0))).unwrap();
@@ -789,7 +789,7 @@ fn warps_are_numbers() {
         (120.0, f32::INFINITY),
         (f64::INFINITY, 0.0),
     ] {
-        let set = SetClipWarp::new(tid, cid, WarpMode::Stretch, bpm, transpose);
+        let set = SetClipWarp::new(tid, cid, WarpMode::Spectral, bpm, transpose);
         assert!(s.perform(set).is_err(), "{bpm} bpm, {transpose}");
     }
     assert_eq!(
@@ -797,7 +797,7 @@ fn warps_are_numbers() {
         ClipWarp::None
     );
     assert_eq!(
-        WarpMode::Stretch.play(f64::NAN, f32::NAN, StretchSettings::default(), 120.0),
+        WarpMode::Spectral.play(f64::NAN, f32::NAN, StretchSettings::default(), 120.0),
         ClipWarp::None
     );
 }
@@ -814,7 +814,7 @@ fn stretched_clips_follow_the_tempo_where_they_are() {
         warp, source_bpm, ..
     } = &mut clip.content
     {
-        *warp = WarpMode::Stretch;
+        *warp = WarpMode::Spectral;
         *source_bpm = 90.0;
     }
     assert_eq!(clip.warp(&edit.tempo), Some(ClipWarp::None));

@@ -86,7 +86,7 @@ fn clips_edit_with(
                     Play::Off => {}
                     Play::Repitch => *transpose = 2.0,
                     Play::Stretch => {
-                        *warp = WarpMode::Stretch;
+                        *warp = WarpMode::Spectral;
                         *source_bpm = SOURCE_BPM;
                         *transpose = semitones;
                         *stretch = settings;
