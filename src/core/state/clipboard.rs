@@ -2,7 +2,7 @@
 
 use super::{MASTER_TRACK_ID, ProjectState};
 use crate::core::clip::AudioClip;
-use tonique_engine::time::BeatPos;
+use tonique_engine::{edit::WarpMode, time::BeatPos};
 
 /// Copied clips, placed relative to the copied range: time from its start,
 /// tracks from the topmost copied one.
@@ -14,9 +14,9 @@ pub struct Clipboard {
     /// Index of the topmost copied track, to paste back there when no
     /// track is selected.
     top_track: usize,
-    /// The tempo then: clips keep their length in seconds, so pasted at
-    /// another, their length in beats changes (as [`ProjectState::set_bpm`]
-    /// does to those in the arrangement).
+    /// The tempo then: unwarped clips keep their length in seconds, so
+    /// pasted at another, their length in beats changes (as
+    /// [`ProjectState::set_bpm`] does to those in the arrangement).
     bpm: f32,
 }
 
@@ -121,7 +121,9 @@ impl ProjectState {
             let track = self.edit().tracks[index].id;
             let mut copy = clip.with_id(self.new_clip_id());
             copy.position = at + copy.position.0;
-            copy.length *= (bpm / clipboard.bpm) as f64;
+            if copy.warp == WarpMode::Off {
+                copy.length *= (bpm / clipboard.bpm) as f64;
+            }
             pasted.push(copy.id);
             self.add_clips(&track, vec![copy]);
         }

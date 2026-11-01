@@ -9,7 +9,10 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tonique_engine::time::TimeSignature;
+use tonique_engine::{
+    edit::{StretchWindow, WarpMode},
+    time::TimeSignature,
+};
 
 use crate::core::effect::EffectKind;
 
@@ -19,8 +22,9 @@ pub const EXTENSION: &str = "tonique";
 /// 2 added groups; 3 the echo, spectrum and utility effects, settings
 /// (filter `mode`, echo `time`) among effect parameters, and effect names;
 /// 4 the time signature; 5 clip gain, pan, loops and bar 1, clips saved by
-/// offset and length rather than by trims.
-pub const VERSION: u32 = 5;
+/// offset and length rather than by trims; 6 clip warp, tempo and
+/// transposition.
+pub const VERSION: u32 = 6;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
@@ -147,6 +151,90 @@ pub struct ClipFile {
     /// file's start (0) when absent.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub origin: f64,
+    /// How it follows the project's tempo; older projects' clips don't.
+    #[serde(default, skip_serializing_if = "WarpFile::is_off")]
+    pub warp: WarpFile,
+    /// The file's tempo; the project's when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
+    /// In semitones, fractions being cents.
+    #[serde(default, skip_serializing_if = "is_centred")]
+    pub transpose: f32,
+    /// Stretched, the window it's stretched with; normal when absent.
+    #[serde(default, skip_serializing_if = "WindowFile::is_normal")]
+    pub window: WindowFile,
+    /// Stretched and transposed, whether its formants stay where they are.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub formants: bool,
+}
+
+/// See [`WarpMode`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WarpFile {
+    #[default]
+    Off,
+    Spectral,
+}
+
+impl WarpFile {
+    fn is_off(&self) -> bool {
+        *self == Self::Off
+    }
+}
+
+impl From<WarpMode> for WarpFile {
+    fn from(mode: WarpMode) -> Self {
+        match mode {
+            WarpMode::Off => Self::Off,
+            WarpMode::Spectral => Self::Spectral,
+        }
+    }
+}
+
+impl From<WarpFile> for WarpMode {
+    fn from(file: WarpFile) -> Self {
+        match file {
+            WarpFile::Off => Self::Off,
+            WarpFile::Spectral => Self::Spectral,
+        }
+    }
+}
+
+/// See [`StretchWindow`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowFile {
+    Short,
+    #[default]
+    Normal,
+    Long,
+}
+
+impl WindowFile {
+    fn is_normal(&self) -> bool {
+        *self == Self::Normal
+    }
+}
+
+impl From<StretchWindow> for WindowFile {
+    fn from(window: StretchWindow) -> Self {
+        match window {
+            StretchWindow::Short => Self::Short,
+            StretchWindow::Normal => Self::Normal,
+            StretchWindow::Long => Self::Long,
+        }
+    }
+}
+
+impl From<WindowFile> for StretchWindow {
+    fn from(file: WindowFile) -> Self {
+        match file {
+            WindowFile::Short => Self::Short,
+            WindowFile::Normal => Self::Normal,
+            WindowFile::Long => Self::Long,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -339,6 +427,11 @@ mod tests {
                     gain: 0.5,
                     pan: -0.25,
                     origin: 0.75,
+                    warp: WarpFile::Spectral,
+                    bpm: Some(96.),
+                    transpose: -2.5,
+                    window: WindowFile::Short,
+                    formants: true,
                 }],
             }],
         };

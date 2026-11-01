@@ -382,7 +382,7 @@ fn volume_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState, size: 
         SliderEdit::Released { start, value } if value != start => {
             state.commit_volume(track.id, start, value)
         }
-        SliderEdit::Reset { from, to } => state.commit_volume(track.id, from, to),
+        SliderEdit::Set { from, to } => state.commit_volume(track.id, from, to),
         _ => {}
     }
 }
@@ -395,7 +395,7 @@ fn pan_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState, size: Vec
         SliderEdit::Released { start, value } if value != start => {
             state.commit_pan(track.id, start, value)
         }
-        SliderEdit::Reset { from, to } => state.commit_pan(track.id, from, to),
+        SliderEdit::Set { from, to } => state.commit_pan(track.id, from, to),
         _ => {}
     }
 }

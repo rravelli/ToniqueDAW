@@ -112,7 +112,8 @@ pub(super) fn arrangement_preview(
                 // Each pass of the clip's loop shows its part of the whole
                 // file laid out.
                 let pixels_per_beat = inner.width() / shown as f32;
-                let file_width = (seconds * bpm as f64 / 60.) as f32 * pixels_per_beat;
+                // The whole file as the clip plays it: at its speed.
+                let file_width = clip.source_beats(bpm) as f32 * pixels_per_beat;
                 let clip_x = |beats: f64| clip_rect.left() + beats as f32 * pixels_per_beat;
                 // Only the passes in the overview: a short loop makes many.
                 let beats = |x: f32| ((x - clip_rect.left()) / pixels_per_beat) as f64;

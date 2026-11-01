@@ -143,8 +143,9 @@ pub struct ProjectState {
     /// Loop region in beats; playback wraps over it while `looping`.
     loop_range: (BeatPos, BeatPos),
     looping: bool,
-    /// Tempo the engine's loop (in samples) was computed with.
-    loop_bpm: f32,
+    /// An undo step was opened for a clip edit heard as it's made (see
+    /// [`Self::edit_clip_live`]), to close when it's done.
+    live_edit: bool,
 
     /// A clip being trimmed, as it will be once committed: shown instead
     /// of the edit's (see [`Self::shown_clip`]).
@@ -197,7 +198,7 @@ impl ProjectState {
                 BeatPos(DEFAULT_LOOP_BARS * GridService::new().beats_per_bar()),
             ),
             looping: false,
-            loop_bpm: DEFAULT_BPM as f32,
+            live_edit: false,
             track_palette: Vec::new(),
             metronome: false,
         }
@@ -212,10 +213,6 @@ impl ProjectState {
             report(result);
         }
         self.sync_time_signature();
-        // Tempo changes (edits, undo, redo) move the loop in samples.
-        if self.looping && self.bpm() != self.loop_bpm {
-            self.sync_loop();
-        }
         if self.playback_state == PlaybackState::Playing {
             self.playhead = self.session.position();
         }
@@ -248,16 +245,20 @@ impl ProjectState {
         self.track_steps(steps);
     }
 
-    /// Run `f` as one undo step (or as part of the open batch).
+    /// Run `f` as one undo step (or as part of the open batch), its
+    /// changes reaching the engine at once.
     fn transaction(&mut self, label: &'static str, f: impl FnOnce(&mut Self)) {
+        self.session.hold_effects();
         if self.batching {
-            return f(self);
+            f(self);
+        } else {
+            let steps = self.steps_recorded();
+            self.session.begin_transaction(label);
+            f(self);
+            self.session.commit_transaction();
+            self.track_steps(steps);
         }
-        let steps = self.steps_recorded();
-        self.session.begin_transaction(label);
-        f(self);
-        self.session.commit_transaction();
-        self.track_steps(steps);
+        report(self.session.release_effects());
     }
 
     fn steps_recorded(&self) -> u64 {
@@ -482,8 +483,12 @@ impl ProjectState {
     }
 
     // History management
-    /// Group the following changes into one undo step, until `commit_batch`.
+    /// Group the following changes into one undo step, until `commit_batch`,
+    /// reaching the engine then (but for a live edit's, heard as made).
     pub fn begin_batch(&mut self) {
+        if !self.live_edit {
+            self.session.hold_effects();
+        }
         self.batching = true;
         self.batch_steps = Some(self.steps_recorded());
         self.session.begin_transaction("Edit");
@@ -494,6 +499,9 @@ impl ProjectState {
         self.session.commit_transaction();
         if let Some(steps) = self.batch_steps.take() {
             self.track_steps(steps);
+        }
+        if !self.live_edit {
+            report(self.session.release_effects());
         }
     }
     /// Undo last action, and bring back the clip selection from before it.

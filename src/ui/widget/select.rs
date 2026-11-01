@@ -9,7 +9,7 @@ use egui_phosphor::fill::CARET_DOWN;
 
 use crate::ui::{font::PHOSPHOR_FILL, theme::ThemeExt, widget::list_row::ListRow};
 
-const HEIGHT: f32 = 20.;
+pub const HEIGHT: f32 = 20.;
 const PADDING: f32 = 6.;
 const MAX_POPUP_HEIGHT: f32 = 240.;
 
@@ -20,6 +20,7 @@ pub struct Select<'a, T> {
     value: &'a mut T,
     options: Vec<(T, String)>,
     width: f32,
+    height: f32,
     placeholder: String,
 }
 
@@ -30,6 +31,7 @@ impl<'a, T: PartialEq + Clone> Select<'a, T> {
             value,
             options: Vec::new(),
             width: 160.,
+            height: HEIGHT,
             placeholder: "—".into(),
         }
     }
@@ -49,6 +51,12 @@ impl<'a, T: PartialEq + Clone> Select<'a, T> {
         self
     }
 
+    /// As tall as the fields beside it ([`HEIGHT`] unless set).
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = height;
+        self
+    }
+
     /// Shown when the value matches no option.
     pub fn placeholder(mut self, text: impl ToString) -> Self {
         self.placeholder = text.to_string();
@@ -62,7 +70,8 @@ impl<T: PartialEq + Clone> Widget for Select<'_, T> {
         let id = ui.make_persistent_id(self.id_salt);
         let popup_id = id.with("popup");
         let open = Popup::is_id_open(ui.ctx(), popup_id);
-        let (rect, mut response) = ui.allocate_exact_size(vec2(self.width, HEIGHT), Sense::click());
+        let (rect, mut response) =
+            ui.allocate_exact_size(vec2(self.width, self.height), Sense::click());
 
         let theme = ui.app_theme();
         let fill = if !enabled {

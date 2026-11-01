@@ -2,7 +2,7 @@
 //! them.
 
 use crate::core::{
-    clip::AudioClip,
+    clip::{AudioClip, split_pitch},
     state::clip_ops::{ClipOp, TrackClips},
     track::TrackRow,
 };
@@ -11,7 +11,8 @@ use tonique_engine::{
     edit::{
         Clip, ClipContent, ClipId, Parameter, TrackId,
         commands::{
-            AddClip, MoveClip, RemoveClip, ResizeClip, SetClipLoop, SetClipOrigin, SetParam,
+            AddClip, MoveClip, RemoveClip, ResizeClip, SetClipLoop, SetClipOrigin, SetClipStretch,
+            SetClipWarp, SetParam,
         },
     },
     time::BeatPos,
@@ -136,10 +137,13 @@ impl ProjectState {
             return;
         };
         let region = |c: &AudioClip| (c.position, c.length, c.offset, c.looped);
-        if region(&clip) == region(&resized) {
+        let warp = |c: &AudioClip| (c.warp, c.bpm, c.transpose, c.detune, c.stretch);
+        if region(&clip) == region(&resized) && warp(&clip) == warp(&resized) {
             return;
         }
-        let label = if clip.looped != resized.looped {
+        let label = if warp(&clip) != warp(&resized) {
+            "Clip warp"
+        } else if clip.looped != resized.looped {
             "Clip loop"
         } else {
             "Resize clip"
@@ -160,6 +164,20 @@ impl ProjectState {
         let origin = origin.clamp(0., clip.source_seconds() as f64);
         if origin != clip.origin {
             self.perform(SetClipOrigin::new(track, id, origin));
+        }
+    }
+    /// Apply `edited` at once, heard as it's made (a transposition being
+    /// dragged), as one undo step with the edits after it until one is
+    /// `done`.
+    pub fn edit_clip_live(&mut self, edited: AudioClip, done: bool) {
+        if !self.batching {
+            self.live_edit = true;
+            self.begin_batch();
+        }
+        self.commit_resize_clip(edited);
+        if done && self.live_edit {
+            self.commit_batch();
+            self.live_edit = false;
         }
     }
     /// Set an audio clip's gain (linear) or pan, heard at once. Not an
@@ -212,17 +230,35 @@ impl ProjectState {
             }
             ClipOp::Remove(track, id) => self.perform(RemoveClip::new(track, id)),
             ClipOp::Resize(track, clip) => {
-                let looped = self
+                let current = self
                     .edit()
                     .track(track)
                     .ok()
                     .and_then(|t| t.clip(clip.id))
                     .and_then(|c| match &c.content {
-                        ClipContent::Audio { looped, .. } => Some(*looped),
+                        ClipContent::Audio {
+                            looped,
+                            warp,
+                            source_bpm,
+                            transpose,
+                            stretch,
+                            ..
+                        } => Some((*looped, (*warp, *source_bpm, *transpose), *stretch)),
                         ClipContent::Midi { .. } => None,
                     });
-                if looped.is_some_and(|l| l != clip.looped) {
-                    self.perform(SetClipLoop::new(track, clip.id, clip.looped));
+                if let Some((looped, warp, stretch)) = current {
+                    if looped != clip.looped {
+                        self.perform(SetClipLoop::new(track, clip.id, clip.looped));
+                    }
+                    let wanted = (clip.warp, clip.bpm, clip.pitch());
+                    if warp != wanted {
+                        self.perform(SetClipWarp::new(
+                            track, clip.id, wanted.0, wanted.1, wanted.2,
+                        ));
+                    }
+                    if stretch != clip.stretch {
+                        self.perform(SetClipStretch::new(track, clip.id, clip.stretch));
+                    }
                 }
                 self.perform(ResizeClip::new(
                     track,
@@ -257,11 +293,21 @@ impl ProjectState {
             pan,
             looped,
             origin_s,
+            warp,
+            source_bpm,
+            transpose,
+            stretch,
             ..
         } = &mut engine_clip.content
         {
             *source_offset_s = clip.offset;
             *origin_s = clip.origin;
+            *warp = clip.warp;
+            if clip.bpm > 0. {
+                *source_bpm = clip.bpm;
+            }
+            *transpose = clip.pitch();
+            *stretch = clip.stretch;
             // In range, whatever a project file says.
             gain.value.set(clip.gain.clamp(gain.min, gain.max), 0.);
             pan.value.set(clip.pan.clamp(pan.min, pan.max), 0.);
@@ -280,8 +326,10 @@ impl ProjectState {
             ref pan,
             looped,
             origin_s,
-            // Warping isn't shown or edited yet: clips play unwarped.
-            ..
+            warp,
+            source_bpm,
+            transpose,
+            stretch,
         } = clip.content
         else {
             return None;
@@ -289,6 +337,7 @@ impl ProjectState {
         let audio = self.sources.info(source)?.clone();
         // Clips of files of unknown length can't be edited.
         audio.duration?;
+        let (semitones, cents) = split_pitch(transpose);
         Some(AudioClip {
             id: clip.id,
             audio,
@@ -299,6 +348,11 @@ impl ProjectState {
             gain: gain.get(),
             pan: pan.get(),
             origin: origin_s,
+            warp,
+            bpm: source_bpm,
+            transpose: semitones,
+            detune: cents,
+            stretch,
         })
     }
 

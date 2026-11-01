@@ -1,6 +1,6 @@
 use egui::Rect;
 use tonique_engine::{
-    edit::{ClipId, ClipLoop},
+    edit::{ClipId, ClipLoop, WarpMode},
     time::{BeatPos, TimeSignature},
 };
 
@@ -8,7 +8,7 @@ use super::{inspector::*, markers::*, *};
 use crate::{
     analysis::AudioInfo,
     core::{
-        clip::{AudioClip, MIN_LENGTH},
+        clip::{AudioClip, MAX_DETUNE, MIN_LENGTH},
         state::ProjectState,
     },
     utils::{format_bars, parse_bars},
@@ -131,6 +131,8 @@ struct Harness {
     details: ClipDetails,
     state: ProjectState,
     clip: ClipId,
+    /// What the last frame drew.
+    shapes: Vec<egui::epaint::ClippedShape>,
 }
 
 impl Harness {
@@ -152,6 +154,7 @@ impl Harness {
             details: ClipDetails::new(),
             state,
             clip,
+            shapes: Vec::new(),
         };
         harness.frame(Vec::new());
         harness
@@ -178,6 +181,49 @@ impl Harness {
             details.ui(ui, &clip, &track, state);
         });
         output.textures_delta.clear();
+        self.shapes = output.shapes;
+    }
+
+    /// Where the last frame wrote `text`.
+    fn text(&self, text: &str) -> Rect {
+        self.shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == text => {
+                    Some(t.galley.rect.translate(t.pos.to_vec2()))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{text:?} isn't shown"))
+    }
+
+    /// A click, in one frame: frames are a second apart, too long for one.
+    fn click(&mut self, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        self.frame(vec![
+            egui::Event::PointerMoved(at),
+            button(true),
+            button(false),
+        ]);
+        self.frame(Vec::new());
+    }
+
+    /// Two clicks in a row, in one frame.
+    fn double_click(&mut self, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let clicks = [true, false, true, false].map(button);
+        self.frame([vec![egui::Event::PointerMoved(at)], clicks.to_vec()].concat());
+        self.frame(Vec::new());
     }
 
     fn drag(&mut self, from: egui::Pos2, to: egui::Pos2) {
@@ -270,4 +316,115 @@ fn the_loop_brackets_end_drags_and_the_clip_outgrows_the_file() {
     assert_eq!((l.start_s, l.end_s), (0.5, 1.75));
     h.state.undo();
     assert_eq!(h.clip().looped.unwrap().end_s, 1.5, "one step");
+}
+
+#[test]
+fn warping_keeps_the_view_as_it_was() {
+    let mut h = Harness::new();
+    h.details.grid.offset.x += 40.;
+    let (zoom, offset) = (h.details.grid.beats_to_width(1.), h.details.grid.offset);
+    let mut warped = h.clip();
+    warped.set_warp(WarpMode::Spectral, 100., 0, 0., 120.);
+    h.state.commit_resize_clip(warped);
+    h.frame(Vec::new());
+    assert_ne!(h.details.speed, 1., "played faster");
+    assert_eq!(
+        (h.details.grid.beats_to_width(1.), h.details.grid.offset),
+        (zoom, offset)
+    );
+}
+
+/// Dragged, a transposition follows the pointer: a quarter of the field's
+/// width is a quarter of its range (12 of -24 to 24 semitones), one undo
+/// step.
+#[test]
+fn dragging_the_transposition_follows_the_pointer() {
+    let mut h = Harness::new();
+    // Each cell's label is at its left.
+    let left = h.text("Transpose").left();
+    let width = h.text("Detune").left() - left - CELL_GAP;
+    let from = h.text("+0 st").center();
+    h.drag(from, from + egui::vec2(width / 4., 0.));
+    assert_eq!(h.clip().transpose, 12);
+    h.state.undo();
+    assert_eq!(h.clip().transpose, 0);
+}
+
+/// The inspector's panels are laid out alike: their sections and rows
+/// start at the same heights.
+#[test]
+fn the_clip_and_audio_panels_line_up() {
+    let h = Harness::new();
+    for (clip, audio) in [
+        ("CLIP", "AUDIO"),
+        ("Start", "Gain"),
+        ("Length", "Transpose"),
+        ("LOOP", "WARP"),
+        ("Position", "Window"),
+    ] {
+        assert_eq!(h.text(clip).top(), h.text(audio).top(), "{clip} / {audio}");
+    }
+}
+
+/// Detuned to its furthest, a clip stays at its transposition: a pitch
+/// splits into semitones and cents one way only.
+#[test]
+fn detuning_to_the_end_keeps_the_transposition() {
+    let mut h = Harness::new();
+    let left = h.text("Detune").left();
+    let from = h.text("+0 ct").center();
+    // Well past the field's end, at once.
+    h.drag(from, egui::pos2(left + 1000., from.y));
+    assert_eq!((h.clip().transpose, h.clip().detune), (0, MAX_DETUNE));
+}
+
+/// Double-clicked, a transposition is back to none, one undo step.
+#[test]
+fn double_clicking_the_transposition_resets_it() {
+    let mut h = Harness::new();
+    let mut clip = h.clip();
+    clip.transpose = 5;
+    h.state.commit_resize_clip(clip);
+    h.frame(Vec::new());
+    let at = h.text("+5 st").center();
+    h.double_click(at);
+    assert_eq!(h.clip().transpose, 0);
+    h.state.undo();
+    assert_eq!(h.clip().transpose, 5);
+}
+
+/// The warp's title switches it off and on again.
+#[test]
+fn the_warp_title_switches_it() {
+    let mut h = Harness::new();
+    assert_eq!(h.clip().warp, WarpMode::Spectral);
+    let title = h.text("WARP").center();
+    h.click(title);
+    assert_eq!(h.clip().warp, WarpMode::Off);
+    h.click(title);
+    assert_eq!(h.clip().warp, WarpMode::Spectral);
+}
+
+/// Stepped by the arrow keys past its range, the detune carries over into
+/// the transposition, a cent at a time.
+#[test]
+fn detune_steps_carry_over_into_the_transposition() {
+    let mut h = Harness::new();
+    let mut clip = h.clip();
+    clip.detune = MAX_DETUNE;
+    h.state.commit_resize_clip(clip);
+    h.frame(Vec::new());
+    let at = h.text("+49 ct").center();
+    h.click(at);
+    let key = |key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    h.frame(vec![key(egui::Key::ArrowUp)]);
+    assert_eq!((h.clip().transpose, h.clip().detune), (1, -50.));
+    h.frame(vec![key(egui::Key::ArrowDown)]);
+    assert_eq!((h.clip().transpose, h.clip().detune), (0, 49.));
 }

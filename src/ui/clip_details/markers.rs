@@ -11,7 +11,7 @@ use crate::{
     ui::theme::{Theme, ThemeExt, with_alpha},
 };
 
-use super::{ClipDetails, LOOP_BAR_HEIGHT, to_beats, to_seconds};
+use super::{ClipDetails, LOOP_BAR_HEIGHT};
 
 /// Half the width of the area grabbing a marker or a loop edge.
 const HANDLE_REACH: f32 = 4.;
@@ -81,7 +81,11 @@ impl ClipDetails {
                 ));
             }
             None => {
-                let end = self.x(shown.offset + to_seconds(shown.length, bpm), bpm, lane);
+                let end = self.x(
+                    shown.offset + shown.file_seconds(shown.length, bpm),
+                    bpm,
+                    lane,
+                );
                 areas.push((Handle::EndMarker, marker(end)));
                 areas.push((Handle::EndMarker, flag_rect(TrimEdge::End, end, ruler)));
             }
@@ -128,7 +132,7 @@ impl ClipDetails {
                     }
                     Handle::EndMarker => {
                         let mut c = shown.clone();
-                        let length = to_beats(at - c.offset, bpm).max(MIN_LENGTH);
+                        let length = c.file_beats(at - c.offset, bpm).max(MIN_LENGTH);
                         c.trim_end_at(c.position + length, bpm);
                         Some(c)
                     }
@@ -192,7 +196,10 @@ impl ClipDetails {
         }
         let mut markers = vec![(TrimEdge::Start, clip.offset)];
         if clip.active_loop().is_none() {
-            markers.push((TrimEdge::End, clip.offset + to_seconds(clip.length, bpm)));
+            markers.push((
+                TrimEdge::End,
+                clip.offset + clip.file_seconds(clip.length, bpm),
+            ));
         }
         let ink = theme.text;
         for (edge, at) in markers {
@@ -230,7 +237,7 @@ impl ClipDetails {
 /// inside the file), its start marker no later than the loop's end.
 pub(super) fn with_loop(clip: &AudioClip, start: f64, end: f64, bpm: f32) -> AudioClip {
     let source = clip.source_seconds() as f64;
-    let min = to_seconds(MIN_LENGTH, bpm);
+    let min = clip.file_seconds(MIN_LENGTH, bpm);
     let start = start.clamp(0., (source - min).max(0.));
     let end = end.clamp(start + min, source.max(start + min));
     let mut c = clip.clone();
@@ -251,8 +258,8 @@ pub(super) fn with_loop(clip: &AudioClip, start: f64, end: f64, bpm: f32) -> Aud
 /// that's too short.
 pub(super) fn default_loop(clip: &AudioClip, bpm: f32) -> ClipLoop {
     let source = clip.source_seconds() as f64;
-    let end = (clip.offset + to_seconds(clip.length, bpm)).min(source);
-    if end - clip.offset >= to_seconds(MIN_LENGTH, bpm) {
+    let end = (clip.offset + clip.file_seconds(clip.length, bpm)).min(source);
+    if end - clip.offset >= clip.file_seconds(MIN_LENGTH, bpm) {
         ClipLoop {
             start_s: clip.offset,
             end_s: end,
