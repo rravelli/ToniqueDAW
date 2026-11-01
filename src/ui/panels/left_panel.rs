@@ -5,6 +5,7 @@ use crate::{
         browser::{ADD_FOLDER_SIZE, FileBrowser},
         commands::Commands,
         dnd::DragPayload,
+        missing_files::{self, MissingFilesView},
         theme::ThemeExt,
         widget::{icon_rail::IconRail, list_row::ListRow, search_bar::SearchBar},
         workspace::Workspace,
@@ -27,6 +28,9 @@ pub enum BrowserSource {
     /// What's been given a label, by label.
     Labels,
     Effects,
+    /// Audio files the project uses that weren't found: on the rail only
+    /// while there are.
+    Missing,
 }
 
 impl BrowserSource {
@@ -38,6 +42,7 @@ impl BrowserSource {
             Self::Files => "Files",
             Self::Labels => "Labels",
             Self::Effects => "Effects",
+            Self::Missing => "Missing files",
         }
     }
 
@@ -46,6 +51,7 @@ impl BrowserSource {
             Self::Files => icons::FOLDER_SIMPLE,
             Self::Labels => icons::TAG,
             Self::Effects => icons::MAGIC_WAND,
+            Self::Missing => icons::WARNING,
         }
     }
 }
@@ -59,6 +65,7 @@ pub struct LeftPanel {
     file_search: SearchBar,
     label_search: SearchBar,
     effect_search: SearchBar,
+    missing: MissingFilesView,
 }
 
 impl LeftPanel {
@@ -70,6 +77,7 @@ impl LeftPanel {
             file_search: SearchBar::new("Search all folders"),
             label_search: SearchBar::new("Search labelled files"),
             effect_search: SearchBar::new("Search effects"),
+            missing: MissingFilesView::new(),
         }
     }
 
@@ -81,6 +89,13 @@ impl LeftPanel {
         commands: &mut Commands,
     ) {
         let mut open = workspace.left_panel_open;
+        if let Some(path) = missing_files::take_request(ui.ctx()) {
+            open = true;
+            self.source = BrowserSource::Missing;
+            if let Some(path) = path {
+                self.missing.select_path(state, &path);
+            }
+        }
         egui::Panel::left("left-panel")
             .min_size(100.)
             .max_size(400.)
@@ -121,10 +136,17 @@ impl LeftPanel {
         let (rail, content) = full.split_left_right_at_x(full.left() + RAIL_WIDTH);
         ui.scope_builder(UiBuilder::new().max_rect(rail), |ui| {
             ui.add_space(HEADER_SPACING);
+            // Missing files below the rest, while there are (or shown).
+            let missing = (!state.missing_files().is_empty()
+                || self.source == BrowserSource::Missing)
+                .then_some(BrowserSource::Missing);
             ui.add(
                 IconRail::new(
                     &mut self.source,
-                    BrowserSource::ALL.map(|s| (s, s.icon(), s.name())),
+                    BrowserSource::ALL
+                        .into_iter()
+                        .chain(missing)
+                        .map(|s| (s, s.icon(), s.name())),
                 )
                 .size(RAIL_WIDTH),
             );
@@ -187,11 +209,21 @@ impl LeftPanel {
                     BrowserSource::Effects => {
                         ui.push_id("effect-search", |ui| self.effect_search.ui(ui));
                     }
+                    BrowserSource::Missing => {
+                        self.missing.header_ui(ui, &self.file_browser.folders());
+                    }
                 });
 
             match self.source {
                 BrowserSource::Files => {
                     self.file_browser.ui(ui, state, commands, self.focused);
+                }
+                BrowserSource::Missing => {
+                    Frame::new()
+                        .inner_margin(Margin::symmetric(4, 0))
+                        .show(ui, |ui| {
+                            self.missing.ui(ui, state, &self.file_browser.folders());
+                        });
                 }
                 BrowserSource::Labels => {
                     self.file_browser

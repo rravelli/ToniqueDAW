@@ -5,6 +5,7 @@ use crate::{
     ui::{
         about::AboutWindow,
         commands::Commands,
+        missing_files,
         project::ProjectAction,
         theme::ThemeExt,
         workspace::{MainView, Workspace},
@@ -113,6 +114,18 @@ impl AppMenuBar {
             ui.separator();
             if menu_item(ui, "Export audio…", export) {
                 commands.push(Action::ExportAudio);
+            }
+            ui.separator();
+            // Always there, so it can be found; usable while files are missing.
+            let label = match state.missing_files().len() {
+                0 | 1 => "Locate missing files…".to_string(),
+                n => format!("Locate {n} missing files…"),
+            };
+            if ui
+                .add_enabled(!state.missing_files().is_empty(), Button::new(label))
+                .clicked()
+            {
+                missing_files::request(ui.ctx(), None);
             }
         });
         picked

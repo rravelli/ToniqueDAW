@@ -21,7 +21,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-mod file_tree;
+pub mod file_tree;
 mod items;
 mod preview;
 
@@ -317,6 +317,11 @@ impl FileBrowser {
     fn add_folder(&mut self, dir: PathBuf) {
         self.config.add_dir(dir);
         self.reload();
+    }
+
+    /// The folders added to the browser.
+    pub fn folders(&self) -> Vec<PathBuf> {
+        self.config.list_dirs()
     }
 
     /// The name of the folder the search is kept to, if it is.

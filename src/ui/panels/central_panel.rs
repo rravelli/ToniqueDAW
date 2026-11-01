@@ -629,6 +629,7 @@ mod tests {
             bit_depth: None,
             num_samples: None,
             path: Default::default(),
+            missing: false,
         };
         let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
             let input = egui::RawInput {

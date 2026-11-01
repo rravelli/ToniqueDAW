@@ -16,7 +16,7 @@ use crate::{
         project::{EXTENSION, ProjectFile, project_name},
         state::ProjectState,
     },
-    ui::widget::dialog,
+    ui::{missing_files, widget::dialog},
 };
 
 /// What the user asked for.
@@ -54,6 +54,8 @@ pub struct ProjectManager {
     saved: ProjectFile,
     pending: Option<Pending>,
     notice: Option<Notice>,
+    /// A project with missing files was opened: show them.
+    show_missing: bool,
     recent: RecentProjects,
     /// Set once the user agreed to close, to let the next close through.
     closing: bool,
@@ -69,6 +71,7 @@ impl ProjectManager {
             saved: state.project(None),
             pending: None,
             notice: None,
+            show_missing: false,
             recent: RecentProjects::load(),
             closing: false,
             title: String::new(),
@@ -167,6 +170,7 @@ impl ProjectManager {
         };
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let problems = state.load_project(&project, &dir);
+        self.show_missing = !state.missing_files().is_empty();
         self.replaced = true;
         self.saved = state.project(Some(&dir));
         if !problems.is_empty() {
@@ -278,6 +282,9 @@ impl ProjectManager {
             self.prompt(ui, pending, state);
         }
         self.notice(ui);
+        if std::mem::take(&mut self.show_missing) {
+            missing_files::request(ui.ctx(), None);
+        }
     }
 
     fn prompt(&mut self, ui: &Ui, pending: Pending, state: &mut ProjectState) {

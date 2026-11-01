@@ -3,6 +3,8 @@ use crate::{
     core::{clip::AudioClip, state::ProjectState},
     ui::arrangement::grid::PaintGrid,
     ui::{
+        font::PHOSPHOR_REGULAR,
+        missing_files,
         theme::{ThemeExt, contrast, with_alpha},
         waveform::paint_waveform,
         widget::context_menu::ContextMenuButton,
@@ -12,7 +14,10 @@ use egui::{
     Align2, Color32, CornerRadius, CursorIcon, FontFamily, FontId, Id, Painter, Pos2, Rect,
     Response, Sense, Stroke, Ui, pos2, vec2,
 };
-use egui_phosphor::fill::TRASH;
+use egui_phosphor::{
+    fill::{MAGNIFYING_GLASS, TRASH},
+    regular::WARNING,
+};
 use std::{ops::Range, time::Duration};
 use tonique_engine::time::BeatPos;
 
@@ -171,7 +176,8 @@ impl ClipView<'_> {
         // the selected part of the body is lit, the header stays as is.
         // Mixed into the background rather than see-through.
         let tint = |color: Color32, amount: f32| theme.bg_base.lerp_to_gamma(color, amount);
-        let (body, header, header_ink, outline) = if self.silenced {
+        // Missing files are drawn as silenced: their clips play nothing.
+        let (body, header, header_ink, outline) = if self.silenced || clip.audio.missing {
             (
                 tint(color, SILENCED_BODY_TINT),
                 tint(color, SILENCED_HEADER_TINT),
@@ -265,15 +271,37 @@ impl ClipView<'_> {
                 }
             }
         }
+        let mut name_x = pos.x + PADDING_TEXT;
+        if clip.audio.missing {
+            // Its file wasn't found: a warning before its name, and what's
+            // wrong over its body.
+            let icon = painter.text(
+                Pos2::new(name_x, pos.y + 2.),
+                Align2::LEFT_TOP,
+                WARNING,
+                FontId::new(font_size::SMALL, FontFamily::Name(PHOSPHOR_REGULAR.into())),
+                theme.warning,
+            );
+            name_x = icon.right() + 3.;
+            if !self.collapsed && rect.height() > font_size::SMALL * 2. {
+                painter.text(
+                    pos2(name_x, rect.top() + 3.),
+                    Align2::LEFT_TOP,
+                    "File not found",
+                    FontId::proportional(font_size::SMALL),
+                    theme.text_muted,
+                );
+            }
+        }
         painter.text(
-            Pos2::new(pos.x + PADDING_TEXT, pos.y + 2.),
+            Pos2::new(name_x, pos.y + 2.),
             Align2::LEFT_TOP,
             clip.audio.name.clone(),
             FontId::new(font_size::SMALL, FontFamily::Monospace),
             header_ink,
         );
         // Draw an overlay when audio not ready
-        if !clip.audio.data.is_ready() {
+        if !clip.audio.data.is_ready() && !clip.audio.missing {
             painter.rect_filled(sample_rect, 1.0, theme.shadow);
             // Show the waveform growing while the file decodes.
             ui.ctx().request_repaint_after(LOADING_REPAINT);
@@ -342,6 +370,13 @@ impl ClipView<'_> {
 
     fn context_menu(&self, ui: &mut Ui, clip: &AudioClip, state: &mut ProjectState) {
         ui.vertical(|ui| {
+            if clip.audio.missing
+                && ui
+                    .add(ContextMenuButton::new(MAGNIFYING_GLASS, "Locate file…"))
+                    .clicked()
+            {
+                missing_files::request(ui.ctx(), Some(clip.audio.path.clone()));
+            }
             if ui
                 .add(ContextMenuButton::new(TRASH, "Delete").text_color(ui.app_theme().danger))
                 .clicked()

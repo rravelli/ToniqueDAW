@@ -1145,7 +1145,7 @@ mod projects {
     use crate::{
         cache::AUDIO_ANALYSIS_CACHE,
         core::{
-            project::{ClipFile, ProjectFile},
+            project::{ClipFile, LoopFile, ProjectFile},
             state::MASTER_TRACK_ID,
         },
     };
@@ -1282,10 +1282,24 @@ mod projects {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn missing_audio_is_reported_and_the_rest_loads() {
-        let dir = temp_dir("missing");
-        let mut project = setup_state().project(Some(&dir));
+    fn clip_file(path: &str, position: f64, offset: f64, length: Option<f64>) -> ClipFile {
+        ClipFile {
+            path: path.into(),
+            position,
+            offset,
+            length,
+            looped: None,
+            trim_start: None,
+            trim_end: None,
+            gain: 1.,
+            pan: 0.,
+            origin: 0.,
+        }
+    }
+
+    /// A project in `dir` with a track of `clips`.
+    fn project_with(dir: &Path, clips: Vec<ClipFile>) -> ProjectFile {
+        let mut project = setup_state().project(Some(dir));
         project.tracks.push(crate::core::project::TrackFile {
             name: "Gone".into(),
             color: "#ffffff".into(),
@@ -1294,26 +1308,125 @@ mod projects {
             soloed: false,
             group: None,
             channel: project.master.clone(),
-            clips: vec![ClipFile {
-                path: "gone.wav".into(),
-                position: 0.,
-                offset: 0.,
-                length: Some(4.),
-                looped: None,
-                trim_start: None,
-                trim_end: None,
-                gain: 1.,
-                pan: 0.,
-                origin: 0.,
-            }],
+            clips,
         });
+        project
+    }
+
+    /// Clips of missing files are kept as they were, silent, and saved
+    /// unchanged; older projects' clips, placed by parts of the file, from
+    /// its start up to the next clip (a bar at most).
+    #[test]
+    fn missing_audio_keeps_its_clips() {
+        let dir = temp_dir("missing");
+        let mut looped = clip_file("gone.wav", 8., 0.5, Some(16.));
+        looped.looped = Some(LoopFile { start: 1., end: 3. });
+        let old = |position| {
+            let mut old = clip_file("old.wav", position, 0., None);
+            old.trim_start = Some(0.5);
+            old.trim_end = Some(0.75);
+            old
+        };
+        let project = project_with(
+            &dir,
+            vec![
+                clip_file("gone.wav", 0., 0., Some(4.)),
+                looped,
+                old(30.),
+                old(31.5),
+            ],
+        );
         let mut state = setup_state();
         let problems = state.load_project(&project, &dir);
-        assert_eq!(problems, ["Missing audio file: gone.wav"]);
+        assert!(problems.is_empty(), "{problems:?}");
+
+        let missing = state.missing_files();
+        assert_eq!(missing.len(), 2);
+        assert_eq!(missing[0].1.name, "gone.wav", "one, shared by two clips");
+        assert_eq!(missing[1].1.name, "old.wav");
+        // At 120 bpm: 2 s for the first clip, the loop's end for the other.
+        assert_eq!(missing[0].1.duration, Some(Duration::from_secs(3)));
         let tracks: Vec<_> = state.tracks().collect();
-        assert_eq!(tracks.len(), 1);
-        assert_eq!(tracks[0].name, "Gone");
-        assert!(tracks[0].clips.is_empty());
+        assert_eq!(tracks[0].clips.len(), 4);
+        assert!(tracks[0].clips.iter().all(|clip| clip.audio.missing));
+        assert!(tracks[0].clips[1].active_loop().is_some());
+        // Silent: exporting doesn't wait for them.
+        assert!(state.sources_ready(state.session.engine().config().sample_rate));
+
+        // Older clips are saved as clips of today's projects.
+        let mut saved = project.clone();
+        for (clip, length) in saved.tracks[0].clips[2..].iter_mut().zip([1.5, 4.]) {
+            clip.length = Some(length);
+            (clip.trim_start, clip.trim_end) = (None, None);
+        }
+        assert_eq!(rounded(state.project(Some(&dir))), rounded(saved));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Locating one file relinks every clip using it and finds the files
+    /// next to it; the rest are searched for in a folder.
+    #[test]
+    fn missing_files_are_located() {
+        let dir = temp_dir("locate");
+        fs::create_dir_all(dir.join("moved")).unwrap();
+        fs::create_dir_all(dir.join("deep/er")).unwrap();
+        for file in ["moved/a.wav", "moved/b.wav", "deep/er/c.wav"] {
+            write_wav(&dir.join(file));
+        }
+        fs::write(dir.join("moved/notes.txt"), "not audio").unwrap();
+        let project = project_with(
+            &dir,
+            vec![
+                clip_file("a.wav", 0., 0., Some(2.)),
+                clip_file("b.wav", 4., 0., Some(2.)),
+                clip_file("a.wav", 8., 1., Some(1.)),
+                clip_file("/elsewhere/c.wav", 12., 0., Some(2.)),
+            ],
+        );
+        let mut state = setup_state();
+        assert!(state.load_project(&project, &dir).is_empty());
+        assert_eq!(state.missing_files().len(), 3);
+        let a = state.missing_files()[0].0;
+
+        assert!(
+            state
+                .locate_file(a, &dir.join("moved/notes.txt"))
+                .unwrap_err()
+                .contains("notes.txt")
+        );
+        assert_eq!(state.locate_file(a, &dir.join("moved/a.wav")), Ok(2));
+        let names: Vec<_> = state
+            .missing_files()
+            .iter()
+            .map(|(_, audio)| audio.name.clone())
+            .collect();
+        assert_eq!(names, ["c.wav"]);
+        assert_eq!(state.search_files(&dir, false), 0, "not in subfolders");
+        assert_eq!(state.search_files(&dir, true), 1);
+        assert!(state.missing_files().is_empty());
+
+        let saved = state.project(Some(&dir));
+        let paths: Vec<_> = saved.tracks[0].clips.iter().map(|c| &c.path).collect();
+        assert_eq!(
+            paths,
+            [
+                Path::new("moved/a.wav"),
+                Path::new("moved/b.wav"),
+                Path::new("moved/a.wav"),
+                Path::new("deep/er/c.wav"),
+            ]
+        );
+        // The clips themselves are as they were.
+        assert_eq!(saved.tracks[0].clips[2].offset, 1.);
+        assert_eq!(saved.tracks[0].clips[2].length, Some(1.));
+
+        let path = dir.join("song.tonique");
+        saved.write(&path).unwrap();
+        let mut reloaded = setup_state();
+        let problems = reloaded.load_project(&ProjectFile::read(&path).unwrap(), &dir);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert!(reloaded.missing_files().is_empty());
+        assert_eq!(reloaded.tracks().next().unwrap().clips.len(), 4);
         let _ = fs::remove_dir_all(&dir);
     }
 
