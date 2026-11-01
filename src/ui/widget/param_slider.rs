@@ -256,7 +256,7 @@ pub fn format_db(gain: f32) -> String {
 /// A slider drag: the value follows the pointer's distance from where it
 /// was anchored, so going past an end and back lands where it left.
 #[derive(Debug, Clone, Copy)]
-struct Drag {
+pub struct Drag {
     /// The parameter's value when the drag started, for undo.
     start: f32,
     anchor_x: f32,
@@ -266,7 +266,7 @@ struct Drag {
     fine: bool,
 }
 
-enum DragStep {
+pub enum DragStep {
     None,
     /// Dragged to this slider value.
     Moved(f32),
@@ -278,7 +278,7 @@ enum DragStep {
 
 /// Drive `drag` from `response`. `value` is the slider's current value in
 /// `range`, `param` the parameter's (they differ for gain: dB vs linear).
-fn anchored_drag(
+pub fn anchored_drag(
     ui: &Ui,
     response: &Response,
     drag: &mut Option<Drag>,

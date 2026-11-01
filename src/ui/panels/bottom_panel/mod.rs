@@ -29,6 +29,9 @@ const TAB_PADDING: f32 = 6.;
 const TAB_RADIUS: f32 = 4.;
 /// Between effects, and around them.
 const GAP: f32 = 8.;
+/// Shortest the panel gets: the clip inspector's tallest panel (Audio,
+/// stretched) shows whole.
+const MIN_HEIGHT: f32 = 220.;
 
 /// One of the shown effects being dragged to another place, by index.
 #[derive(Clone, Copy)]
@@ -75,8 +78,8 @@ impl BottomPanel {
     ) {
         let mut open = workspace.bottom_panel_open;
         egui::Panel::bottom("bottom-panel")
-            .size_range(Rangef::new(160., 400.))
-            .default_size(200.)
+            .size_range(Rangef::new(MIN_HEIGHT, 400.))
+            .default_size(MIN_HEIGHT)
             .resizable(true)
             .frame(
                 Frame::new()

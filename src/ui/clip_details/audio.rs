@@ -1,8 +1,8 @@
-//! The inspector's Audio panel: how the clip sounds (gain, pan), how it
-//! follows the project's tempo (its file's tempo, how it's stretched), and
-//! its transposition.
+//! The inspector's Audio panel: how the clip sounds (gain, pan, its
+//! transposition), and how it follows the project's tempo (its file's
+//! tempo, how it's stretched).
 
-use egui::{Color32, DragValue, Rect, Shape, Ui, pos2, vec2};
+use egui::{Color32, DragValue, FontId, Rect, Shape, Ui, pos2, vec2};
 use tonique_engine::edit::{MAX_TRANSPOSE, StretchSettings, StretchWindow, WarpMode};
 
 use crate::{
@@ -10,21 +10,26 @@ use crate::{
         clip::AudioClip,
         state::{ClipParam, ProjectState},
     },
-    ui::widget::{
-        flat_button::FlatButton,
-        param_slider::{FIELD_LEVEL, ParamSlider},
-        select::{self, Select},
+    ui::{
+        theme::font_size,
+        widget::{
+            flat_button::FlatButton,
+            param_slider::{Drag, DragStep, FIELD_LEVEL, ParamSlider, anchored_drag},
+            select::{self, Select},
+        },
     },
 };
 
 use super::inspector::{
-    CELL_GAP, CLIP_GAIN_RANGE, FIELD_HEIGHT, apply_param, cell_label, gesture, section, section_row,
+    CELL_GAP, CLIP_GAIN_RANGE, FIELD_HEIGHT, apply_param, cell_label, section, section_row,
 };
 
 /// The warp mode's picker, on its section's title row.
 const WARP_MODE_WIDTH: f32 = 80.;
 /// The file's tempo halved or doubled, beside it.
-const TEMPO_BUTTON_WIDTH: f32 = 22.;
+const TEMPO_BUTTON_WIDTH: f32 = 26.;
+/// The file's tempo as typed: `120.00` and room around it.
+const TEMPO_FIELD_WIDTH: f32 = 72.;
 /// Fine tuning's range either way, in cents.
 const MAX_DETUNE: f32 = 50.;
 /// A file's tempo, as typed.
@@ -69,6 +74,43 @@ pub(super) fn audio_panel(
     apply_param(state, shown.id, ClipParam::Gain, gain);
     apply_param(state, shown.id, ClipParam::Pan, pan);
 
+    // Heard as they're dragged, one undo step once released.
+    ui.add_space(CELL_GAP);
+    ui.columns(2, |cells| {
+        let id = ("clip-transpose", shown.id);
+        let transpose = shown.transpose as f32;
+        let edit = pitch_cell(
+            &mut cells[0],
+            id,
+            "Transpose",
+            transpose,
+            MAX_TRANSPOSE,
+            "st",
+            color,
+        );
+        if let Some((transpose, done)) = edit {
+            let mut edited = shown.clone();
+            edited.set_warp(shown.warp, shown.bpm, transpose as i32, shown.detune, bpm);
+            *live = Some((edited, done));
+        }
+
+        let id = ("clip-detune", shown.id);
+        let edit = pitch_cell(
+            &mut cells[1],
+            id,
+            "Detune",
+            shown.detune,
+            MAX_DETUNE,
+            "ct",
+            color,
+        );
+        if let Some((detune, done)) = edit {
+            let mut edited = shown.clone();
+            edited.set_warp(shown.warp, shown.bpm, shown.transpose, detune, bpm);
+            *live = Some((edited, done));
+        }
+    });
+
     // Its mode picked on the title's row.
     let header = section_row(ui, "Warp", WARP_MODE_WIDTH + CELL_GAP, select::HEIGHT);
     let picker = Rect::from_min_max(
@@ -89,12 +131,7 @@ pub(super) fn audio_panel(
         *live = Some((edited, true));
     }
     let warped = shown.warp != WarpMode::Off;
-    // Half the row: a tempo needs no more.
-    let file_bpm = ui.columns(2, |cells| {
-        cells[0]
-            .add_enabled_ui(warped, |ui| tempo_ui(ui, shown))
-            .inner
-    });
+    let file_bpm = ui.add_enabled_ui(warped, |ui| tempo_ui(ui, shown)).inner;
     if let Some(file_bpm) = file_bpm.filter(|b| BPM_RANGE.contains(b)) {
         let mut edited = shown.clone();
         edited.set_warp(shown.warp, file_bpm, shown.transpose, shown.detune, bpm);
@@ -115,64 +152,35 @@ pub(super) fn audio_panel(
             *live = Some((edited, true));
         }
     }
-
-    ui.add_space(CELL_GAP);
-    ui.columns(2, |cells| {
-        let mut transpose = shown.transpose;
-        let limit = MAX_TRANSPOSE as i32;
-        let response = pitch_cell(
-            &mut cells[0],
-            "Transpose",
-            DragValue::new(&mut transpose)
-                .speed(0.1)
-                .range(-limit..=limit)
-                .custom_formatter(|v, _| format!("{v:+.0} st"))
-                .custom_parser(|text| text.trim().trim_end_matches("st").trim().parse().ok()),
-            shown.transpose as f32 / MAX_TRANSPOSE,
-            color,
-        );
-        if let Some(done) = gesture(&response) {
-            let mut edited = shown.clone();
-            edited.set_warp(shown.warp, shown.bpm, transpose, shown.detune, bpm);
-            *live = Some((edited, done));
-        }
-
-        let mut detune = shown.detune;
-        let response = pitch_cell(
-            &mut cells[1],
-            "Detune",
-            DragValue::new(&mut detune)
-                .speed(0.5)
-                .range(-MAX_DETUNE..=MAX_DETUNE)
-                .max_decimals(0)
-                .custom_formatter(|v, _| format!("{v:+.0} ct"))
-                .custom_parser(|text| text.trim().trim_end_matches("ct").trim().parse().ok()),
-            shown.detune / MAX_DETUNE,
-            color,
-        );
-        if let Some(done) = gesture(&response) {
-            let mut edited = shown.clone();
-            edited.set_warp(shown.warp, shown.bpm, shown.transpose, detune, bpm);
-            *live = Some((edited, done));
-        }
-    });
 }
 
-/// A pitch's cell: its field filled in `color` from the centre, to
-/// `level` (-1 to 1) of its width either way, as a pan.
+/// A pitch's cell: a field of whole steps from `-limit` to `limit`
+/// (printed with `unit`), filled in `color` from the centre, as a pan.
+/// Dragged, the fill follows the pointer (Shift for fine steps); clicked,
+/// it's typed. Returns the new value and whether the edit is done.
 fn pitch_cell(
     ui: &mut Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
     label: &str,
-    value: DragValue,
-    level: f32,
+    value: f32,
+    limit: f32,
+    unit: &'static str,
     color: Color32,
-) -> egui::Response {
+) -> Option<(f32, bool)> {
     cell_label(ui, label);
     // Painted under the field, whose own background is see-through.
     let under = ui.painter().add(Shape::Noop);
     let width = ui.available_width();
+    let mut typed = value;
+    // Its own drag does nothing: the drag below follows the pointer.
+    let field = DragValue::new(&mut typed)
+        .speed(0.)
+        .range(-limit..=limit)
+        .max_decimals(0)
+        .custom_formatter(move |v, _| format!("{v:+.0} {unit}"))
+        .custom_parser(move |text| text.trim().trim_end_matches(unit).trim().parse().ok());
     let response = ui
-        .scope(|ui| {
+        .push_id(id, |ui| {
             let widgets = &mut ui.visuals_mut().widgets;
             for w in [
                 &mut widgets.inactive,
@@ -181,14 +189,14 @@ fn pitch_cell(
             ] {
                 w.weak_bg_fill = Color32::TRANSPARENT;
             }
-            ui.add_sized(vec2(width, FIELD_HEIGHT), value)
+            ui.add_sized(vec2(width, FIELD_HEIGHT), field)
         })
         .inner;
     let rect = response.rect;
     let visuals = ui.style().interact(&response);
     let centre = rect.center().x;
     let x = rect
-        .lerp_inside(vec2((level.clamp(-1., 1.) + 1.) / 2., 0.))
+        .lerp_inside(vec2((value / limit).clamp(-1., 1.) / 2. + 0.5, 0.))
         .x;
     let fill = Rect::from_x_y_ranges(centre.min(x)..=centre.max(x), rect.y_range());
     let fill_color = visuals.weak_bg_fill.lerp_to_gamma(color, FIELD_LEVEL);
@@ -200,7 +208,23 @@ fn pitch_cell(
             Shape::rect_filled(fill, radius, fill_color),
         ]),
     );
-    response
+
+    let drag_id = response.id.with("drag");
+    let mut drag = ui.data(|d| d.get_temp(drag_id));
+    let step = anchored_drag(ui, &response, &mut drag, value, value, &(-limit..=limit));
+    ui.data_mut(|d| match drag {
+        Some(drag) => {
+            d.insert_temp(drag_id, drag);
+        }
+        None => d.remove::<Drag>(drag_id),
+    });
+    match step {
+        DragStep::Moved(dragged) => Some((dragged.round(), false)).filter(|(v, _)| *v != value),
+        DragStep::Released { .. } => Some((value, true)),
+        DragStep::None => {
+            (response.changed() && !response.dragged()).then_some((typed.round(), true))
+        }
+    }
 }
 
 /// The stretch's window, picked into `stretch`.
@@ -217,10 +241,12 @@ fn window_ui(ui: &mut Ui, shown: &AudioClip, stretch: &mut StretchSettings) {
 /// The stretch's formants, kept or moved with the pitch, into `stretch`.
 fn formants_ui(ui: &mut Ui, stretch: &mut StretchSettings) {
     cell_label(ui, "Formants");
-    let size = vec2(ui.available_width(), FIELD_HEIGHT);
+    // As the window's picker beside it.
+    let size = vec2(ui.available_width(), select::HEIGHT);
     let on = stretch.formants;
     let toggle = FlatButton::new(if on { "Keep" } else { "Move" })
         .size(size)
+        .font(FontId::proportional(font_size::BODY))
         .selected(on);
     if ui.add(toggle).clicked() {
         stretch.formants = !on;
@@ -240,7 +266,7 @@ fn window_name(window: StretchWindow) -> &'static str {
 fn tempo_ui(ui: &mut Ui, shown: &AudioClip) -> Option<f64> {
     cell_label(ui, "BPM");
     ui.horizontal(|ui| {
-        let field = ui.available_width() - 2. * (TEMPO_BUTTON_WIDTH + CELL_GAP);
+        let field = TEMPO_FIELD_WIDTH;
         let id = ui.id().with(("clip-bpm", shown.id));
         let typed = typed_field(ui, id, shown.bpm, field);
         let button = |text| FlatButton::new(text).size(vec2(TEMPO_BUTTON_WIDTH, FIELD_HEIGHT));
@@ -261,9 +287,7 @@ fn typed_field(ui: &mut Ui, id: egui::Id, value: f64, width: f32) -> Option<f64>
         .unwrap_or_else(|| shown.clone());
     let response = ui.add_sized(
         vec2(width, FIELD_HEIGHT),
-        egui::TextEdit::singleline(&mut text)
-            .horizontal_align(egui::Align::Center)
-            .margin(vec2(2., 1.)),
+        egui::TextEdit::singleline(&mut text).horizontal_align(egui::Align::Center),
     );
     let entered = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     if response.has_focus() {
@@ -275,21 +299,7 @@ fn typed_field(ui: &mut Ui, id: egui::Id, value: f64, width: f32) -> Option<f64>
     entered.then(|| text.trim().parse::<f64>().ok()).flatten()
 }
 
-/// `120`, `97.5`, `97.25`: up to two decimals.
+/// `120.00`, `97.25`: two decimals.
 fn format_number(value: f64) -> String {
-    let text = format!("{value:.2}");
-    text.trim_end_matches('0').trim_end_matches('.').to_owned()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::format_number;
-
-    #[test]
-    fn tempos_show_the_decimals_they_have() {
-        assert_eq!(format_number(120.), "120");
-        assert_eq!(format_number(97.5), "97.5");
-        assert_eq!(format_number(97.25), "97.25");
-        assert_eq!(format_number(100.004), "100");
-    }
+    format!("{value:.2}")
 }

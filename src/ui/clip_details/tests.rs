@@ -131,6 +131,8 @@ struct Harness {
     details: ClipDetails,
     state: ProjectState,
     clip: ClipId,
+    /// What the last frame drew.
+    shapes: Vec<egui::epaint::ClippedShape>,
 }
 
 impl Harness {
@@ -152,6 +154,7 @@ impl Harness {
             details: ClipDetails::new(),
             state,
             clip,
+            shapes: Vec::new(),
         };
         harness.frame(Vec::new());
         harness
@@ -178,6 +181,20 @@ impl Harness {
             details.ui(ui, &clip, &track, state);
         });
         output.textures_delta.clear();
+        self.shapes = output.shapes;
+    }
+
+    /// Where the last frame wrote `text`.
+    fn text(&self, text: &str) -> Rect {
+        self.shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == text => {
+                    Some(t.galley.rect.translate(t.pos.to_vec2()))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{text:?} isn't shown"))
     }
 
     fn drag(&mut self, from: egui::Pos2, to: egui::Pos2) {
@@ -286,4 +303,20 @@ fn warping_keeps_the_view_as_it_was() {
         (h.details.grid.beats_to_width(1.), h.details.grid.offset),
         (zoom, offset)
     );
+}
+
+/// Dragged, a transposition follows the pointer: a quarter of the field's
+/// width is a quarter of its range (12 of -24 to 24 semitones), one undo
+/// step.
+#[test]
+fn dragging_the_transposition_follows_the_pointer() {
+    let mut h = Harness::new();
+    // Each cell's label is at its left.
+    let left = h.text("Transpose").left();
+    let width = h.text("Detune").left() - left - CELL_GAP;
+    let from = h.text("+0 st").center();
+    h.drag(from, from + egui::vec2(width / 4., 0.));
+    assert_eq!(h.clip().transpose, 12);
+    h.state.undo();
+    assert_eq!(h.clip().transpose, 0);
 }
