@@ -24,6 +24,10 @@ use super::inspector::{
     CELL_GAP, CLIP_GAIN_RANGE, FIELD_HEIGHT, apply_param, cell_label, section, toggle_section,
 };
 
+/// Semitones Shift and an arrow key transpose by.
+const OCTAVE: f32 = 12.;
+/// Cents Shift and an arrow key detune by.
+const DETUNE_BIG_STEP: f32 = 10.;
 /// The warp mode's picker, on its section's title row.
 const WARP_MODE_WIDTH: f32 = 80.;
 /// The file's tempo halved or doubled, beside it.
@@ -49,7 +53,9 @@ pub(super) fn audio_panel(
 ) {
     section(ui, "Audio", 0.);
     // As on tracks: a level in the clip's colour, reset by a double-click;
-    // heard as it moves, one undo step once released.
+    // heard as it moves, one undo step once released. The pitch's also
+    // step by the arrow keys once clicked, an octave (or 10 cents) with
+    // Shift.
     let slider = |value: ParamSlider, ui: &mut Ui| {
         let size = vec2(ui.available_width(), FIELD_HEIGHT);
         value.field().color(color).size(size).show(ui).1
@@ -68,11 +74,11 @@ pub(super) fn audio_panel(
     ui.add_space(CELL_GAP);
     let (transpose, detune) = ui.columns(2, |cells| {
         cell_label(&mut cells[0], "Transpose");
-        let transpose = ParamSlider::steps(shown.transpose as f32, MAX_TRANSPOSE, "st");
+        let transpose = ParamSlider::steps(shown.transpose as f32, MAX_TRANSPOSE, OCTAVE, "st");
         let transpose = slider(transpose, &mut cells[0]);
         cell_label(&mut cells[1], "Detune");
         let detune = slider(
-            ParamSlider::steps(shown.detune, MAX_DETUNE, "ct"),
+            ParamSlider::steps(shown.detune, MAX_DETUNE, DETUNE_BIG_STEP, "ct"),
             &mut cells[1],
         );
         (transpose, detune)
@@ -141,7 +147,7 @@ fn pitch_edit(edit: SliderEdit) -> Option<(f32, bool)> {
         SliderEdit::None => None,
         SliderEdit::Moved(value) => Some((value, false)),
         SliderEdit::Released { value, .. } => Some((value, true)),
-        SliderEdit::Reset { to, .. } => Some((to, true)),
+        SliderEdit::Set { to, .. } => Some((to, true)),
     }
 }
 

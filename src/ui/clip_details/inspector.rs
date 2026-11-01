@@ -431,7 +431,7 @@ pub(super) fn apply_param(
     match edit {
         SliderEdit::Moved(value) => state.set_clip_param(clip, which, value),
         SliderEdit::Released { start, value } => state.commit_clip_param(clip, which, start, value),
-        SliderEdit::Reset { from, to } => state.commit_clip_param(clip, which, from, to),
+        SliderEdit::Set { from, to } => state.commit_clip_param(clip, which, from, to),
         SliderEdit::None => {}
     }
 }
