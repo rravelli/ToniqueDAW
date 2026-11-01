@@ -1,7 +1,7 @@
 use crate::analysis::AudioInfo;
 use std::{fmt::Debug, ops::Range};
 use tonique_engine::{
-    edit::{ClipId, ClipLoop, MAX_TRANSPOSE, WarpMode},
+    edit::{ClipId, ClipLoop, MAX_SPEED, MAX_TRANSPOSE, MIN_SPEED, WarpMode},
     nodes::ClipWarp,
     time::BeatPos,
 };
@@ -233,6 +233,36 @@ impl AudioClip {
             .min(self.max_length(bpm));
     }
 
+    /// Stretch the clip to end at `beats`, keeping its start: it plays the
+    /// same part of its file, faster or slower. See [`Self::stretch_to`].
+    pub fn stretch_end_at(&mut self, beats: BeatPos, bpm: f32) {
+        self.stretch_to(beats - self.position, bpm);
+    }
+
+    /// Stretch the clip to start at `beats` (not before the first beat),
+    /// keeping its end, as [`Self::stretch_end_at`].
+    pub fn stretch_start_at(&mut self, beats: BeatPos, bpm: f32) {
+        let end = self.end(bpm);
+        self.stretch_to(end - beats.max(BeatPos::ZERO), bpm);
+        self.position = end - self.length;
+    }
+
+    /// Play what the clip plays of its file over `length` beats (at least
+    /// [`MIN_LENGTH`]), warped to the project's tempo with its file's
+    /// tempo set to fit, its pitch kept. As near as the stretcher's speeds
+    /// ([`MIN_SPEED`] to [`MAX_SPEED`]) allow.
+    fn stretch_to(&mut self, length: f64, bpm: f32) {
+        let played = self.file_seconds(self.length, bpm);
+        if played <= 0. {
+            return;
+        }
+        let seconds = to_seconds(length.max(MIN_LENGTH), bpm);
+        let speed = (played / seconds).clamp(MIN_SPEED, MAX_SPEED);
+        self.warp = WarpMode::Spectral;
+        self.bpm = bpm as f64 / speed;
+        self.length = self.file_beats(played, bpm);
+    }
+
     /// Keep only the part of the clip inside `start..end` (in beats). Never
     /// reveals audio that was trimmed away.
     pub fn crop(&mut self, start: BeatPos, end: BeatPos, bpm: f32) {
@@ -382,6 +412,35 @@ mod tests {
         // The end, no further than the file's.
         c.trim_end_at(BeatPos(30.), BPM);
         assert_eq!(c.end(BPM), BeatPos(16.));
+    }
+
+    #[test]
+    fn stretching_plays_the_same_audio_over_the_new_length() {
+        // Twice as long: the same 2 s of the file, at half the speed, as if
+        // its tempo were twice the project's.
+        let mut c = clip();
+        c.warp = WarpMode::Off;
+        c.stretch_end_at(BeatPos(18.), BPM);
+        assert_eq!(c.warp, WarpMode::Spectral, "warped");
+        assert!(close(c.bpm, 240.) && close(c.length, 8.));
+        assert_eq!((c.position, c.offset), (BeatPos(10.), 1.));
+        assert!(close(c.file_seconds(c.length, BPM), 2.));
+        // From the start, the end stays.
+        c.stretch_start_at(BeatPos(16.), BPM);
+        assert!(close(c.bpm, 60.) && close(c.length, 2.));
+        assert_eq!(c.end(BPM), BeatPos(18.));
+    }
+
+    #[test]
+    fn stretching_stops_at_the_stretchers_speeds() {
+        let mut c = clip();
+        c.stretch_end_at(BeatPos(1000.), BPM);
+        assert!(close(c.bpm, BPM as f64 * 4.), "a quarter of the speed");
+        assert!(close(c.length, 16.));
+        c.stretch_start_at(BeatPos(25.9), BPM);
+        assert!(close(c.bpm, BPM as f64 / 4.), "four times the speed");
+        assert!(close(c.length, 1.));
+        assert_eq!(c.end(BPM), BeatPos(26.));
     }
 
     #[test]

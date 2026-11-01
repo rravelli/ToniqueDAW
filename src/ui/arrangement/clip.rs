@@ -333,7 +333,8 @@ impl ClipView<'_> {
 
     /// A trim handle: dragging it moves that edge of `clip`, snapping to
     /// the grid, other clips' edges, the loop and the edit cursor (Alt
-    /// disables snapping).
+    /// disables snapping). With Shift, the clip is stretched to it instead
+    /// of trimmed: the same audio, played faster or slower.
     fn trim_handle(
         &self,
         ui: &mut Ui,
@@ -360,9 +361,12 @@ impl ClipView<'_> {
                     .snap_to_targets(beats, &targets)
                     .map_or(beats, |(snapped, _)| snapped)
             };
-            match edge {
-                Edge::Start => clip.trim_start_at(beats, state.bpm()),
-                Edge::End => clip.trim_end_at(beats, state.bpm()),
+            let bpm = state.bpm();
+            match (edge, ui.input(|i| i.modifiers.shift)) {
+                (Edge::Start, false) => clip.trim_start_at(beats, bpm),
+                (Edge::End, false) => clip.trim_end_at(beats, bpm),
+                (Edge::Start, true) => clip.stretch_start_at(beats, bpm),
+                (Edge::End, true) => clip.stretch_end_at(beats, bpm),
             }
         }
         response
@@ -510,6 +514,76 @@ mod tests {
             CursorIcon::ResizeHorizontal,
             "a trim handle"
         );
+    }
+
+    /// The clip, a 4 s file at beat 0 drawn over (0, 0)–(400, 60), once
+    /// its end handle is dragged 200 points right with `modifiers` held.
+    fn drag_end(modifiers: egui::Modifiers) -> AudioClip {
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        let track = state.add_track();
+        let id = state.new_clip_id();
+        let clip = AudioClip::new(id, AudioInfo::silent(4.), BeatPos(0.), 120.);
+        state.add_clips(&track, vec![clip]);
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers,
+        };
+        let (from, to) = (pos2(398., 40.), pos2(598., 40.));
+        let mut frames = vec![
+            vec![egui::Event::ModifiersChanged(modifiers)],
+            vec![egui::Event::PointerMoved(from), button(from, true)],
+        ];
+        for step in 1..=4 {
+            frames.push(vec![egui::Event::PointerMoved(
+                from.lerp(to, step as f32 / 4.),
+            )]);
+        }
+        frames.push(vec![button(to, false)]);
+        for (i, events) in frames.into_iter().enumerate() {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800., 200.))),
+                time: Some(i as f64),
+                events,
+                ..Default::default()
+            };
+            // As being resized, as the timeline draws it.
+            let clip = state.shown_clip(&state.find_clip(id).unwrap().1);
+            let mut output = ctx.run_ui(input, |ui| {
+                ClipView {
+                    clip: &clip,
+                    rect: Rect::from_min_size(Pos2::ZERO, vec2(400., 60.)),
+                    viewport: Rect::from_min_size(Pos2::ZERO, vec2(800., 200.)),
+                    color: crate::ui::theme::Theme::dark().accent,
+                    selected: false,
+                    zone: None,
+                    collapsed: false,
+                    silenced: false,
+                }
+                .ui(ui, &mut state);
+            });
+            output.textures_delta.clear();
+        }
+        state.find_clip(id).unwrap().1
+    }
+
+    #[test]
+    fn shift_dragging_an_edge_stretches_the_clip() {
+        let trimmed = drag_end(egui::Modifiers::NONE);
+        assert_eq!(
+            (trimmed.length, trimmed.bpm),
+            (8., 120.),
+            "no further than the file"
+        );
+        let stretched = drag_end(egui::Modifiers::SHIFT);
+        assert!(stretched.length > 8., "longer: {}", stretched.length);
+        assert!(stretched.bpm > 120., "played slower");
+        let played = stretched.file_seconds(stretched.length, 120.);
+        assert!((played - 4.).abs() < 1e-6, "the same audio: {played} s");
     }
 
     /// Whether egui warned of two widgets with one ID, drawing `clip` with
