@@ -19,6 +19,7 @@ use crate::{
             reverb::ReverbEditor,
             saturation::SaturationEditor,
             spectrum::SpectrumEditor,
+            tuner::TunerEditor,
             utility::UtilityEditor,
         },
         font::PHOSPHOR_REGULAR,
@@ -55,6 +56,7 @@ pub mod reverb;
 pub mod saturation;
 pub mod shapes;
 pub mod spectrum;
+pub mod tuner;
 pub mod utility;
 
 /// Size of a parameter's switch.
@@ -224,6 +226,7 @@ fn editor(kind: EffectKind) -> Box<dyn EffectEditor> {
         EffectKind::Filter => Box::new(FilterEditor::new()),
         EffectKind::Echo => Box::new(EchoEditor),
         EffectKind::Spectrum => Box::new(SpectrumEditor::new()),
+        EffectKind::Tuner => Box::new(TunerEditor::new()),
         EffectKind::Utility => Box::new(UtilityEditor),
         EffectKind::Eq => Box::new(EqEditor::new()),
         EffectKind::Compressor => Box::new(CompressorEditor::new()),

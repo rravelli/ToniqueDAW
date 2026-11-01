@@ -25,7 +25,7 @@ pub const EXTENSION: &str = "tonique";
 /// offset and length rather than by trims; 6 clip warp, tempo and
 /// transposition; 7 the grid settings; 8 the EQ, compressor, limiter, gate,
 /// saturation and reverb effects, more filter modes and a filter gain, echo
-/// sync (`sync`, in beats) and feedback cuts.
+/// sync (`sync`, in beats) and feedback cuts, and the tuner.
 pub const VERSION: u32 = 8;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

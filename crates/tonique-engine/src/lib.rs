@@ -22,6 +22,7 @@ pub mod nodes;
 pub mod onset;
 pub mod param;
 pub mod peaks;
+pub mod pitch;
 pub mod preview;
 pub mod resample;
 pub mod rt;

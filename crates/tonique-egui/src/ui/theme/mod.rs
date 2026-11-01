@@ -136,6 +136,8 @@ pub mod font_size {
     pub const BODY: f32 = 12.;
     /// Titles.
     pub const HEADING: f32 = 14.;
+    /// Readouts to see from a distance: the tuner's note.
+    pub const DISPLAY: f32 = 32.;
 }
 
 /// A colour of the theme, as listed in theme files and the editor.

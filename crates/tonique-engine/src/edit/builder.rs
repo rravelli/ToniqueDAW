@@ -314,7 +314,7 @@ impl Builder<'_> {
                     let node = GateNode::new(p, tap.clone());
                     self.tapped(node.with_identity(id), tap, prev)
                 }
-                PluginKind::Analyzer => {
+                PluginKind::Analyzer | PluginKind::Tuner => {
                     self.tapped(ThroughNode::new(2).with_identity(id), tap, prev)
                 }
                 PluginKind::Latency { samples } => {
@@ -373,6 +373,7 @@ fn plugin_label(kind: PluginKind) -> &'static str {
         PluginKind::Echo { .. } => "echo",
         PluginKind::Latency { .. } => "latency",
         PluginKind::Analyzer => "analyzer",
+        PluginKind::Tuner => "tuner",
         PluginKind::Utility => "utility",
         PluginKind::Compressor => "compressor",
         PluginKind::Limiter { .. } => "limiter",

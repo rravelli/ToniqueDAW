@@ -19,6 +19,8 @@ pub enum EffectKind {
     Echo,
     /// Shows the spectrum at its place in the chain; leaves audio as is.
     Spectrum,
+    /// Shows the note played and how far off it is; leaves audio as is.
+    Tuner,
     /// Gain, balance, stereo width, mono and phase inversion.
     Utility,
     /// Parametric EQ: cuts, shelves and peaks.
@@ -62,7 +64,7 @@ pub const LIMITER_LOOKAHEADS: RangeInclusive<f32> = 0.5..=20.;
 
 impl EffectKind {
     /// In the order the browser lists them.
-    pub const ALL: [EffectKind; 10] = [
+    pub const ALL: [EffectKind; 11] = [
         EffectKind::Eq,
         EffectKind::Filter,
         EffectKind::Compressor,
@@ -73,6 +75,7 @@ impl EffectKind {
         EffectKind::Reverb,
         EffectKind::Utility,
         EffectKind::Spectrum,
+        EffectKind::Tuner,
     ];
 
     /// Shown in the browser and on the effect's header.
@@ -81,6 +84,7 @@ impl EffectKind {
             EffectKind::Filter => "Filter",
             EffectKind::Echo => "Echo",
             EffectKind::Spectrum => "Spectrum",
+            EffectKind::Tuner => "Tuner",
             EffectKind::Utility => "Utility",
             EffectKind::Eq => "EQ",
             EffectKind::Compressor => "Compressor",
@@ -109,6 +113,7 @@ impl EffectKind {
             ],
             EffectKind::Echo => &["delay", "feedback", "repeat", "tempo", "sync"],
             EffectKind::Spectrum => &["analyzer", "analyser", "fft", "frequency", "meter"],
+            EffectKind::Tuner => &["pitch", "tuning", "note", "cents", "guitar", "intonation"],
             EffectKind::Utility => &[
                 "gain", "volume", "pan", "balance", "width", "stereo", "mono", "phase", "invert",
             ],
@@ -157,6 +162,7 @@ impl EffectKind {
                 sync: None,
             },
             EffectKind::Spectrum => PluginKind::Analyzer,
+            EffectKind::Tuner => PluginKind::Tuner,
             EffectKind::Utility => PluginKind::Utility,
             EffectKind::Eq => PluginKind::Eq,
             EffectKind::Compressor => PluginKind::Compressor,
@@ -175,6 +181,7 @@ impl EffectKind {
             PluginKind::Filter(_) => Some(EffectKind::Filter),
             PluginKind::Echo { .. } => Some(EffectKind::Echo),
             PluginKind::Analyzer => Some(EffectKind::Spectrum),
+            PluginKind::Tuner => Some(EffectKind::Tuner),
             PluginKind::Utility => Some(EffectKind::Utility),
             PluginKind::Eq => Some(EffectKind::Eq),
             PluginKind::Compressor => Some(EffectKind::Compressor),
@@ -195,6 +202,7 @@ impl EffectKind {
             // from before the cuts keep theirs out of the way.
             EffectKind::Echo => &[("low_cut", 80.), ("high_cut", 8000.)],
             EffectKind::Spectrum
+            | EffectKind::Tuner
             | EffectKind::Utility
             | EffectKind::Eq
             | EffectKind::Compressor

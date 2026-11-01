@@ -130,6 +130,10 @@ pub enum PluginKind {
     /// Passes audio through untouched: a point in the chain for its
     /// [`Plugin::tap`] to show, like a spectrum analyser.
     Analyzer,
+    /// Passes audio through untouched, for its [`Plugin::tap`] to tune by:
+    /// see [`PitchTracker`](crate::pitch::PitchTracker). Its `reference`
+    /// is the pitch of A4, in Hz.
+    Tuner,
     /// Gain, balance, stereo width, mono and phase inversion: see
     /// [`UtilityNode`](crate::nodes::UtilityNode).
     Utility,
@@ -240,6 +244,7 @@ impl Plugin {
                 p("hold", 0.0, 500.0, 50.0),
                 p("release", 5.0, 2000.0, 150.0),
             ],
+            PluginKind::Tuner => vec![p("reference", 415.0, 466.0, 440.0)],
             PluginKind::Latency { .. } | PluginKind::Analyzer => vec![],
         };
         Self {
