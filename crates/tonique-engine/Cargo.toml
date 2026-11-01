@@ -53,3 +53,8 @@ harness = false
 [[bench]]
 name = "dsp"
 harness = false
+
+[[bench]]
+name = "stretch"
+harness = false
+required-features = ["signalsmith"]
