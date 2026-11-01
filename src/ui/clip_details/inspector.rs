@@ -112,7 +112,7 @@ pub(super) fn inspector_ui(
     let mut panels = Panels::get(ui.ctx());
     let mut top = rect.top();
     for (on, icon, name) in [
-        (&mut panels.clip, icons::FILM_STRIP, "Clip"),
+        (&mut panels.clip, icons::BROWSER, "Clip"),
         (&mut panels.audio, icons::WAVEFORM, "Audio"),
     ] {
         let button = FlatButton::ghost(icon)
