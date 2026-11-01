@@ -11,6 +11,17 @@ use tonique_engine::{
 const MAX_SEGMENTS: usize = 4096;
 /// Shortest a clip, or a loop, can be, in beats.
 pub const MIN_LENGTH: f64 = 1. / 16.;
+/// Furthest a clip is detuned either way, in cents: short of half a
+/// semitone, so a pitch splits into semitones and cents one way only (see
+/// [`split_pitch`]).
+pub const MAX_DETUNE: f32 = 49.;
+
+/// A pitch in semitones (fractions being cents) as whole semitones and
+/// cents: the nearest semitone, and what's left.
+pub fn split_pitch(pitch: f32) -> (i32, f32) {
+    let semitones = pitch.round();
+    (semitones as i32, (pitch - semitones) * 100.)
+}
 
 /// A clip representing an audio file placed on a track: from `offset` in
 /// the file (its start marker), for `length` beats; with a loop, once
@@ -43,7 +54,8 @@ pub struct AudioClip {
     /// In whole semitones: warped, the pitch alone moves; unwarped, the
     /// speed too.
     pub transpose: i32,
-    /// Fine tuning, in cents (-50 to 50), as `transpose`.
+    /// Fine tuning, in cents (up to [`MAX_DETUNE`] either way), as
+    /// `transpose`.
     pub detune: f32,
     /// How it's stretched, warped.
     pub stretch: StretchSettings,
@@ -140,7 +152,7 @@ impl AudioClip {
             self.bpm = file_bpm;
         }
         self.transpose = transpose.clamp(-limit, limit);
-        self.detune = detune.clamp(-50., 50.);
+        self.detune = detune.clamp(-MAX_DETUNE, MAX_DETUNE);
         self.length = self
             .file_beats(played, bpm)
             .max(MIN_LENGTH)
@@ -562,10 +574,10 @@ mod tests {
         assert!(close(c.length, 2.));
         assert!(close(c.speed(60.), 2.), "whatever the tempo");
         // Detuned by cents.
-        c.set_warp(WarpMode::Off, BPM as f64, 0, 50., BPM);
-        assert!(close(c.speed(BPM), 2f64.powf(0.5 / 12.)));
+        c.set_warp(WarpMode::Off, BPM as f64, 0, 40., BPM);
+        assert!(close(c.speed(BPM), 2f64.powf(0.4 / 12.)));
         c.set_warp(WarpMode::Off, BPM as f64, 0, 80., BPM);
-        assert_eq!(c.detune, 50., "at most half a semitone");
+        assert_eq!(c.detune, MAX_DETUNE, "short of half a semitone");
     }
 
     #[test]

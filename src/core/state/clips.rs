@@ -2,7 +2,7 @@
 //! them.
 
 use crate::core::{
-    clip::AudioClip,
+    clip::{AudioClip, split_pitch},
     state::clip_ops::{ClipOp, TrackClips},
     track::TrackRow,
 };
@@ -337,6 +337,7 @@ impl ProjectState {
         let audio = self.sources.info(source)?.clone();
         // Clips of files of unknown length can't be edited.
         audio.duration?;
+        let (semitones, cents) = split_pitch(transpose);
         Some(AudioClip {
             id: clip.id,
             audio,
@@ -349,9 +350,8 @@ impl ProjectState {
             origin: origin_s,
             warp,
             bpm: source_bpm,
-            // Whole semitones, and what's left in cents (-50 to 50).
-            transpose: transpose.round() as i32,
-            detune: (transpose - transpose.round()) * 100.,
+            transpose: semitones,
+            detune: cents,
             stretch,
         })
     }

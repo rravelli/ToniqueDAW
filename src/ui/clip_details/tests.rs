@@ -8,7 +8,7 @@ use super::{inspector::*, markers::*, *};
 use crate::{
     analysis::AudioInfo,
     core::{
-        clip::{AudioClip, MIN_LENGTH},
+        clip::{AudioClip, MAX_DETUNE, MIN_LENGTH},
         state::ProjectState,
     },
     utils::{format_bars, parse_bars},
@@ -319,4 +319,32 @@ fn dragging_the_transposition_follows_the_pointer() {
     assert_eq!(h.clip().transpose, 12);
     h.state.undo();
     assert_eq!(h.clip().transpose, 0);
+}
+
+/// The inspector's panels are laid out alike: their sections and rows
+/// start at the same heights.
+#[test]
+fn the_clip_and_audio_panels_line_up() {
+    let h = Harness::new();
+    for (clip, audio) in [
+        ("CLIP", "AUDIO"),
+        ("Start", "Gain"),
+        ("Length", "Transpose"),
+        ("LOOP", "WARP"),
+        ("Position", "BPM"),
+    ] {
+        assert_eq!(h.text(clip).top(), h.text(audio).top(), "{clip} / {audio}");
+    }
+}
+
+/// Detuned to its furthest, a clip stays at its transposition: a pitch
+/// splits into semitones and cents one way only.
+#[test]
+fn detuning_to_the_end_keeps_the_transposition() {
+    let mut h = Harness::new();
+    let left = h.text("Detune").left();
+    let from = h.text("+0 ct").center();
+    // Well past the field's end, at once.
+    h.drag(from, egui::pos2(left + 1000., from.y));
+    assert_eq!((h.clip().transpose, h.clip().detune), (0, MAX_DETUNE));
 }

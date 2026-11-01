@@ -2,12 +2,12 @@
 //! transposition), and how it follows the project's tempo (its file's
 //! tempo, how it's stretched).
 
-use egui::{Color32, DragValue, FontId, Rect, Shape, Ui, pos2, vec2};
+use egui::{Color32, DragValue, FontId, Rect, Shape, Ui, vec2};
 use tonique_engine::edit::{MAX_TRANSPOSE, StretchSettings, StretchWindow, WarpMode};
 
 use crate::{
     core::{
-        clip::AudioClip,
+        clip::{AudioClip, MAX_DETUNE},
         state::{ClipParam, ProjectState},
     },
     ui::{
@@ -15,31 +15,27 @@ use crate::{
         widget::{
             flat_button::FlatButton,
             param_slider::{Drag, DragStep, FIELD_LEVEL, ParamSlider, anchored_drag},
-            select::{self, Select},
+            select::Select,
         },
     },
 };
 
 use super::inspector::{
-    CELL_GAP, CLIP_GAIN_RANGE, FIELD_HEIGHT, apply_param, cell_label, section, section_row,
+    CELL_GAP, CLIP_GAIN_RANGE, FIELD_HEIGHT, apply_param, cell_label, section, switch_section,
 };
 
-/// The warp mode's picker, on its section's title row.
-const WARP_MODE_WIDTH: f32 = 80.;
 /// The file's tempo halved or doubled, beside it.
 const TEMPO_BUTTON_WIDTH: f32 = 26.;
 /// The file's tempo as typed: `120.00` and room around it.
 const TEMPO_FIELD_WIDTH: f32 = 72.;
-/// Fine tuning's range either way, in cents.
-const MAX_DETUNE: f32 = 50.;
 /// A file's tempo, as typed.
 const BPM_RANGE: std::ops::RangeInclusive<f64> = 10.0..=999.0;
 
-/// Gain and pan, sliders like a track's heard as they're dragged; the warp
-/// mode; the file's tempo, typed or halved and doubled; stretched, the
-/// window and formants; the transposition, heard as it's dragged (`live`)
-/// and filled in the clip's `color`. Edits go in
-/// `change` (shown until done) or `live`, as in the inspector.
+/// Gain and pan, sliders like a track's heard as they're dragged; the
+/// transposition, heard as it's dragged (`live`) and filled in the clip's
+/// `color`; the warp, switched; the file's tempo, typed or halved and
+/// doubled; the stretch's window and formants. Edits go in `change` (shown
+/// until done) or `live`, as in the inspector.
 pub(super) fn audio_panel(
     ui: &mut Ui,
     shown: &AudioClip,
@@ -111,35 +107,25 @@ pub(super) fn audio_panel(
         }
     });
 
-    // Its mode picked on the title's row.
-    let header = section_row(ui, "Warp", WARP_MODE_WIDTH + CELL_GAP, select::HEIGHT);
-    let picker = Rect::from_min_max(
-        pos2(header.right() - WARP_MODE_WIDTH, header.top()),
-        header.max,
-    );
-    let mut warp = shown.warp;
-    ui.put(
-        picker,
-        Select::new(("clip-warp", shown.id), &mut warp)
-            .option(WarpMode::Off, "Off")
-            .option(WarpMode::Spectral, "Tonal")
-            .width(WARP_MODE_WIDTH),
-    );
-    if warp != shown.warp {
+    // Off, it shows how it would play, greyed out, as the loop.
+    let warped = shown.warp == WarpMode::Spectral;
+    if switch_section(ui, "Warp", warped) {
+        let warp = if warped {
+            WarpMode::Off
+        } else {
+            WarpMode::Spectral
+        };
         let mut edited = shown.clone();
         edited.set_warp(warp, shown.bpm, shown.transpose, shown.detune, bpm);
         *live = Some((edited, true));
     }
-    let warped = shown.warp != WarpMode::Off;
-    let file_bpm = ui.add_enabled_ui(warped, |ui| tempo_ui(ui, shown)).inner;
-    if let Some(file_bpm) = file_bpm.filter(|b| BPM_RANGE.contains(b)) {
-        let mut edited = shown.clone();
-        edited.set_warp(shown.warp, file_bpm, shown.transpose, shown.detune, bpm);
-        *change = Some((edited, true));
-    }
+    ui.add_enabled_ui(warped, |ui| {
+        if let Some(file_bpm) = tempo_ui(ui, shown).filter(|b| BPM_RANGE.contains(b)) {
+            let mut edited = shown.clone();
+            edited.set_warp(shown.warp, file_bpm, shown.transpose, shown.detune, bpm);
+            *change = Some((edited, true));
+        }
 
-    // Only stretching has these.
-    if shown.warp == WarpMode::Spectral {
         let mut stretch = shown.stretch;
         ui.add_space(CELL_GAP);
         ui.columns(2, |cells| {
@@ -151,7 +137,7 @@ pub(super) fn audio_panel(
             edited.stretch = stretch;
             *live = Some((edited, true));
         }
-    }
+    });
 }
 
 /// A pitch's cell: a field of whole steps from `-limit` to `limit`
@@ -231,7 +217,9 @@ fn pitch_cell(
 fn window_ui(ui: &mut Ui, shown: &AudioClip, stretch: &mut StretchSettings) {
     cell_label(ui, "Window");
     let width = ui.available_width();
-    let mut select = Select::new(("clip-window", shown.id), &mut stretch.window).width(width);
+    let mut select = Select::new(("clip-window", shown.id), &mut stretch.window)
+        .width(width)
+        .height(FIELD_HEIGHT);
     for window in StretchWindow::ALL {
         select = select.option(window, window_name(window));
     }
@@ -241,8 +229,8 @@ fn window_ui(ui: &mut Ui, shown: &AudioClip, stretch: &mut StretchSettings) {
 /// The stretch's formants, kept or moved with the pitch, into `stretch`.
 fn formants_ui(ui: &mut Ui, stretch: &mut StretchSettings) {
     cell_label(ui, "Formants");
-    // As the window's picker beside it.
-    let size = vec2(ui.available_width(), select::HEIGHT);
+    // In the window picker's font, beside it.
+    let size = vec2(ui.available_width(), FIELD_HEIGHT);
     let on = stretch.formants;
     let toggle = FlatButton::new(if on { "Keep" } else { "Move" })
         .size(size)

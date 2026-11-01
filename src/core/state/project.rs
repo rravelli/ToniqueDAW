@@ -23,7 +23,7 @@ use crate::{
     analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,
     core::{
-        clip::{AudioClip, MIN_LENGTH},
+        clip::{AudioClip, MIN_LENGTH, split_pitch},
         effect::{EffectKind, Setting},
         project::{
             ChannelFile, ClipFile, EffectFile, GroupFile, LoopFile, ProjectFile, TrackFile,
@@ -308,8 +308,7 @@ impl ProjectState {
         // In range, whatever a project file says.
         let limit = MAX_TRANSPOSE;
         let transpose = clip.transpose.clamp(-limit, limit);
-        restored.transpose = transpose.round() as i32;
-        restored.detune = (transpose - transpose.round()) * 100.;
+        (restored.transpose, restored.detune) = split_pitch(transpose);
         restored.stretch = StretchSettings {
             window: clip.window.into(),
             formants: clip.formants,
