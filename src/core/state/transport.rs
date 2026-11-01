@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use tonique_engine::{
     edit::{
-        ClipContent, EditError,
+        ClipContent, EditError, WarpMode,
         commands::{ResizeClip, SetTempoMap},
     },
     time::{BeatPos, TimeSignature},
@@ -20,8 +20,8 @@ impl ProjectState {
         if value <= 0. || value == old {
             return;
         }
-        // Audio clips keep their length in seconds, so their length in beats
-        // scales with the tempo.
+        // Unwarped audio clips keep their length in seconds, so their length
+        // in beats scales with the tempo; warped ones keep theirs in beats.
         let resized: Vec<_> = self
             .edit()
             .tracks
@@ -29,12 +29,14 @@ impl ProjectState {
             .flat_map(|t| t.clips.iter().map(move |c| (t.id, c)))
             .filter_map(|(t, c)| match c.content {
                 ClipContent::Audio {
-                    source_offset_s, ..
+                    source_offset_s,
+                    warp: WarpMode::Off,
+                    ..
                 } => {
                     let length = c.length * value as f64 / old as f64;
                     Some(ResizeClip::new(t, c.id, c.start, length, source_offset_s))
                 }
-                ClipContent::Midi { .. } => None,
+                ClipContent::Audio { .. } | ClipContent::Midi { .. } => None,
             })
             .collect();
         let mut tempo = self.edit().tempo.clone();
@@ -172,10 +174,9 @@ impl ProjectState {
             self.sync_loop();
         }
     }
-    /// Hand the loop to the engine. It counts in samples, so this must run
-    /// again whenever the tempo changes.
+    /// Hand the loop to the engine, in beats: it keeps it on them through
+    /// tempo changes, as it does the playhead.
     pub(super) fn sync_loop(&mut self) {
-        self.loop_bpm = self.bpm();
         let range = self.looping.then_some(self.loop_range);
         report(self.session.set_loop(range));
     }

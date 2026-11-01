@@ -4,6 +4,7 @@ mod inspector;
 mod markers;
 #[cfg(test)]
 mod tests;
+mod warp;
 
 use egui::{CursorIcon, Rect, Response, ScrollArea, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 use tonique_engine::{edit::ClipId, time::BeatPos};
@@ -45,6 +46,9 @@ pub struct ClipDetails {
     fitted: Option<ClipId>,
     /// Where bar 1 is in the file, in seconds: the clip's, as last drawn.
     origin: f64,
+    /// Seconds of the file the clip plays per second, as last drawn: the
+    /// grid counts beats as heard.
+    speed: f64,
     /// The waveform's lane, as last drawn.
     #[cfg(test)]
     lane: Rect,
@@ -57,6 +61,7 @@ impl ClipDetails {
             grid: GridService::new().with_negative_offset(),
             fitted: None,
             origin: 0.,
+            speed: 1.,
             #[cfg(test)]
             lane: Rect::NOTHING,
         }
@@ -88,12 +93,19 @@ impl ClipDetails {
         let bpm = state.bpm();
         // Bars as the project counts them.
         self.grid.set_time_signature(state.time_signature());
+        // Played faster or slower: the file spans fewer or more beats, the
+        // view fitted to it again.
+        let speed = clip.speed(bpm);
+        if speed != self.speed {
+            self.speed = speed;
+            self.fitted = None;
+        }
         if self.fitted == Some(clip.id) && clip.origin != self.origin {
             // Bar 1 moved: the grid follows, and the audio stays where it
             // was on screen.
             self.grid.offset.x -= self
                 .grid
-                .beats_to_width(to_beats(clip.origin - self.origin, bpm));
+                .beats_to_width(clip.file_beats(clip.origin - self.origin, bpm));
         }
         self.origin = clip.origin;
         if self.fitted != Some(clip.id) {
@@ -132,10 +144,20 @@ impl ClipDetails {
         ui.allocate_rect(rect, Sense::hover());
     }
 
+    /// Beats the clip takes to play `seconds` of the file.
+    fn beats(&self, seconds: f64, bpm: f32) -> f64 {
+        to_beats(seconds / self.speed, bpm)
+    }
+
+    /// Seconds of the file the clip plays in `beats`.
+    fn seconds(&self, beats: f64, bpm: f32) -> f64 {
+        to_seconds(beats, bpm) * self.speed
+    }
+
     /// Where `file` seconds into the file are drawn.
     fn x(&self, file: f64, bpm: f32, lane: Rect) -> f32 {
         self.grid
-            .beats_to_x(BeatPos(to_beats(file - self.origin, bpm)), lane)
+            .beats_to_x(BeatPos(self.beats(file - self.origin, bpm)), lane)
     }
 
     /// The time in the file drawn at `x`, snapped to the grid (counted from
@@ -147,7 +169,7 @@ impl ClipDetails {
         } else {
             self.grid.snap_at_grid(beats)
         };
-        self.origin + to_seconds(beats.0, bpm)
+        self.origin + self.seconds(beats.0, bpm)
     }
 
     /// Where the whole file is drawn, left to right.
@@ -161,8 +183,8 @@ impl ClipDetails {
         let (start, end) = played(clip, bpm);
         let margin = (end - start) * FIT_MARGIN;
         self.grid.fit(
-            BeatPos(to_beats(start - self.origin, bpm) - margin),
-            BeatPos(to_beats(end - self.origin, bpm) + margin),
+            BeatPos(clip.file_beats(start - self.origin, bpm) - margin),
+            BeatPos(clip.file_beats(end - self.origin, bpm) + margin),
             width,
         );
     }
@@ -204,12 +226,7 @@ impl ClipDetails {
             ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
             self.grid.offset.x -= response.drag_delta().x;
         }
-        let ruler_response = ui
-            .interact(ruler, ui.id().with("clip-ruler"), Sense::click())
-            .on_hover_text(
-                "Bars from the clip's bar 1. Double-click to fit the clip, right-click to \
-                 move bar 1.",
-            );
+        let ruler_response = ui.interact(ruler, ui.id().with("clip-ruler"), Sense::click());
         if ruler_response.double_clicked() {
             self.fit(clip, bpm, lane.width());
         }
@@ -240,7 +257,7 @@ impl ClipDetails {
             && let Some(pos) = ruler.interact_pointer_pos()
         {
             // Where the pointer is, not snapped: the grid being moved.
-            let at = self.origin + to_seconds(self.grid.x_to_beats(pos.x, lane).0, bpm);
+            let at = self.origin + self.seconds(self.grid.x_to_beats(pos.x, lane).0, bpm);
             ui.data_mut(|d| d.insert_temp(clicked, at));
         }
         ruler.context_menu(|ui| {
@@ -265,7 +282,7 @@ impl ClipDetails {
 
     /// How far the view scrolls: always keeping part of the file in view.
     fn scroll_range(&self, clip: &AudioClip, bpm: f32, lane: Rect) -> (f32, f32) {
-        let file_start = to_beats(-self.origin, bpm);
+        let file_start = clip.file_beats(-self.origin, bpm);
         let half = lane.width() / 2.;
         let min = self.grid.beats_to_width(file_start) - half;
         let max = self
@@ -358,7 +375,10 @@ impl ClipDetails {
 fn played(clip: &AudioClip, bpm: f32) -> (f64, f64) {
     match clip.active_loop() {
         Some(l) => (clip.offset.min(l.start_s), l.end_s.max(clip.offset)),
-        None => (clip.offset, clip.offset + to_seconds(clip.length, bpm)),
+        None => (
+            clip.offset,
+            clip.offset + clip.file_seconds(clip.length, bpm),
+        ),
     }
 }
 

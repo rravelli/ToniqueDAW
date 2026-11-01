@@ -9,7 +9,8 @@ use std::{
 use egui::Vec2;
 use tonique_engine::{
     edit::{
-        Bus, BusId, Channel, ClipLoop, Edit, Output, SourceId, Track, TrackId,
+        Bus, BusId, Channel, ClipLoop, Edit, MAX_TRANSPOSE, Output, SourceId, Track, TrackId,
+        WarpMode,
         commands::{AddBus, SetBypass, SetOutput, SetSolo},
     },
     time::BeatPos,
@@ -158,6 +159,9 @@ impl ProjectState {
                 gain: clip.gain,
                 pan: clip.pan,
                 origin: clip.origin,
+                warp: clip.warp.into(),
+                bpm: Some(clip.bpm),
+                transpose: clip.pitch(),
             })
             .collect();
         clips.sort_by(|a, b| a.position.total_cmp(&b.position));
@@ -297,6 +301,13 @@ impl ProjectState {
         restored.gain = clip.gain;
         restored.pan = clip.pan;
         restored.origin = clip.origin;
+        restored.warp = clip.warp.into();
+        restored.bpm = clip.bpm.filter(|b| *b > 0.).unwrap_or(bpm as f64);
+        // In range, whatever a project file says.
+        let limit = MAX_TRANSPOSE;
+        let transpose = clip.transpose.clamp(-limit, limit);
+        restored.transpose = transpose.round() as i32;
+        restored.detune = (transpose - transpose.round()) * 100.;
         restored.looped = clip.looped.map(|l| ClipLoop {
             start_s: l.start,
             end_s: l.end,
@@ -434,7 +445,15 @@ fn reach_by_file(project: &ProjectFile, bpm: f32, bar: f64) -> HashMap<&Path, f6
             Some(length) => (clip.offset, length),
             None => (0., placeholder),
         };
-        let end = offset + length * 60. / bpm as f64;
+        // Played faster or slower, the clip reads more or less of its file.
+        let file_bpm = clip.bpm.filter(|b| *b > 0.).unwrap_or(bpm as f64);
+        let warp = WarpMode::from(clip.warp).play(
+            file_bpm,
+            clip.transpose,
+            tonique_engine::edit::StretchSettings::default(),
+            bpm as f64,
+        );
+        let end = offset + length * 60. / bpm as f64 * warp.speed();
         let read = match clip.looped {
             // Round the loop rather than on through the file.
             Some(looped) if offset < looped.end => looped.end,

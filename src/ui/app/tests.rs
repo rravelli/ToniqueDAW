@@ -32,7 +32,10 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tonique_engine::time::BeatPos;
+use tonique_engine::{
+    edit::{MAX_SPEED, MIN_SPEED, WarpMode},
+    time::BeatPos,
+};
 
 const SIZE: Vec2 = vec2(1400., 900.);
 /// Inputs per seed, unless `TONIQUE_FUZZ_STEPS` says otherwise.
@@ -453,16 +456,22 @@ fn widgets(harness: &Harness<'_, ToniqueApp>, size: Vec2) -> Vec<Rect> {
 }
 
 /// What must hold whatever the user did: clips have a length and don't play
-/// past their file, the project saves and opens again as it was, and
-/// undoing everything then redoing it gets back to it.
+/// past their file (but warped ones the tempo is too far from their file's
+/// to stretch to: they go on silent), the project saves and opens again as
+/// it was, and undoing everything then redoing it gets back to it.
 fn check(harness: &mut Harness<'_, ToniqueApp>) {
     let state = &mut harness.state_mut().state;
     let bpm = state.bpm() as f64;
     for clip in state.tracks().flat_map(|t| t.clips) {
         assert!(clip.length > 0., "{:?} has no length", clip.id);
-        let end = clip.offset + clip.length * 60. / bpm;
+        let end = clip.offset + clip.file_seconds(clip.length, bpm as f32);
+        let ratio = bpm / clip.bpm;
+        let stretched_too_far =
+            clip.warp == WarpMode::Spectral && !(MIN_SPEED..=MAX_SPEED).contains(&ratio);
         assert!(
-            clip.active_loop().is_some() || end <= clip.source_seconds() as f64 + 1e-6,
+            clip.active_loop().is_some()
+                || stretched_too_far
+                || end <= clip.source_seconds() as f64 + 1e-6,
             "{:?} plays to {end} s of its {} s file",
             clip.id,
             clip.source_seconds()
