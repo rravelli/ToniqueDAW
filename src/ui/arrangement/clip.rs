@@ -13,7 +13,7 @@ use egui::{
     Response, Sense, Stroke, Ui, pos2, vec2,
 };
 use egui_phosphor::fill::TRASH;
-use std::time::Duration;
+use std::{ops::Range, time::Duration};
 use tonique_engine::time::BeatPos;
 
 const PADDING_TEXT: f32 = 4.;
@@ -253,8 +253,13 @@ impl ClipView<'_> {
         // Where the loop starts over: a faint line through the header.
         if clip.active_loop().is_some() {
             let stroke = Stroke::new(1., with_alpha(header_ink, LOOP_LINE_ALPHA));
-            for segment in clip.segments(state.bpm()).iter().skip(1) {
-                let x = pos.x + segment.start as f32 * state.grid.pixels_per_beat();
+            let pixels_per_beat = state.grid.pixels_per_beat();
+            let in_view = beats_in_view(pos.x, viewport, pixels_per_beat);
+            for segment in clip.segments(in_view, state.bpm()) {
+                if segment.start <= 0. {
+                    continue;
+                }
+                let x = pos.x + segment.start as f32 * pixels_per_beat;
                 if viewport.x_range().contains(x) {
                     painter.vline(x, pos.y..=pos.y + HEADER_HEIGHT, stroke);
                 }
@@ -357,6 +362,13 @@ fn wave_ink(bg: Color32) -> Color32 {
     }
 }
 
+/// The beats of a clip starting at `left` that `viewport` shows, from the
+/// clip's start.
+fn beats_in_view(left: f32, viewport: Rect, pixels_per_beat: f32) -> Range<f64> {
+    let beats = |x: f32| ((x - left) / pixels_per_beat) as f64;
+    beats(viewport.left()).max(0.)..beats(viewport.right())
+}
+
 /// The waveform of `clip` over `rect` (the clip's, from its start), as it
 /// plays: piece by piece, each pass of its loop after a thin line marking
 /// the seam. Each piece lays out the whole file and shows only its part, so
@@ -379,7 +391,8 @@ pub fn paint_clip_waveform(
     }
     let x = |beats: f64| rect.left() + beats as f32 * pixels_per_beat;
     let file_width = (seconds * bpm as f64 / 60.) as f32 * pixels_per_beat;
-    for segment in clip.segments(bpm) {
+    let in_view = beats_in_view(rect.left(), viewport, pixels_per_beat);
+    for segment in clip.segments(in_view, bpm) {
         let (left, right) = (x(segment.start), x(segment.end));
         if right < viewport.left() || left > viewport.right() {
             continue;

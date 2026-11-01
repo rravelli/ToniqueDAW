@@ -1,12 +1,12 @@
 use crate::analysis::AudioInfo;
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::Range};
 use tonique_engine::{
     edit::{ClipId, ClipLoop},
     time::BeatPos,
 };
 
-/// Most pieces [`AudioClip::segments`] cuts a clip into: a tiny loop over
-/// a long clip would make too many to draw.
+/// Most pieces [`AudioClip::segments`] cuts a stretch into: a tiny loop
+/// over a long stretch would make too many to draw.
 const MAX_SEGMENTS: usize = 4096;
 /// Shortest a clip, or a loop, can be, in beats.
 pub const MIN_LENGTH: f64 = 1. / 16.;
@@ -196,10 +196,13 @@ impl AudioClip {
     }
 
     /// The clip cut where it jumps, at each pass of its loop: what to draw.
-    pub fn segments(&self, bpm: f32) -> Vec<Segment> {
+    /// Only the pieces over `range` (in beats from the clip's start), so a
+    /// long clip on a short loop cuts only the passes in view.
+    pub fn segments(&self, range: Range<f64>, bpm: f32) -> Vec<Segment> {
         let mut segments = Vec::new();
-        let mut start = 0.;
-        while start < self.length && segments.len() < MAX_SEGMENTS {
+        let mut start = self.pass_before(range.start, bpm);
+        let stop = range.end.min(self.length);
+        while start < stop && segments.len() < MAX_SEGMENTS {
             let file_start = self.file_at(start, bpm);
             // Until the loop's end, or the file's.
             let until = match self.active_loop() {
@@ -219,6 +222,22 @@ impl AudioClip {
             start = end;
         }
         segments
+    }
+
+    /// Where the pass of the loop playing at `beats` (from the clip's
+    /// start) begins: 0 before the first jump. Passes after it all last
+    /// the loop's length.
+    fn pass_before(&self, beats: f64, bpm: f32) -> f64 {
+        let Some(l) = self.active_loop() else {
+            return 0.;
+        };
+        // Reading wraps into the loop, so it starts before its end.
+        let first = to_beats(l.end_s - self.file_at(0., bpm), bpm);
+        if beats < first {
+            return 0.;
+        }
+        let pass = to_beats(l.end_s - l.start_s, bpm);
+        first + ((beats - first) / pass).floor() * pass
     }
 }
 
@@ -320,7 +339,7 @@ mod tests {
 
     #[test]
     fn segments_cut_the_clip_at_each_pass_of_its_loop() {
-        let segments = looped().segments(BPM);
+        let segments = looped().segments(0.0..f64::INFINITY, BPM);
         let spans: Vec<_> = segments
             .iter()
             .map(|s| (s.start, s.end, s.file_start, s.file_end))
@@ -335,7 +354,27 @@ mod tests {
                 (10., 12., 2., 3.),
             ]
         );
-        assert_eq!(clip().segments(BPM).len(), 1, "without a loop: one");
+        assert_eq!(
+            clip().segments(0.0..f64::INFINITY, BPM).len(),
+            1,
+            "without a loop: one"
+        );
+    }
+
+    #[test]
+    fn segments_start_at_the_pass_in_range_however_far_in() {
+        let segments = looped().segments(7.5..9., BPM);
+        let starts: Vec<_> = segments.iter().map(|s| s.start).collect();
+        assert_eq!(starts, [6., 8.], "the passes over 7.5 to 9");
+        assert_eq!(looped().segments(1.0..3., BPM)[0].start, 0., "the intro");
+
+        // A thousand passes in: still there, reading the loop.
+        let mut c = looped();
+        c.length = 10_000.;
+        let far = c.segments(9_000.5..9_001., BPM);
+        assert_eq!(far.len(), 1);
+        assert_eq!(far[0].start, 9_000.);
+        assert!(close(far[0].file_start, 2.) && close(far[0].file_end, 3.));
     }
 
     #[test]
