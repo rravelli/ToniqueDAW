@@ -14,7 +14,7 @@ use std::ops::RangeInclusive;
 
 /// How much of the colour a field's level has, mixed into its background:
 /// enough to read as a level, little enough for the value on it to read.
-const FIELD_LEVEL: f32 = 0.45;
+pub const FIELD_LEVEL: f32 = 0.45;
 /// Shift-dragging moves this much slower.
 const FINE_DRAG: f32 = 0.1;
 const PAN_RANGE: RangeInclusive<f32> = -1.0..=1.0;
