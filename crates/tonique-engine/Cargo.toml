@@ -34,7 +34,11 @@ name = "play"
 required-features = ["device"]
 
 [dev-dependencies]
-criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support", "html_reports"] }
+criterion = { version = "0.8.2", default-features = false, features = [
+    "cargo_bench_support",
+    "html_reports",
+    "plotters",
+] }
 
 # `cargo bench -p tonique-engine`; compare branches with
 # `-- --save-baseline master` then `-- --baseline master`.
