@@ -9,8 +9,8 @@ use std::{
 use egui::Vec2;
 use tonique_engine::{
     edit::{
-        Bus, BusId, Channel, ClipLoop, Edit, MAX_TRANSPOSE, Output, SourceId, Track, TrackId,
-        WarpMode,
+        Bus, BusId, Channel, ClipLoop, Edit, MAX_TRANSPOSE, Output, SourceId, StretchSettings,
+        Track, TrackId, WarpMode,
         commands::{AddBus, SetBypass, SetOutput, SetSolo},
     },
     time::BeatPos,
@@ -162,6 +162,8 @@ impl ProjectState {
                 warp: clip.warp.into(),
                 bpm: Some(clip.bpm),
                 transpose: clip.pitch(),
+                window: clip.stretch.window.into(),
+                formants: clip.stretch.formants,
             })
             .collect();
         clips.sort_by(|a, b| a.position.total_cmp(&b.position));
@@ -308,6 +310,10 @@ impl ProjectState {
         let transpose = clip.transpose.clamp(-limit, limit);
         restored.transpose = transpose.round() as i32;
         restored.detune = (transpose - transpose.round()) * 100.;
+        restored.stretch = StretchSettings {
+            window: clip.window.into(),
+            formants: clip.formants,
+        };
         restored.looped = clip.looped.map(|l| ClipLoop {
             start_s: l.start,
             end_s: l.end,
@@ -450,7 +456,7 @@ fn reach_by_file(project: &ProjectFile, bpm: f32, bar: f64) -> HashMap<&Path, f6
         let warp = WarpMode::from(clip.warp).play(
             file_bpm,
             clip.transpose,
-            tonique_engine::edit::StretchSettings::default(),
+            StretchSettings::default(),
             bpm as f64,
         );
         let end = offset + length * 60. / bpm as f64 * warp.speed();

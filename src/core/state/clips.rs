@@ -11,8 +11,8 @@ use tonique_engine::{
     edit::{
         Clip, ClipContent, ClipId, Parameter, TrackId,
         commands::{
-            AddClip, MoveClip, RemoveClip, ResizeClip, SetClipLoop, SetClipOrigin, SetClipWarp,
-            SetParam,
+            AddClip, MoveClip, RemoveClip, ResizeClip, SetClipLoop, SetClipOrigin, SetClipStretch,
+            SetClipWarp, SetParam,
         },
     },
     time::BeatPos,
@@ -137,7 +137,7 @@ impl ProjectState {
             return;
         };
         let region = |c: &AudioClip| (c.position, c.length, c.offset, c.looped);
-        let warp = |c: &AudioClip| (c.warp, c.bpm, c.transpose, c.detune);
+        let warp = |c: &AudioClip| (c.warp, c.bpm, c.transpose, c.detune, c.stretch);
         if region(&clip) == region(&resized) && warp(&clip) == warp(&resized) {
             return;
         }
@@ -241,11 +241,12 @@ impl ProjectState {
                             warp,
                             source_bpm,
                             transpose,
+                            stretch,
                             ..
-                        } => Some((*looped, (*warp, *source_bpm, *transpose))),
+                        } => Some((*looped, (*warp, *source_bpm, *transpose), *stretch)),
                         ClipContent::Midi { .. } => None,
                     });
-                if let Some((looped, warp)) = current {
+                if let Some((looped, warp, stretch)) = current {
                     if looped != clip.looped {
                         self.perform(SetClipLoop::new(track, clip.id, clip.looped));
                     }
@@ -254,6 +255,9 @@ impl ProjectState {
                         self.perform(SetClipWarp::new(
                             track, clip.id, wanted.0, wanted.1, wanted.2,
                         ));
+                    }
+                    if stretch != clip.stretch {
+                        self.perform(SetClipStretch::new(track, clip.id, clip.stretch));
                     }
                 }
                 self.perform(ResizeClip::new(
@@ -292,6 +296,7 @@ impl ProjectState {
             warp,
             source_bpm,
             transpose,
+            stretch,
             ..
         } = &mut engine_clip.content
         {
@@ -302,6 +307,7 @@ impl ProjectState {
                 *source_bpm = clip.bpm;
             }
             *transpose = clip.pitch();
+            *stretch = clip.stretch;
             // In range, whatever a project file says.
             gain.value.set(clip.gain.clamp(gain.min, gain.max), 0.);
             pan.value.set(clip.pan.clamp(pan.min, pan.max), 0.);
@@ -323,7 +329,7 @@ impl ProjectState {
             warp,
             source_bpm,
             transpose,
-            ..
+            stretch,
         } = clip.content
         else {
             return None;
@@ -346,6 +352,7 @@ impl ProjectState {
             // Whole semitones, and what's left in cents (-50 to 50).
             transpose: transpose.round() as i32,
             detune: (transpose - transpose.round()) * 100.,
+            stretch,
         })
     }
 

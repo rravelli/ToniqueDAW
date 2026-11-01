@@ -1,7 +1,7 @@
 use crate::analysis::AudioInfo;
 use std::{fmt::Debug, ops::Range};
 use tonique_engine::{
-    edit::{ClipId, ClipLoop, MAX_SPEED, MAX_TRANSPOSE, MIN_SPEED, WarpMode},
+    edit::{ClipId, ClipLoop, MAX_SPEED, MAX_TRANSPOSE, MIN_SPEED, StretchSettings, WarpMode},
     nodes::ClipWarp,
     time::BeatPos,
 };
@@ -45,6 +45,8 @@ pub struct AudioClip {
     pub transpose: i32,
     /// Fine tuning, in cents (-50 to 50), as `transpose`.
     pub detune: f32,
+    /// How it's stretched, warped.
+    pub stretch: StretchSettings,
 }
 
 /// A stretch of a clip playing one stretch of its file, without a jump.
@@ -76,6 +78,7 @@ impl AudioClip {
             bpm: bpm as f64,
             transpose: 0,
             detune: 0.,
+            stretch: StretchSettings::default(),
         };
         clip.length = clip.source_beats(bpm);
         clip
@@ -99,12 +102,8 @@ impl AudioClip {
 
     /// How it plays its file at `bpm`.
     pub fn play(&self, bpm: f32) -> ClipWarp {
-        self.warp.play(
-            self.bpm,
-            self.pitch(),
-            tonique_engine::edit::StretchSettings::default(),
-            bpm as f64,
-        )
+        self.warp
+            .play(self.bpm, self.pitch(), self.stretch, bpm as f64)
     }
 
     /// Seconds of the file played per second at `bpm`.

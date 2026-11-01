@@ -9,7 +9,10 @@ use crate::{
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tonique_engine::{
-    edit::{ClipId, ClipLoop, PluginKind, TrackId, WarpMode},
+    edit::{
+        ClipContent, ClipId, ClipLoop, PluginKind, StretchSettings, StretchWindow, TrackId,
+        WarpMode,
+    },
     engine::{Engine, EngineConfig},
     nodes::FilterMode,
     sample::SampleBuffer,
@@ -1269,6 +1272,10 @@ mod projects {
         clip.bpm = 100.;
         clip.transpose = 3;
         clip.detune = -25.;
+        clip.stretch = StretchSettings {
+            window: StretchWindow::Long,
+            formants: true,
+        };
         state.add_clips(&track, vec![clip]);
         state.commit_volume(track, 1.0, 0.5);
         state.commit_volume(MASTER_TRACK_ID, 1.0, 0.8);
@@ -1313,6 +1320,10 @@ mod projects {
         );
         assert!(track_file.channel.effects[2].collapsed);
         assert_eq!(track_file.clips[0].path, Path::new("loop.wav"));
+        assert_eq!(
+            (track_file.clips[0].window, track_file.clips[0].formants),
+            (crate::core::project::WindowFile::Long, true)
+        );
         assert_eq!(track_file.color, "#0a141e");
         assert!(!track_file.channel.effects[0].enabled);
         let path = dir.join("song.tonique");
@@ -1341,6 +1352,8 @@ mod projects {
             warp: crate::core::project::WarpFile::Off,
             bpm: None,
             transpose: 0.,
+            window: Default::default(),
+            formants: false,
         }
     }
 
@@ -1508,6 +1521,8 @@ mod projects {
                 warp: crate::core::project::WarpFile::Off,
                 bpm: None,
                 transpose: 0.,
+                window: Default::default(),
+                formants: false,
             }],
         });
         let mut state = setup_state();
@@ -2313,4 +2328,33 @@ fn live_clip_edits_are_heard_at_once_and_undone_as_one() {
     }
     state.undo();
     assert_eq!(pitch(&state), 0, "one step");
+}
+
+/// How a clip is stretched reaches the engine as one undo step, and leaves
+/// the clip where it was.
+#[test]
+fn stretch_settings_are_applied_and_undone() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let clip = add_clip(&mut state, track, 0., 2.);
+    let before = state.find_clip(clip).unwrap().1;
+    let stretch = StretchSettings {
+        window: StretchWindow::Short,
+        formants: true,
+    };
+    let mut edited = before.clone();
+    edited.stretch = stretch;
+    state.edit_clip_live(edited, true);
+    let in_engine = |state: &ProjectState| {
+        let c = state.edit().track(track).unwrap().clip(clip).unwrap();
+        match c.content {
+            ClipContent::Audio { stretch, .. } => stretch,
+            ClipContent::Midi { .. } => unreachable!(),
+        }
+    };
+    assert_eq!(in_engine(&state), stretch);
+    let after = state.find_clip(clip).unwrap().1;
+    assert_eq!((after.stretch, after.length), (stretch, before.length));
+    state.undo();
+    assert_eq!(in_engine(&state), StretchSettings::default());
 }

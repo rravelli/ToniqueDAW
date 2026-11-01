@@ -1,8 +1,9 @@
 //! The inspector's Audio panel: how the clip sounds (gain, pan), how it
-//! follows the project's tempo (its file's tempo), and its transposition.
+//! follows the project's tempo (its file's tempo, how it's stretched), and
+//! its transposition.
 
 use egui::{Color32, DragValue, Rect, Ui, pos2, vec2};
-use tonique_engine::edit::{MAX_TRANSPOSE, WarpMode};
+use tonique_engine::edit::{MAX_TRANSPOSE, StretchSettings, StretchWindow, WarpMode};
 
 use crate::{
     core::{
@@ -29,8 +30,8 @@ const TEMPO_BUTTON_WIDTH: f32 = 26.;
 const BPM_RANGE: std::ops::RangeInclusive<f64> = 10.0..=999.0;
 
 /// Gain and pan, sliders like a track's heard as they're dragged; the warp
-/// mode; the file's tempo, typed or halved and doubled; the
-/// transposition, heard as it's dragged (`live`). Edits go in
+/// mode; the file's tempo, typed or halved and doubled; the stretch's
+/// window and formants; the transposition, heard as it's dragged (`live`). Edits go in
 /// `change` (shown until done) or `live`, as in the inspector.
 pub(super) fn audio_panel(
     ui: &mut Ui,
@@ -94,6 +95,17 @@ pub(super) fn audio_panel(
     }
 
     ui.add_space(CELL_GAP);
+    let stretched = shown.warp == WarpMode::Spectral;
+    let stretch = ui
+        .add_enabled_ui(stretched, |ui| stretch_ui(ui, shown))
+        .inner;
+    if stretch != shown.stretch {
+        let mut edited = shown.clone();
+        edited.stretch = stretch;
+        *live = Some((edited, true));
+    }
+
+    ui.add_space(CELL_GAP);
     ui.columns(2, |cells| {
         let mut transpose = shown.transpose;
         let limit = MAX_TRANSPOSE as i32;
@@ -129,6 +141,40 @@ pub(super) fn audio_panel(
             *live = Some((edited, done));
         }
     });
+}
+
+/// The stretch's window, picked, and its formants, switched on and off.
+/// Returns the settings as they're left.
+fn stretch_ui(ui: &mut Ui, shown: &AudioClip) -> StretchSettings {
+    let mut stretch = shown.stretch;
+    ui.columns(2, |cells| {
+        cell_label(&mut cells[0], "Window");
+        let width = cells[0].available_width();
+        let mut select = Select::new(("clip-window", shown.id), &mut stretch.window).width(width);
+        for window in StretchWindow::ALL {
+            select = select.option(window, window_name(window));
+        }
+        cells[0].add(select);
+
+        cell_label(&mut cells[1], "Formants");
+        let size = vec2(cells[1].available_width(), select::HEIGHT);
+        let on = stretch.formants;
+        let toggle = FlatButton::new(if on { "Keep" } else { "Move" })
+            .size(size)
+            .selected(on);
+        if cells[1].add(toggle).clicked() {
+            stretch.formants = !on;
+        }
+    });
+    stretch
+}
+
+fn window_name(window: StretchWindow) -> &'static str {
+    match window {
+        StretchWindow::Short => "Short",
+        StretchWindow::Normal => "Normal",
+        StretchWindow::Long => "Long",
+    }
 }
 
 /// The file's tempo, typed and applied on Enter (each change resizes the

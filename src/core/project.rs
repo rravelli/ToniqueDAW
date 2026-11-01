@@ -9,7 +9,10 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tonique_engine::{edit::WarpMode, time::TimeSignature};
+use tonique_engine::{
+    edit::{StretchWindow, WarpMode},
+    time::TimeSignature,
+};
 
 use crate::core::effect::EffectKind;
 
@@ -157,6 +160,12 @@ pub struct ClipFile {
     /// In semitones, fractions being cents.
     #[serde(default, skip_serializing_if = "is_centred")]
     pub transpose: f32,
+    /// Stretched, the window it's stretched with; normal when absent.
+    #[serde(default, skip_serializing_if = "WindowFile::is_normal")]
+    pub window: WindowFile,
+    /// Stretched and transposed, whether its formants stay where they are.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub formants: bool,
 }
 
 /// See [`WarpMode`].
@@ -188,6 +197,42 @@ impl From<WarpFile> for WarpMode {
         match file {
             WarpFile::Off => Self::Off,
             WarpFile::Spectral => Self::Spectral,
+        }
+    }
+}
+
+/// See [`StretchWindow`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowFile {
+    Short,
+    #[default]
+    Normal,
+    Long,
+}
+
+impl WindowFile {
+    fn is_normal(&self) -> bool {
+        *self == Self::Normal
+    }
+}
+
+impl From<StretchWindow> for WindowFile {
+    fn from(window: StretchWindow) -> Self {
+        match window {
+            StretchWindow::Short => Self::Short,
+            StretchWindow::Normal => Self::Normal,
+            StretchWindow::Long => Self::Long,
+        }
+    }
+}
+
+impl From<WindowFile> for StretchWindow {
+    fn from(file: WindowFile) -> Self {
+        match file {
+            WindowFile::Short => Self::Short,
+            WindowFile::Normal => Self::Normal,
+            WindowFile::Long => Self::Long,
         }
     }
 }
@@ -385,6 +430,8 @@ mod tests {
                     warp: WarpFile::Spectral,
                     bpm: Some(96.),
                     transpose: -2.5,
+                    window: WindowFile::Short,
+                    formants: true,
                 }],
             }],
         };
