@@ -411,8 +411,11 @@ impl SetClipWarp {
     }
 
     fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
-        if self.source_bpm.is_nan() || self.source_bpm <= 0.0 {
+        if !self.source_bpm.is_finite() || self.source_bpm <= 0.0 {
             return Err(EditError::Invalid("a tempo must be positive"));
+        }
+        if !self.transpose.is_finite() {
+            return Err(EditError::Invalid("a transposition must be finite"));
         }
         let c = edit
             .track_mut(self.track)?

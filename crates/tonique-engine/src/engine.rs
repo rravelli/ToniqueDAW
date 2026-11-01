@@ -185,6 +185,9 @@ pub struct AudioProcessor {
     loop_beats: Option<(BeatPos, BeatPos)>,
     /// A seek in beats waiting for a graph with a tempo map to place it.
     seek_beats: Option<BeatPos>,
+    /// The transport was inside the loop when the tempo last changed: it
+    /// stays inside, wherever rounding put it and the loop's end.
+    retimed_in_loop: bool,
     jumped: bool,
     preview: Option<PreviewStream>,
     preview_generation: u64,
@@ -245,6 +248,7 @@ impl Engine {
             loop_range: None,
             loop_beats: None,
             seek_beats: None,
+            retimed_in_loop: false,
             jumped: true,
             preview: None,
             preview_generation: 0,
@@ -488,6 +492,7 @@ impl AudioProcessor {
             self.handle_commands();
             self.adopt_graphs();
             self.place_beats();
+            self.keep_in_loop();
             let frames = out.len() / channels;
             let mut done = 0;
             while done < frames {
@@ -698,9 +703,27 @@ impl AudioProcessor {
     fn retime(&mut self, from: &TempoMap, to: &TempoMap) {
         let sr = self.config.sample_rate;
         let move_to = |pos: SamplePos| to.beats_to_samples(from.samples_to_beats(pos, sr), sr);
+        self.retimed_in_loop |= self
+            .loop_range
+            .is_some_and(|(s, e)| (s..e).contains(&self.position));
         self.position = move_to(self.position);
         if self.loop_beats.is_none() {
             self.loop_range = self.loop_range.map(|(s, e)| (move_to(s), move_to(e)));
+        }
+    }
+
+    /// Rounded apart, the transport and the loop's end, moved to a new
+    /// tempo, can land on or past each other, where the loop never ends:
+    /// it goes round now instead.
+    fn keep_in_loop(&mut self) {
+        if !std::mem::take(&mut self.retimed_in_loop) {
+            return;
+        }
+        if let Some((start, end)) = self.loop_range
+            && self.position >= end
+        {
+            self.position = start;
+            self.jumped = true;
         }
     }
 
@@ -714,6 +737,7 @@ impl AudioProcessor {
         if let Some(beat) = self.seek_beats.take() {
             self.position = tempo.beats_to_samples(beat, sr);
             self.jumped = true;
+            self.retimed_in_loop = false;
         }
         if let Some((start, end)) = self.loop_beats {
             self.loop_range = Some((

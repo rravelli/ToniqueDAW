@@ -7,7 +7,7 @@ use tonique_engine::edit::{
     Note, Output, Plugin, PluginKind, Send, Track, TrackId, WarpMode,
 };
 use tonique_engine::engine::{AudioProcessor, Engine, EngineConfig, render_offline};
-use tonique_engine::nodes::{Envelope, FilterMode, UTILITY_SILENT_DB};
+use tonique_engine::nodes::{ClipWarp, Envelope, FilterMode, UTILITY_SILENT_DB};
 use tonique_engine::sample::SampleBuffer;
 use tonique_engine::time::{BeatPos, TempoMap};
 
@@ -736,6 +736,68 @@ fn stretched_clips_stay_on_their_beats_when_the_tempo_changes() {
     // Beat 1 at 0.5 s, then three more at 200 bpm.
     let heard = loudest(&out);
     assert!((heard - 1.4).abs() < 0.01, "heard at {heard} s");
+}
+
+/// A warp is numbers: a transposition or a source tempo that isn't one is
+/// refused, and one that got into a clip anyway plays as if it weren't set.
+#[test]
+fn warps_are_numbers() {
+    let (mut s, _p, tid, cid) = playing_clip(sine(48000), None, 1.0);
+    for (bpm, transpose) in [
+        (120.0, f32::NAN),
+        (120.0, f32::INFINITY),
+        (f64::INFINITY, 0.0),
+    ] {
+        let set = SetClipWarp::new(tid, cid, WarpMode::Stretch, bpm, transpose);
+        assert!(s.perform(set).is_err(), "{bpm} bpm, {transpose}");
+    }
+    assert_eq!(WarpMode::Off.play(120.0, f32::NAN, 120.0), ClipWarp::None);
+    assert_eq!(
+        WarpMode::Stretch.play(f64::NAN, f32::NAN, 120.0),
+        ClipWarp::None
+    );
+}
+
+/// Stretched, a clip follows the tempo where it is: at 90 bpm after a
+/// change from 120, a 90 bpm source plays as it is.
+#[test]
+fn stretched_clips_follow_the_tempo_where_they_are() {
+    let mut edit = Edit::new(120.0);
+    edit.tempo.set_tempo(BeatPos(32.0), 90.0);
+    let src = edit.add_source(sine(48000));
+    let mut clip = Clip::audio(&mut edit, BeatPos(44.0), 8.0, src);
+    if let ClipContent::Audio {
+        warp, source_bpm, ..
+    } = &mut clip.content
+    {
+        *warp = WarpMode::Stretch;
+        *source_bpm = 90.0;
+    }
+    assert_eq!(clip.warp(&edit.tempo), Some(ClipWarp::None));
+    // Across the change, at its average: 4 beats at each.
+    clip.start = BeatPos(28.0);
+    let Some(ClipWarp::Stretch { speed, .. }) = clip.warp(&edit.tempo) else {
+        panic!("not stretched");
+    };
+    assert!(
+        (speed - 8.0 / (2.0 + 8.0 / 3.0) * 60.0 / 90.0).abs() < 1e-9,
+        "{speed}"
+    );
+}
+
+/// The tempo raised with the transport a sample before the loop's end,
+/// both rounding to the same sample: the loop still goes round.
+#[test]
+fn loops_go_round_when_the_tempo_moves_the_transport_onto_their_end() {
+    let (mut s, mut p, _, _) = playing_clip(sine(48000 * 8), None, 8.0);
+    s.set_loop(Some((BeatPos(0.0), BeatPos(4.0)))).unwrap();
+    // Beat 4 at 120 bpm is sample 96000: seek to 95998, play one.
+    s.seek(BeatPos(95998.0 / 24000.0)).unwrap();
+    render_offline(&mut p, 1, 2);
+    // At 143 bpm, 95999 and 96000 both fall on 80559.
+    s.perform(SetTempoMap::new(TempoMap::new(143.0))).unwrap();
+    render_offline(&mut p, 48000, 2);
+    assert!(s.position().0 < 4.0, "{:?}", s.position());
 }
 
 /// Held back, changes reach the engine at once: one graph for many.

@@ -246,21 +246,32 @@ pub enum WarpMode {
 /// breaks the sound up.
 pub const MIN_SPEED: f64 = 0.25;
 pub const MAX_SPEED: f64 = 4.0;
-/// Furthest a clip is transposed, either way, in semitones.
-pub const MAX_TRANSPOSE: f32 = 48.0;
+/// Furthest a clip is transposed, either way, in semitones: 24, as
+/// resampled it can't go past [`MAX_SPEED`].
+pub const MAX_TRANSPOSE: f32 = 24.0;
 
 impl WarpMode {
     /// How a clip whose source is at `source_bpm`, transposed by
     /// `transpose`, plays at `bpm`.
     pub fn play(self, source_bpm: f64, transpose: f32, bpm: f64) -> ClipWarp {
-        let transpose = transpose.clamp(-MAX_TRANSPOSE, MAX_TRANSPOSE);
+        // Clamping lets NaN through: anything not a number plays as is.
+        let transpose = if transpose.is_finite() {
+            transpose.clamp(-MAX_TRANSPOSE, MAX_TRANSPOSE)
+        } else {
+            0.0
+        };
         match self {
             Self::Off if transpose == 0.0 => ClipWarp::None,
             Self::Off => ClipWarp::Repitch {
                 speed: (2f64.powf(transpose as f64 / 12.0)).clamp(MIN_SPEED, MAX_SPEED),
             },
             Self::Stretch => {
-                let speed = (bpm / source_bpm).clamp(MIN_SPEED, MAX_SPEED);
+                let speed = bpm / source_bpm;
+                let speed = if speed.is_nan() {
+                    1.0
+                } else {
+                    speed.clamp(MIN_SPEED, MAX_SPEED)
+                };
                 if (speed - 1.0).abs() < 1e-9 && transpose == 0.0 {
                     ClipWarp::None
                 } else {
@@ -335,8 +346,9 @@ impl Clip {
         BeatPos(self.start.0 + self.length)
     }
 
-    /// How an audio clip plays its source at `tempo`'s pace; `None` for MIDI
-    /// clips.
+    /// How an audio clip plays its source at `tempo`'s pace, stretched at
+    /// the clip's own average tempo so its source fills its length; `None`
+    /// for MIDI clips.
     pub fn warp(&self, tempo: &TempoMap) -> Option<ClipWarp> {
         let ClipContent::Audio {
             warp,
@@ -347,7 +359,13 @@ impl Clip {
         else {
             return None;
         };
-        Some(warp.play(*source_bpm, *transpose, tempo.bpm_at(BeatPos::ZERO)))
+        let seconds = tempo.beats_to_seconds(self.end()) - tempo.beats_to_seconds(self.start);
+        let bpm = if seconds > 0.0 {
+            self.length * 60.0 / seconds
+        } else {
+            tempo.bpm_at(self.start)
+        };
+        Some(warp.play(*source_bpm, *transpose, bpm))
     }
 
     /// The audio clip's gain, if it is one.
