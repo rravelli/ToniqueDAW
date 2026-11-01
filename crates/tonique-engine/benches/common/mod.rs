@@ -1,4 +1,6 @@
 //! Fixtures shared by the benchmarks and the `stress` example.
+//! Each bench uses only some of them.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 
@@ -84,8 +86,14 @@ pub fn config(max_block: usize, worker_threads: usize) -> EngineConfig {
 /// A playing, looping session over [`busy_edit`], with its graph already
 /// adopted by the processor. Keep the session alive while processing.
 pub fn playing(tracks: usize, config: EngineConfig) -> (EditSession, AudioProcessor) {
+    playing_edit(busy_edit(tracks), config)
+}
+
+/// A playing session over `edit` looping its first [`LOOP_BEATS`], as
+/// [`playing`].
+pub fn playing_edit(edit: Edit, config: EngineConfig) -> (EditSession, AudioProcessor) {
     let (engine, mut processor) = Engine::new(config);
-    let mut session = EditSession::new(busy_edit(tracks), engine).expect("the fixture compiles");
+    let mut session = EditSession::new(edit, engine).expect("the fixture compiles");
     session
         .set_loop(Some((BeatPos(0.0), BeatPos(LOOP_BEATS))))
         .expect("command ring has room");

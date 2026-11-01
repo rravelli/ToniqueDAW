@@ -16,6 +16,9 @@ bench = false
 default = []
 # Real audio device output through cpal.
 device = ["dep:cpal"]
+# Time stretching with Signalsmith Stretch (C++, built with a C++ compiler
+# and libclang). Without it, stretched clips play resampled.
+signalsmith = ["dep:signalsmith-stretch"]
 
 # Keep this crate free of UI dependencies: it must stay usable (and
 # publishable) on its own. UI code lives in the DAW crate at the repo root.
@@ -28,6 +31,7 @@ rustfft = "6.4"
 # PulseAudio (pure Rust, also served by PipeWire) lists the real outputs on
 # Linux, Bluetooth ones included; plain ALSA only sees sound cards.
 cpal = { version = "0.18", optional = true, features = ["pulseaudio"] }
+signalsmith-stretch = { version = "0.1.3", optional = true }
 
 [[example]]
 name = "play"
@@ -49,3 +53,8 @@ harness = false
 [[bench]]
 name = "dsp"
 harness = false
+
+[[bench]]
+name = "stretch"
+harness = false
+required-features = ["signalsmith"]

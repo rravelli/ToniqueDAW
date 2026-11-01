@@ -28,7 +28,7 @@ use crate::graph::{
 };
 use crate::preview::{PreviewControl, PreviewShared, PreviewSource, PreviewStream};
 use crate::rt;
-use crate::time::SamplePos;
+use crate::time::{BeatPos, SamplePos, TempoMap};
 
 #[derive(Clone, Copy, Debug)]
 pub struct EngineConfig {
@@ -65,8 +65,15 @@ pub enum Command {
     Play,
     Stop,
     Seek(SamplePos),
+    /// Seek to a beat, placed with the tempo of the graph playing (see
+    /// [`crate::graph::GraphDescription::set_tempo`]): whatever graph
+    /// comes before or after, it lands on that beat.
+    SeekBeats(BeatPos),
     /// Loop `[start, end)` while playing; `None` disables looping.
     SetLoop(Option<(SamplePos, SamplePos)>),
+    /// Loop between two beats, as [`Command::SeekBeats`]: they stay where
+    /// they are in beats when the tempo changes.
+    SetLoopBeats(Option<(BeatPos, BeatPos)>),
     /// Deliver a message to the node with this identity (e.g. swap in a new
     /// automation curve without rebuilding the graph).
     SendToNode {
@@ -116,6 +123,9 @@ impl From<CompileError> for EngineError {
 #[derive(Default)]
 struct Shared {
     position: AtomicI64,
+    /// The position in beats, through the playing graph's tempo map
+    /// (`f64` bits; NaN without one).
+    position_beats: AtomicU64,
     playing: AtomicBool,
     graphs_adopted: AtomicU64,
     blocks: AtomicU64,
@@ -171,6 +181,13 @@ pub struct AudioProcessor {
     playing: bool,
     position: SamplePos,
     loop_range: Option<(SamplePos, SamplePos)>,
+    /// The loop in beats, when set so: placed again with each tempo.
+    loop_beats: Option<(BeatPos, BeatPos)>,
+    /// A seek in beats waiting for a graph with a tempo map to place it.
+    seek_beats: Option<BeatPos>,
+    /// The transport was inside the loop when the tempo last changed: it
+    /// stays inside, wherever rounding put it and the loop's end.
+    retimed_in_loop: bool,
     jumped: bool,
     preview: Option<PreviewStream>,
     preview_generation: u64,
@@ -189,6 +206,10 @@ impl Engine {
         let (graph_tx, graph_rx) = rtrb::RingBuffer::new(GRAPH_CAPACITY);
         let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(GARBAGE_CAPACITY);
         let shared = Arc::new(Shared::default());
+        // No graph has placed the position in beats yet.
+        shared
+            .position_beats
+            .store(f64::NAN.to_bits(), Ordering::Relaxed);
         let garbage = Arc::new(Mutex::new(garbage_rx));
         let graphs = Arc::new(Mutex::new(GraphOutbox {
             tx: graph_tx,
@@ -225,6 +246,9 @@ impl Engine {
             playing: false,
             position: 0,
             loop_range: None,
+            loop_beats: None,
+            seek_beats: None,
+            retimed_in_loop: false,
             jumped: true,
             preview: None,
             preview_generation: 0,
@@ -307,12 +331,29 @@ impl Engine {
         self.send(Command::Seek(pos))
     }
 
+    /// See [`Command::SeekBeats`].
+    pub fn seek_beats(&mut self, beat: BeatPos) -> Result<(), EngineError> {
+        self.send(Command::SeekBeats(beat))
+    }
+
     pub fn set_loop(&mut self, range: Option<(SamplePos, SamplePos)>) -> Result<(), EngineError> {
         self.send(Command::SetLoop(range))
     }
 
+    /// See [`Command::SetLoopBeats`].
+    pub fn set_loop_beats(&mut self, range: Option<(BeatPos, BeatPos)>) -> Result<(), EngineError> {
+        self.send(Command::SetLoopBeats(range))
+    }
+
     pub fn position(&self) -> SamplePos {
         self.shared.position.load(Ordering::Relaxed)
+    }
+
+    /// The position in beats, as the audio thread places it with the tempo
+    /// it plays at: `None` until a graph with a tempo map plays.
+    pub fn position_beats(&self) -> Option<BeatPos> {
+        let beats = f64::from_bits(self.shared.position_beats.load(Ordering::Relaxed));
+        (!beats.is_nan()).then_some(BeatPos(beats))
     }
 
     pub fn is_playing(&self) -> bool {
@@ -450,6 +491,8 @@ impl AudioProcessor {
         rt::no_alloc(|| {
             self.handle_commands();
             self.adopt_graphs();
+            self.place_beats();
+            self.keep_in_loop();
             let frames = out.len() / channels;
             let mut done = 0;
             while done < frames {
@@ -469,6 +512,17 @@ impl AudioProcessor {
             }
             self.mix_preview(out, channels);
             self.shared.position.store(self.position, Ordering::Relaxed);
+            let beats = match self.tempo() {
+                Some(tempo) => {
+                    tempo
+                        .samples_to_beats(self.position, self.config.sample_rate)
+                        .0
+                }
+                None => f64::NAN,
+            };
+            self.shared
+                .position_beats
+                .store(beats.to_bits(), Ordering::Relaxed);
             self.shared.playing.store(self.playing, Ordering::Relaxed);
             self.shared.blocks.fetch_add(1, Ordering::Relaxed);
         });
@@ -568,9 +622,21 @@ impl AudioProcessor {
                 Command::Stop => self.playing = false,
                 Command::Seek(pos) => {
                     self.position = pos;
+                    self.seek_beats = None;
                     self.jumped = true;
                 }
-                Command::SetLoop(range) => self.loop_range = range.filter(|(s, e)| e > s),
+                // Placed once a graph's tempo is known (see `place_beats`).
+                Command::SeekBeats(beat) => self.seek_beats = Some(beat),
+                Command::SetLoop(range) => {
+                    self.loop_range = range.filter(|(s, e)| e > s);
+                    self.loop_beats = None;
+                }
+                Command::SetLoopBeats(range) => {
+                    self.loop_beats = range.filter(|(s, e)| e.0 > s.0);
+                    if self.loop_beats.is_none() {
+                        self.loop_range = None;
+                    }
+                }
                 Command::SendToNode { target, mut msg } => {
                     if let Some(g) = self.current.as_deref_mut() {
                         g.deliver(target, &mut msg);
@@ -605,6 +671,11 @@ impl AudioProcessor {
             };
             let migrated = match self.current.take() {
                 Some(mut old) => {
+                    if let (Some(from), Some(to)) = (old.tempo(), next.tempo())
+                        && from != to
+                    {
+                        self.retime(from, to);
+                    }
                     let m = next.adopt_state_from(&mut old);
                     let _ = self.garbage.push(Garbage::Graph(old));
                     m
@@ -616,6 +687,64 @@ impl AudioProcessor {
                 .last_migrated
                 .store(migrated as u64, Ordering::Relaxed);
             self.shared.graphs_adopted.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+impl AudioProcessor {
+    /// The tempo map of the graph playing, if it has one.
+    fn tempo(&self) -> Option<&TempoMap> {
+        self.current.as_deref().and_then(CompiledGraph::tempo)
+    }
+
+    /// The tempo changes from `from` to `to`: the transport (and a loop set
+    /// in samples) keeps its place in beats, where its samples now fall
+    /// elsewhere. Not a jump: what plays goes on from the same beat.
+    fn retime(&mut self, from: &TempoMap, to: &TempoMap) {
+        let sr = self.config.sample_rate;
+        let move_to = |pos: SamplePos| to.beats_to_samples(from.samples_to_beats(pos, sr), sr);
+        self.retimed_in_loop |= self
+            .loop_range
+            .is_some_and(|(s, e)| (s..e).contains(&self.position));
+        self.position = move_to(self.position);
+        if self.loop_beats.is_none() {
+            self.loop_range = self.loop_range.map(|(s, e)| (move_to(s), move_to(e)));
+        }
+    }
+
+    /// Rounded apart, the transport and the loop's end, moved to a new
+    /// tempo, can land on or past each other, where the loop never ends:
+    /// it goes round now instead.
+    fn keep_in_loop(&mut self) {
+        if !std::mem::take(&mut self.retimed_in_loop) {
+            return;
+        }
+        if let Some((start, end)) = self.loop_range
+            && self.position >= end
+        {
+            self.position = start;
+            self.jumped = true;
+        }
+    }
+
+    /// Place what was asked in beats (a seek, the loop) with the tempo of
+    /// the graph playing, once there is one.
+    fn place_beats(&mut self) {
+        let Some(tempo) = self.current.as_deref().and_then(CompiledGraph::tempo) else {
+            return;
+        };
+        let sr = self.config.sample_rate;
+        if let Some(beat) = self.seek_beats.take() {
+            self.position = tempo.beats_to_samples(beat, sr);
+            self.jumped = true;
+            self.retimed_in_loop = false;
+        }
+        if let Some((start, end)) = self.loop_beats {
+            self.loop_range = Some((
+                tempo.beats_to_samples(start, sr),
+                tempo.beats_to_samples(end, sr),
+            ))
+            .filter(|(s, e)| e > s);
         }
     }
 }

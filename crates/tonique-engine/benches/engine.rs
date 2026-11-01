@@ -10,6 +10,7 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tonique_engine::edit::builder::build_graph;
 use tonique_engine::graph::{CompileOptions, compile};
+use tonique_engine::stretch::Stretchers;
 
 use common::{SAMPLE_RATE, busy_edit, config, playing};
 
@@ -60,12 +61,14 @@ fn rebuild(c: &mut Criterion) {
     let mut group = c.benchmark_group("rebuild");
     for tracks in [8, 32, 128, 256, 512] {
         let edit = busy_edit(tracks);
+        // No clip is stretched: the stretchers aren't used.
+        let mut stretchers = Stretchers::default();
         group.bench_with_input(BenchmarkId::new("build_graph", tracks), &edit, |b, edit| {
-            b.iter(|| build_graph(black_box(edit), SAMPLE_RATE))
+            b.iter(|| build_graph(black_box(edit), SAMPLE_RATE, &mut stretchers))
         });
         group.bench_with_input(BenchmarkId::new("compile", tracks), &edit, |b, edit| {
             b.iter_batched(
-                || build_graph(edit, SAMPLE_RATE),
+                || build_graph(edit, SAMPLE_RATE, &mut stretchers),
                 |desc| compile(desc, &opts).expect("the fixture compiles"),
                 criterion::BatchSize::SmallInput,
             )

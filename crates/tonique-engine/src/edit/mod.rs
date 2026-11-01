@@ -11,12 +11,13 @@ mod undo;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub use crate::stretch::{StretchSettings, StretchWindow};
 pub use session::EditSession;
 pub use undo::{Effects, UndoManager};
 
 use crate::automation::BeatPoint;
 use crate::meter::{ChannelMeter, PluginTap};
-use crate::nodes::{Envelope, FilterMode};
+use crate::nodes::{ClipWarp, Envelope, FilterMode};
 use crate::param::{AtomicParam, ParamId};
 use crate::sample::SampleBuffer;
 use crate::time::{BeatPos, TempoMap};
@@ -216,11 +217,84 @@ pub enum ClipContent {
         /// Where bar 1 of the clip's own grid is in the source, in seconds:
         /// for editing it, not heard.
         origin_s: f64,
+        /// How it follows the edit's tempo, see [`Clip::warp`].
+        warp: WarpMode,
+        /// The source's tempo: stretched, it plays at the edit's over it.
+        source_bpm: f64,
+        /// In semitones, fractions being cents: stretched, the pitch alone
+        /// moves; otherwise resampled, its speed too.
+        transpose: f32,
+        /// How it's stretched, when it is.
+        stretch: StretchSettings,
     },
     Midi {
         notes: Vec<Note>,
         channel: u8,
     },
+}
+
+/// How an audio clip follows the edit's tempo.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum WarpMode {
+    /// It doesn't: it plays at its own pace, transposing it resamples it
+    /// (faster and higher, slower and lower).
+    #[default]
+    Off,
+    /// Stretched to the edit's tempo over its source's, its pitch kept and
+    /// transposed on its own, by a [`crate::stretch::Stretcher`] working on
+    /// its spectrum: smooth on sustained, tonal sound (voices, chords, whole
+    /// mixes), softer on attacks.
+    Spectral,
+}
+
+/// Slowest and fastest a clip plays its source: past them, stretching
+/// breaks the sound up.
+pub const MIN_SPEED: f64 = 0.25;
+pub const MAX_SPEED: f64 = 4.0;
+/// Furthest a clip is transposed, either way, in semitones: 24, as
+/// resampled it can't go past [`MAX_SPEED`].
+pub const MAX_TRANSPOSE: f32 = 24.0;
+
+impl WarpMode {
+    /// How a clip whose source is at `source_bpm`, transposed by
+    /// `transpose`, plays at `bpm`, stretched as `settings` say.
+    pub fn play(
+        self,
+        source_bpm: f64,
+        transpose: f32,
+        settings: StretchSettings,
+        bpm: f64,
+    ) -> ClipWarp {
+        // Clamping lets NaN through: anything not a number plays as is.
+        let transpose = if transpose.is_finite() {
+            transpose.clamp(-MAX_TRANSPOSE, MAX_TRANSPOSE)
+        } else {
+            0.0
+        };
+        match self {
+            Self::Off if transpose == 0.0 => ClipWarp::None,
+            Self::Off => ClipWarp::Repitch {
+                speed: (2f64.powf(transpose as f64 / 12.0)).clamp(MIN_SPEED, MAX_SPEED),
+            },
+            Self::Spectral => {
+                let speed = bpm / source_bpm;
+                let speed = if speed.is_nan() {
+                    1.0
+                } else {
+                    speed.clamp(MIN_SPEED, MAX_SPEED)
+                };
+                if (speed - 1.0).abs() < 1e-9 && transpose == 0.0 {
+                    ClipWarp::None
+                } else {
+                    ClipWarp::Stretch {
+                        speed,
+                        semitones: transpose,
+                        settings,
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// The part of an audio clip's source that loops, in seconds.
@@ -273,12 +347,39 @@ impl Clip {
                 pan: Parameter::new(ParamId(edit.next_id()), "pan", -1.0, 1.0, 0.0),
                 looped: None,
                 origin_s: 0.0,
+                warp: WarpMode::Off,
+                source_bpm: edit.tempo.bpm_at(BeatPos::ZERO),
+                transpose: 0.0,
+                stretch: StretchSettings::default(),
             },
         }
     }
 
     pub fn end(&self) -> BeatPos {
         BeatPos(self.start.0 + self.length)
+    }
+
+    /// How an audio clip plays its source at `tempo`'s pace, stretched at
+    /// the clip's own average tempo so its source fills its length; `None`
+    /// for MIDI clips.
+    pub fn warp(&self, tempo: &TempoMap) -> Option<ClipWarp> {
+        let ClipContent::Audio {
+            warp,
+            source_bpm,
+            transpose,
+            stretch,
+            ..
+        } = &self.content
+        else {
+            return None;
+        };
+        let seconds = tempo.beats_to_seconds(self.end()) - tempo.beats_to_seconds(self.start);
+        let bpm = if seconds > 0.0 {
+            self.length * 60.0 / seconds
+        } else {
+            tempo.bpm_at(self.start)
+        };
+        Some(warp.play(*source_bpm, *transpose, *stretch, bpm))
     }
 
     /// The audio clip's gain, if it is one.

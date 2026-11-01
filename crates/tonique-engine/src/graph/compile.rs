@@ -73,6 +73,7 @@ pub fn compile(
     opts: &CompileOptions,
 ) -> Result<CompiledGraph, CompileError> {
     let output = desc.output.ok_or(CompileError::NoOutput)?.0;
+    let tempo = desc.tempo;
     let described = desc.nodes.len();
     let mut work: Vec<Option<WorkNode>> = Vec::with_capacity(described);
     for (i, spec) in desc.nodes.into_iter().enumerate() {
@@ -310,6 +311,7 @@ pub fn compile(
         *opts,
         stats,
         topology,
+        tempo,
     ))
 }
 

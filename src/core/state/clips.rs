@@ -280,6 +280,8 @@ impl ProjectState {
             ref pan,
             looped,
             origin_s,
+            // Warping isn't shown or edited yet: clips play unwarped.
+            ..
         } = clip.content
         else {
             return None;

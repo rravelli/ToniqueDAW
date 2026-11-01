@@ -4,12 +4,12 @@ use tonique_engine::automation::{BeatPoint, CurveShape};
 use tonique_engine::edit::commands::*;
 use tonique_engine::edit::{
     Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, ClipLoop, Edit, EditError, EditSession,
-    Note, Output, Plugin, PluginKind, Send, Track, TrackId,
+    Note, Output, Plugin, PluginKind, Send, StretchSettings, Track, TrackId, WarpMode,
 };
 use tonique_engine::engine::{AudioProcessor, Engine, EngineConfig, render_offline};
-use tonique_engine::nodes::{Envelope, FilterMode, UTILITY_SILENT_DB};
+use tonique_engine::nodes::{ClipWarp, Envelope, FilterMode, UTILITY_SILENT_DB};
 use tonique_engine::sample::SampleBuffer;
-use tonique_engine::time::BeatPos;
+use tonique_engine::time::{BeatPos, TempoMap};
 
 const SR: f64 = 48000.0;
 
@@ -551,6 +551,313 @@ fn playing_clip(
     let mut s = EditSession::new(edit, e).expect("session");
     s.play().expect("play");
     (s, p, tid, cid)
+}
+
+/// Silence with a 10 ms burst of 1 kHz at `at` seconds, `seconds` long.
+fn burst(seconds: f64, at: f64) -> Arc<SampleBuffer> {
+    let start = (at * SR) as usize;
+    let wave = (0..(seconds * SR) as usize)
+        .map(|i| {
+            let into = i as f64 - start as f64;
+            if (0.0..SR / 100.0).contains(&into) {
+                (into / SR * 1000.0 * std::f64::consts::TAU).sin() as f32 * 0.5
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    Arc::new(SampleBuffer::new(vec![wave], SR))
+}
+
+/// Where the loudest 5 ms of the left channel of `out` start, in seconds
+/// from its start.
+#[cfg(feature = "signalsmith")]
+fn loudest(out: &[f32]) -> f64 {
+    let window = (SR / 200.0) as usize;
+    let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+    let energy = |w: usize| {
+        left[w * window..(w + 1) * window]
+            .iter()
+            .map(|x| x * x)
+            .sum::<f32>()
+    };
+    let best = (0..left.len() / window)
+        .max_by(|a, b| energy(*a).total_cmp(&energy(*b)))
+        .unwrap_or(0);
+    (best * window) as f64 / SR
+}
+
+/// Resampled (no warp, transposed), a clip plays faster and higher, or
+/// slower and lower: an octave up, its second of audio is over in half.
+#[test]
+fn transposed_unwarped_clips_play_resampled() {
+    let (mut s, mut p, tid, cid) = playing_clip(sine(48000), None, 3.0);
+    s.perform(SetClipWarp::new(tid, cid, WarpMode::Off, 120.0, 12.0))
+        .unwrap();
+    assert!(peak(&render_offline(&mut p, 19200, 2)) > 0.4, "0 to 0.4 s");
+    render_offline(&mut p, 9600, 2);
+    assert!(
+        peak(&render_offline(&mut p, 9600, 2)) < 1e-6,
+        "0.6 to 0.8 s"
+    );
+}
+
+/// Stretched to half speed (the edit at 120 bpm, its source at 240), a
+/// burst 1 s into the source is heard 2 s into the clip: from the start,
+/// and after seeking past the clip's start, the stretcher fed from there.
+#[cfg(feature = "signalsmith")]
+#[test]
+fn stretched_clips_play_on_time() {
+    let (mut s, mut p, tid, cid) = playing_clip(burst(3.0, 1.0), None, 6.0);
+    s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 240.0, 0.0))
+        .unwrap();
+    let heard = loudest(&render_offline(&mut p, (3.0 * SR) as usize, 2));
+    assert!((heard - 2.0).abs() < 0.01, "heard at {heard} s");
+
+    s.seek(BeatPos(3.0)).unwrap(); // 1.5 s
+    let heard = 1.5 + loudest(&render_offline(&mut p, (1.0 * SR) as usize, 2));
+    assert!(
+        (heard - 2.0).abs() < 0.01,
+        "after a seek, heard at {heard} s"
+    );
+}
+
+/// Transposed while stretched, the pitch alone moves: an octave up, a
+/// 1 kHz tone comes out at 2 kHz, as long as before, its formants kept or
+/// not.
+#[cfg(feature = "signalsmith")]
+#[test]
+fn stretched_clips_transpose_without_changing_speed() {
+    for formants in [false, true] {
+        let tone: Vec<f32> = (0..48000)
+            .map(|i| (i as f64 / SR * 1000.0 * std::f64::consts::TAU).sin() as f32 * 0.5)
+            .collect();
+        let (mut s, mut p, tid, cid) =
+            playing_clip(Arc::new(SampleBuffer::new(vec![tone], SR)), None, 3.0);
+        s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 120.0, 12.0))
+            .unwrap();
+        let stretch = StretchSettings {
+            formants,
+            ..Default::default()
+        };
+        s.perform(SetClipStretch::new(tid, cid, stretch)).unwrap();
+        render_offline(&mut p, 9600, 2);
+        let out = render_offline(&mut p, 24000, 2);
+        let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+        let crossings = left
+            .windows(2)
+            .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+            .count();
+        // Half a second: about 1000 crossings at 2 kHz.
+        assert!(
+            (950..1050).contains(&crossings),
+            "formants {formants}: {crossings}"
+        );
+        render_offline(&mut p, 9600, 2); // to 0.9 s
+        assert!(
+            peak(&render_offline(&mut p, 4800, 2)) > 0.2,
+            "formants {formants}: still playing"
+        );
+    }
+}
+
+/// Stretched with any window, a clip plays on time; its window changed as
+/// it plays, it gets a new stretcher, which starts over in the right
+/// place.
+#[cfg(feature = "signalsmith")]
+#[test]
+fn stretched_clips_play_on_time_whatever_their_window() {
+    for window in tonique_engine::edit::StretchWindow::ALL {
+        let (mut s, mut p, tid, cid) = playing_clip(burst(3.0, 1.0), None, 6.0);
+        s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 240.0, 0.0))
+            .unwrap();
+        let stretch = StretchSettings {
+            window,
+            ..Default::default()
+        };
+        s.perform(SetClipStretch::new(tid, cid, stretch)).unwrap();
+        let heard = loudest(&render_offline(&mut p, (3.0 * SR) as usize, 2));
+        assert!((heard - 2.0).abs() < 0.01, "{window:?}: heard at {heard} s");
+
+        s.seek(BeatPos(0.0)).unwrap();
+        let mut out = render_offline(&mut p, (1.0 * SR) as usize, 2);
+        s.undo().unwrap(); // back to the normal window
+        out.extend(render_offline(&mut p, (2.0 * SR) as usize, 2));
+        let heard = loudest(&out);
+        assert!(
+            (heard - 2.0).abs() < 0.01,
+            "{window:?} then normal: heard at {heard} s"
+        );
+    }
+}
+
+/// Rebuilt as it plays, a stretched clip keeps its stretcher (handed over
+/// to the new graph) and its timing; and keeps playing through graphs
+/// replaced before they ever played.
+#[cfg(feature = "signalsmith")]
+#[test]
+fn stretched_clips_play_on_through_rebuilds() {
+    let (mut s, mut p, tid, cid) = playing_clip(burst(3.0, 1.0), None, 6.0);
+    s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 240.0, 0.0))
+        .unwrap();
+    let mut out = Vec::new();
+    for _ in 0..30 {
+        out.extend(render_offline(&mut p, 4800, 2));
+        s.engine().collect_garbage();
+        s.rebuild().unwrap();
+    }
+    let heard = loudest(&out);
+    assert!((heard - 2.0).abs() < 0.01, "heard at {heard} s");
+
+    // Stretched again in a graph replaced before it plays (the engine
+    // takes 8 at most): its stretcher is new in the one replacing it.
+    s.perform(SetClipWarp::new(tid, cid, WarpMode::Off, 240.0, 0.0))
+        .unwrap();
+    s.seek(BeatPos(3.0)).unwrap(); // 1.5 s
+    render_offline(&mut p, 512, 2);
+    for _ in 0..8 {
+        s.rebuild().unwrap();
+    }
+    s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 240.0, 0.0))
+        .unwrap();
+    s.rebuild().unwrap();
+    // The graphs queued play, then the one left waiting.
+    render_offline(&mut p, 256, 2);
+    s.engine().collect_garbage();
+    s.seek(BeatPos(3.0)).unwrap();
+    let heard = 1.5 + loudest(&render_offline(&mut p, (1.0 * SR) as usize, 2));
+    assert!(
+        (heard - 2.0).abs() < 0.01,
+        "after graphs never played, heard at {heard} s"
+    );
+}
+
+/// The tempo changing while playing, the transport stays on its beat and
+/// goes on at the new tempo: it doesn't jump to where its samples fall.
+#[test]
+fn the_transport_keeps_its_beat_when_the_tempo_changes() {
+    let (mut s, mut p, _, _) = playing_clip(sine(48000 * 4), None, 4.0);
+    render_offline(&mut p, 48000, 2); // 1 s at 120 bpm: beat 2
+    assert!((s.position().0 - 2.0).abs() < 1e-3, "{:?}", s.position());
+    s.perform(SetTempoMap::new(TempoMap::new(60.0))).unwrap();
+    render_offline(&mut p, 48000, 2); // 1 s at 60 bpm: a beat further
+    assert!((s.position().0 - 3.0).abs() < 0.01, "{:?}", s.position());
+    s.undo().unwrap();
+    render_offline(&mut p, 48000, 2); // back at 120: two more
+    assert!((s.position().0 - 5.0).abs() < 0.01, "{:?}", s.position());
+}
+
+/// A seek and a loop asked in beats land on their beats whatever tempo
+/// reaches the engine with them.
+#[test]
+fn seeks_and_loops_land_on_their_beats_across_tempo_changes() {
+    let (mut s, mut p, _, _) = playing_clip(sine(48000 * 8), None, 8.0);
+    render_offline(&mut p, 256, 2);
+    s.set_loop(Some((BeatPos(0.0), BeatPos(4.0)))).unwrap();
+    s.seek(BeatPos(3.0)).unwrap();
+    s.perform(SetTempoMap::new(TempoMap::new(60.0))).unwrap();
+    // 1.5 s at 60 bpm: to beat 4, back to 0, half a beat on.
+    render_offline(&mut p, 72000, 2);
+    assert!((s.position().0 - 0.5).abs() < 0.01, "{:?}", s.position());
+}
+
+/// Stretched (its source at 240 bpm), a clip goes on through a tempo
+/// change, its stretcher playing on at the new speed, and stays on its
+/// beats: a burst on beat 4 of its source is heard on beat 4, at the new
+/// tempo.
+#[cfg(feature = "signalsmith")]
+#[test]
+fn stretched_clips_stay_on_their_beats_when_the_tempo_changes() {
+    let (mut s, mut p, tid, cid) = playing_clip(burst(3.0, 1.0), None, 6.0);
+    s.perform(SetClipWarp::new(tid, cid, WarpMode::Spectral, 240.0, 0.0))
+        .unwrap();
+    let mut out = render_offline(&mut p, 24000, 2); // beat 1 at 120 bpm
+    s.perform(SetTempoMap::new(TempoMap::new(200.0))).unwrap();
+    out.extend(render_offline(&mut p, (2.0 * SR) as usize, 2));
+    // Beat 1 at 0.5 s, then three more at 200 bpm.
+    let heard = loudest(&out);
+    assert!((heard - 1.4).abs() < 0.01, "heard at {heard} s");
+}
+
+/// A warp is numbers: a transposition or a source tempo that isn't one is
+/// refused, and one that got into a clip anyway plays as if it weren't set.
+#[test]
+fn warps_are_numbers() {
+    let (mut s, _p, tid, cid) = playing_clip(sine(48000), None, 1.0);
+    for (bpm, transpose) in [
+        (120.0, f32::NAN),
+        (120.0, f32::INFINITY),
+        (f64::INFINITY, 0.0),
+    ] {
+        let set = SetClipWarp::new(tid, cid, WarpMode::Spectral, bpm, transpose);
+        assert!(s.perform(set).is_err(), "{bpm} bpm, {transpose}");
+    }
+    assert_eq!(
+        WarpMode::Off.play(120.0, f32::NAN, StretchSettings::default(), 120.0),
+        ClipWarp::None
+    );
+    assert_eq!(
+        WarpMode::Spectral.play(f64::NAN, f32::NAN, StretchSettings::default(), 120.0),
+        ClipWarp::None
+    );
+}
+
+/// Stretched, a clip follows the tempo where it is: at 90 bpm after a
+/// change from 120, a 90 bpm source plays as it is.
+#[test]
+fn stretched_clips_follow_the_tempo_where_they_are() {
+    let mut edit = Edit::new(120.0);
+    edit.tempo.set_tempo(BeatPos(32.0), 90.0);
+    let src = edit.add_source(sine(48000));
+    let mut clip = Clip::audio(&mut edit, BeatPos(44.0), 8.0, src);
+    if let ClipContent::Audio {
+        warp, source_bpm, ..
+    } = &mut clip.content
+    {
+        *warp = WarpMode::Spectral;
+        *source_bpm = 90.0;
+    }
+    assert_eq!(clip.warp(&edit.tempo), Some(ClipWarp::None));
+    // Across the change, at its average: 4 beats at each.
+    clip.start = BeatPos(28.0);
+    let Some(ClipWarp::Stretch { speed, .. }) = clip.warp(&edit.tempo) else {
+        panic!("not stretched");
+    };
+    assert!(
+        (speed - 8.0 / (2.0 + 8.0 / 3.0) * 60.0 / 90.0).abs() < 1e-9,
+        "{speed}"
+    );
+}
+
+/// The tempo raised with the transport a sample before the loop's end,
+/// both rounding to the same sample: the loop still goes round.
+#[test]
+fn loops_go_round_when_the_tempo_moves_the_transport_onto_their_end() {
+    let (mut s, mut p, _, _) = playing_clip(sine(48000 * 8), None, 8.0);
+    s.set_loop(Some((BeatPos(0.0), BeatPos(4.0)))).unwrap();
+    // Beat 4 at 120 bpm is sample 96000: seek to 95998, play one.
+    s.seek(BeatPos(95998.0 / 24000.0)).unwrap();
+    render_offline(&mut p, 1, 2);
+    // At 143 bpm, 95999 and 96000 both fall on 80559.
+    s.perform(SetTempoMap::new(TempoMap::new(143.0))).unwrap();
+    render_offline(&mut p, 48000, 2);
+    assert!(s.position().0 < 4.0, "{:?}", s.position());
+}
+
+/// Held back, changes reach the engine at once: one graph for many.
+#[test]
+fn held_effects_rebuild_once() {
+    let (mut s, mut p, tid, cid) = playing_clip(burst(3.0, 1.0), None, 6.0);
+    render_offline(&mut p, 512, 2);
+    let adopted = s.engine().graphs_adopted();
+    s.hold_effects();
+    for bpm in [100.0, 110.0, 120.0] {
+        s.perform(SetClipWarp::new(tid, cid, WarpMode::Off, bpm, 0.0))
+            .unwrap();
+    }
+    s.release_effects().unwrap();
+    render_offline(&mut p, 512, 2);
+    assert_eq!(s.engine().graphs_adopted(), adopted + 1);
 }
 
 #[test]

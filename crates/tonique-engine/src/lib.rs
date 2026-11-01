@@ -25,6 +25,7 @@ pub mod resample;
 pub mod rt;
 pub mod sample;
 pub mod spectrum;
+pub mod stretch;
 pub mod time;
 
 #[cfg(feature = "device")]
