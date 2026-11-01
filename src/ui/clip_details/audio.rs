@@ -1,7 +1,7 @@
 //! The inspector's Audio panel: how the clip sounds (gain, pan), how it
 //! follows the project's tempo (its file's tempo), and its transposition.
 
-use egui::{Color32, Rect, Ui, pos2, vec2};
+use egui::{Color32, DragValue, Rect, Ui, pos2, vec2};
 use tonique_engine::edit::{MAX_TRANSPOSE, WarpMode};
 
 use crate::{
@@ -11,14 +11,14 @@ use crate::{
     },
     ui::widget::{
         flat_button::FlatButton,
-        knob::Knob,
         param_slider::ParamSlider,
         select::{self, Select},
     },
 };
 
 use super::inspector::{
-    CELL_GAP, CLIP_GAIN_RANGE, FIELD_HEIGHT, apply_param, cell_label, gesture, section, section_row,
+    CELL_GAP, CLIP_GAIN_RANGE, FIELD_HEIGHT, apply_param, cell, cell_label, gesture, section,
+    section_row,
 };
 
 /// The warp mode's picker, on its section's title row.
@@ -30,7 +30,7 @@ const BPM_RANGE: std::ops::RangeInclusive<f64> = 10.0..=999.0;
 
 /// Gain and pan, sliders like a track's heard as they're dragged; the warp
 /// mode; the file's tempo, typed or halved and doubled; the
-/// transposition on knobs, heard as they're turned (`live`). Edits go in
+/// transposition, heard as it's dragged (`live`). Edits go in
 /// `change` (shown until done) or `live`, as in the inspector.
 pub(super) fn audio_panel(
     ui: &mut Ui,
@@ -95,35 +95,37 @@ pub(super) fn audio_panel(
 
     ui.add_space(CELL_GAP);
     ui.columns(2, |cells| {
-        let mut transpose = shown.transpose as f32;
-        let limit = MAX_TRANSPOSE;
-        let response = cells[0].vertical_centered(|ui| {
-            ui.add(
-                Knob::new(&mut transpose, -limit..=limit)
-                    .name("Transpose")
-                    .default(Some(0.))
-                    .format(&|v| format!("{:+} st", v.round() as i32)),
-            )
-        });
-        if let Some(done) = gesture(&response.inner) {
+        let mut transpose = shown.transpose;
+        let limit = MAX_TRANSPOSE as i32;
+        let response = cell(
+            &mut cells[0],
+            "Transpose",
+            DragValue::new(&mut transpose)
+                .speed(0.1)
+                .range(-limit..=limit)
+                .custom_formatter(|v, _| format!("{v:+.0} st"))
+                .custom_parser(|text| text.trim().trim_end_matches("st").trim().parse().ok()),
+        );
+        if let Some(done) = gesture(&response) {
             let mut edited = shown.clone();
-            let transpose = transpose.round() as i32;
             edited.set_warp(shown.warp, shown.bpm, transpose, shown.detune, bpm);
             *live = Some((edited, done));
         }
 
         let mut detune = shown.detune;
-        let response = cells[1].vertical_centered(|ui| {
-            ui.add(
-                Knob::new(&mut detune, -50.0..=50.)
-                    .name("Detune")
-                    .default(Some(0.))
-                    .format(&|v| format!("{:+.0} ct", v)),
-            )
-        });
-        if let Some(done) = gesture(&response.inner) {
+        let response = cell(
+            &mut cells[1],
+            "Detune",
+            DragValue::new(&mut detune)
+                .speed(0.5)
+                .range(-50.0..=50.0)
+                .max_decimals(0)
+                .custom_formatter(|v, _| format!("{v:+.0} ct"))
+                .custom_parser(|text| text.trim().trim_end_matches("ct").trim().parse().ok()),
+        );
+        if let Some(done) = gesture(&response) {
             let mut edited = shown.clone();
-            edited.set_warp(shown.warp, shown.bpm, shown.transpose, detune.round(), bpm);
+            edited.set_warp(shown.warp, shown.bpm, shown.transpose, detune, bpm);
             *live = Some((edited, done));
         }
     });
@@ -167,8 +169,7 @@ fn typed_field(ui: &mut Ui, id: egui::Id, value: f64, width: f32) -> Option<f64>
     entered.then(|| text.trim().parse::<f64>().ok()).flatten()
 }
 
-/// `120`, `98.5`, `97.25`: no more decimals than needed, two at most.
+/// `120.00`, `97.25`: two decimals.
 fn format_number(value: f64) -> String {
-    let text = format!("{value:.2}");
-    text.trim_end_matches('0').trim_end_matches('.').to_string()
+    format!("{value:.2}")
 }

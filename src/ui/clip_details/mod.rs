@@ -99,12 +99,8 @@ impl ClipDetails {
         // Bars as the project counts them.
         self.grid.set_time_signature(state.time_signature());
         // Played faster or slower: the file spans fewer or more beats, the
-        // view fitted to it again.
-        let speed = clip.speed(bpm);
-        if speed != self.speed {
-            self.speed = speed;
-            self.fitted = None;
-        }
+        // view kept as it was (its zoom and scroll, in beats).
+        self.speed = clip.speed(bpm);
         if self.fitted == Some(clip.id) && clip.origin != self.origin {
             // Bar 1 moved: the grid follows, and the audio stays where it
             // was on screen.

@@ -1,6 +1,6 @@
 use egui::Rect;
 use tonique_engine::{
-    edit::{ClipId, ClipLoop},
+    edit::{ClipId, ClipLoop, WarpMode},
     time::{BeatPos, TimeSignature},
 };
 
@@ -270,4 +270,20 @@ fn the_loop_brackets_end_drags_and_the_clip_outgrows_the_file() {
     assert_eq!((l.start_s, l.end_s), (0.5, 1.75));
     h.state.undo();
     assert_eq!(h.clip().looped.unwrap().end_s, 1.5, "one step");
+}
+
+#[test]
+fn warping_keeps_the_view_as_it_was() {
+    let mut h = Harness::new();
+    h.details.grid.offset.x += 40.;
+    let (zoom, offset) = (h.details.grid.beats_to_width(1.), h.details.grid.offset);
+    let mut warped = h.clip();
+    warped.set_warp(WarpMode::Spectral, 100., 0, 0., 120.);
+    h.state.commit_resize_clip(warped);
+    h.frame(Vec::new());
+    assert_ne!(h.details.speed, 1., "played faster");
+    assert_eq!(
+        (h.details.grid.beats_to_width(1.), h.details.grid.offset),
+        (zoom, offset)
+    );
 }
