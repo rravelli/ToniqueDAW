@@ -26,7 +26,13 @@ pub fn busy_edit(tracks: usize) -> Edit {
     ));
     let source = edit.add_source(sample);
     let mut bus = Bus::new(&mut edit, "fx");
-    let echo = Plugin::new(&mut edit, PluginKind::Echo { time_s: 0.3 });
+    let echo = Plugin::new(
+        &mut edit,
+        PluginKind::Echo {
+            time_s: 0.3,
+            sync: None,
+        },
+    );
     bus.channel.plugins.push(echo);
     for i in 0..tracks {
         let mut t = Track::new(&mut edit, format!("t{i}"));

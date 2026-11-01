@@ -19,7 +19,7 @@ pub struct EchoEditor;
 
 impl EffectEditor for EchoEditor {
     fn ui(&mut self, ui: &mut Ui, cx: &mut EditorContext) {
-        let PluginKind::Echo { time_s } = cx.effect.plugin.kind else {
+        let PluginKind::Echo { time_s, .. } = cx.effect.plugin.kind else {
             return;
         };
         let feedback = cx.param("feedback").map_or(0., |p| p.get());

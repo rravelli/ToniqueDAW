@@ -12,7 +12,7 @@ use tonique_engine::edit::{
     Bus, ChannelRef, Clip, Edit, EditSession, Note, Plugin, PluginKind, Send, Track,
 };
 use tonique_engine::engine::{Engine, EngineConfig};
-use tonique_engine::nodes::{Envelope, FilterMode};
+use tonique_engine::nodes::{Envelope, FilterMode, SaturationCurve};
 use tonique_engine::rt::{self, CheckingAllocator};
 use tonique_engine::sample::SampleBuffer;
 use tonique_engine::time::BeatPos;
@@ -56,6 +56,19 @@ fn busy_edit() -> Edit {
         }
         let filter = Plugin::new(&mut edit, PluginKind::Filter(FilterMode::HighPass));
         t.channel.plugins.push(filter);
+        // Every other effect, a few on each track.
+        let effects = [
+            PluginKind::Compressor,
+            PluginKind::Limiter { lookahead_ms: 3.0 },
+            PluginKind::Eq,
+            PluginKind::Reverb,
+            PluginKind::Saturation(SaturationCurve::Tape),
+            PluginKind::Gate,
+        ];
+        for kind in effects.iter().cycle().skip(i as usize).take(3) {
+            let plugin = Plugin::new(&mut edit, *kind);
+            t.channel.plugins.push(plugin);
+        }
         let send = Send::new(&mut edit, bus.id, 0.2);
         t.sends.push(send);
         t.channel.volume.automation = vec![
@@ -79,7 +92,13 @@ fn busy_edit() -> Edit {
     }
     edit.metronome.set(0.5, 0.0);
     let mut bus = bus;
-    let echo = Plugin::new(&mut edit, PluginKind::Echo { time_s: 0.3 });
+    let echo = Plugin::new(
+        &mut edit,
+        PluginKind::Echo {
+            time_s: 0.3,
+            sync: None,
+        },
+    );
     bus.channel.plugins.push(echo);
     edit.buses.push(bus);
     edit

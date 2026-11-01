@@ -104,6 +104,7 @@ pub fn demo_edit(sample_rate: f64) -> Edit {
         &mut edit,
         PluginKind::Echo {
             time_s: 60.0 / 118.0 * 0.75,
+            sync: None,
         },
     );
     echo.params[0].value.set(0.45, 0.0);

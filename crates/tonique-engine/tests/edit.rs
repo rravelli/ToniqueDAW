@@ -67,7 +67,13 @@ fn renders_a_small_song() {
         vec![note(0.0, 1.0, 60), note(1.0, 1.0, 64), note(2.0, 1.0, 67)],
         4.0,
     );
-    let echo = Plugin::new(&mut edit, PluginKind::Echo { time_s: 0.25 });
+    let echo = Plugin::new(
+        &mut edit,
+        PluginKind::Echo {
+            time_s: 0.25,
+            sync: None,
+        },
+    );
     t.channel.plugins.push(echo);
     let bus = Bus::new(&mut edit, "fx");
     let send = Send::new(&mut edit, bus.id, 0.5);
@@ -94,7 +100,13 @@ fn edits_preserve_node_state_bit_exactly() {
     let build = || {
         let mut edit = Edit::new(120.0);
         let mut t = synth_track(&mut edit, vec![note(0.0, 0.25, 72)], 1.0);
-        let echo = Plugin::new(&mut edit, PluginKind::Echo { time_s: 0.1 });
+        let echo = Plugin::new(
+            &mut edit,
+            PluginKind::Echo {
+                time_s: 0.1,
+                sync: None,
+            },
+        );
         echo.param("feedback").unwrap().set(0.9);
         t.channel.plugins.push(echo);
         edit.tracks.push(t);
@@ -303,7 +315,13 @@ fn parallel_rendering_matches_sequential() {
             edit.tracks.push(t);
         }
         let mut bus = bus;
-        let echo = Plugin::new(&mut edit, PluginKind::Echo { time_s: 0.05 });
+        let echo = Plugin::new(
+            &mut edit,
+            PluginKind::Echo {
+                time_s: 0.05,
+                sync: None,
+            },
+        );
         bus.channel.plugins.push(echo);
         edit.buses.push(bus);
         edit

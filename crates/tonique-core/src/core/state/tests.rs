@@ -319,8 +319,14 @@ fn duplicated_effects_follow_their_originals_and_are_independent() {
         [
             PluginKind::Filter(FilterMode::HighPass),
             PluginKind::Filter(FilterMode::HighPass),
-            PluginKind::Echo { time_s: 0.5 },
-            PluginKind::Echo { time_s: 0.5 },
+            PluginKind::Echo {
+                time_s: 0.5,
+                sync: None,
+            },
+            PluginKind::Echo {
+                time_s: 0.5,
+                sync: None,
+            },
         ]
     );
     assert!(!effects[3].enabled(), "bypassed like its original");

@@ -89,7 +89,10 @@ impl EffectKind {
     pub fn plugin_kind(self) -> PluginKind {
         match self {
             EffectKind::Filter => PluginKind::Filter(FilterMode::LowPass),
-            EffectKind::Echo => PluginKind::Echo { time_s: ECHO_TIME },
+            EffectKind::Echo => PluginKind::Echo {
+                time_s: ECHO_TIME,
+                sync: None,
+            },
             EffectKind::Spectrum => PluginKind::Analyzer,
             EffectKind::Utility => PluginKind::Utility,
         }
@@ -141,7 +144,7 @@ impl Setting {
     pub fn of(plugin: &PluginKind) -> Option<Self> {
         match *plugin {
             PluginKind::Filter(mode) => Some(Setting::Mode(mode)),
-            PluginKind::Echo { time_s } => Some(Setting::Time(time_s)),
+            PluginKind::Echo { time_s, .. } => Some(Setting::Time(time_s)),
             _ => None,
         }
     }
@@ -167,6 +170,8 @@ impl Setting {
         match self {
             Setting::Mode(FilterMode::LowPass) => ("mode", 0.),
             Setting::Mode(FilterMode::HighPass) => ("mode", 1.),
+            // Not offered yet.
+            Setting::Mode(_) => ("mode", 0.),
             Setting::Time(time) => ("time", time),
         }
     }
@@ -176,7 +181,9 @@ impl Setting {
     pub fn apply(self, plugin: PluginKind) -> PluginKind {
         match (self, plugin) {
             (Setting::Mode(mode), PluginKind::Filter(_)) => PluginKind::Filter(mode),
-            (Setting::Time(time_s), PluginKind::Echo { .. }) => PluginKind::Echo { time_s },
+            (Setting::Time(time_s), PluginKind::Echo { sync, .. }) => {
+                PluginKind::Echo { time_s, sync }
+            }
             _ => plugin,
         }
     }

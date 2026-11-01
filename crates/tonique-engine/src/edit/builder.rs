@@ -13,21 +13,26 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::{
-    Bus, BusId, Channel, ClipContent, ClipLoop, Edit, Output, Parameter, PluginKind, Track,
+    Bus, BusId, Channel, ClipContent, ClipLoop, Edit, Output, Parameter, Plugin, PluginKind, Track,
 };
 use crate::automation::AutomationCurve;
-use crate::graph::{GraphDescription, NodeId, NodeIdentity};
+use crate::graph::{GraphDescription, Node, NodeId, NodeIdentity};
+use crate::meter::PluginTap;
 use crate::nodes::{
-    AudioClipNode, AutomationNode, ClipPlacement, ClipWarp, DelayNode, EchoNode, FilterMode,
-    FilterNode, LoopPlacement, MetronomeNode, MidiClipNode, SumNode, SynthNode, TappedNode,
-    ThroughNode, TimelineNote, UtilityNode, VolumePanNode,
+    AudioClipNode, AutomationNode, ClipPlacement, ClipWarp, CompressorNode, DelayNode, EQ_BANDS,
+    EchoNode, EqNode, FilterMode, FilterNode, GateNode, LimiterNode, LoopPlacement, MetronomeNode,
+    MidiClipNode, ReverbNode, SaturationNode, SumNode, SynthNode, TappedNode, ThroughNode,
+    TimelineNote, UtilityNode, VolumePanNode,
 };
-use crate::param::ParamId;
+use crate::param::{AtomicParam, ParamId};
 use crate::stretch::Stretchers;
 
 /// Crossfade at a clip loop's seam: long enough not to click, short enough
 /// not to smear its attack.
 const LOOP_CROSSFADE_S: f64 = 0.004;
+/// Longest echo, in seconds: a synced one at a slow tempo can ask for
+/// more.
+const MAX_ECHO_S: f32 = 8.0;
 use crate::time::{BeatPos, SamplePos};
 
 /// Identity of the automation writer for a parameter; used to address it
@@ -240,47 +245,81 @@ impl Builder<'_> {
             let param = |name| plugin.param(name).expect("plugin param").value.clone();
             let tap = plugin.tap.clone();
             prev = match plugin.kind {
-                PluginKind::Synth(env) => self.d.add(
-                    TappedNode::new(SynthNode::new(env, param("gain")).with_identity(id), tap),
-                    &[prev],
+                PluginKind::Synth(env) => self.tapped(
+                    SynthNode::new(env, param("gain")).with_identity(id),
+                    tap,
+                    prev,
                 ),
-                PluginKind::Filter(mode) => self.d.add(
-                    TappedNode::new(
-                        FilterNode::new(mode, param("cutoff"), param("q")).with_identity(id),
-                        tap,
-                    ),
-                    &[prev],
-                ),
-                PluginKind::Echo { time_s } => self.d.add(
-                    TappedNode::new(
-                        EchoNode::new(time_s, param("feedback"), param("mix")).with_identity(id),
-                        tap,
-                    ),
-                    &[prev],
-                ),
-                PluginKind::Utility => self.d.add(
-                    TappedNode::new(
-                        UtilityNode::new(
-                            param("gain"),
-                            param("balance"),
-                            param("width"),
-                            param("mono"),
-                            param("invert_left"),
-                            param("invert_right"),
-                        )
-                        .with_identity(id),
-                        tap,
-                    ),
-                    &[prev],
-                ),
-                PluginKind::Analyzer => self.d.add(
-                    TappedNode::new(ThroughNode::new(2).with_identity(id), tap),
-                    &[prev],
-                ),
-                PluginKind::Latency { samples } => self.d.add(
-                    TappedNode::new(DelayNode::reporting(samples, 2), tap),
-                    &[prev],
-                ),
+                PluginKind::Filter(mode) => {
+                    let [cutoff, q, gain] = params(plugin, ["cutoff", "q", "gain"]);
+                    let node = FilterNode::new(mode, cutoff, q, gain);
+                    self.tapped(node.with_identity(id), tap, prev)
+                }
+                PluginKind::Echo { time_s, sync } => {
+                    // Synced, at the tempo it starts at.
+                    let time_s = sync.map_or(time_s, |beats| {
+                        (beats as f64 * 60.0 / self.edit.tempo.bpm_at(BeatPos(0.0))) as f32
+                    });
+                    let [feedback, mix, low_cut, high_cut] =
+                        params(plugin, ["feedback", "mix", "low_cut", "high_cut"]);
+                    let time_s = time_s.clamp(0.001, MAX_ECHO_S);
+                    let node = EchoNode::new(time_s, feedback, mix, low_cut, high_cut);
+                    self.tapped(node.with_identity(id), tap, prev)
+                }
+                PluginKind::Utility => {
+                    let [gain, balance, width, mono, invert_left, invert_right] = params(
+                        plugin,
+                        [
+                            "gain",
+                            "balance",
+                            "width",
+                            "mono",
+                            "invert_left",
+                            "invert_right",
+                        ],
+                    );
+                    let node =
+                        UtilityNode::new(gain, balance, width, mono, invert_left, invert_right);
+                    self.tapped(node.with_identity(id), tap, prev)
+                }
+                PluginKind::Compressor => {
+                    let p = params(
+                        plugin,
+                        ["threshold", "ratio", "attack", "release", "knee", "makeup"],
+                    );
+                    let node = CompressorNode::new(p, tap.clone());
+                    self.tapped(node.with_identity(id), tap, prev)
+                }
+                PluginKind::Limiter { lookahead_ms } => {
+                    let samples = (lookahead_ms as f64 * 0.001 * self.sr).round() as usize;
+                    let p = params(plugin, ["gain", "ceiling", "release"]);
+                    let node = LimiterNode::new(samples, p, tap.clone());
+                    self.tapped(node.with_identity(id), tap, prev)
+                }
+                PluginKind::Eq => {
+                    let node = EqNode::new(EQ_BANDS.map(|band| params(plugin, band.params)));
+                    self.tapped(node.with_identity(id), tap, prev)
+                }
+                PluginKind::Reverb => {
+                    let p = params(plugin, ["size", "decay", "damping", "predelay", "mix"]);
+                    self.tapped(ReverbNode::new(p).with_identity(id), tap, prev)
+                }
+                PluginKind::Saturation(curve) => {
+                    let node =
+                        SaturationNode::new(curve, params(plugin, ["drive", "output", "mix"]));
+                    self.tapped(node.with_identity(id), tap, prev)
+                }
+                PluginKind::Gate => {
+                    let p = params(plugin, ["threshold", "range", "attack", "hold", "release"]);
+                    let node = GateNode::new(p, tap.clone());
+                    self.tapped(node.with_identity(id), tap, prev)
+                }
+                PluginKind::Analyzer => {
+                    self.tapped(ThroughNode::new(2).with_identity(id), tap, prev)
+                }
+                PluginKind::Latency { samples } => {
+                    self.tapped(DelayNode::reporting(samples, 2), tap, prev)
+                }
             };
             self.label(prev, format!("{name} · {}", plugin_label(plugin.kind)));
             for p in &plugin.params {
@@ -298,6 +337,11 @@ impl Builder<'_> {
         fader
     }
 
+    /// A plugin's node after `input`, recording into its tap.
+    fn tapped<N: Node + 'static>(&mut self, node: N, tap: Arc<PluginTap>, input: NodeId) -> NodeId {
+        self.d.add(TappedNode::new(node, tap), &[input])
+    }
+
     /// Add an automation writer for `param` that runs before `owner`.
     fn automate(&mut self, param: &Parameter, owner: NodeId, owner_name: &str) {
         if param.automation.is_empty() {
@@ -311,14 +355,30 @@ impl Builder<'_> {
     }
 }
 
+/// The values of `plugin`'s parameters by those names.
+fn params<const N: usize>(plugin: &Plugin, names: [&str; N]) -> [Arc<AtomicParam>; N] {
+    names.map(|name| plugin.param(name).expect("plugin param").value.clone())
+}
+
 fn plugin_label(kind: PluginKind) -> &'static str {
     match kind {
         PluginKind::Synth(_) => "synth",
         PluginKind::Filter(FilterMode::LowPass) => "low-pass",
         PluginKind::Filter(FilterMode::HighPass) => "high-pass",
+        PluginKind::Filter(FilterMode::BandPass) => "band-pass",
+        PluginKind::Filter(FilterMode::Notch) => "notch",
+        PluginKind::Filter(FilterMode::LowShelf) => "low shelf",
+        PluginKind::Filter(FilterMode::HighShelf) => "high shelf",
+        PluginKind::Filter(FilterMode::Peak) => "peak",
         PluginKind::Echo { .. } => "echo",
         PluginKind::Latency { .. } => "latency",
         PluginKind::Analyzer => "analyzer",
         PluginKind::Utility => "utility",
+        PluginKind::Compressor => "compressor",
+        PluginKind::Limiter { .. } => "limiter",
+        PluginKind::Eq => "eq",
+        PluginKind::Reverb => "reverb",
+        PluginKind::Saturation(_) => "saturation",
+        PluginKind::Gate => "gate",
     }
 }

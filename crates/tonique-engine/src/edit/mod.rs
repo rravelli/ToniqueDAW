@@ -17,7 +17,9 @@ pub use undo::{Effects, UndoManager};
 
 use crate::automation::BeatPoint;
 use crate::meter::{ChannelMeter, PluginTap};
-use crate::nodes::{ClipWarp, Envelope, FilterMode};
+use crate::nodes::{
+    ClipWarp, EQ_BANDS, EQ_GAIN_DB, Envelope, FilterMode, SaturationCurve, eq_mode_value,
+};
 use crate::param::{AtomicParam, ParamId};
 use crate::sample::SampleBuffer;
 use crate::time::{BeatPos, TempoMap};
@@ -115,9 +117,11 @@ impl Parameter {
 pub enum PluginKind {
     Synth(Envelope),
     Filter(FilterMode),
-    /// Echo with a fixed delay time (seconds).
+    /// Echo with a fixed delay time (seconds), or a number of beats when
+    /// synced to the tempo.
     Echo {
         time_s: f32,
+        sync: Option<f32>,
     },
     /// Stand-in for a lookahead plugin: a pure delay that reports latency.
     Latency {
@@ -129,6 +133,21 @@ pub enum PluginKind {
     /// Gain, balance, stereo width, mono and phase inversion: see
     /// [`UtilityNode`](crate::nodes::UtilityNode).
     Utility,
+    /// See [`CompressorNode`](crate::nodes::CompressorNode).
+    Compressor,
+    /// Brickwall limiter looking `lookahead_ms` ahead, which it reports as
+    /// latency: see [`LimiterNode`](crate::nodes::LimiterNode).
+    Limiter {
+        lookahead_ms: f32,
+    },
+    /// Parametric EQ of [`EQ_BANDS`].
+    Eq,
+    /// See [`ReverbNode`](crate::nodes::ReverbNode).
+    Reverb,
+    /// See [`SaturationNode`](crate::nodes::SaturationNode).
+    Saturation(SaturationCurve),
+    /// See [`GateNode`](crate::nodes::GateNode).
+    Gate,
 }
 
 #[derive(Clone, Debug)]
@@ -150,10 +169,18 @@ impl Plugin {
         };
         let params = match kind {
             PluginKind::Synth(_) => vec![p("gain", 0.0, 2.0, 1.0)],
-            PluginKind::Filter(_) => {
-                vec![p("cutoff", 20.0, 20000.0, 2000.0), p("q", 0.1, 10.0, 0.707)]
-            }
-            PluginKind::Echo { .. } => vec![p("feedback", 0.0, 0.95, 0.4), p("mix", 0.0, 1.0, 0.3)],
+            PluginKind::Filter(_) => vec![
+                p("cutoff", 20.0, 20000.0, 2000.0),
+                p("q", 0.1, 10.0, 0.707),
+                p("gain", -24.0, 24.0, 0.0),
+            ],
+            // The cuts start out of the way, as echoes were before them.
+            PluginKind::Echo { .. } => vec![
+                p("feedback", 0.0, 0.95, 0.4),
+                p("mix", 0.0, 1.0, 0.3),
+                p("low_cut", 20.0, 2000.0, 20.0),
+                p("high_cut", 500.0, 20000.0, 20000.0),
+            ],
             PluginKind::Utility => vec![
                 p("gain", crate::nodes::UTILITY_SILENT_DB, 24.0, 0.0),
                 p("balance", -1.0, 1.0, 0.0),
@@ -161,6 +188,57 @@ impl Plugin {
                 p("mono", 0.0, 1.0, 0.0),
                 p("invert_left", 0.0, 1.0, 0.0),
                 p("invert_right", 0.0, 1.0, 0.0),
+            ],
+            PluginKind::Compressor => vec![
+                p("threshold", -60.0, 0.0, -18.0),
+                p("ratio", 1.0, 20.0, 4.0),
+                p("attack", 0.1, 100.0, 10.0),
+                p("release", 10.0, 1000.0, 100.0),
+                p("knee", 0.0, 24.0, 6.0),
+                p("makeup", 0.0, 24.0, 0.0),
+            ],
+            PluginKind::Limiter { .. } => vec![
+                p("gain", 0.0, 24.0, 0.0),
+                p("ceiling", -24.0, 0.0, -1.0),
+                p("release", 1.0, 1000.0, 100.0),
+            ],
+            PluginKind::Eq => EQ_BANDS
+                .iter()
+                .flat_map(|band| {
+                    let [freq, gain, q, shape, on] = band.params;
+                    let last = (FilterMode::ALL.len() - 1) as f32;
+                    [
+                        p(freq, 20.0, 20000.0, band.hz),
+                        p(gain, -EQ_GAIN_DB, EQ_GAIN_DB, 0.0),
+                        p(q, 0.1, 10.0, 0.707),
+                        p(shape, 0.0, last, eq_mode_value(band.mode)),
+                        p(on, 0.0, 1.0, 0.0),
+                    ]
+                })
+                .collect(),
+            PluginKind::Reverb => vec![
+                p("size", 0.0, 1.0, 0.5),
+                p("decay", 0.1, 20.0, 2.0),
+                p("damping", 0.0, 1.0, 0.5),
+                p("predelay", 0.0, crate::nodes::REVERB_MAX_PREDELAY_MS, 10.0),
+                p("mix", 0.0, 1.0, 0.3),
+            ],
+            PluginKind::Saturation(_) => vec![
+                p("drive", 0.0, 36.0, 6.0),
+                p("output", -24.0, 12.0, 0.0),
+                p("mix", 0.0, 1.0, 1.0),
+            ],
+            PluginKind::Gate => vec![
+                p("threshold", -80.0, 0.0, -40.0),
+                p(
+                    "range",
+                    crate::nodes::GATE_SILENT_DB,
+                    0.0,
+                    crate::nodes::GATE_SILENT_DB,
+                ),
+                p("attack", 0.1, 50.0, 1.0),
+                p("hold", 0.0, 500.0, 50.0),
+                p("release", 5.0, 2000.0, 150.0),
             ],
             PluginKind::Latency { .. } | PluginKind::Analyzer => vec![],
         };

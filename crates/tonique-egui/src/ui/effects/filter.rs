@@ -157,6 +157,8 @@ pub fn response_db(mode: FilterMode, cutoff: f32, q: f32, sample_rate: f32, hz: 
     let (b0, b1, b2) = match mode {
         FilterMode::LowPass => ((1. - cos0) / 2., 1. - cos0, (1. - cos0) / 2.),
         FilterMode::HighPass => ((1. + cos0) / 2., -(1. + cos0), (1. + cos0) / 2.),
+        // Not offered yet.
+        _ => return 0.,
     };
     let (a0, a1, a2) = (1. + alpha, -2. * cos0, 1. - alpha);
     // H(e^jw), with z^-1 = e^-jw.

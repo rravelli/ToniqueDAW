@@ -1,53 +1,44 @@
 //! Built-in effects: stateful nodes whose state must survive graph rebuilds.
 
-use std::f32::consts::PI;
+use std::f32::consts::FRAC_1_SQRT_2;
 use std::sync::Arc;
 
 use crate::audio::AudioBuffer;
+pub use crate::dsp::FilterMode;
+use crate::dsp::{Biquad, BiquadState};
 use crate::graph::{Node, NodeIdentity, NodeProperties, ProcessContext, StateTransfer};
 use crate::param::{AtomicParam, Smoother};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum FilterMode {
-    LowPass,
-    HighPass,
-}
-
-#[derive(Clone, Copy, Default)]
-struct Biquad {
-    b0: f32,
-    b1: f32,
-    b2: f32,
-    a1: f32,
-    a2: f32,
-}
-
-/// Stereo RBJ biquad with smoothed cutoff (Hz) and Q.
+/// Stereo RBJ biquad with smoothed frequency (Hz), Q and gain (dB, for
+/// the shelves and peak).
 pub struct FilterNode {
     mode: FilterMode,
-    cutoff: Arc<AtomicParam>,
-    q: Arc<AtomicParam>,
-    cutoff_s: Smoother,
-    q_s: Smoother,
+    params: [Arc<AtomicParam>; 3],
+    /// Cutoff, Q, gain.
+    smoothers: [Smoother; 3],
     coefs: Biquad,
-    /// Direct form I state per channel: x1, x2, y1, y2.
-    state: [[f32; 4]; 2],
+    state: [BiquadState; 2],
     sample_rate: f32,
     identity: Option<NodeIdentity>,
 }
 
-const COEF_UPDATE_INTERVAL: usize = 16;
+/// Samples between coefficient updates while a parameter ramps.
+pub(crate) const COEF_UPDATE_INTERVAL: usize = 16;
 
 impl FilterNode {
-    pub fn new(mode: FilterMode, cutoff: Arc<AtomicParam>, q: Arc<AtomicParam>) -> Self {
+    pub fn new(
+        mode: FilterMode,
+        cutoff: Arc<AtomicParam>,
+        q: Arc<AtomicParam>,
+        gain_db: Arc<AtomicParam>,
+    ) -> Self {
+        let params = [cutoff, q, gain_db];
         Self {
             mode,
-            cutoff_s: Smoother::new(cutoff.get()),
-            q_s: Smoother::new(q.get()),
-            cutoff,
-            q,
+            smoothers: std::array::from_fn(|i| Smoother::new(params[i].get())),
+            params,
             coefs: Biquad::default(),
-            state: [[0.0; 4]; 2],
+            state: Default::default(),
             sample_rate: 48000.0,
             identity: None,
         }
@@ -58,23 +49,8 @@ impl FilterNode {
         self
     }
 
-    fn update_coefs(&mut self, cutoff: f32, q: f32) {
-        let f = cutoff.clamp(10.0, self.sample_rate * 0.49);
-        let w = 2.0 * PI * f / self.sample_rate;
-        let (sin, cos) = w.sin_cos();
-        let alpha = sin / (2.0 * q.max(0.05));
-        let a0 = 1.0 + alpha;
-        let (b0, b1, b2) = match self.mode {
-            FilterMode::LowPass => ((1.0 - cos) / 2.0, 1.0 - cos, (1.0 - cos) / 2.0),
-            FilterMode::HighPass => ((1.0 + cos) / 2.0, -(1.0 + cos), (1.0 + cos) / 2.0),
-        };
-        self.coefs = Biquad {
-            b0: b0 / a0,
-            b1: b1 / a0,
-            b2: b2 / a0,
-            a1: -2.0 * cos / a0,
-            a2: (1.0 - alpha) / a0,
-        };
+    fn update_coefs(&mut self, [cutoff, q, gain]: [f32; 3]) {
+        self.coefs = Biquad::new(self.mode, cutoff, q, gain, self.sample_rate);
     }
 }
 
@@ -89,37 +65,34 @@ impl Node for FilterNode {
 
     fn prepare(&mut self, sample_rate: f64, _max_block: usize) {
         self.sample_rate = sample_rate as f32;
-        for (s, p) in [(&mut self.cutoff_s, &self.cutoff), (&mut self.q_s, &self.q)] {
+        for (s, p) in self.smoothers.iter_mut().zip(&self.params) {
             s.set_sample_rate(sample_rate);
             s.snap(p);
         }
-        self.update_coefs(self.cutoff_s.current(), self.q_s.current());
+        self.update_coefs(self.smoothers.each_ref().map(|s| s.current()));
     }
 
     fn process(&mut self, ctx: &mut ProcessContext) {
         ctx.sum_inputs_to_output();
-        self.cutoff_s.retarget(&self.cutoff);
-        self.q_s.retarget(&self.q);
+        for (s, p) in self.smoothers.iter_mut().zip(&self.params) {
+            s.retarget(p);
+        }
         let len = ctx.block_len;
         let mut start = 0;
         while start < len {
             let end = (start + COEF_UPDATE_INTERVAL).min(len);
             // Advance smoothers per sample, recompute coefficients per chunk.
-            let (mut c, mut q) = (0.0, 0.0);
-            for _ in start..end {
-                c = self.cutoff_s.next();
-                q = self.q_s.next();
+            if self.smoothers.iter().any(Smoother::is_ramping) {
+                let mut values = [0.0; 3];
+                for _ in start..end {
+                    values = self.smoothers.each_mut().map(|s| s.next());
+                }
+                self.update_coefs(values);
             }
-            self.update_coefs(c, q);
             let k = self.coefs;
             for (ch, st) in self.state.iter_mut().enumerate() {
                 for x in &mut ctx.audio_out.channel_mut(ch)[start..end] {
-                    let y = k.b0 * *x + k.b1 * st[0] + k.b2 * st[1] - k.a1 * st[2] - k.a2 * st[3];
-                    st[1] = st[0];
-                    st[0] = *x;
-                    st[3] = st[2];
-                    st[2] = y;
-                    *x = y;
+                    *x = st.process(&k, *x);
                 }
             }
             start = end;
@@ -129,9 +102,10 @@ impl Node for FilterNode {
     fn take_state_from(&mut self, previous: &mut dyn Node) -> StateTransfer {
         if let Some(prev) = previous.as_any_mut().and_then(|a| a.downcast_mut::<Self>()) {
             self.state = prev.state;
-            self.cutoff_s = prev.cutoff_s.clone();
-            self.q_s = prev.q_s.clone();
-            self.coefs = prev.coefs;
+            self.smoothers = prev.smoothers.clone();
+            // The mode may have changed: work the coefficients out again.
+            self.sample_rate = prev.sample_rate;
+            self.update_coefs(self.smoothers.each_ref().map(|s| s.current()));
         }
         StateTransfer::KeepNew
     }
@@ -141,31 +115,43 @@ impl Node for FilterNode {
     }
 }
 
-/// Stereo feedback delay ("echo"). Its delay line is exactly the kind of
-/// state that must be carried across graph rebuilds.
+/// Stereo feedback delay ("echo"). Each repeat goes through a high- and a
+/// low-pass, so repeats get thinner and darker as they fade. Its delay line
+/// is exactly the kind of state that must be carried across graph rebuilds.
 pub struct EchoNode {
     time_s: f32,
-    feedback: Arc<AtomicParam>,
-    mix: Arc<AtomicParam>,
-    fb_s: Smoother,
-    mix_s: Smoother,
+    /// Feedback, mix, low cut (Hz), high cut (Hz).
+    params: [Arc<AtomicParam>; 4],
+    smoothers: [Smoother; 4],
+    /// High-pass then low-pass, per channel.
+    cuts: [Biquad; 2],
+    cut_state: [[BiquadState; 2]; 2],
     line: AudioBuffer,
     pos: usize,
     delay: usize,
+    sample_rate: f32,
     identity: Option<NodeIdentity>,
 }
 
 impl EchoNode {
-    pub fn new(time_s: f32, feedback: Arc<AtomicParam>, mix: Arc<AtomicParam>) -> Self {
+    pub fn new(
+        time_s: f32,
+        feedback: Arc<AtomicParam>,
+        mix: Arc<AtomicParam>,
+        low_cut: Arc<AtomicParam>,
+        high_cut: Arc<AtomicParam>,
+    ) -> Self {
+        let params = [feedback, mix, low_cut, high_cut];
         Self {
             time_s,
-            fb_s: Smoother::new(feedback.get()),
-            mix_s: Smoother::new(mix.get()),
-            feedback,
-            mix,
+            smoothers: std::array::from_fn(|i| Smoother::new(params[i].get())),
+            params,
+            cuts: [Biquad::THROUGH; 2],
+            cut_state: Default::default(),
             line: AudioBuffer::new(0, 0),
             pos: 0,
             delay: 1,
+            sample_rate: 48000.0,
             identity: None,
         }
     }
@@ -173,6 +159,26 @@ impl EchoNode {
     pub fn with_identity(mut self, id: NodeIdentity) -> Self {
         self.identity = Some(id);
         self
+    }
+
+    fn update_cuts(&mut self) {
+        let [_, _, low, high] = self.smoothers.each_ref().map(|s| s.current());
+        self.cuts = [
+            Biquad::new(
+                FilterMode::HighPass,
+                low,
+                FRAC_1_SQRT_2,
+                0.0,
+                self.sample_rate,
+            ),
+            Biquad::new(
+                FilterMode::LowPass,
+                high,
+                FRAC_1_SQRT_2,
+                0.0,
+                self.sample_rate,
+            ),
+        ];
     }
 }
 
@@ -186,40 +192,50 @@ impl Node for EchoNode {
     }
 
     fn prepare(&mut self, sample_rate: f64, _max_block: usize) {
+        self.sample_rate = sample_rate as f32;
         self.delay = ((self.time_s as f64 * sample_rate) as usize).max(1);
         self.line = AudioBuffer::new(2, self.delay);
-        for (s, p) in [
-            (&mut self.fb_s, &self.feedback),
-            (&mut self.mix_s, &self.mix),
-        ] {
+        for (s, p) in self.smoothers.iter_mut().zip(&self.params) {
             s.set_sample_rate(sample_rate);
             s.snap(p);
         }
+        self.update_cuts();
     }
 
     fn process(&mut self, ctx: &mut ProcessContext) {
         ctx.sum_inputs_to_output();
-        self.fb_s.retarget(&self.feedback);
-        self.mix_s.retarget(&self.mix);
+        for (s, p) in self.smoothers.iter_mut().zip(&self.params) {
+            s.retarget(p);
+        }
         let (l, r) = ctx.audio_out.channel_pair_mut(0, 1);
         let mut p = self.pos;
-        for (l, r) in l.iter_mut().zip(r.iter_mut()) {
-            let fb = self.fb_s.next().clamp(0.0, 0.98);
-            let mix = self.mix_s.next();
-            for (ch, s) in [l, r].into_iter().enumerate() {
-                let line = self.line.channel_mut(ch);
-                let wet = line[p];
-                line[p] = *s + wet * fb;
-                *s += wet * mix;
+        for (l, r) in l
+            .chunks_mut(COEF_UPDATE_INTERVAL)
+            .zip(r.chunks_mut(COEF_UPDATE_INTERVAL))
+        {
+            let ramping = self.smoothers[2..].iter().any(Smoother::is_ramping);
+            for (l, r) in l.iter_mut().zip(r.iter_mut()) {
+                let [fb, mix, ..] = self.smoothers.each_mut().map(|s| s.next());
+                let fb = fb.clamp(0.0, 0.98);
+                for (ch, s) in [l, r].into_iter().enumerate() {
+                    let line = self.line.channel_mut(ch);
+                    let [hp, lp] = &mut self.cut_state[ch];
+                    let wet = lp.process(&self.cuts[1], hp.process(&self.cuts[0], line[p]));
+                    line[p] = *s + wet * fb;
+                    *s += wet * mix;
+                }
+                p = if p + 1 == self.delay { 0 } else { p + 1 };
             }
-            p = if p + 1 == self.delay { 0 } else { p + 1 };
+            if ramping {
+                self.update_cuts();
+            }
         }
         self.pos = p;
     }
 
     fn tail_samples(&self) -> usize {
         // Until the feedback has decayed by ~60 dB.
-        let fb = self.feedback.get().clamp(0.01, 0.98);
+        let fb = self.params[0].get().clamp(0.01, 0.98);
         let repeats = (-6.9 / fb.ln()).ceil() as usize;
         self.delay * (repeats + 1)
     }
@@ -232,8 +248,9 @@ impl Node for EchoNode {
         {
             std::mem::swap(&mut self.line, &mut prev.line);
             self.pos = prev.pos;
-            self.fb_s = prev.fb_s.clone();
-            self.mix_s = prev.mix_s.clone();
+            self.smoothers = prev.smoothers.clone();
+            self.cuts = prev.cuts;
+            self.cut_state = prev.cut_state;
         }
         StateTransfer::KeepNew
     }

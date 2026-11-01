@@ -127,6 +127,32 @@ impl ChannelMeter {
     }
 }
 
+/// The most gain reduction since the last read, in dB, written by the RT
+/// thread once a block.
+#[derive(Debug, Default)]
+pub struct ReductionMeter {
+    /// The bits of the reduction plus one; 0 when nothing was recorded.
+    /// Non-negative floats order as their bits do.
+    bits: AtomicU32,
+}
+
+impl ReductionMeter {
+    /// RT side: `db` (0 or more) was taken off during a block.
+    pub fn record(&self, db: f32) {
+        let bits = db.max(0.0).to_bits() + 1;
+        self.bits.fetch_max(bits, Ordering::Relaxed);
+    }
+
+    /// UI side: the most taken off since the previous call. `None` if no
+    /// audio was processed in between.
+    pub fn take(&self) -> Option<f32> {
+        match self.bits.swap(0, Ordering::Relaxed) {
+            0 => None,
+            bits => Some(f32::from_bits(bits - 1)),
+        }
+    }
+}
+
 /// History kept by a [`PluginTap`]: enough for a fine spectrum.
 pub const TAP_SCOPE_LEN: usize = 8192;
 
@@ -137,6 +163,8 @@ pub const TAP_SCOPE_LEN: usize = 8192;
 pub struct PluginTap {
     pub input: ChannelMeter,
     pub output: ChannelMeter,
+    /// What a dynamics plugin takes off, like a compressor.
+    pub reduction: ReductionMeter,
     /// Frames left to record, input then output.
     watched: [AtomicU32; 2],
 }
@@ -146,6 +174,7 @@ impl Default for PluginTap {
         Self {
             input: ChannelMeter::with_scope_len(TAP_SCOPE_LEN),
             output: ChannelMeter::with_scope_len(TAP_SCOPE_LEN),
+            reduction: ReductionMeter::default(),
             watched: Default::default(),
         }
     }

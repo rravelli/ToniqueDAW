@@ -12,6 +12,7 @@
 
 pub mod audio;
 pub mod automation;
+pub mod dsp;
 pub mod edit;
 pub mod engine;
 pub mod graph;
