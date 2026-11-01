@@ -31,9 +31,9 @@ const MAX_DETUNE: f32 = 50.;
 const BPM_RANGE: std::ops::RangeInclusive<f64> = 10.0..=999.0;
 
 /// Gain and pan, sliders like a track's heard as they're dragged; the warp
-/// mode; the file's tempo, typed or halved and doubled, beside the
-/// stretch's window; the transposition, heard as it's dragged (`live`)
-/// and filled in the clip's `color`, beside the formants. Edits go in
+/// mode; the file's tempo, typed or halved and doubled; stretched, the
+/// window and formants; the transposition, heard as it's dragged (`live`)
+/// and filled in the clip's `color`. Edits go in
 /// `change` (shown until done) or `live`, as in the inspector.
 pub(super) fn audio_panel(
     ui: &mut Ui,
@@ -89,10 +89,8 @@ pub(super) fn audio_panel(
         *live = Some((edited, true));
     }
     let warped = shown.warp != WarpMode::Off;
-    let stretched = shown.warp == WarpMode::Spectral;
-    let mut stretch = shown.stretch;
+    // Half the row: a tempo needs no more.
     let file_bpm = ui.columns(2, |cells| {
-        cells[1].add_enabled_ui(stretched, |ui| window_ui(ui, shown, &mut stretch));
         cells[0]
             .add_enabled_ui(warped, |ui| tempo_ui(ui, shown))
             .inner
@@ -103,8 +101,23 @@ pub(super) fn audio_panel(
         *change = Some((edited, true));
     }
 
+    // Only stretching has these.
+    if shown.warp == WarpMode::Spectral {
+        let mut stretch = shown.stretch;
+        ui.add_space(CELL_GAP);
+        ui.columns(2, |cells| {
+            window_ui(&mut cells[0], shown, &mut stretch);
+            formants_ui(&mut cells[1], &mut stretch);
+        });
+        if stretch != shown.stretch {
+            let mut edited = shown.clone();
+            edited.stretch = stretch;
+            *live = Some((edited, true));
+        }
+    }
+
     ui.add_space(CELL_GAP);
-    ui.columns(3, |cells| {
+    ui.columns(2, |cells| {
         let mut transpose = shown.transpose;
         let limit = MAX_TRANSPOSE as i32;
         let response = pitch_cell(
@@ -142,14 +155,7 @@ pub(super) fn audio_panel(
             edited.set_warp(shown.warp, shown.bpm, shown.transpose, detune, bpm);
             *live = Some((edited, done));
         }
-
-        cells[2].add_enabled_ui(stretched, |ui| formants_ui(ui, &mut stretch));
     });
-    if stretch != shown.stretch {
-        let mut edited = shown.clone();
-        edited.stretch = stretch;
-        *live = Some((edited, true));
-    }
 }
 
 /// A pitch's cell: its field filled in `color` from the centre, to
