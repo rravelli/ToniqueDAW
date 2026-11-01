@@ -32,6 +32,7 @@ use super::{
 pub(super) const CELL_GAP: f32 = 4.;
 /// Above each section of the inspector.
 const SECTION_GAP: f32 = 4.;
+const SECTION_TITLE_HEIGHT: f32 = 14.;
 /// A section's on/off switch, on its title row.
 const SWITCH_WIDTH: f32 = 28.;
 /// The inspector's values.
@@ -352,9 +353,15 @@ pub(super) fn switch_section(ui: &mut Ui, title: &str, on: bool) -> bool {
 /// A section's title, small and muted, with a rule after it up to
 /// `reserve` from the right (for something on its row). Returns its row.
 pub(super) fn section(ui: &mut Ui, title: &str, reserve: f32) -> Rect {
+    section_row(ui, title, reserve, SECTION_TITLE_HEIGHT)
+}
+
+/// A section's title on a row `height` tall: as [`section`], for a field
+/// on its row.
+pub(super) fn section_row(ui: &mut Ui, title: &str, reserve: f32, height: f32) -> Rect {
     ui.add_space(SECTION_GAP);
     let theme = ui.app_theme();
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 14.), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let painter = ui.painter();
     let text = painter.text(
         rect.left_center(),

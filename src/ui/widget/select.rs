@@ -9,7 +9,7 @@ use egui_phosphor::fill::CARET_DOWN;
 
 use crate::ui::{font::PHOSPHOR_FILL, theme::ThemeExt, widget::list_row::ListRow};
 
-const HEIGHT: f32 = 20.;
+pub const HEIGHT: f32 = 20.;
 const PADDING: f32 = 6.;
 const MAX_POPUP_HEIGHT: f32 = 240.;
 

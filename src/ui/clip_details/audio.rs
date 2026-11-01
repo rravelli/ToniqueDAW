@@ -1,7 +1,7 @@
 //! The inspector's Audio panel: how the clip sounds (gain, pan), how it
 //! follows the project's tempo (its file's tempo), and its transposition.
 
-use egui::{Color32, Ui, vec2};
+use egui::{Color32, Rect, Ui, pos2, vec2};
 use tonique_engine::edit::{MAX_TRANSPOSE, WarpMode};
 
 use crate::{
@@ -9,21 +9,27 @@ use crate::{
         clip::AudioClip,
         state::{ClipParam, ProjectState},
     },
-    ui::widget::{flat_button::FlatButton, knob::Knob, param_slider::ParamSlider},
+    ui::widget::{
+        flat_button::FlatButton,
+        knob::Knob,
+        param_slider::ParamSlider,
+        select::{self, Select},
+    },
 };
 
 use super::inspector::{
-    CELL_GAP, CLIP_GAIN_RANGE, FIELD_HEIGHT, apply_param, cell_label, gesture, section,
-    switch_section,
+    CELL_GAP, CLIP_GAIN_RANGE, FIELD_HEIGHT, apply_param, cell_label, gesture, section, section_row,
 };
 
+/// The warp mode's picker, on its section's title row.
+const WARP_MODE_WIDTH: f32 = 80.;
 /// The file's tempo halved or doubled, beside it.
 const TEMPO_BUTTON_WIDTH: f32 = 26.;
 /// A file's tempo, as typed.
 const BPM_RANGE: std::ops::RangeInclusive<f64> = 10.0..=999.0;
 
-/// Gain and pan, sliders like a track's heard as they're dragged; warping
-/// switched on or off; the file's tempo, typed or halved and doubled; the
+/// Gain and pan, sliders like a track's heard as they're dragged; the warp
+/// mode; the file's tempo, typed or halved and doubled; the
 /// transposition on knobs, heard as they're turned (`live`). Edits go in
 /// `change` (shown until done) or `live`, as in the inspector.
 pub(super) fn audio_panel(
@@ -60,17 +66,26 @@ pub(super) fn audio_panel(
     apply_param(state, shown.id, ClipParam::Gain, gain);
     apply_param(state, shown.id, ClipParam::Pan, pan);
 
-    let warped = shown.warp == WarpMode::Spectral;
-    if switch_section(ui, "Warp", warped) {
-        let warp = if warped {
-            WarpMode::Off
-        } else {
-            WarpMode::Spectral
-        };
+    // Its mode picked on the title's row.
+    let header = section_row(ui, "Warp", WARP_MODE_WIDTH + CELL_GAP, select::HEIGHT);
+    let picker = Rect::from_min_max(
+        pos2(header.right() - WARP_MODE_WIDTH, header.top()),
+        header.max,
+    );
+    let mut warp = shown.warp;
+    ui.put(
+        picker,
+        Select::new(("clip-warp", shown.id), &mut warp)
+            .option(WarpMode::Off, "Off")
+            .option(WarpMode::Spectral, "Tonal")
+            .width(WARP_MODE_WIDTH),
+    );
+    if warp != shown.warp {
         let mut edited = shown.clone();
         edited.set_warp(warp, shown.bpm, shown.transpose, shown.detune, bpm);
         *live = Some((edited, true));
     }
+    let warped = shown.warp != WarpMode::Off;
     let file_bpm = ui.add_enabled_ui(warped, |ui| tempo_ui(ui, shown)).inner;
     if let Some(file_bpm) = file_bpm.filter(|b| BPM_RANGE.contains(b)) {
         let mut edited = shown.clone();
