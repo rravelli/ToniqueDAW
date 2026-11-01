@@ -44,11 +44,6 @@ impl Note {
     pub fn in_tune(&self) -> bool {
         self.cents.abs() <= IN_TUNE
     }
-
-    /// The same note, whatever its tuning.
-    fn same(&self, other: &Note) -> bool {
-        (self.name, self.octave) == (other.name, other.octave)
-    }
 }
 
 /// The note nearest `hz`, with A4 at `reference` Hz.
@@ -146,8 +141,9 @@ impl EffectEditor for TunerEditor {
         let (dt, now) = ui.input(|i| (i.stable_dt, i.time));
         self.tracker.update(&tap.output, cx.sample_rate, dt);
         self.history.push(now, self.tracker.hz());
-
         let reference = reference.map_or(440., |p| p.get());
+        self.history.follow(reference, dt);
+
         let inner = display.shrink(PADDING);
         match self.view {
             View::Gauge => {
