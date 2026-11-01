@@ -9,7 +9,7 @@ use tonique_engine::edit::{
 use tonique_engine::engine::{AudioProcessor, Engine, EngineConfig, render_offline};
 use tonique_engine::nodes::{Envelope, FilterMode, UTILITY_SILENT_DB};
 use tonique_engine::sample::SampleBuffer;
-use tonique_engine::time::BeatPos;
+use tonique_engine::time::{BeatPos, TempoMap};
 
 const SR: f64 = 48000.0;
 
@@ -689,6 +689,53 @@ fn stretched_clips_play_on_through_rebuilds() {
         (heard - 2.0).abs() < 0.01,
         "after graphs never played, heard at {heard} s"
     );
+}
+
+/// The tempo changing while playing, the transport stays on its beat and
+/// goes on at the new tempo: it doesn't jump to where its samples fall.
+#[test]
+fn the_transport_keeps_its_beat_when_the_tempo_changes() {
+    let (mut s, mut p, _, _) = playing_clip(sine(48000 * 4), None, 4.0);
+    render_offline(&mut p, 48000, 2); // 1 s at 120 bpm: beat 2
+    assert!((s.position().0 - 2.0).abs() < 1e-3, "{:?}", s.position());
+    s.perform(SetTempoMap::new(TempoMap::new(60.0))).unwrap();
+    render_offline(&mut p, 48000, 2); // 1 s at 60 bpm: a beat further
+    assert!((s.position().0 - 3.0).abs() < 0.01, "{:?}", s.position());
+    s.undo().unwrap();
+    render_offline(&mut p, 48000, 2); // back at 120: two more
+    assert!((s.position().0 - 5.0).abs() < 0.01, "{:?}", s.position());
+}
+
+/// A seek and a loop asked in beats land on their beats whatever tempo
+/// reaches the engine with them.
+#[test]
+fn seeks_and_loops_land_on_their_beats_across_tempo_changes() {
+    let (mut s, mut p, _, _) = playing_clip(sine(48000 * 8), None, 8.0);
+    render_offline(&mut p, 256, 2);
+    s.set_loop(Some((BeatPos(0.0), BeatPos(4.0)))).unwrap();
+    s.seek(BeatPos(3.0)).unwrap();
+    s.perform(SetTempoMap::new(TempoMap::new(60.0))).unwrap();
+    // 1.5 s at 60 bpm: to beat 4, back to 0, half a beat on.
+    render_offline(&mut p, 72000, 2);
+    assert!((s.position().0 - 0.5).abs() < 0.01, "{:?}", s.position());
+}
+
+/// Stretched (its source at 240 bpm), a clip goes on through a tempo
+/// change, its stretcher playing on at the new speed, and stays on its
+/// beats: a burst on beat 4 of its source is heard on beat 4, at the new
+/// tempo.
+#[cfg(feature = "signalsmith")]
+#[test]
+fn stretched_clips_stay_on_their_beats_when_the_tempo_changes() {
+    let (mut s, mut p, tid, cid) = playing_clip(burst(3.0, 1.0), None, 6.0);
+    s.perform(SetClipWarp::new(tid, cid, WarpMode::Stretch, 240.0, 0.0))
+        .unwrap();
+    let mut out = render_offline(&mut p, 24000, 2); // beat 1 at 120 bpm
+    s.perform(SetTempoMap::new(TempoMap::new(200.0))).unwrap();
+    out.extend(render_offline(&mut p, (2.0 * SR) as usize, 2));
+    // Beat 1 at 0.5 s, then three more at 200 bpm.
+    let heard = loudest(&out);
+    assert!((heard - 1.4).abs() < 0.01, "heard at {heard} s");
 }
 
 /// Held back, changes reach the engine at once: one graph for many.

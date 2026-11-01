@@ -14,6 +14,7 @@ use super::node::{
 use super::topology::{GraphTopology, NodeMeters};
 use crate::audio::{AudioBlock, AudioBlockMut, AudioBuffer};
 use crate::midi::MidiEventList;
+use crate::time::TempoMap;
 
 pub(crate) struct CompiledNode {
     node: UnsafeCell<Box<dyn Node>>,
@@ -63,6 +64,7 @@ pub struct CompiledGraph {
     stats: CompileStats,
     topology: Arc<GraphTopology>,
     meters: Arc<NodeMeters>,
+    tempo: Option<TempoMap>,
 }
 
 // SAFETY: the raw pointers in `io` point into heap storage owned by this
@@ -89,6 +91,7 @@ impl CompiledGraph {
         opts: CompileOptions,
         stats: CompileStats,
         topology: GraphTopology,
+        tempo: Option<TempoMap>,
     ) -> Self {
         let n = nodes.len();
         let mut slots: Vec<AudioBuffer> = (0..slot_count)
@@ -142,6 +145,7 @@ impl CompiledGraph {
             meters: topology.meters_arc(),
             topology: Arc::new(topology),
             nodes,
+            tempo,
         }
     }
 
@@ -160,6 +164,12 @@ impl CompiledGraph {
     /// Structure and live meters of this graph, for inspection.
     pub fn topology(&self) -> Arc<GraphTopology> {
         self.topology.clone()
+    }
+
+    /// The tempo map its nodes were placed with, if any (see
+    /// [`super::GraphDescription::set_tempo`]).
+    pub fn tempo(&self) -> Option<&TempoMap> {
+        self.tempo.as_ref()
     }
 
     pub fn sample_rate(&self) -> f64 {

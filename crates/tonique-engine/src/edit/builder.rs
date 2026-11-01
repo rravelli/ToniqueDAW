@@ -118,6 +118,7 @@ impl Builder<'_> {
         let out = self.d.add(SumNode::new(2), &[master, click]);
         self.label(out, "output");
         self.d.set_output(out);
+        self.d.set_tempo(self.edit.tempo.clone());
         std::mem::take(&mut self.d)
     }
 

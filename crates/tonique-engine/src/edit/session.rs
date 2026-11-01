@@ -193,12 +193,6 @@ impl EditSession {
         Ok(stats)
     }
 
-    fn to_samples(&self, b: BeatPos) -> i64 {
-        self.edit
-            .tempo
-            .beats_to_samples(b, self.engine.config().sample_rate)
-    }
-
     pub fn play(&mut self) -> Result<(), EditError> {
         Ok(self.engine.play()?)
     }
@@ -207,19 +201,25 @@ impl EditSession {
         Ok(self.engine.stop()?)
     }
 
+    /// Seek to `beat`: placed by the audio thread with the tempo it plays,
+    /// so it lands there whether or not a tempo change has reached it yet.
     pub fn seek(&mut self, beat: BeatPos) -> Result<(), EditError> {
-        let pos = self.to_samples(beat);
-        Ok(self.engine.seek(pos)?)
+        Ok(self.engine.seek_beats(beat)?)
     }
 
+    /// Loop between two beats, which stay where they are when the tempo
+    /// changes.
     pub fn set_loop(&mut self, range: Option<(BeatPos, BeatPos)>) -> Result<(), EditError> {
-        let r = range.map(|(a, b)| (self.to_samples(a), self.to_samples(b)));
-        Ok(self.engine.set_loop(r)?)
+        Ok(self.engine.set_loop_beats(range)?)
     }
 
+    /// The transport's position, as the audio thread places it in beats:
+    /// steady across tempo changes, the playhead going on from its beat.
     pub fn position(&self) -> BeatPos {
-        self.edit
-            .tempo
-            .samples_to_beats(self.engine.position(), self.engine.config().sample_rate)
+        self.engine.position_beats().unwrap_or_else(|| {
+            self.edit
+                .tempo
+                .samples_to_beats(self.engine.position(), self.engine.config().sample_rate)
+        })
     }
 }

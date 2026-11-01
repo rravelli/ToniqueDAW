@@ -100,8 +100,11 @@ struct Stretching {
     stretcher: Box<dyn Stretcher>,
     /// Next source position fed (going on past a loop's end, see
     /// [`LoopPlacement::read`]), with its fraction: ahead of what's heard
-    /// by the stretcher's latency.
+    /// by the stretcher's latency. NaN before the first seek.
     fed: f64,
+    /// The speed last played at: the output queued in the stretcher was
+    /// made at it.
+    speed: f64,
     /// The timeline position the next block starts at if playback goes on
     /// without a jump; none when stopped or never played.
     next: Option<SamplePos>,
@@ -162,7 +165,8 @@ impl AudioClipNode {
                     stretcher.set_transpose(semitones);
                     self.stretching = Some(Stretching {
                         stretcher,
-                        fed: 0.0,
+                        fed: f64::NAN,
+                        speed,
                         next: None,
                         input: Vec::new(),
                         output: Vec::new(),
@@ -290,6 +294,35 @@ impl Stretching {
         self.stretcher
             .process(&self.input[..frames * 2], &mut self.output[..behind * 2]);
         self.fed = to;
+        self.speed = speed;
+    }
+
+    /// The source position of the next output frame: what's fed, less
+    /// what's in the stretcher, its output queued at the speed it was made.
+    fn heard(&self) -> f64 {
+        let (ahead, behind) = (
+            self.stretcher.input_latency(),
+            self.stretcher.output_latency(),
+        );
+        self.fed - ahead as f64 - behind as f64 * self.speed
+    }
+
+    /// Whether playing on from where it is gives the source at `at` (as
+    /// after a graph rebuilt for a tempo change: the same beat, at another
+    /// speed), rather than seeking, which starts it over. Going on at
+    /// another speed, the feed moves by the difference over its queued
+    /// output so the source stays on the timeline once that's played out.
+    fn goes_on(&mut self, at: f64, speed: f64) -> bool {
+        // Within a timeline sample, as positions are rounded to samples
+        // (never before a first seek: `fed` is NaN).
+        let off = (self.heard() - at).abs();
+        if off.is_nan() || off > 1.0 + speed {
+            return false;
+        }
+        let behind = self.stretcher.output_latency() as f64;
+        self.fed += behind * (speed - self.speed);
+        self.speed = speed;
+        true
     }
 
     /// The next `frames` frames of output, into `self.output`.
@@ -312,6 +345,7 @@ impl Stretching {
         self.stretcher
             .process(&self.input[..feed * 2], &mut self.output[..frames * 2]);
         self.fed = to;
+        self.speed = speed;
     }
 }
 
@@ -374,7 +408,9 @@ impl Node for AudioClipNode {
         if let Some(st) = &mut self.stretching {
             if ctx.jumped || st.next != Some(a) {
                 let at = p.source_offset as f64 + (a - p.start) as f64 * speed;
-                st.seek(&self.source, p.looped, at, speed);
+                if ctx.jumped || !st.goes_on(at, speed) {
+                    st.seek(&self.source, p.looped, at, speed);
+                }
             }
             st.play(&self.source, p.looped, (b - a) as usize, speed);
             st.next = Some(b);
@@ -418,8 +454,14 @@ impl Node for AudioClipNode {
             if same_audio && same_speed && new.input.len() == old.input.len() {
                 std::mem::swap(&mut new.input, &mut old.input);
                 std::mem::swap(&mut new.output, &mut old.output);
-                new.fed = old.fed;
                 new.next = old.next;
+            }
+            // Where it is in the same source, read the same way: placed
+            // otherwise (the tempo changed...), it goes on from there if
+            // that's where it plays from (see `Stretching::goes_on`).
+            if Arc::ptr_eq(&self.source, &prev.source) && self.place.looped == prev.place.looped {
+                new.fed = old.fed;
+                new.speed = old.speed;
             }
         }
         StateTransfer::KeepNew
@@ -562,5 +604,113 @@ impl Node for MidiClipNode {
 
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{BlockInfo, CompileOptions, CompiledGraph, GraphDescription, compile};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const OPTS: CompileOptions = CompileOptions {
+        sample_rate: 48000.0,
+        max_block: 256,
+    };
+
+    /// Gives silence, counting the times it's started over.
+    struct Counting(Arc<AtomicUsize>);
+
+    impl Stretcher for Counting {
+        fn input_latency(&self) -> usize {
+            64
+        }
+        fn output_latency(&self) -> usize {
+            64
+        }
+        fn set_transpose(&mut self, _: f32) {}
+        fn seek(&mut self, _: &[f32], _: f64) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+        fn process(&mut self, _: &[f32], output: &mut [f32]) {
+            output.fill(0.0);
+        }
+    }
+
+    /// A graph of a clip of 4 s of source from `start`, stretched at
+    /// `speed`.
+    fn graph(
+        source: &Arc<SampleBuffer>,
+        start: SamplePos,
+        speed: f64,
+        seeks: &Arc<AtomicUsize>,
+    ) -> CompiledGraph {
+        let place = ClipPlacement {
+            start,
+            length: (4.0 * 48000.0 / speed) as SamplePos,
+            source_offset: 0,
+            fade_in: 0,
+            fade_out: 0,
+            looped: None,
+        };
+        let node = AudioClipNode::new(
+            source.clone(),
+            place,
+            Arc::new(AtomicParam::new(1.0)),
+            Arc::new(AtomicParam::new(0.0)),
+        )
+        .with_warp(
+            ClipWarp::Stretch {
+                speed,
+                semitones: 0.0,
+            },
+            Some(Box::new(Counting(seeks.clone()))),
+        )
+        .with_identity(NodeIdentity::of(&"clip"));
+        let mut d = GraphDescription::new();
+        let n = d.add(node, &[]);
+        d.set_output(n);
+        compile(d, &OPTS).unwrap()
+    }
+
+    fn block(g: &mut CompiledGraph, at: SamplePos, jumped: bool) {
+        g.process_sequential(&BlockInfo {
+            block_len: 256,
+            sample_rate: 48000.0,
+            timeline_pos: at,
+            playing: true,
+            jumped,
+        });
+    }
+
+    /// Rebuilt for a tempo change, a stretched clip plays on where it was in
+    /// its source, at its new speed: its stretcher isn't started over. Moved
+    /// elsewhere in its source, it is.
+    #[test]
+    fn stretchers_go_on_through_tempo_changes() {
+        let source = Arc::new(SampleBuffer::new(vec![vec![0.0; 48000 * 4]], 48000.0));
+        let seeks = Arc::new(AtomicUsize::new(0));
+        // At half speed, from the timeline's start: 4 blocks in, 512 source
+        // frames are played.
+        let mut old = graph(&source, 0, 0.5, &seeks);
+        block(&mut old, 0, true);
+        for i in 1..4 {
+            block(&mut old, i * 256, false);
+        }
+        assert_eq!(seeks.load(Ordering::Relaxed), 1, "once, from the start");
+
+        // Half the tempo: a quarter of the speed, the same place in the
+        // source twice as far into the timeline.
+        let mut new = graph(&source, 0, 0.25, &seeks);
+        new.adopt_state_from(&mut old);
+        block(&mut new, 2048, false);
+        block(&mut new, 2048 + 256, false);
+        assert_eq!(seeks.load(Ordering::Relaxed), 1, "played on");
+
+        // The clip moved: elsewhere in its source, it starts over.
+        let mut moved = graph(&source, 1000, 0.25, &seeks);
+        moved.adopt_state_from(&mut new);
+        block(&mut moved, 2048 + 512, false);
+        assert_eq!(seeks.load(Ordering::Relaxed), 2, "started over");
     }
 }

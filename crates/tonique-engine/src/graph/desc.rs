@@ -1,4 +1,5 @@
 use super::node::Node;
+use crate::time::TempoMap;
 
 /// Handle to a node inside a [`GraphDescription`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -22,6 +23,8 @@ pub(crate) struct NodeSpec {
 pub struct GraphDescription {
     pub(crate) nodes: Vec<NodeSpec>,
     pub(crate) output: Option<NodeId>,
+    /// How the graph places musical time in samples, if it does.
+    pub(crate) tempo: Option<TempoMap>,
 }
 
 impl GraphDescription {
@@ -69,6 +72,13 @@ impl GraphDescription {
 
     pub fn set_output(&mut self, node: NodeId) {
         self.output = Some(node);
+    }
+
+    /// The tempo map the graph's nodes were placed with: when the engine
+    /// switches to a graph of another tempo while playing, the transport
+    /// keeps its place in beats rather than in samples.
+    pub fn set_tempo(&mut self, tempo: TempoMap) {
+        self.tempo = Some(tempo);
     }
 
     pub fn len(&self) -> usize {
