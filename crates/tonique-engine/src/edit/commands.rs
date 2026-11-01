@@ -4,7 +4,7 @@
 
 use super::{
     Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, ClipLoop, Edit, EditError, Effects, Output,
-    Plugin, PluginId, Send, Track, TrackId,
+    Plugin, PluginId, Send, Track, TrackId, WarpMode,
 };
 use crate::automation::BeatPoint;
 use crate::param::ParamId;
@@ -374,6 +374,71 @@ impl SetClipOrigin {
 impl EditCommand for SetClipOrigin {
     fn label(&self) -> &'static str {
         "Clip bar 1"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+}
+
+/// How an audio clip follows the edit's tempo: its warp mode, its source's
+/// tempo and its transposition (see [`ClipContent::Audio`]).
+pub struct SetClipWarp {
+    track: TrackId,
+    id: ClipId,
+    warp: WarpMode,
+    source_bpm: f64,
+    transpose: f32,
+}
+
+impl SetClipWarp {
+    pub fn new(
+        track: TrackId,
+        id: ClipId,
+        warp: WarpMode,
+        source_bpm: f64,
+        transpose: f32,
+    ) -> Self {
+        Self {
+            track,
+            id,
+            warp,
+            source_bpm,
+            transpose,
+        }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        if self.source_bpm.is_nan() || self.source_bpm <= 0.0 {
+            return Err(EditError::Invalid("a tempo must be positive"));
+        }
+        let c = edit
+            .track_mut(self.track)?
+            .clips
+            .iter_mut()
+            .find(|c| c.id == self.id)
+            .ok_or(EditError::ClipNotFound(self.id))?;
+        let ClipContent::Audio {
+            warp,
+            source_bpm,
+            transpose,
+            ..
+        } = &mut c.content
+        else {
+            return Err(EditError::Invalid("not an audio clip"));
+        };
+        std::mem::swap(warp, &mut self.warp);
+        std::mem::swap(source_bpm, &mut self.source_bpm);
+        std::mem::swap(transpose, &mut self.transpose);
+        Ok(Effects::rebuild())
+    }
+}
+
+impl EditCommand for SetClipWarp {
+    fn label(&self) -> &'static str {
+        "Clip warp"
     }
     fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         self.swap(edit)

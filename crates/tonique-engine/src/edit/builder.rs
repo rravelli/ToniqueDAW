@@ -18,11 +18,12 @@ use super::{
 use crate::automation::AutomationCurve;
 use crate::graph::{GraphDescription, NodeId, NodeIdentity};
 use crate::nodes::{
-    AudioClipNode, AutomationNode, ClipPlacement, DelayNode, EchoNode, FilterMode, FilterNode,
-    LoopPlacement, MetronomeNode, MidiClipNode, SumNode, SynthNode, TappedNode, ThroughNode,
-    TimelineNote, UtilityNode, VolumePanNode,
+    AudioClipNode, AutomationNode, ClipPlacement, ClipWarp, DelayNode, EchoNode, FilterMode,
+    FilterNode, LoopPlacement, MetronomeNode, MidiClipNode, SumNode, SynthNode, TappedNode,
+    ThroughNode, TimelineNote, UtilityNode, VolumePanNode,
 };
 use crate::param::ParamId;
+use crate::stretch::Stretchers;
 
 /// Crossfade at a clip loop's seam: long enough not to click, short enough
 /// not to smear its attack.
@@ -35,10 +36,11 @@ pub fn automation_identity(param: ParamId) -> NodeIdentity {
     NodeIdentity::of(&("automation", param.0))
 }
 
-pub fn build_graph(edit: &Edit, sample_rate: f64) -> GraphDescription {
+pub fn build_graph(edit: &Edit, sample_rate: f64, stretchers: &mut Stretchers) -> GraphDescription {
     let mut b = Builder {
         edit,
         sr: sample_rate,
+        stretchers,
         d: GraphDescription::new(),
         owner: None,
     };
@@ -57,6 +59,7 @@ pub fn automation_curve(edit: &Edit, param: &Parameter, sample_rate: f64) -> Arc
 struct Builder<'a> {
     edit: &'a Edit,
     sr: f64,
+    stretchers: &'a mut Stretchers,
     d: GraphDescription,
     /// Track or bus whose nodes are being added (for inspection).
     owner: Option<u64>,
@@ -161,16 +164,25 @@ impl Builder<'_> {
                             )
                         }),
                     };
-                    // Stateless: no identity needed, and dedupable by content.
-                    self.d.add(
-                        AudioClipNode::new(
-                            source.clone(),
-                            place,
-                            gain.value.clone(),
-                            pan.value.clone(),
-                        ),
-                        &[],
-                    )
+                    let node = AudioClipNode::new(
+                        source.clone(),
+                        place,
+                        gain.value.clone(),
+                        pan.value.clone(),
+                    );
+                    match clip.warp(&self.edit.tempo).unwrap_or(ClipWarp::None) {
+                        // Stretched: its stretcher, fed so far, kept across
+                        // rebuilds, so its own identity.
+                        warp @ ClipWarp::Stretch { .. } => {
+                            let node = node
+                                .with_warp(warp, self.stretchers.get(clip.id.0))
+                                .with_identity(NodeIdentity::of(&("audio-clip", clip.id)));
+                            self.d.add(node, &[])
+                        }
+                        // Stateless: no identity needed, and dedupable by
+                        // content.
+                        warp => self.d.add(node.with_warp(warp, None), &[]),
+                    }
                 }
                 ClipContent::Midi { notes, channel } => {
                     let tl: Vec<TimelineNote> = notes

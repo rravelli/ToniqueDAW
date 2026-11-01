@@ -6,6 +6,7 @@ use crate::graph::{ContentId, Node, NodeIdentity, NodeProperties, ProcessContext
 use crate::midi::{ActiveNotes, MidiMessage};
 use crate::param::{AtomicParam, Smoother};
 use crate::sample::SampleBuffer;
+use crate::stretch::Stretcher;
 use crate::time::SamplePos;
 
 /// Placement of an audio clip on the timeline, in engine samples.
@@ -62,12 +63,65 @@ impl LoopPlacement {
     }
 }
 
+/// How a clip plays its source.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClipWarp {
+    /// As it is: a source sample per output sample.
+    None,
+    /// Resampled, as tape: `speed` source samples per output sample, the
+    /// pitch moving with it.
+    Repitch { speed: f64 },
+    /// Stretched: `speed` source samples per output sample, the pitch kept,
+    /// and transposed by `semitones` (by the clip's [`Stretcher`]).
+    Stretch { speed: f64, semitones: f32 },
+}
+
+impl ClipWarp {
+    /// Source samples per output sample.
+    pub fn speed(&self) -> f64 {
+        match *self {
+            Self::None => 1.0,
+            Self::Repitch { speed } | Self::Stretch { speed, .. } => speed,
+        }
+    }
+
+    /// For identifying content: its numbers' bits.
+    fn bits(&self) -> (u8, u64, u32) {
+        match *self {
+            Self::None => (0, 0, 0),
+            Self::Repitch { speed } => (1, speed.to_bits(), 0),
+            Self::Stretch { speed, semitones } => (2, speed.to_bits(), semitones.to_bits()),
+        }
+    }
+}
+
+/// Where a stretched clip's [`Stretcher`] is in its source.
+struct Stretching {
+    stretcher: Box<dyn Stretcher>,
+    /// Next source position fed (going on past a loop's end, see
+    /// [`LoopPlacement::read`]), with its fraction: ahead of what's heard
+    /// by the stretcher's latency.
+    fed: f64,
+    /// The timeline position the next block starts at if playback goes on
+    /// without a jump; none when stopped or never played.
+    next: Option<SamplePos>,
+    /// Interleaved stereo, sized in `prepare` so processing never
+    /// allocates.
+    input: Vec<f32>,
+    output: Vec<f32>,
+}
+
 /// Reads a region of shared, pre-converted sample data at the transport
-/// position. Position is derived from the timeline each block, so seeking
-/// and looping need no state.
+/// position. As it is or resampled, the position is derived from the
+/// timeline each block, so seeking and looping need no state; stretched,
+/// its stretcher is fed ahead of the transport, and starts over (fed again
+/// from the right place) at each jump.
 pub struct AudioClipNode {
     source: Arc<SampleBuffer>,
     place: ClipPlacement,
+    warp: ClipWarp,
+    /// For [`ClipWarp::Stretch`] (resampled without one).
+    stretching: Option<Stretching>,
     /// Linear, shared with the clip's parameter: changes are heard at once.
     gain: Arc<AtomicParam>,
     gain_s: Smoother,
@@ -87,12 +141,37 @@ impl AudioClipNode {
         Self {
             source,
             place,
+            warp: ClipWarp::None,
+            stretching: None,
             gain_s: Smoother::new(gain.get()),
             gain,
             pan_s: Smoother::new(pan.get()),
             pan,
             identity: None,
         }
+    }
+
+    /// Play the source `warp`ed. Stretched, with `stretcher` (built off the
+    /// audio thread), or resampled without one.
+    pub fn with_warp(mut self, warp: ClipWarp, stretcher: Option<Box<dyn Stretcher>>) -> Self {
+        self.warp = warp;
+        self.stretching = None;
+        if let ClipWarp::Stretch { speed, semitones } = warp {
+            match stretcher {
+                Some(mut stretcher) => {
+                    stretcher.set_transpose(semitones);
+                    self.stretching = Some(Stretching {
+                        stretcher,
+                        fed: 0.0,
+                        next: None,
+                        input: Vec::new(),
+                        output: Vec::new(),
+                    });
+                }
+                None => self.warp = ClipWarp::Repitch { speed },
+            }
+        }
+        self
     }
 
     pub fn with_identity(mut self, id: NodeIdentity) -> Self {
@@ -113,16 +192,138 @@ impl AudioClipNode {
         }
         g
     }
+
+    /// The source's frame at `at` (going on past a loop's end, crossfaded
+    /// at its seam); silence outside the source.
+    #[inline]
+    fn frame(&self, at: SamplePos) -> (f32, f32) {
+        let source = &*self.source;
+        frame(source, self.place.looped, at)
+    }
+
+    /// The source at `at` and a fraction, between frames: a cubic through
+    /// the four around it.
+    #[inline]
+    fn frame_between(&self, at: f64) -> (f32, f32) {
+        let i = at.floor();
+        let f = (at - i) as f32;
+        let i = i as SamplePos;
+        let [a, b, c, d] = [i - 1, i, i + 1, i + 2].map(|j| self.frame(j));
+        (
+            hermite(a.0, b.0, c.0, d.0, f),
+            hermite(a.1, b.1, c.1, d.1, f),
+        )
+    }
+}
+
+/// `source`'s frame at `at` with its loop, as [`AudioClipNode::frame`].
+#[inline]
+fn frame(source: &SampleBuffer, looped: Option<LoopPlacement>, at: SamplePos) -> (f32, f32) {
+    let len = source.len() as SamplePos;
+    let (left, right) = (
+        source.channel(0),
+        source.channel(1.min(source.num_channels() - 1)),
+    );
+    let (si, blend) = match looped {
+        Some(looped) => looped.read(at),
+        None => (at, None),
+    };
+    if !(0..len).contains(&si) {
+        return (0.0, 0.0);
+    }
+    let (mut l, mut r) = (left[si as usize], right[si as usize]);
+    if let Some((from, mix)) = blend
+        && (0..len).contains(&from)
+    {
+        let from = from as usize;
+        l += (left[from] - l) * mix;
+        r += (right[from] - r) * mix;
+    }
+    (l, r)
+}
+
+/// Catmull-Rom between `b` and `c` (at `t` from 0 to 1), `a` before and `d`
+/// after.
+#[inline]
+fn hermite(a: f32, b: f32, c: f32, d: f32, t: f32) -> f32 {
+    let c1 = 0.5 * (c - a);
+    let c2 = a - 2.5 * b + 2.0 * c - 0.5 * d;
+    let c3 = 0.5 * (d - a) + 1.5 * (b - c);
+    ((c3 * t + c2) * t + c1) * t + b
+}
+
+/// Interleave `frames` frames of `source` from `from` (with its loop) into
+/// `out`.
+fn fill(
+    out: &mut [f32],
+    source: &SampleBuffer,
+    looped: Option<LoopPlacement>,
+    from: SamplePos,
+    frames: usize,
+) {
+    for (k, pair) in out[..frames * 2]
+        .as_chunks_mut::<2>()
+        .0
+        .iter_mut()
+        .enumerate()
+    {
+        let (l, r) = frame(source, looped, from + k as SamplePos);
+        *pair = [l, r];
+    }
+}
+
+impl Stretching {
+    /// Start over so the next output frame is the source at `at`: fed from
+    /// there, the output lagging behind it played out and dropped.
+    fn seek(&mut self, source: &SampleBuffer, looped: Option<LoopPlacement>, at: f64, speed: f64) {
+        let start = at.round() as SamplePos;
+        let ahead = self.stretcher.input_latency();
+        fill(&mut self.input, source, looped, start, ahead);
+        self.stretcher.seek(&self.input[..ahead * 2], speed);
+        // The processing time is now at `start`; output comes its latency
+        // behind it: play that out and drop it.
+        let behind = self.stretcher.output_latency();
+        let fed = (start + ahead as SamplePos) as f64;
+        let to = fed + behind as f64 * speed;
+        let frames = (to.floor() - fed.floor()) as usize;
+        fill(&mut self.input, source, looped, fed as SamplePos, frames);
+        self.stretcher
+            .process(&self.input[..frames * 2], &mut self.output[..behind * 2]);
+        self.fed = to;
+    }
+
+    /// The next `frames` frames of output, into `self.output`.
+    fn play(
+        &mut self,
+        source: &SampleBuffer,
+        looped: Option<LoopPlacement>,
+        frames: usize,
+        speed: f64,
+    ) {
+        let to = self.fed + frames as f64 * speed;
+        let feed = (to.floor() - self.fed.floor()) as usize;
+        fill(
+            &mut self.input,
+            source,
+            looped,
+            self.fed.floor() as SamplePos,
+            feed,
+        );
+        self.stretcher
+            .process(&self.input[..feed * 2], &mut self.output[..frames * 2]);
+        self.fed = to;
+    }
 }
 
 impl Node for AudioClipNode {
     fn properties(&self) -> NodeProperties {
-        // Same source data + placement + gain => same output: dedupable.
-        // The gain and pan change live, so they're the same only if they're
-        // the same parameters.
+        // Same source data + placement + warp + gain => same output:
+        // dedupable. The gain and pan change live, so they're the same only
+        // if they're the same parameters.
         let content = ContentId::of(&(
             Arc::as_ptr(&self.source) as usize,
             self.place,
+            self.warp.bits(),
             Arc::as_ptr(&self.gain) as usize,
             Arc::as_ptr(&self.pan) as usize,
         ));
@@ -133,10 +334,18 @@ impl Node for AudioClipNode {
         }
     }
 
-    fn prepare(&mut self, sample_rate: f64, _max_block: usize) {
+    fn prepare(&mut self, sample_rate: f64, max_block: usize) {
         for (s, p) in [(&mut self.gain_s, &self.gain), (&mut self.pan_s, &self.pan)] {
             s.set_sample_rate(sample_rate);
             s.snap(p);
+        }
+        if let Some(st) = &mut self.stretching {
+            // The most fed or played at once: a block, or a seek.
+            let (ahead, behind) = (st.stretcher.input_latency(), st.stretcher.output_latency());
+            let speed = self.warp.speed();
+            let fed = ((max_block.max(behind) as f64 * speed).ceil() as usize + 2).max(ahead);
+            st.input.resize(fed * 2, 0.0);
+            st.output.resize(max_block.max(behind) * 2, 0.0);
         }
     }
 
@@ -151,42 +360,73 @@ impl Node for AudioClipNode {
         if !ctx.playing || a >= b {
             self.gain_s.snap(&self.gain);
             self.pan_s.snap(&self.pan);
+            if let Some(st) = &mut self.stretching {
+                st.next = None;
+            }
             return;
         }
         self.gain_s.retarget(&self.gain);
         self.pan_s.retarget(&self.pan);
-        let src_len = self.source.len() as SamplePos;
-        let src_chans = self.source.num_channels();
+
+        // Stretched: played ahead into the stretcher's output, from the
+        // right place again after a jump.
+        let speed = self.warp.speed();
+        if let Some(st) = &mut self.stretching {
+            if ctx.jumped || st.next != Some(a) {
+                let at = p.source_offset as f64 + (a - p.start) as f64 * speed;
+                st.seek(&self.source, p.looped, at, speed);
+            }
+            st.play(&self.source, p.looped, (b - a) as usize, speed);
+            st.next = Some(b);
+        }
+
         let (left, right) = ctx.audio_out.channel_pair_mut(0, 1);
-        let (src_l, src_r) = (
-            self.source.channel(0),
-            self.source.channel(1.min(src_chans - 1)),
-        );
-        let in_source = |i: SamplePos| i >= 0 && i < src_len;
         for t in a..b {
             let gain = self.gain_s.next();
             let (gain_l, gain_r) = balance(self.pan_s.next());
             let rel = t - p.start;
-            let (si, blend) = match p.looped {
-                Some(looped) => looped.read(rel + p.source_offset),
-                None => (rel + p.source_offset, None),
+            let (l, r) = match (&self.stretching, self.warp) {
+                (Some(st), _) => {
+                    let k = (t - a) as usize * 2;
+                    (st.output[k], st.output[k + 1])
+                }
+                (None, ClipWarp::None) => self.frame(rel + p.source_offset),
+                (None, _) => self.frame_between(p.source_offset as f64 + rel as f64 * speed),
             };
-            if !in_source(si) {
-                continue;
-            }
             let g = gain * self.fade(rel);
-            let (mut l, mut r) = (src_l[si as usize], src_r[si as usize]);
-            if let Some((from, mix)) = blend
-                && in_source(from)
-            {
-                let from = from as usize;
-                l += (src_l[from] - l) * mix;
-                r += (src_r[from] - r) * mix;
-            }
             let at = (t - block_start) as usize;
             left[at] = l * g * gain_l;
             right[at] = r * g * gain_r;
         }
+    }
+
+    /// A stretched clip keeps its stretcher, fed so far, when the graph is
+    /// rebuilt (its gain, another clip... changed): going on where it was
+    /// if it plays the same source the same way, from the right place
+    /// otherwise.
+    fn take_state_from(&mut self, previous: &mut dyn Node) -> StateTransfer {
+        let Some(prev) = previous.as_any_mut().and_then(|a| a.downcast_mut::<Self>()) else {
+            return StateTransfer::KeepNew;
+        };
+        let same_audio = Arc::ptr_eq(&self.source, &prev.source) && self.place == prev.place;
+        let same_speed = self.warp.speed() == prev.warp.speed();
+        if let (Some(new), Some(old)) = (&mut self.stretching, &mut prev.stretching) {
+            std::mem::swap(&mut new.stretcher, &mut old.stretcher);
+            if let ClipWarp::Stretch { semitones, .. } = self.warp {
+                new.stretcher.set_transpose(semitones);
+            }
+            if same_audio && same_speed && new.input.len() == old.input.len() {
+                std::mem::swap(&mut new.input, &mut old.input);
+                std::mem::swap(&mut new.output, &mut old.output);
+                new.fed = old.fed;
+                new.next = old.next;
+            }
+        }
+        StateTransfer::KeepNew
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 }
 

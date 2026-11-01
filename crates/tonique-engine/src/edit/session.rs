@@ -6,6 +6,7 @@ use super::{Edit, EditError, Effects, SourceId, UndoManager};
 use crate::engine::{Command, Engine, EngineError};
 use crate::graph::{CompileStats, NodeMessage};
 use crate::sample::SampleBuffer;
+use crate::stretch::Stretchers;
 use crate::time::BeatPos;
 
 impl From<EngineError> for EditError {
@@ -22,6 +23,10 @@ pub struct EditSession {
     undo: UndoManager,
     engine: Engine,
     last_stats: Option<CompileStats>,
+    stretchers: Stretchers,
+    /// Effects held back by [`Self::hold_effects`], and how many holds are
+    /// open.
+    held: Option<(Effects, usize)>,
 }
 
 impl EditSession {
@@ -32,6 +37,8 @@ impl EditSession {
             undo: UndoManager::default(),
             engine,
             last_stats: None,
+            stretchers: Stretchers::default(),
+            held: None,
         };
         s.rebuild()?;
         Ok(s)
@@ -70,6 +77,8 @@ impl EditSession {
     /// the transport starts stopped at 0 on the new engine.
     pub fn replace_engine(&mut self, engine: Engine) -> Result<Engine, EditError> {
         let old = std::mem::replace(&mut self.engine, engine);
+        // Nothing to hand stretchers over from.
+        self.stretchers = Stretchers::default();
         self.rebuild()?;
         Ok(old)
     }
@@ -129,7 +138,33 @@ impl EditSession {
         }
     }
 
+    /// Hold back the effects of the changes made until
+    /// [`Self::release_effects`], to push them to the engine at once (one
+    /// rebuild for many clips added...). Holds nest.
+    pub fn hold_effects(&mut self) {
+        match &mut self.held {
+            Some((_, holds)) => *holds += 1,
+            None => self.held = Some((Effects::none(), 1)),
+        }
+    }
+
+    /// Close a hold, pushing the effects held back once the last is.
+    pub fn release_effects(&mut self) -> Result<(), EditError> {
+        match self.held.take() {
+            Some((effects, 1)) => self.apply_effects(effects),
+            Some((effects, holds)) => {
+                self.held = Some((effects, holds - 1));
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
+
     fn apply_effects(&mut self, effects: Effects) -> Result<(), EditError> {
+        if let Some((held, _)) = &mut self.held {
+            held.merge(effects);
+            return Ok(());
+        }
         if effects.rebuild {
             return self.rebuild().map(|_| ());
         }
@@ -146,8 +181,14 @@ impl EditSession {
 
     /// Rebuild the graph from the edit and hand it to the engine.
     pub fn rebuild(&mut self) -> Result<CompileStats, EditError> {
-        let desc = build_graph(&self.edit, self.engine.config().sample_rate);
+        // A graph still pending now is replaced, never playing: it can't
+        // hand its stretchers over.
+        let handover = !self.engine.has_pending_graph();
+        let sr = self.engine.config().sample_rate;
+        self.stretchers.begin(sr, handover);
+        let desc = build_graph(&self.edit, sr, &mut self.stretchers);
         let stats = self.engine.load_graph(desc)?;
+        self.stretchers.published();
         self.last_stats = Some(stats);
         Ok(stats)
     }
