@@ -37,7 +37,7 @@ const SWITCH_WIDTH: f32 = 28.;
 /// The inspector's values.
 pub(super) const FIELD_HEIGHT: f32 = 18.;
 /// The column of panel toggles, left of the panels.
-const RAIL_WIDTH: f32 = 24.;
+pub(super) const RAIL_WIDTH: f32 = 24.;
 const PANEL_WIDTH: f32 = 196.;
 /// Between the rail and the panels, and between panels: a rule in its
 /// middle.
@@ -128,33 +128,57 @@ pub(super) fn inspector_ui(
     }
     panels.set(ui.ctx());
 
-    let mut left = rect.left() + RAIL_WIDTH;
-    let shown_panels = [(panels.clip, Panel::Clip), (panels.audio, Panel::Audio)];
-    for (_, panel) in shown_panels.into_iter().filter(|(on, _)| *on) {
-        ui.painter().vline(
-            left + PANEL_GAP / 2.,
-            rect.y_range(),
-            Stroke::new(1., theme.separator),
-        );
-        let at = Rect::from_min_size(
-            pos2(left + PANEL_GAP, rect.top()),
-            vec2(PANEL_WIDTH, rect.height()),
-        );
-        left = at.right();
-        ui.scope_builder(UiBuilder::new().max_rect(at), |ui| {
-            ui.style_mut().override_font_id = Some(FontId::proportional(font_size::LABEL));
-            ui.spacing_mut().item_spacing = vec2(CELL_GAP, 1.);
-            ScrollArea::vertical()
-                .id_salt(("clip-inspector", panel))
-                .auto_shrink(false)
-                .show(ui, |ui| match panel {
-                    Panel::Clip => clip_panel(ui, &shown, bpm, bpb, &mut change),
-                    Panel::Audio => {
-                        audio_panel(ui, &shown, color, bpm, state, &mut change, &mut live)
-                    }
-                });
-        });
-    }
+    // Too narrow for them all, the panels scroll sideways under the rail.
+    let shown_panels: Vec<Panel> = [(panels.clip, Panel::Clip), (panels.audio, Panel::Audio)]
+        .into_iter()
+        .filter_map(|(on, panel)| on.then_some(panel))
+        .collect();
+    let area = rect.with_min_x(rect.left() + RAIL_WIDTH);
+    ui.scope_builder(UiBuilder::new().max_rect(area), |ui| {
+        // Shown whenever they're cut, not only on hover.
+        ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+        ScrollArea::horizontal()
+            .id_salt("clip-inspector-panels")
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                let width = shown_panels.len() as f32 * (PANEL_GAP + PANEL_WIDTH);
+                let height = ui.available_height();
+                let (content, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+                let mut left = content.left();
+                for &panel in &shown_panels {
+                    ui.painter().vline(
+                        left + PANEL_GAP / 2.,
+                        content.y_range(),
+                        Stroke::new(1., theme.separator),
+                    );
+                    let at = Rect::from_min_size(
+                        pos2(left + PANEL_GAP, content.top()),
+                        vec2(PANEL_WIDTH, height),
+                    );
+                    left = at.right();
+                    ui.scope_builder(UiBuilder::new().max_rect(at), |ui| {
+                        ui.style_mut().override_font_id =
+                            Some(FontId::proportional(font_size::LABEL));
+                        ui.spacing_mut().item_spacing = vec2(CELL_GAP, 1.);
+                        ScrollArea::vertical()
+                            .id_salt(("clip-inspector", panel))
+                            .auto_shrink(false)
+                            .show(ui, |ui| match panel {
+                                Panel::Clip => clip_panel(ui, &shown, bpm, bpb, &mut change),
+                                Panel::Audio => audio_panel(
+                                    ui,
+                                    &shown,
+                                    color,
+                                    bpm,
+                                    state,
+                                    &mut change,
+                                    &mut live,
+                                ),
+                            });
+                    });
+                }
+            });
+    });
 
     if let Some((edited, done)) = live {
         state.edit_clip_live(edited, done);

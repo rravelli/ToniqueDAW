@@ -19,10 +19,12 @@ use crate::{
     },
 };
 
-use inspector::{Panels, inspector_ui};
+use inspector::{Panels, RAIL_WIDTH, inspector_ui};
 use markers::FLAG_SIZE;
 
 const PADDING: f32 = 8.;
+/// The least the waveform's view is given, the inspector taking the rest.
+const MIN_VIEW_WIDTH: f32 = 240.;
 /// The ruler: the loop's bracket along its top, the bars, and the markers'
 /// flags along its bottom.
 const RULER_HEIGHT: f32 = 24.;
@@ -73,7 +75,12 @@ impl ClipDetails {
         state: &mut ProjectState,
     ) {
         let rect = ui.available_rect_before_wrap().shrink(PADDING);
-        let inspector_width = Panels::get(ui.ctx()).width().min(rect.width() / 2.);
+        // The waveform gives way to the panels, down to its least; then the
+        // panels scroll.
+        let inspector_width = Panels::get(ui.ctx())
+            .width()
+            .min(rect.width() - PADDING - MIN_VIEW_WIDTH)
+            .max(RAIL_WIDTH);
         let inspector = Rect::from_min_size(rect.min, vec2(inspector_width, rect.height()));
         let view = Rect::from_min_max(pos2(inspector.right() + PADDING, rect.top()), rect.max);
         let ruler = Rect::from_min_max(view.min, pos2(view.right(), view.top() + RULER_HEIGHT));
