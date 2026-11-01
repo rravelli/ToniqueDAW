@@ -23,8 +23,10 @@ pub const EXTENSION: &str = "tonique";
 /// (filter `mode`, echo `time`) among effect parameters, and effect names;
 /// 4 the time signature; 5 clip gain, pan, loops and bar 1, clips saved by
 /// offset and length rather than by trims; 6 clip warp, tempo and
-/// transposition; 7 the grid settings.
-pub const VERSION: u32 = 7;
+/// transposition; 7 the grid settings; 8 the EQ, compressor, limiter, gate,
+/// saturation and reverb effects, more filter modes and a filter gain, echo
+/// sync (`sync`, in beats) and feedback cuts.
+pub const VERSION: u32 = 8;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {

@@ -12,7 +12,13 @@ use crate::{
     },
     ui::{
         effects::{
-            echo::EchoEditor, filter::FilterEditor, spectrum::SpectrumEditor,
+            dynamics::{CompressorEditor, GateEditor, LimiterEditor},
+            echo::EchoEditor,
+            eq::EqEditor,
+            filter::FilterEditor,
+            reverb::ReverbEditor,
+            saturation::SaturationEditor,
+            spectrum::SpectrumEditor,
             utility::UtilityEditor,
         },
         font::PHOSPHOR_REGULAR,
@@ -31,7 +37,7 @@ use egui::{
 };
 use egui_phosphor::{
     fill::{COPY, TRASH},
-    regular::{CARET_DOWN, CARET_RIGHT, POWER, TEXT_T},
+    regular::{ARROWS_IN_SIMPLE, ARROWS_OUT_SIMPLE, CARET_DOWN, CARET_RIGHT, POWER, TEXT_T},
 };
 use std::f32::consts::FRAC_PI_2;
 use std::{collections::HashMap, ops::RangeInclusive};
@@ -40,15 +46,23 @@ use tonique_engine::{
     param::ParamId,
 };
 
+pub mod dynamics;
 pub mod echo;
+pub mod eq;
 pub mod filter;
 pub mod graph;
+pub mod reverb;
+pub mod saturation;
+pub mod shapes;
 pub mod spectrum;
 pub mod utility;
 
 /// Size of a parameter's switch.
 pub const TOGGLE_SIZE: Vec2 = vec2(30., 20.);
 const HEADER_HEIGHT: f32 = 20.;
+/// Inside an effect open in a full window, and its bar.
+const FULL_WINDOW_MARGIN: f32 = 12.;
+const FULL_BAR_HEIGHT: f32 = 24.;
 /// The output meter outside an effect's frame, low at its right, and the
 /// space between them.
 const METER_WIDTH: f32 = 4.;
@@ -73,6 +87,8 @@ pub struct EditorContext<'a> {
     pub sample_rate: f32,
     /// Filled by the editor.
     pub edits: Vec<EffectEdit>,
+    /// Shown in a full window, with room for more than in the rack.
+    pub expanded: bool,
 }
 
 impl EditorContext<'_> {
@@ -196,6 +212,11 @@ pub trait EffectEditor {
     fn ui(&mut self, ui: &mut Ui, cx: &mut EditorContext);
     /// Width of the editor's frame.
     fn width(&self) -> f32;
+    /// Whether it can open in a full window: a graph that's worth seeing
+    /// big. It then draws at any size.
+    fn expandable(&self) -> bool {
+        false
+    }
 }
 
 fn editor(kind: EffectKind) -> Box<dyn EffectEditor> {
@@ -204,6 +225,12 @@ fn editor(kind: EffectKind) -> Box<dyn EffectEditor> {
         EffectKind::Echo => Box::new(EchoEditor),
         EffectKind::Spectrum => Box::new(SpectrumEditor::new()),
         EffectKind::Utility => Box::new(UtilityEditor),
+        EffectKind::Eq => Box::new(EqEditor::new()),
+        EffectKind::Compressor => Box::new(CompressorEditor::new()),
+        EffectKind::Limiter => Box::new(LimiterEditor::new()),
+        EffectKind::Gate => Box::new(GateEditor::new()),
+        EffectKind::Saturation => Box::new(SaturationEditor),
+        EffectKind::Reverb => Box::new(ReverbEditor),
     }
 }
 
@@ -265,6 +292,10 @@ struct Slot {
 pub struct EffectRack {
     editors: HashMap<PluginId, Slot>,
     renaming: Option<Renaming>,
+    /// The effect open in a full window.
+    expanded: Option<PluginId>,
+    /// Where it opens; none to cover the whole window.
+    full_area: Option<Rect>,
 }
 
 impl EffectRack {
@@ -278,6 +309,15 @@ impl EffectRack {
     /// are large, and removed effects' would pile up.
     pub fn retain(&mut self, shown: &[PluginId]) {
         self.editors.retain(|id, _| shown.contains(id));
+        if self.expanded.is_some_and(|id| !shown.contains(&id)) {
+            self.expanded = None;
+        }
+    }
+
+    /// The effect open in a full window.
+    #[cfg(test)]
+    pub fn expanded(&self) -> Option<PluginId> {
+        self.expanded
     }
 
     /// Start typing a new name for `effect`.
@@ -299,9 +339,6 @@ impl EffectRack {
         sample_rate: f32,
         selected: bool,
     ) -> EffectResponse {
-        if effect.collapsed {
-            return self.strip_ui(ui, effect, height, selected);
-        }
         let slot = self
             .editors
             .entry(effect.plugin.id)
@@ -309,6 +346,15 @@ impl EffectRack {
                 editor: editor(effect.kind),
                 levels: AudioMetrics::new(),
             });
+        let expandable = slot.editor.expandable();
+        let full = self.expanded == Some(effect.plugin.id);
+        if effect.collapsed {
+            let mut response = self.strip_ui(ui, effect, height, selected, expandable);
+            if full {
+                self.full_window(ui.ctx(), effect, sample_rate, &mut response);
+            }
+            return response;
+        }
         let width = slot.editor.width();
         // Its output, while shown: a bypassed effect isn't heard, so it has
         // none.
@@ -327,7 +373,7 @@ impl EffectRack {
         ui.painter().rect_filled(rect, 3., theme.bg_raised);
         let clip = rect.intersect(ui.clip_rect());
         let header = Rect::from_min_size(rect.min, vec2(width, HEADER_HEIGHT));
-        let mut response = self.header(ui, effect, header, clip, selected);
+        let mut response = self.header(ui, effect, header, clip, selected, expandable);
 
         // Outside the frame, low down at its right.
         let meter = Rect::from_min_max(
@@ -364,8 +410,19 @@ impl EffectRack {
             effect,
             sample_rate,
             edits: Vec::new(),
+            expanded: false,
         };
-        if let Some(slot) = self.editors.get_mut(&effect.plugin.id) {
+        if full {
+            // Drawn in its window instead: one editor can't be in two places.
+            let theme = ui.app_theme();
+            body_ui.painter().text(
+                body.center(),
+                Align2::CENTER_CENTER,
+                "Open in a full window",
+                FontId::proportional(font_size::SMALL),
+                theme.text_muted,
+            );
+        } else if let Some(slot) = self.editors.get_mut(&effect.plugin.id) {
             slot.editor.ui(&mut body_ui, &mut cx);
         }
         response.edits = cx.edits;
@@ -376,7 +433,103 @@ impl EffectRack {
 
         paint_outline(ui, rect, selected);
         response.rect = whole;
+        if full {
+            self.full_window(ui.ctx(), effect, sample_rate, &mut response);
+        }
         response
+    }
+
+    /// Where an effect opens in a full window: over the effect panel and
+    /// up to just under the top bar.
+    pub fn set_full_area(&mut self, area: Rect) {
+        self.full_area = Some(area);
+    }
+
+    /// `effect`'s editor over [`Self::set_full_area`]'s area, with a bar
+    /// holding its power button, its name and a button back to the rack.
+    /// Escape goes back too.
+    fn full_window(
+        &mut self,
+        ctx: &egui::Context,
+        effect: &Effect,
+        sample_rate: f32,
+        response: &mut EffectResponse,
+    ) {
+        let Some(slot) = self.editors.get_mut(&effect.plugin.id) else {
+            return;
+        };
+        let theme = ctx.app_theme();
+        let area = self
+            .full_area
+            .filter(|a| a.is_positive())
+            .unwrap_or_else(|| ctx.content_rect());
+        let shown = egui::Area::new(egui::Id::new(("effect-full-window", effect.plugin.id.0)))
+            .order(egui::Order::Middle)
+            .fixed_pos(area.min)
+            .constrain(false)
+            .show(ctx, |ui| {
+                let (whole, _) = ui.allocate_exact_size(area.size(), Sense::click_and_drag());
+                ui.set_clip_rect(whole);
+                ui.painter().rect_filled(whole, 0., theme.bg_panel);
+                let rect = whole.shrink(FULL_WINDOW_MARGIN);
+                let bar = Rect::from_min_size(rect.min, vec2(rect.width(), FULL_BAR_HEIGHT));
+                let mut buttons = ui.new_child(
+                    UiBuilder::new()
+                        .id_salt(("effect-full-bar", effect.plugin.id.0))
+                        .max_rect(bar)
+                        .layout(Layout::left_to_right(Align::Center)),
+                );
+                buttons.spacing_mut().item_spacing.x = 8.;
+                let toggled = buttons
+                    .add(power_button(effect.enabled()).square(20.))
+                    .clicked();
+                buttons.label(
+                    egui::RichText::new(effect.name())
+                        .font(semibold(font_size::HEADING))
+                        .color(if effect.enabled() {
+                            theme.text
+                        } else {
+                            theme.text_muted
+                        }),
+                );
+                let back = ui
+                    .put(
+                        Rect::from_min_size(
+                            bar.right_top() - vec2(FULL_BAR_HEIGHT, 0.),
+                            Vec2::splat(FULL_BAR_HEIGHT),
+                        ),
+                        FlatButton::ghost(ARROWS_IN_SIMPLE)
+                            .square(FULL_BAR_HEIGHT)
+                            .font(FontId::new(14., FontFamily::Name(PHOSPHOR_REGULAR.into())))
+                            .tooltip("Back to the rack (Esc)"),
+                    )
+                    .clicked();
+                let body = Rect::from_min_max(rect.min + vec2(0., FULL_BAR_HEIGHT + 8.), rect.max);
+                let mut body_ui = ui.new_child(
+                    UiBuilder::new()
+                        .id_salt(("effect-full-body", effect.plugin.id.0))
+                        .max_rect(body)
+                        .layout(Layout::top_down(Align::Min)),
+                );
+                body_ui.set_clip_rect(body);
+                body_ui.spacing_mut().item_spacing = vec2(6., 4.);
+                let mut cx = EditorContext {
+                    effect,
+                    sample_rate,
+                    edits: Vec::new(),
+                    expanded: true,
+                };
+                slot.editor.ui(&mut body_ui, &mut cx);
+                (toggled, back, cx.edits)
+            });
+        let (toggled, back, edits) = shown.inner;
+        response.toggled |= toggled;
+        response.edits.extend(edits);
+        let escape =
+            ctx.memory(|m| m.focused().is_none()) && ctx.input(|i| i.key_pressed(Key::Escape));
+        if back || escape {
+            self.expanded = None;
+        }
     }
 
     /// Power and collapse buttons, and the name (or the field typing it).
@@ -388,6 +541,7 @@ impl EffectRack {
         rect: Rect,
         clip: Rect,
         selected: bool,
+        expandable: bool,
     ) -> EffectResponse {
         let theme = ui.app_theme();
         let header = ui.interact(
@@ -426,11 +580,25 @@ impl EffectRack {
         {
             response.collapse = Some(true);
         }
+        let left = buttons.cursor().left() + 2.;
+        // At the right end, out of the name's way.
+        let mut right = rect.right() - 4.;
+        if expandable {
+            let at =
+                Rect::from_min_size(pos2(rect.right() - 18., rect.top() + 2.5), Vec2::splat(15.));
+            if buttons
+                .put(
+                    at,
+                    icon_button(ARROWS_OUT_SIMPLE).tooltip("Open in a full window"),
+                )
+                .clicked()
+            {
+                self.expanded = Some(effect.plugin.id);
+            }
+            right = at.left() - 2.;
+        }
 
-        let name = Rect::from_min_max(
-            pos2(buttons.cursor().left() + 2., rect.top() + 2.),
-            pos2(rect.right() - 4., rect.bottom() - 2.),
-        );
+        let name = Rect::from_min_max(pos2(left, rect.top() + 2.), pos2(right, rect.bottom() - 2.));
         let mut field = ui.new_child(
             UiBuilder::new()
                 .id_salt(("effect-name", effect.plugin.id.0))
@@ -455,7 +623,7 @@ impl EffectRack {
         if response.header.double_clicked() {
             response.collapse = Some(true);
         }
-        self.context_menu(effect, &mut response);
+        self.context_menu(effect, &mut response, expandable);
         response
     }
 
@@ -467,6 +635,7 @@ impl EffectRack {
         effect: &Effect,
         height: f32,
         selected: bool,
+        expandable: bool,
     ) -> EffectResponse {
         let theme = ui.app_theme();
         let (rect, _) = ui.allocate_exact_size(vec2(STRIP_WIDTH, height), Sense::hover());
@@ -520,7 +689,7 @@ impl EffectRack {
         if response.header.double_clicked() {
             response.collapse = Some(false);
         }
-        self.context_menu(effect, &mut response);
+        self.context_menu(effect, &mut response, expandable);
         paint_outline(ui, rect, selected);
         response.rect = rect;
         response
@@ -564,8 +733,9 @@ impl EffectRack {
         true
     }
 
-    fn context_menu(&mut self, effect: &Effect, response: &mut EffectResponse) {
+    fn context_menu(&mut self, effect: &Effect, response: &mut EffectResponse, expandable: bool) {
         let mut rename = false;
+        let mut expand = false;
         response.header.context_menu(|ui| {
             ui.add(ContextMenuLabel::new(effect.name()));
             if ui.add(ContextMenuButton::new(TEXT_T, "Rename")).clicked() {
@@ -579,6 +749,16 @@ impl EffectRack {
             if ui.add(ContextMenuButton::new(icon, text)).clicked() {
                 response.collapse = Some(!effect.collapsed);
             }
+            if expandable
+                && ui
+                    .add(ContextMenuButton::new(
+                        ARROWS_OUT_SIMPLE,
+                        "Open in full window",
+                    ))
+                    .clicked()
+            {
+                expand = true;
+            }
             if ui.add(ContextMenuButton::new(COPY, "Duplicate")).clicked() {
                 response.duplicated = true;
             }
@@ -590,6 +770,9 @@ impl EffectRack {
                 response.removed = true;
             }
         });
+        if expand {
+            self.expanded = Some(effect.plugin.id);
+        }
         if rename {
             // Typed in the header: expand it first.
             if effect.collapsed {
@@ -636,6 +819,11 @@ pub fn format_hz(hz: f32) -> String {
     } else {
         format!("{:.0} kHz", hz / 1000.)
     }
+}
+
+/// A gain in dB, signed.
+pub fn format_db(db: f32) -> String {
+    format!("{db:+.1} dB")
 }
 
 pub fn format_percent(ratio: f32) -> String {

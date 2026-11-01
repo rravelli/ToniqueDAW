@@ -16,17 +16,19 @@ impl ProjectState {
     /// Add an effect to a channel, at `index` among its effects; past the
     /// last appends it.
     pub fn add_effect(&mut self, id: &TrackId, kind: EffectKind, index: usize) {
-        self.add_effect_with(id, kind, None, index);
+        self.add_effect_with(id, kind, &[], index);
     }
-    /// Add an effect made with `setting` rather than its default one.
+    /// Add an effect made with `settings` rather than its default ones.
     pub fn add_effect_with(
         &mut self,
         id: &TrackId,
         kind: EffectKind,
-        setting: Option<Setting>,
+        settings: &[Setting],
         index: usize,
     ) {
-        let plugin_kind = setting.map_or(kind.plugin_kind(), |s| s.apply(kind.plugin_kind()));
+        let plugin_kind = settings
+            .iter()
+            .fold(kind.plugin_kind(), |plugin, s| s.apply(plugin));
         let plugin = self.session.create(|e| Plugin::new(e, plugin_kind));
         for (name, value) in kind.initial_params() {
             if let Some(param) = plugin.param(name) {

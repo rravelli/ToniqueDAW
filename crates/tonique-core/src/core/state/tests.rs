@@ -303,7 +303,7 @@ fn duplicated_effects_follow_their_originals_and_are_independent() {
     let mut state = setup_state();
     let track = state.add_track();
     state.add_effect(&track, EffectKind::Filter, 0);
-    state.add_effect_with(&track, EffectKind::Echo, Some(Setting::Time(0.5)), 1);
+    state.add_effect_with(&track, EffectKind::Echo, &[Setting::Time(0.5)], 1);
     let filter = state.effects(&track)[0].plugin.clone();
     filter.param("cutoff").unwrap().set(440.);
     state.set_effect_setting(&track, filter.id, Setting::Mode(FilterMode::HighPass));
@@ -1225,7 +1225,7 @@ mod projects {
         },
     };
     use std::{fs, path::Path};
-    use tonique_engine::sample::WavWriter;
+    use tonique_engine::{nodes::SaturationCurve, sample::WavWriter};
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("tonique-save-{name}-{}", std::process::id()));
@@ -1332,11 +1332,49 @@ mod projects {
         plugin.param("cutoff").unwrap().set(800.);
         state.set_effect_enabled(&track, plugin.id, false);
         state.set_effect_setting(&track, plugin.id, Setting::Mode(FilterMode::HighPass));
-        state.add_effect_with(&track, EffectKind::Echo, Some(Setting::Time(0.5)), 1);
+        state.add_effect_with(&track, EffectKind::Echo, &[Setting::Time(0.5)], 1);
         state.add_effect(&track, EffectKind::Spectrum, 2);
         let spectrum = state.effects(&track)[2].plugin.id;
         state.rename_effect(&track, spectrum, Some("Bus check".into()));
         state.set_effect_collapsed(spectrum, true);
+        // Every newer effect, each with a setting or parameter moved.
+        state.add_effect_with(
+            &track,
+            EffectKind::Echo,
+            &[Setting::Time(0.3), Setting::Sync(Some(0.75))],
+            3,
+        );
+        state.add_effect_with(&track, EffectKind::Limiter, &[Setting::Lookahead(7.)], 4);
+        state.add_effect_with(
+            &track,
+            EffectKind::Saturation,
+            &[Setting::Curve(SaturationCurve::Tape)],
+            5,
+        );
+        state.add_effect_with(
+            &track,
+            EffectKind::Filter,
+            &[Setting::Mode(FilterMode::LowShelf)],
+            6,
+        );
+        for kind in [
+            EffectKind::Eq,
+            EffectKind::Compressor,
+            EffectKind::Gate,
+            EffectKind::Reverb,
+        ] {
+            state.add_effect(&track, kind, 7);
+        }
+        let moved = state.effects(&track);
+        for (effect, name, value) in [
+            (6, "gain", -4.5),
+            (7, "decay", 5.),
+            (8, "release", 300.),
+            (9, "ratio", 8.),
+            (10, "b4_gain", 3.),
+        ] {
+            moved[effect].plugin.param(name).unwrap().set(value);
+        }
 
         let saved = state.project(Some(&dir));
         assert_eq!(
@@ -1363,6 +1401,11 @@ mod projects {
         );
         assert_eq!(track_file.color, "#0a141e");
         assert!(!track_file.channel.effects[0].enabled);
+        assert_eq!(track_file.channel.effects[3].params["sync"], 0.75);
+        assert_eq!(track_file.channel.effects[4].params["lookahead"], 7.);
+        assert_eq!(track_file.channel.effects[5].params["curve"], 1.);
+        assert_eq!(track_file.channel.effects[6].params["mode"], 4.);
+        assert_eq!(track_file.channel.effects[10].kind, EffectKind::Eq);
         let path = dir.join("song.tonique");
         saved.write(&path).unwrap();
 

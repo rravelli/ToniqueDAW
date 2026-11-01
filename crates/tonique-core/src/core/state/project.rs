@@ -190,7 +190,11 @@ impl ProjectState {
                             .params
                             .iter()
                             .map(|p| (p.name, p.get()))
-                            .chain(Setting::of(&plugin.kind).map(Setting::saved))
+                            .chain(
+                                Setting::all_of(&plugin.kind)
+                                    .into_iter()
+                                    .map(Setting::saved),
+                            )
                             .map(|(name, value)| (name.to_string(), value))
                             .collect(),
                     })
@@ -401,11 +405,12 @@ impl ProjectState {
             self.set_mute(id, true);
         }
         for (index, effect) in channel.effects.iter().enumerate() {
-            let setting = effect
+            let settings: Vec<_> = effect
                 .params
                 .iter()
-                .find_map(|(name, value)| Setting::parse(effect.kind, name, *value));
-            self.add_effect_with(&id, effect.kind, setting, index);
+                .filter_map(|(name, value)| Setting::parse(effect.kind, name, *value))
+                .collect();
+            self.add_effect_with(&id, effect.kind, &settings, index);
             let Some(plugin) = self.effects(&id).get(index).map(|e| e.plugin.clone()) else {
                 continue;
             };

@@ -94,4 +94,8 @@ impl EffectEditor for SpectrumEditor {
     fn width(&self) -> f32 {
         320.
     }
+
+    fn expandable(&self) -> bool {
+        true
+    }
 }

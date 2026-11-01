@@ -73,6 +73,9 @@ impl BottomPanel {
         commands: &mut Commands,
     ) {
         let mut open = workspace.bottom_panel_open;
+        // Everything under the top bar: an effect opened in a full window
+        // covers that down to the panel's bottom.
+        let under_bar = ui.available_rect_before_wrap().top();
         egui::Panel::bottom("bottom-panel")
             .size_range(Rangef::new(MIN_HEIGHT, 400.))
             .default_size(MIN_HEIGHT)
@@ -85,6 +88,10 @@ impl BottomPanel {
             .show_collapsible(ui, &mut open, |ui| {
                 ui.set_height(ui.available_height());
                 let panel = ui.max_rect();
+                self.rack.set_full_area(Rect::from_min_max(
+                    egui::pos2(panel.left(), under_bar),
+                    panel.max,
+                ));
                 if let Some(pos) = ui.input(|i| {
                     i.pointer
                         .primary_pressed()

@@ -256,8 +256,9 @@ fn echo_times_dont_drive_each_other() {
     let before = times(&state);
     run(&ctx, &mut panel, &mut state, vec![], &[]);
 
-    // Drag the first echo's time knob up.
-    let knob = panel.rects[1].left_bottom() + vec2(6. + 23., -6. - 26.);
+    // Drag the first echo's time knob up, past its sync switch.
+    let sync = crate::ui::effects::TOGGLE_SIZE.x + 6.;
+    let knob = panel.rects[1].left_bottom() + vec2(6. + sync + 23., -6. - 26.);
     let button = |pos, pressed| egui::Event::PointerButton {
         pos,
         button: egui::PointerButton::Primary,
@@ -358,9 +359,10 @@ fn delete_after_clicking_an_effect_never_deletes_the_track() {
 #[test]
 fn effects_fit_the_panel() {
     let (ctx, mut panel, mut state, track) = setup();
-    state.add_effect(&track, EffectKind::Filter, 2);
-    state.add_effect(&track, EffectKind::Spectrum, 3);
-    state.add_effect(&track, EffectKind::Utility, 4);
+    // Every kind, after the filter and echo already there.
+    for (i, kind) in EffectKind::ALL.into_iter().enumerate() {
+        state.add_effect(&track, kind, 2 + i);
+    }
     let mut first = Vec::new();
     for _ in 0..4 {
         run(&ctx, &mut panel, &mut state, vec![], &[]);
@@ -368,7 +370,7 @@ fn effects_fit_the_panel() {
             first.clone_from(&panel.rects);
         }
     }
-    assert_eq!(panel.rects.len(), 5);
+    assert_eq!(panel.rects.len(), 2 + EffectKind::ALL.len());
     assert_eq!(panel.rects, first, "stable across frames");
     // The default panel: 200 tall at the bottom of an 800 tall screen.
     for rect in &panel.rects {
@@ -550,4 +552,77 @@ fn dragged_effects_say_where_they_come_from() {
         *payload,
         DragPayload::MovedEffect { track: t, plugin: p } if t == track && p == plugin
     ));
+}
+
+/// The expand button in an EQ's header opens it in a full window; its
+/// frame in the rack says so. Escape closes it.
+#[test]
+fn graph_effects_open_in_a_full_window() {
+    let (ctx, mut panel, mut state, track) = setup();
+    state.add_effect(&track, EffectKind::Eq, 2);
+    run(&ctx, &mut panel, &mut state, vec![], &[]);
+    let eq = state.effects(&track)[2].plugin.id;
+    // The frame, without the meter beside it.
+    let frame = panel.rects[2].right() - 7.;
+    let button = egui::pos2(frame - 10.5, panel.rects[2].top() + 10.);
+    run(&ctx, &mut panel, &mut state, click(button), &[]);
+    assert_eq!(panel.rack.expanded(), Some(eq));
+    run(&ctx, &mut panel, &mut state, vec![], &[]);
+    let escape = egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    };
+    run(&ctx, &mut panel, &mut state, vec![escape], &[]);
+    assert_eq!(panel.rack.expanded(), None);
+    // Only graphs open: an echo has no button there.
+    let echo = egui::pos2(
+        panel.rects[1].right() - 7. - 10.5,
+        panel.rects[1].top() + 10.,
+    );
+    run(&ctx, &mut panel, &mut state, click(echo), &[]);
+    assert_eq!(panel.rack.expanded(), None);
+}
+
+/// Double-clicking an EQ's graph adds a point, a bell where clicked,
+/// as one undo step; double-clicking the point removes it.
+#[test]
+fn eq_points_are_added_and_removed_by_double_click() {
+    let (ctx, mut panel, mut state, track) = setup();
+    state.add_effect(&track, EffectKind::Eq, 0);
+    run(&ctx, &mut panel, &mut state, vec![], &[]);
+    let at = panel.rects[0].left_top() + vec2(190., 50.);
+    let double_click = |pos| {
+        let button = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        vec![
+            egui::Event::PointerMoved(pos),
+            button(true),
+            button(false),
+            button(true),
+            button(false),
+        ]
+    };
+    let value =
+        |state: &ProjectState, name| state.effects(&track)[0].plugin.param(name).unwrap().get();
+    run(&ctx, &mut panel, &mut state, double_click(at), &[]);
+    assert_eq!(value(&state, "b1_on"), 1.);
+    assert_eq!(
+        tonique_engine::nodes::eq_mode(value(&state, "b1_type")),
+        tonique_engine::nodes::FilterMode::Peak
+    );
+    assert!(value(&state, "b1_gain") > 0., "above 0 dB: raised");
+    run(&ctx, &mut panel, &mut state, double_click(at), &[]);
+    assert_eq!(value(&state, "b1_on"), 0., "removed");
+    state.undo();
+    assert_eq!(value(&state, "b1_on"), 1.);
+    state.undo();
+    assert_eq!(value(&state, "b1_on"), 0., "added in one step");
+    assert_eq!(value(&state, "b1_freq"), 30., "all of it");
 }
