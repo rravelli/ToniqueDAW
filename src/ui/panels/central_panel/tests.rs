@@ -318,8 +318,8 @@ fn dropping_past_the_last_track_shows_its_header_at_once() {
     assert_eq!(dropped, ghost, "the real header, in the ghost's place");
 }
 
-/// A rubber band starts where the button went down, between grid lines
-/// as much as on them.
+/// A rubber band starts where the button went down (not snapping, between
+/// grid lines as much as on them).
 #[test]
 fn rubber_bands_start_where_pressed() {
     use crate::ui::arrangement::ruler::RULER_HEIGHT;
@@ -327,6 +327,7 @@ fn rubber_bands_start_where_pressed() {
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
+    state.grid.settings.snap = false;
     state.add_track();
     state.add_track();
     let ctx = egui::Context::default();

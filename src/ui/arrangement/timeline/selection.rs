@@ -22,15 +22,9 @@ impl Timeline {
         layout: &RowLayout,
         response: &Response,
     ) {
-        // Near grid lines it snaps to them, as trims do; Alt keeps it free.
-        let free = ui.input(|i| i.modifiers.alt);
-        let snap = |beats: BeatPos| {
-            if free {
-                beats
-            } else {
-                state.grid.snap_at_grid(beats)
-            }
-        };
+        // Snapped to the grid, as trims are.
+        let alt = ui.input(|i| i.modifiers.alt);
+        let snap = |beats: BeatPos| state.grid.snap(beats, alt);
         // From where the button went down: egui starts drags a few points
         // later.
         if response.drag_started()

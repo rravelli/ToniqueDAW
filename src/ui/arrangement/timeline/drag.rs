@@ -117,10 +117,10 @@ impl Timeline {
 
             // Snap the nearest clip edge: starts to the grid or to snap
             // targets (other clips, loop, edit cursor), ends to targets only.
-            // Alt disables snapping.
+            // Only when snapping, which Alt inverts.
             let mut beat_delta = f64::INFINITY;
             let mut snapped_to = None;
-            if ui.input(|i| !i.modifiers.alt) {
+            if state.grid.snaps(ui.input(|i| i.modifiers.alt)) {
                 let targets = state.snap_targets(&clip_drag.dragged_ids());
                 let bpm = state.bpm();
                 for dragged in clip_drag.clips.iter() {
@@ -129,15 +129,9 @@ impl Timeline {
                         .x_to_beats(mouse_pos.x - dragged.grab_x, viewport);
                     let end = start + (dragged.clip.end(bpm) - dragged.clip.position);
                     let candidates = [
-                        state
-                            .grid
-                            .snap_to_targets(start, &targets)
-                            .map(|s| (s, start)),
-                        state
-                            .grid
-                            .snap_to_targets(end, &targets)
-                            .filter(|(_, target)| *target)
-                            .map(|s| (s, end)),
+                        Some((state.grid.snap_to_targets(start, &targets), start)),
+                        Some((state.grid.snap_to_targets(end, &targets), end))
+                            .filter(|((_, target), _)| *target),
                     ];
                     for ((pos, target), edge) in candidates.into_iter().flatten() {
                         if (pos - edge).abs() < beat_delta.abs() {

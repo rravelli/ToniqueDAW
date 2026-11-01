@@ -320,9 +320,10 @@ impl ClipView<'_> {
         }
         ui.ctx().set_cursor_icon(CursorIcon::Text);
         let beats = state.grid.x_to_beats(pointer.x, self.viewport);
+        let alt = ui.input(|i| i.modifiers.alt);
         let x = state
             .grid
-            .beats_to_x(state.grid.snap_at_grid(beats), self.viewport);
+            .beats_to_x(state.grid.snap(beats, alt), self.viewport);
         let theme = ui.app_theme();
         ui.painter_at(body).vline(
             x,
@@ -332,8 +333,8 @@ impl ClipView<'_> {
     }
 
     /// A trim handle: dragging it moves that edge of `clip`, snapping to
-    /// the grid, other clips' edges, the loop and the edit cursor (Alt
-    /// disables snapping). With Shift, the clip is stretched to it instead
+    /// the grid, other clips' edges, the loop and the edit cursor (when
+    /// snapping, which Alt inverts). With Shift, the clip is stretched to it instead
     /// of trimmed: the same audio, played faster or slower.
     fn trim_handle(
         &self,
@@ -352,14 +353,11 @@ impl ClipView<'_> {
             && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
         {
             let beats = state.grid.x_to_beats(mouse_pos.x, self.viewport);
-            let beats = if ui.input(|i| i.modifiers.alt) {
-                beats
-            } else {
+            let beats = if state.grid.snaps(ui.input(|i| i.modifiers.alt)) {
                 let targets = state.snap_targets(&[clip.id]);
-                state
-                    .grid
-                    .snap_to_targets(beats, &targets)
-                    .map_or(beats, |(snapped, _)| snapped)
+                state.grid.snap_to_targets(beats, &targets).0
+            } else {
+                beats
             };
             let bpm = state.bpm();
             match (edge, ui.input(|i| i.modifiers.shift)) {

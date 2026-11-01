@@ -6,7 +6,7 @@ use crate::{
         state::ProjectState,
         track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow},
     },
-    ui::arrangement::grid::PaintGrid,
+    ui::arrangement::{grid::PaintGrid, grid_menu::grid_menu},
     ui::{
         arrangement::clip::ClipView,
         arrangement::{
@@ -70,6 +70,7 @@ impl Timeline {
         self.run_actions(ui, state, commands, viewport);
         // Create timeline area
         let timeline_res = ui.allocate_rect(viewport, Sense::all());
+        timeline_res.context_menu(|ui| grid_menu(ui, state));
         let painter = ui.painter_at(viewport);
         // Handle interactions in the timeline area
         self.interact(ui, &timeline_res, state, viewport);
@@ -120,7 +121,8 @@ impl Timeline {
         {
             state.clear_clip_selection();
             let beats = state.grid.x_to_beats(mouse_pos.x, viewport);
-            state.set_edit_cursor(state.grid.snap_at_grid(beats));
+            let alt = ui.input(|i| i.modifiers.alt);
+            state.set_edit_cursor(state.grid.snap(beats, alt));
         }
         // Ctrl+wheel (and pinch) zooms; egui reports it as a zoom factor.
         let zoom = ui.input(|i| i.zoom_delta());
@@ -378,7 +380,8 @@ impl Timeline {
                 {
                     // Convert x to beats and snap to grid
                     let position = state.grid.x_to_beats(mouse_pos.x, viewport);
-                    let snapped_position = state.grid.snap_at_grid(position);
+                    let alt = ui.input(|i| i.modifiers.alt);
+                    let snapped_position = state.grid.snap(position, alt);
 
                     let track = state.add_track();
                     let clip = AudioClip::new(
@@ -411,7 +414,8 @@ impl Timeline {
         {
             // Calculate grid position in beats
             let position = state.grid.x_to_beats(mouse_pos.x, viewport);
-            let snapped_position = state.grid.snap_at_grid(position);
+            let alt = ui.input(|i| i.modifiers.alt);
+            let snapped_position = state.grid.snap(position, alt);
             let x = state.grid.beats_to_x(snapped_position, viewport);
             let mouse_y = mouse_pos.y;
 

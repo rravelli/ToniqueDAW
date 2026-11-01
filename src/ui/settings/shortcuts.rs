@@ -14,7 +14,7 @@ use egui::{
 };
 use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, PLUS};
 
-const GROUPS: [&str; 4] = ["File", "Transport", "Edit", "View"];
+const GROUPS: [&str; 5] = ["File", "Transport", "Edit", "Grid", "View"];
 const LABEL_WIDTH: f32 = 200.;
 const CHIP_HEIGHT: f32 = 20.;
 const LIST_HEIGHT: f32 = 380.;

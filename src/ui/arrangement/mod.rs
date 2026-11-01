@@ -3,6 +3,7 @@
 
 pub mod clip;
 pub mod grid;
+pub mod grid_menu;
 pub mod row_layout;
 pub mod ruler;
 pub mod timeline;

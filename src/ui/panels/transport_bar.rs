@@ -1,11 +1,11 @@
 use crate::ui::theme::font_size;
 use egui::{
-    Align, Align2, FontFamily, FontId, Frame, Layout, Margin, Rangef, Rect, Response, RichText,
-    Sense, Ui, UiBuilder, Vec2, pos2, vec2,
+    Align, Align2, FontFamily, FontId, Frame, Layout, Margin, Popup, Rangef, Rect, Response,
+    RichText, Sense, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 use egui_phosphor::{
     fill::SIDEBAR_SIMPLE,
-    regular::{CPU, GRAPH, RECORD, SPEAKER_SLASH, WARNING},
+    regular::{CPU, GRAPH, MAGNET, RECORD, SPEAKER_SLASH, WARNING},
 };
 use tonique_engine::time::TimeSignature;
 
@@ -14,6 +14,7 @@ use crate::{
     core::state::{PlaybackState, ProjectState},
     ui::{
         RECORDING,
+        arrangement::grid_menu::grid_menu,
         commands::Commands,
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         missing_files,
@@ -35,6 +36,8 @@ const POSITION_BARS_WIDTH: f32 = 72.;
 const USAGE_WIDTH: f32 = 46.;
 /// Each of the time signature's two fields.
 const TIME_SIGNATURE_FIELD_WIDTH: f32 = 22.;
+/// The grid's step, `1/16T` or `8 bars`.
+const GRID_STEP_WIDTH: f32 = 48.;
 
 pub struct TransportBar {
     bpm_input: NumberInput,
@@ -159,8 +162,8 @@ impl TransportBar {
         });
     }
 
-    /// Undo and redo, the status, the tempo and the time signature, laid
-    /// out right to left.
+    /// Undo and redo, the status, the tempo, the time signature and the
+    /// grid, laid out right to left.
     fn right_ui(&mut self, ui: &mut Ui, state: &mut ProjectState, commands: &mut Commands) {
         if self.redo_ui(ui, state).clicked() {
             commands.push(Action::Redo);
@@ -192,6 +195,52 @@ impl TransportBar {
         }
         ui.add_space(BUTTON_GAP);
         self.time_signature_ui(ui, state);
+        ui.add_space(GROUP_GAP);
+        self.grid_ui(ui, state);
+        if self.snap_ui(ui, state).clicked() {
+            commands.push(Action::ToggleSnap);
+        }
+    }
+
+    /// The grid's step, choosing it (and the rest of the grid's settings)
+    /// from a menu. Adaptive, it's the step at the arrangement's zoom,
+    /// muted.
+    fn grid_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
+        let grid = &state.grid;
+        let theme = ui.app_theme();
+        let (step, color) = if grid.settings.adaptive {
+            (grid.line_step(), theme.text_muted)
+        } else {
+            (grid.snap_step(), theme.text)
+        };
+        let response = ui.add(
+            FlatButton::new(grid.step_name(step))
+                .size(vec2(GRID_STEP_WIDTH, BUTTON_SIZE))
+                .font(FontId::proportional(font_size::SMALL))
+                .color(color),
+        );
+        Popup::menu(&response).show(|ui| grid_menu(ui, state));
+    }
+
+    fn snap_ui(&mut self, ui: &mut Ui, state: &ProjectState) -> Response {
+        let snap = state.grid.settings.snap;
+        ui.add(
+            FlatButton::ghost(MAGNET)
+                .square(BUTTON_SIZE)
+                .font(FontId::new(
+                    15.,
+                    FontFamily::Name(
+                        if snap {
+                            PHOSPHOR_FILL
+                        } else {
+                            PHOSPHOR_REGULAR
+                        }
+                        .into(),
+                    ),
+                ))
+                .selected(snap)
+                .tooltip(tooltip(ui, state, "Snap to grid", Action::ToggleSnap)),
+        )
     }
 
     /// Beats per bar over the note that counts them, each typed or dragged.
