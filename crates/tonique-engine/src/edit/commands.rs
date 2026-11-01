@@ -4,7 +4,7 @@
 
 use super::{
     Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, ClipLoop, Edit, EditError, Effects, Output,
-    Plugin, PluginId, Send, Track, TrackId, WarpMode,
+    Plugin, PluginId, Send, StretchSettings, Track, TrackId, WarpMode,
 };
 use crate::automation::BeatPoint;
 use crate::param::ParamId;
@@ -442,6 +442,45 @@ impl SetClipWarp {
 impl EditCommand for SetClipWarp {
     fn label(&self) -> &'static str {
         "Clip warp"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+}
+
+/// How a stretched audio clip is stretched (see [`ClipContent::Audio`]).
+pub struct SetClipStretch {
+    track: TrackId,
+    id: ClipId,
+    stretch: StretchSettings,
+}
+
+impl SetClipStretch {
+    pub fn new(track: TrackId, id: ClipId, stretch: StretchSettings) -> Self {
+        Self { track, id, stretch }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        let c = edit
+            .track_mut(self.track)?
+            .clips
+            .iter_mut()
+            .find(|c| c.id == self.id)
+            .ok_or(EditError::ClipNotFound(self.id))?;
+        let ClipContent::Audio { stretch, .. } = &mut c.content else {
+            return Err(EditError::Invalid("not an audio clip"));
+        };
+        std::mem::swap(stretch, &mut self.stretch);
+        Ok(Effects::rebuild())
+    }
+}
+
+impl EditCommand for SetClipStretch {
+    fn label(&self) -> &'static str {
+        "Clip stretch"
     }
     fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         self.swap(edit)

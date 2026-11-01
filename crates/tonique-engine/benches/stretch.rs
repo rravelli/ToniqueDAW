@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use tonique_engine::edit::{Clip, ClipContent, Edit, EditSession, Track, WarpMode};
+use tonique_engine::edit::{
+    Clip, ClipContent, Edit, EditSession, StretchSettings, StretchWindow, Track, WarpMode,
+};
 use tonique_engine::engine::Engine;
 use tonique_engine::sample::SampleBuffer;
 use tonique_engine::time::BeatPos;
@@ -44,6 +46,24 @@ impl Play {
 /// `tracks` tracks of `clips_per_track` stereo clips one after the other,
 /// [`LOOP_BEATS`] long each, playing as `play` says.
 fn clips_edit(tracks: usize, clips_per_track: usize, play: Play) -> Edit {
+    clips_edit_with(
+        tracks,
+        clips_per_track,
+        play,
+        StretchSettings::default(),
+        0.0,
+    )
+}
+
+/// As [`clips_edit`], stretched as `settings` say, transposed by
+/// `transpose` when stretched.
+fn clips_edit_with(
+    tracks: usize,
+    clips_per_track: usize,
+    play: Play,
+    settings: StretchSettings,
+    semitones: f32,
+) -> Edit {
     let mut edit = Edit::new(BPM);
     // Long enough for the fastest clip to play to its end.
     let len = SAMPLE_RATE as usize * 8;
@@ -58,6 +78,7 @@ fn clips_edit(tracks: usize, clips_per_track: usize, play: Play) -> Edit {
                 warp,
                 source_bpm,
                 transpose,
+                stretch,
                 ..
             } = &mut clip.content
             {
@@ -67,6 +88,8 @@ fn clips_edit(tracks: usize, clips_per_track: usize, play: Play) -> Edit {
                     Play::Stretch => {
                         *warp = WarpMode::Stretch;
                         *source_bpm = SOURCE_BPM;
+                        *transpose = semitones;
+                        *stretch = settings;
                     }
                 }
             }
@@ -89,6 +112,28 @@ fn process_block(c: &mut Criterion) {
             let mut out = vec![0.0; BLOCK * 2];
             group.throughput(Throughput::Elements(clips as u64));
             group.bench_with_input(BenchmarkId::new(play.name(), clips), &clips, |b, _| {
+                b.iter(|| processor.process_interleaved(black_box(&mut out), 2))
+            });
+        }
+    }
+    group.finish();
+}
+
+/// One callback with 8 stretched clips playing at once, transposed, with
+/// each window, keeping their formants or not.
+fn settings(c: &mut Criterion) {
+    const BLOCK: usize = 256;
+    const CLIPS: usize = 8;
+    let mut group = c.benchmark_group("stretch/settings/8_clips_256_frames");
+    for window in StretchWindow::ALL {
+        for formants in [false, true] {
+            let settings = StretchSettings { window, formants };
+            let edit = clips_edit_with(CLIPS, 1, Play::Stretch, settings, 3.0);
+            let (_session, mut processor) = playing_edit(edit, config(BLOCK, 0));
+            let mut out = vec![0.0; BLOCK * 2];
+            let name = format!("{window:?}{}", if formants { "+formants" } else { "" });
+            group.throughput(Throughput::Elements(CLIPS as u64));
+            group.bench_function(name.to_lowercase(), |b| {
                 b.iter(|| processor.process_interleaved(black_box(&mut out), 2))
             });
         }
@@ -140,5 +185,5 @@ fn rebuild(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, process_block, rebuild);
+criterion_group!(benches, process_block, settings, rebuild);
 criterion_main!(benches);

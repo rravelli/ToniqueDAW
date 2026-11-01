@@ -4,7 +4,7 @@ use tonique_engine::automation::{BeatPoint, CurveShape};
 use tonique_engine::edit::commands::*;
 use tonique_engine::edit::{
     Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, ClipLoop, Edit, EditError, EditSession,
-    Note, Output, Plugin, PluginKind, Send, Track, TrackId, WarpMode,
+    Note, Output, Plugin, PluginKind, Send, StretchSettings, Track, TrackId, WarpMode,
 };
 use tonique_engine::engine::{AudioProcessor, Engine, EngineConfig, render_offline};
 use tonique_engine::nodes::{ClipWarp, Envelope, FilterMode, UTILITY_SILENT_DB};
@@ -623,31 +623,72 @@ fn stretched_clips_play_on_time() {
 }
 
 /// Transposed while stretched, the pitch alone moves: an octave up, a
-/// 1 kHz tone comes out at 2 kHz, as long as before.
+/// 1 kHz tone comes out at 2 kHz, as long as before, its formants kept or
+/// not.
 #[cfg(feature = "signalsmith")]
 #[test]
 fn stretched_clips_transpose_without_changing_speed() {
-    let tone: Vec<f32> = (0..48000)
-        .map(|i| (i as f64 / SR * 1000.0 * std::f64::consts::TAU).sin() as f32 * 0.5)
-        .collect();
-    let (mut s, mut p, tid, cid) =
-        playing_clip(Arc::new(SampleBuffer::new(vec![tone], SR)), None, 3.0);
-    s.perform(SetClipWarp::new(tid, cid, WarpMode::Stretch, 120.0, 12.0))
-        .unwrap();
-    render_offline(&mut p, 9600, 2);
-    let out = render_offline(&mut p, 24000, 2);
-    let left: Vec<f32> = out.iter().step_by(2).copied().collect();
-    let crossings = left
-        .windows(2)
-        .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
-        .count();
-    // Half a second: about 1000 crossings at 2 kHz.
-    assert!((950..1050).contains(&crossings), "{crossings}");
-    render_offline(&mut p, 9600, 2); // to 0.9 s
-    assert!(
-        peak(&render_offline(&mut p, 4800, 2)) > 0.2,
-        "still playing"
-    );
+    for formants in [false, true] {
+        let tone: Vec<f32> = (0..48000)
+            .map(|i| (i as f64 / SR * 1000.0 * std::f64::consts::TAU).sin() as f32 * 0.5)
+            .collect();
+        let (mut s, mut p, tid, cid) =
+            playing_clip(Arc::new(SampleBuffer::new(vec![tone], SR)), None, 3.0);
+        s.perform(SetClipWarp::new(tid, cid, WarpMode::Stretch, 120.0, 12.0))
+            .unwrap();
+        let stretch = StretchSettings {
+            formants,
+            ..Default::default()
+        };
+        s.perform(SetClipStretch::new(tid, cid, stretch)).unwrap();
+        render_offline(&mut p, 9600, 2);
+        let out = render_offline(&mut p, 24000, 2);
+        let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+        let crossings = left
+            .windows(2)
+            .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+            .count();
+        // Half a second: about 1000 crossings at 2 kHz.
+        assert!(
+            (950..1050).contains(&crossings),
+            "formants {formants}: {crossings}"
+        );
+        render_offline(&mut p, 9600, 2); // to 0.9 s
+        assert!(
+            peak(&render_offline(&mut p, 4800, 2)) > 0.2,
+            "formants {formants}: still playing"
+        );
+    }
+}
+
+/// Stretched with any window, a clip plays on time; its window changed as
+/// it plays, it gets a new stretcher, which starts over in the right
+/// place.
+#[cfg(feature = "signalsmith")]
+#[test]
+fn stretched_clips_play_on_time_whatever_their_window() {
+    for window in tonique_engine::edit::StretchWindow::ALL {
+        let (mut s, mut p, tid, cid) = playing_clip(burst(3.0, 1.0), None, 6.0);
+        s.perform(SetClipWarp::new(tid, cid, WarpMode::Stretch, 240.0, 0.0))
+            .unwrap();
+        let stretch = StretchSettings {
+            window,
+            ..Default::default()
+        };
+        s.perform(SetClipStretch::new(tid, cid, stretch)).unwrap();
+        let heard = loudest(&render_offline(&mut p, (3.0 * SR) as usize, 2));
+        assert!((heard - 2.0).abs() < 0.01, "{window:?}: heard at {heard} s");
+
+        s.seek(BeatPos(0.0)).unwrap();
+        let mut out = render_offline(&mut p, (1.0 * SR) as usize, 2);
+        s.undo().unwrap(); // back to the normal window
+        out.extend(render_offline(&mut p, (2.0 * SR) as usize, 2));
+        let heard = loudest(&out);
+        assert!(
+            (heard - 2.0).abs() < 0.01,
+            "{window:?} then normal: heard at {heard} s"
+        );
+    }
 }
 
 /// Rebuilt as it plays, a stretched clip keeps its stretcher (handed over
@@ -751,9 +792,12 @@ fn warps_are_numbers() {
         let set = SetClipWarp::new(tid, cid, WarpMode::Stretch, bpm, transpose);
         assert!(s.perform(set).is_err(), "{bpm} bpm, {transpose}");
     }
-    assert_eq!(WarpMode::Off.play(120.0, f32::NAN, 120.0), ClipWarp::None);
     assert_eq!(
-        WarpMode::Stretch.play(f64::NAN, f32::NAN, 120.0),
+        WarpMode::Off.play(120.0, f32::NAN, StretchSettings::default(), 120.0),
+        ClipWarp::None
+    );
+    assert_eq!(
+        WarpMode::Stretch.play(f64::NAN, f32::NAN, StretchSettings::default(), 120.0),
         ClipWarp::None
     );
 }

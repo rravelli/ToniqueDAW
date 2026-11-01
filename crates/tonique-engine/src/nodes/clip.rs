@@ -6,7 +6,7 @@ use crate::graph::{ContentId, Node, NodeIdentity, NodeProperties, ProcessContext
 use crate::midi::{ActiveNotes, MidiMessage};
 use crate::param::{AtomicParam, Smoother};
 use crate::sample::SampleBuffer;
-use crate::stretch::Stretcher;
+use crate::stretch::{StretchSettings, Stretcher};
 use crate::time::SamplePos;
 
 /// Placement of an audio clip on the timeline, in engine samples.
@@ -72,8 +72,13 @@ pub enum ClipWarp {
     /// pitch moving with it.
     Repitch { speed: f64 },
     /// Stretched: `speed` source samples per output sample, the pitch kept,
-    /// and transposed by `semitones` (by the clip's [`Stretcher`]).
-    Stretch { speed: f64, semitones: f32 },
+    /// and transposed by `semitones` (by the clip's [`Stretcher`], as
+    /// `settings` say).
+    Stretch {
+        speed: f64,
+        semitones: f32,
+        settings: StretchSettings,
+    },
 }
 
 impl ClipWarp {
@@ -86,11 +91,23 @@ impl ClipWarp {
     }
 
     /// For identifying content: its numbers' bits.
-    fn bits(&self) -> (u8, u64, u32) {
+    fn bits(&self) -> (u8, u64, u32, StretchSettings) {
         match *self {
-            Self::None => (0, 0, 0),
-            Self::Repitch { speed } => (1, speed.to_bits(), 0),
-            Self::Stretch { speed, semitones } => (2, speed.to_bits(), semitones.to_bits()),
+            Self::None => (0, 0, 0, StretchSettings::default()),
+            Self::Repitch { speed } => (1, speed.to_bits(), 0, StretchSettings::default()),
+            Self::Stretch {
+                speed,
+                semitones,
+                settings,
+            } => (2, speed.to_bits(), semitones.to_bits(), settings),
+        }
+    }
+
+    /// Stretched, its settings.
+    fn settings(&self) -> Option<StretchSettings> {
+        match *self {
+            Self::Stretch { settings, .. } => Some(settings),
+            _ => None,
         }
     }
 }
@@ -159,10 +176,15 @@ impl AudioClipNode {
     pub fn with_warp(mut self, warp: ClipWarp, stretcher: Option<Box<dyn Stretcher>>) -> Self {
         self.warp = warp;
         self.stretching = None;
-        if let ClipWarp::Stretch { speed, semitones } = warp {
+        if let ClipWarp::Stretch {
+            speed,
+            semitones,
+            settings,
+        } = warp
+        {
             match stretcher {
                 Some(mut stretcher) => {
-                    stretcher.set_transpose(semitones);
+                    stretcher.set_transpose(semitones, settings.formants);
                     self.stretching = Some(Stretching {
                         stretcher,
                         fed: f64::NAN,
@@ -482,17 +504,27 @@ impl Node for AudioClipNode {
     /// A stretched clip keeps its stretcher, fed so far, when the graph is
     /// rebuilt (its gain, another clip... changed): going on where it was
     /// if it plays the same source the same way, from the right place
-    /// otherwise.
+    /// otherwise. With another window, it has a new stretcher, which starts
+    /// over.
     fn take_state_from(&mut self, previous: &mut dyn Node) -> StateTransfer {
         let Some(prev) = previous.as_any_mut().and_then(|a| a.downcast_mut::<Self>()) else {
             return StateTransfer::KeepNew;
         };
         let same_audio = Arc::ptr_eq(&self.source, &prev.source) && self.place == prev.place;
         let same_speed = self.warp.speed() == prev.warp.speed();
-        if let (Some(new), Some(old)) = (&mut self.stretching, &mut prev.stretching) {
+        let same_window =
+            self.warp.settings().map(|s| s.window) == prev.warp.settings().map(|s| s.window);
+        if let (Some(new), Some(old)) = (&mut self.stretching, &mut prev.stretching)
+            && same_window
+        {
             std::mem::swap(&mut new.stretcher, &mut old.stretcher);
-            if let ClipWarp::Stretch { semitones, .. } = self.warp {
-                new.stretcher.set_transpose(semitones);
+            if let ClipWarp::Stretch {
+                semitones,
+                settings,
+                ..
+            } = self.warp
+            {
+                new.stretcher.set_transpose(semitones, settings.formants);
             }
             if same_audio && same_speed && new.input.len() == old.input.len() {
                 std::mem::swap(&mut new.input, &mut old.input);
@@ -671,7 +703,7 @@ mod tests {
         fn output_latency(&self) -> usize {
             64
         }
-        fn set_transpose(&mut self, _: f32) {}
+        fn set_transpose(&mut self, _: f32, _: bool) {}
         fn seek(&mut self, _: &[f32], _: f64) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
@@ -706,6 +738,7 @@ mod tests {
             ClipWarp::Stretch {
                 speed,
                 semitones: 0.0,
+                settings: StretchSettings::default(),
             },
             Some(Box::new(Counting(seeks.clone()))),
         )

@@ -174,9 +174,10 @@ impl Builder<'_> {
                     match clip.warp(&self.edit.tempo).unwrap_or(ClipWarp::None) {
                         // Stretched: its stretcher, fed so far, kept across
                         // rebuilds, so its own identity.
-                        warp @ ClipWarp::Stretch { .. } => {
+                        warp @ ClipWarp::Stretch { settings, .. } => {
+                            let stretcher = self.stretchers.get(clip.id.0, settings.window);
                             let node = node
-                                .with_warp(warp, self.stretchers.get(clip.id.0))
+                                .with_warp(warp, stretcher)
                                 .with_identity(NodeIdentity::of(&("audio-clip", clip.id)));
                             self.d.add(node, &[])
                         }

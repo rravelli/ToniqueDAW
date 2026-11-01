@@ -11,6 +11,7 @@ mod undo;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub use crate::stretch::{StretchSettings, StretchWindow};
 pub use session::EditSession;
 pub use undo::{Effects, UndoManager};
 
@@ -223,6 +224,8 @@ pub enum ClipContent {
         /// In semitones, fractions being cents: stretched, the pitch alone
         /// moves; otherwise resampled, its speed too.
         transpose: f32,
+        /// How it's stretched, when it is.
+        stretch: StretchSettings,
     },
     Midi {
         notes: Vec<Note>,
@@ -252,8 +255,14 @@ pub const MAX_TRANSPOSE: f32 = 24.0;
 
 impl WarpMode {
     /// How a clip whose source is at `source_bpm`, transposed by
-    /// `transpose`, plays at `bpm`.
-    pub fn play(self, source_bpm: f64, transpose: f32, bpm: f64) -> ClipWarp {
+    /// `transpose`, plays at `bpm`, stretched as `settings` say.
+    pub fn play(
+        self,
+        source_bpm: f64,
+        transpose: f32,
+        settings: StretchSettings,
+        bpm: f64,
+    ) -> ClipWarp {
         // Clamping lets NaN through: anything not a number plays as is.
         let transpose = if transpose.is_finite() {
             transpose.clamp(-MAX_TRANSPOSE, MAX_TRANSPOSE)
@@ -278,6 +287,7 @@ impl WarpMode {
                     ClipWarp::Stretch {
                         speed,
                         semitones: transpose,
+                        settings,
                     }
                 }
             }
@@ -338,6 +348,7 @@ impl Clip {
                 warp: WarpMode::Off,
                 source_bpm: edit.tempo.bpm_at(BeatPos::ZERO),
                 transpose: 0.0,
+                stretch: StretchSettings::default(),
             },
         }
     }
@@ -354,6 +365,7 @@ impl Clip {
             warp,
             source_bpm,
             transpose,
+            stretch,
             ..
         } = &self.content
         else {
@@ -365,7 +377,7 @@ impl Clip {
         } else {
             tempo.bpm_at(self.start)
         };
-        Some(warp.play(*source_bpm, *transpose, bpm))
+        Some(warp.play(*source_bpm, *transpose, *stretch, bpm))
     }
 
     /// The audio clip's gain, if it is one.
