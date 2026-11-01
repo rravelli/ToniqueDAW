@@ -33,8 +33,8 @@ pub(super) const CELL_GAP: f32 = 4.;
 /// Above each section of the inspector.
 const SECTION_GAP: f32 = 4.;
 const SECTION_TITLE_HEIGHT: f32 = 14.;
-/// A section's on/off switch, on its title row.
-const SWITCH_WIDTH: f32 = 28.;
+/// Either side of a section's title, as a toggle.
+const TOGGLE_PADDING: f32 = 5.;
 /// The inspector's values.
 pub(super) const FIELD_HEIGHT: f32 = 18.;
 /// The column of panel toggles, left of the panels.
@@ -289,7 +289,7 @@ fn clip_panel(
 
     // Off, it shows where it would be, greyed out.
     let looped = shown.active_loop();
-    if switch_section(ui, "Loop", looped.is_some()) {
+    if toggle_section(ui, "Loop", looped.is_some(), 0.).1 {
         let mut toggled = shown.clone();
         match looped {
             Some(_) => toggled.set_loop(None, bpm),
@@ -335,19 +335,39 @@ fn clip_panel(
     });
 }
 
-/// A section's title with an On/Off switch on its row. Returns whether the
-/// switch was clicked.
-pub(super) fn switch_section(ui: &mut Ui, title: &str, on: bool) -> bool {
-    let header = section(ui, title, SWITCH_WIDTH + CELL_GAP);
-    let switch = Rect::from_min_max(
-        pos2(header.right() - SWITCH_WIDTH, header.top()),
-        header.max,
-    );
-    let toggle = FlatButton::new(if on { "On" } else { "Off" })
-        .size(switch.size())
-        .font(FontId::proportional(font_size::SMALL))
+/// A section switched on and off by its title, a toggle as tall as a
+/// field, with a rule after it up to `reserve` from the right (for
+/// something on its row). Returns its row and whether the toggle was
+/// clicked.
+pub(super) fn toggle_section(ui: &mut Ui, title: &str, on: bool, reserve: f32) -> (Rect, bool) {
+    ui.add_space(SECTION_GAP);
+    let theme = ui.app_theme();
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(ui.available_width(), FIELD_HEIGHT), Sense::hover());
+    let title = title.to_uppercase();
+    let font = semibold(font_size::SMALL);
+    let width = ui
+        .painter()
+        .layout_no_wrap(title.clone(), font.clone(), theme.text)
+        .size()
+        .x
+        + 2. * TOGGLE_PADDING;
+    let at = Rect::from_min_size(rect.min, vec2(width, FIELD_HEIGHT));
+    let toggle = FlatButton::new(title)
+        .size(at.size())
+        .font(font)
         .selected(on);
-    ui.put(switch, toggle).clicked()
+    let clicked = ui.put(at, toggle).clicked();
+    let rule_end = rect.right() - reserve;
+    if at.right() + 6. < rule_end {
+        ui.painter().hline(
+            at.right() + 6.0..=rule_end,
+            rect.center().y,
+            Stroke::new(1., theme.separator),
+        );
+    }
+    ui.add_space(2.);
+    (rect, clicked)
 }
 
 /// A section's title, small and muted, with a rule after it up to

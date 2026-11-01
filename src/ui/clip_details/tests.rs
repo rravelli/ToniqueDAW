@@ -197,6 +197,35 @@ impl Harness {
             .unwrap_or_else(|| panic!("{text:?} isn't shown"))
     }
 
+    /// A click, in one frame: frames are a second apart, too long for one.
+    fn click(&mut self, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        self.frame(vec![
+            egui::Event::PointerMoved(at),
+            button(true),
+            button(false),
+        ]);
+        self.frame(Vec::new());
+    }
+
+    /// Two clicks in a row, in one frame.
+    fn double_click(&mut self, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let clicks = [true, false, true, false].map(button);
+        self.frame([vec![egui::Event::PointerMoved(at)], clicks.to_vec()].concat());
+        self.frame(Vec::new());
+    }
+
     fn drag(&mut self, from: egui::Pos2, to: egui::Pos2) {
         let button = |pos, pressed| egui::Event::PointerButton {
             pos,
@@ -331,7 +360,7 @@ fn the_clip_and_audio_panels_line_up() {
         ("Start", "Gain"),
         ("Length", "Transpose"),
         ("LOOP", "WARP"),
-        ("Position", "BPM"),
+        ("Position", "Window"),
     ] {
         assert_eq!(h.text(clip).top(), h.text(audio).top(), "{clip} / {audio}");
     }
@@ -347,4 +376,31 @@ fn detuning_to_the_end_keeps_the_transposition() {
     // Well past the field's end, at once.
     h.drag(from, egui::pos2(left + 1000., from.y));
     assert_eq!((h.clip().transpose, h.clip().detune), (0, MAX_DETUNE));
+}
+
+/// Double-clicked, a transposition is back to none, one undo step.
+#[test]
+fn double_clicking_the_transposition_resets_it() {
+    let mut h = Harness::new();
+    let mut clip = h.clip();
+    clip.transpose = 5;
+    h.state.commit_resize_clip(clip);
+    h.frame(Vec::new());
+    let at = h.text("+5 st").center();
+    h.double_click(at);
+    assert_eq!(h.clip().transpose, 0);
+    h.state.undo();
+    assert_eq!(h.clip().transpose, 5);
+}
+
+/// The warp's title switches it off and on again.
+#[test]
+fn the_warp_title_switches_it() {
+    let mut h = Harness::new();
+    assert_eq!(h.clip().warp, WarpMode::Spectral);
+    let title = h.text("WARP").center();
+    h.click(title);
+    assert_eq!(h.clip().warp, WarpMode::Off);
+    h.click(title);
+    assert_eq!(h.clip().warp, WarpMode::Spectral);
 }

@@ -1,6 +1,7 @@
-//! A gain or a pan as a horizontal bar, as in track headers: filled in a
-//! colour from the left (gain) or from the centre (pan) to show the level,
-//! the value printed on top. Dragging moves it from where it was grabbed
+//! A gain, a pan or a number of steps (a transposition) as a horizontal
+//! bar, as in track headers: filled in a colour from the left (gain) or
+//! from the centre (pan, steps) to show the level, the value printed on
+//! top. Dragging moves it from where it was grabbed
 //! (Shift for fine steps), double-clicking resets it.
 
 use crate::{
@@ -14,7 +15,7 @@ use std::ops::RangeInclusive;
 
 /// How much of the colour a field's level has, mixed into its background:
 /// enough to read as a level, little enough for the value on it to read.
-pub const FIELD_LEVEL: f32 = 0.45;
+const FIELD_LEVEL: f32 = 0.45;
 /// Shift-dragging moves this much slower.
 const FINE_DRAG: f32 = 0.1;
 const PAN_RANGE: RangeInclusive<f32> = -1.0..=1.0;
@@ -25,9 +26,12 @@ enum Scale {
     Gain(RangeInclusive<f32>),
     /// -1 (left) to 1 (right), snapping to the centre.
     Pan,
+    /// Whole steps from `-limit` to `limit`, printed with `unit`.
+    Steps { limit: f32, unit: &'static str },
 }
 
-/// What the user did, in the parameter's own values (linear gain, or pan).
+/// What the user did, in the parameter's own values (linear gain, pan, or
+/// steps).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SliderEdit {
     None,
@@ -38,7 +42,7 @@ pub enum SliderEdit {
         start: f32,
         value: f32,
     },
-    /// Double-clicked: back to the default (unity gain, centre), from
+    /// Double-clicked: back to the default (unity gain, centre, none), from
     /// `from`.
     Reset {
         from: f32,
@@ -67,6 +71,12 @@ impl ParamSlider {
     /// For a `pan` from -1 (left) to 1 (right).
     pub fn pan(pan: f32) -> Self {
         Self::new(Scale::Pan, pan)
+    }
+
+    /// For `value` whole steps from `-limit` to `limit`, printed with
+    /// `unit` (`+7 st`).
+    pub fn steps(value: f32, limit: f32, unit: &'static str) -> Self {
+        Self::new(Scale::Steps { limit, unit }, value)
     }
 
     fn new(scale: Scale, value: f32) -> Self {
@@ -153,15 +163,18 @@ impl ParamSlider {
                     pos2(rect.lerp_inside(vec2(t.clamp(0., 1.), 0.)).x, rect.max.y),
                 )
             }
-            Scale::Pan => {
+            Scale::Pan | Scale::Steps { .. } => {
                 let centre = rect.center().x;
-                let x = rect.lerp_inside(vec2((shown + 1.) / 2., 0.)).x;
+                let t = (shown - range.start()) / (range.end() - range.start());
+                let x = rect.lerp_inside(vec2(t, 0.)).x;
                 Rect::from_x_y_ranges(centre.min(x)..=centre.max(x), rect.y_range())
             }
         };
         let text = match self.scale {
             Scale::Gain(_) => format!("{}{}", format_db(self.param_value(shown)), self.suffix),
             Scale::Pan => format_pan(shown),
+            // `+ 0.` for no `-0`.
+            Scale::Steps { unit, .. } => format!("{:+.0} {unit}", self.param_value(shown) + 0.),
         };
         let theme = ui.app_theme();
         let painter = ui.painter();
@@ -215,13 +228,14 @@ impl ParamSlider {
         match &self.scale {
             Scale::Gain(db) => db.clone(),
             Scale::Pan => PAN_RANGE,
+            Scale::Steps { limit, .. } => -limit..=*limit,
         }
     }
 
     fn default(&self) -> f32 {
         match self.scale {
             Scale::Gain(_) => 1.,
-            Scale::Pan => 0.,
+            Scale::Pan | Scale::Steps { .. } => 0.,
         }
     }
 
@@ -231,6 +245,7 @@ impl ParamSlider {
             Scale::Gain(db) if value > 0. => (20. * value.log10()).clamp(*db.start(), *db.end()),
             Scale::Gain(db) => *db.start(),
             Scale::Pan => value.clamp(-1., 1.),
+            Scale::Steps { limit, .. } => value.clamp(-limit, *limit),
         }
     }
 
@@ -240,6 +255,7 @@ impl ParamSlider {
             Scale::Gain(db) if value <= *db.start() => 0.,
             Scale::Gain(_) => 10f32.powf(value / 20.),
             Scale::Pan => snap_to_centre(value),
+            Scale::Steps { .. } => value.round(),
         }
     }
 }
@@ -256,7 +272,7 @@ pub fn format_db(gain: f32) -> String {
 /// A slider drag: the value follows the pointer's distance from where it
 /// was anchored, so going past an end and back lands where it left.
 #[derive(Debug, Clone, Copy)]
-pub struct Drag {
+struct Drag {
     /// The parameter's value when the drag started, for undo.
     start: f32,
     anchor_x: f32,
@@ -266,7 +282,7 @@ pub struct Drag {
     fine: bool,
 }
 
-pub enum DragStep {
+enum DragStep {
     None,
     /// Dragged to this slider value.
     Moved(f32),
@@ -278,7 +294,7 @@ pub enum DragStep {
 
 /// Drive `drag` from `response`. `value` is the slider's current value in
 /// `range`, `param` the parameter's (they differ for gain: dB vs linear).
-pub fn anchored_drag(
+fn anchored_drag(
     ui: &Ui,
     response: &Response,
     drag: &mut Option<Drag>,
