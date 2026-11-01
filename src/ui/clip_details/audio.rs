@@ -7,7 +7,7 @@ use tonique_engine::edit::{MAX_TRANSPOSE, StretchSettings, StretchWindow, WarpMo
 
 use crate::{
     core::{
-        clip::{AudioClip, MAX_DETUNE},
+        clip::{AudioClip, MAX_DETUNE, MIN_DETUNE, carried},
         state::{ClipParam, ProjectState},
     },
     ui::{
@@ -55,7 +55,7 @@ pub(super) fn audio_panel(
     // As on tracks: a level in the clip's colour, reset by a double-click;
     // heard as it moves, one undo step once released. The pitch's also
     // step by the arrow keys once clicked, an octave (or 10 cents) with
-    // Shift.
+    // Shift; the detune going on into the next semitones.
     let slider = |value: ParamSlider, ui: &mut Ui| {
         let size = vec2(ui.available_width(), FIELD_HEIGHT);
         value.field().color(color).size(size).show(ui).1
@@ -74,13 +74,13 @@ pub(super) fn audio_panel(
     ui.add_space(CELL_GAP);
     let (transpose, detune) = ui.columns(2, |cells| {
         cell_label(&mut cells[0], "Transpose");
-        let transpose = ParamSlider::steps(shown.transpose as f32, MAX_TRANSPOSE, OCTAVE, "st");
+        let range = -MAX_TRANSPOSE..=MAX_TRANSPOSE;
+        let transpose = ParamSlider::steps(shown.transpose as f32, range, OCTAVE, "st");
         let transpose = slider(transpose, &mut cells[0]);
         cell_label(&mut cells[1], "Detune");
-        let detune = slider(
-            ParamSlider::steps(shown.detune, MAX_DETUNE, DETUNE_BIG_STEP, "ct"),
-            &mut cells[1],
-        );
+        let range = MIN_DETUNE..=MAX_DETUNE;
+        let detune = ParamSlider::steps(shown.detune, range, DETUNE_BIG_STEP, "ct").carry();
+        let detune = slider(detune, &mut cells[1]);
         (transpose, detune)
     });
     if let Some((transpose, done)) = pitch_edit(transpose) {
@@ -88,9 +88,11 @@ pub(super) fn audio_panel(
         edited.set_warp(shown.warp, shown.bpm, transpose as i32, shown.detune, bpm);
         *live = Some((edited, done));
     }
+    // Stepped past its range, it carries over into the transposition.
     if let Some((detune, done)) = pitch_edit(detune) {
+        let (transpose, detune) = carried(shown.transpose, detune);
         let mut edited = shown.clone();
-        edited.set_warp(shown.warp, shown.bpm, shown.transpose, detune, bpm);
+        edited.set_warp(shown.warp, shown.bpm, transpose, detune, bpm);
         *live = Some((edited, done));
     }
 

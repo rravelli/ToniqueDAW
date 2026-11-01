@@ -404,3 +404,27 @@ fn the_warp_title_switches_it() {
     h.click(title);
     assert_eq!(h.clip().warp, WarpMode::Spectral);
 }
+
+/// Stepped by the arrow keys past its range, the detune carries over into
+/// the transposition, a cent at a time.
+#[test]
+fn detune_steps_carry_over_into_the_transposition() {
+    let mut h = Harness::new();
+    let mut clip = h.clip();
+    clip.detune = MAX_DETUNE;
+    h.state.commit_resize_clip(clip);
+    h.frame(Vec::new());
+    let at = h.text("+49 ct").center();
+    h.click(at);
+    let key = |key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    h.frame(vec![key(egui::Key::ArrowUp)]);
+    assert_eq!((h.clip().transpose, h.clip().detune), (1, -50.));
+    h.frame(vec![key(egui::Key::ArrowDown)]);
+    assert_eq!((h.clip().transpose, h.clip().detune), (0, 49.));
+}

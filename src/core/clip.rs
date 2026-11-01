@@ -11,16 +11,28 @@ use tonique_engine::{
 const MAX_SEGMENTS: usize = 4096;
 /// Shortest a clip, or a loop, can be, in beats.
 pub const MIN_LENGTH: f64 = 1. / 16.;
-/// Furthest a clip is detuned either way, in cents: short of half a
-/// semitone, so a pitch splits into semitones and cents one way only (see
-/// [`split_pitch`]).
+/// How far a clip is detuned, in cents: half a semitone down to just short
+/// of half up, so a pitch splits into semitones and cents one way only
+/// (see [`split_pitch`]).
+pub const MIN_DETUNE: f32 = -50.;
 pub const MAX_DETUNE: f32 = 49.;
 
 /// A pitch in semitones (fractions being cents) as whole semitones and
-/// cents: the nearest semitone, and what's left.
+/// cents from [`MIN_DETUNE`] to [`MAX_DETUNE`]: the nearest semitone (the
+/// one above, half way), and what's left.
 pub fn split_pitch(pitch: f32) -> (i32, f32) {
-    let semitones = pitch.round();
+    let semitones = (pitch + 0.5).floor();
     (semitones as i32, (pitch - semitones) * 100.)
+}
+
+/// `semitones` and `cents`, the cents past the detune's range carried over
+/// into semitones (`0` and `+50` are `+1` and `-50`), no further than
+/// [`MAX_TRANSPOSE`] either way. Exact for whole cents.
+pub fn carried(semitones: i32, cents: f32) -> (i32, f32) {
+    let limit = MAX_TRANSPOSE * 100.;
+    let cents = (semitones as f32 * 100. + cents).clamp(-limit, limit);
+    let semitones = ((cents - MIN_DETUNE) / 100.).floor();
+    (semitones as i32, cents - semitones * 100.)
 }
 
 /// A clip representing an audio file placed on a track: from `offset` in
@@ -54,7 +66,7 @@ pub struct AudioClip {
     /// In whole semitones: warped, the pitch alone moves; unwarped, the
     /// speed too.
     pub transpose: i32,
-    /// Fine tuning, in cents (up to [`MAX_DETUNE`] either way), as
+    /// Fine tuning, in cents ([`MIN_DETUNE`] to [`MAX_DETUNE`]), as
     /// `transpose`.
     pub detune: f32,
     /// How it's stretched, warped.
@@ -152,7 +164,7 @@ impl AudioClip {
             self.bpm = file_bpm;
         }
         self.transpose = transpose.clamp(-limit, limit);
-        self.detune = detune.clamp(-MAX_DETUNE, MAX_DETUNE);
+        self.detune = detune.clamp(MIN_DETUNE, MAX_DETUNE);
         self.length = self
             .file_beats(played, bpm)
             .max(MIN_LENGTH)
@@ -377,6 +389,27 @@ impl Debug for AudioClip {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pitch splits one way only, half way up being the semitone above.
+    #[test]
+    fn pitches_split_into_semitones_and_cents() {
+        assert_eq!(split_pitch(0.49), (0, 49.));
+        assert_eq!(split_pitch(0.5), (1, -50.));
+        assert_eq!(split_pitch(-0.5), (0, -50.));
+        assert_eq!(split_pitch(-2.25), (-2, -25.));
+    }
+
+    /// Cents past the detune's range carry over into semitones, a cent at a
+    /// time, as far as the transposition goes.
+    #[test]
+    fn cents_carry_over_into_semitones() {
+        assert_eq!(carried(0, 49.), (0, 49.));
+        assert_eq!(carried(0, 50.), (1, -50.));
+        assert_eq!(carried(1, -51.), (0, 49.));
+        assert_eq!(carried(3, 120.), (4, 20.));
+        assert_eq!(carried(24, 10.), (24, 0.));
+        assert_eq!(carried(-24, -60.), (-24, 0.));
+    }
     use tonique_engine::edit::WarpMode;
 
     /// 120 bpm: two beats a second.

@@ -11,7 +11,7 @@ use crate::{
 };
 use egui::{
     Align2, Color32, CursorIcon, EventFilter, FontId, Key, Modifiers, Rect, Response, Sense,
-    StrokeKind, Ui, Vec2, pos2, vec2,
+    Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
 };
 use std::ops::RangeInclusive;
 
@@ -28,10 +28,11 @@ enum Scale {
     Gain(RangeInclusive<f32>),
     /// -1 (left) to 1 (right), snapping to the centre.
     Pan,
-    /// Whole steps from `-limit` to `limit`, printed with `unit`; `big`
-    /// at once with Shift and an arrow key.
+    /// Whole steps from `min` to `max`, printed with `unit`; `big` at once
+    /// with Shift and an arrow key.
     Steps {
-        limit: f32,
+        min: f32,
+        max: f32,
         big: f32,
         unit: &'static str,
     },
@@ -67,6 +68,8 @@ pub struct ParamSlider {
     suffix: &'static str,
     /// Drawn as a field like egui's (see [`Self::field`]).
     field: bool,
+    /// Steps by the arrow keys go past its range (see [`Self::carry`]).
+    carry: bool,
 }
 
 impl ParamSlider {
@@ -80,11 +83,27 @@ impl ParamSlider {
         Self::new(Scale::Pan, pan)
     }
 
-    /// For `value` whole steps from `-limit` to `limit`, printed with
-    /// `unit` (`+7 st`). Clicked, the arrow keys move it a step, or `big`
-    /// with Shift.
-    pub fn steps(value: f32, limit: f32, big: f32, unit: &'static str) -> Self {
-        Self::new(Scale::Steps { limit, big, unit }, value)
+    /// For `value` whole steps over `range`, printed with `unit` (`+7 st`).
+    /// Clicked, the arrow keys move it a step, or `big` with Shift.
+    pub fn steps(value: f32, range: RangeInclusive<f32>, big: f32, unit: &'static str) -> Self {
+        let (min, max) = range.into_inner();
+        Self::new(
+            Scale::Steps {
+                min,
+                max,
+                big,
+                unit,
+            },
+            value,
+        )
+    }
+
+    /// Let the arrow keys step past the range, for the caller to carry what
+    /// goes past over (cents into semitones): their [`SliderEdit::Set`]
+    /// goes as far as they do.
+    pub fn carry(mut self) -> Self {
+        self.carry = true;
+        self
     }
 
     fn new(scale: Scale, value: f32) -> Self {
@@ -95,6 +114,7 @@ impl ParamSlider {
             size: vec2(31., 20.),
             suffix: "",
             field: false,
+            carry: false,
         }
     }
 
@@ -166,7 +186,7 @@ impl ParamSlider {
             && let Some(to) = self.keyed(ui, &response, big)
             && drag.is_none()
         {
-            shown = to;
+            shown = self.slider_value(to);
             edit = SliderEdit::Set {
                 from: self.value,
                 to,
@@ -182,11 +202,14 @@ impl ParamSlider {
                     pos2(rect.lerp_inside(vec2(t.clamp(0., 1.), 0.)).x, rect.max.y),
                 )
             }
+            // From zero, either way.
             Scale::Pan | Scale::Steps { .. } => {
-                let centre = rect.center().x;
-                let t = (shown - range.start()) / (range.end() - range.start());
-                let x = rect.lerp_inside(vec2(t, 0.)).x;
-                Rect::from_x_y_ranges(centre.min(x)..=centre.max(x), rect.y_range())
+                let at = |v: f32| {
+                    let t = (v - range.start()) / (range.end() - range.start());
+                    rect.lerp_inside(vec2(t, 0.)).x
+                };
+                let (zero, x) = (at(0.), at(shown));
+                Rect::from_x_y_ranges(zero.min(x)..=zero.max(x), rect.y_range())
             }
         };
         let text = match self.scale {
@@ -204,9 +227,9 @@ impl ParamSlider {
             painter.rect_filled(rect, radius, visuals.bg_fill);
             let level = visuals.bg_fill.lerp_to_gamma(self.color, FIELD_LEVEL);
             painter.rect_filled(fill.intersect(rect), radius, level);
-            // Taking the arrow keys: outlined as focused fields are.
+            // Taking the arrow keys: outlined in the accent.
             let stroke = if response.has_focus() {
-                ui.visuals().selection.stroke
+                Stroke::new(1., theme.accent)
             } else {
                 visuals.bg_stroke
             };
@@ -288,7 +311,12 @@ impl ParamSlider {
             steps
         });
         let range = self.range();
-        let to = (self.value + steps).clamp(*range.start(), *range.end());
+        let to = self.value + steps;
+        let to = if self.carry {
+            to
+        } else {
+            to.clamp(*range.start(), *range.end())
+        };
         (to != self.value).then_some(to)
     }
 
@@ -296,7 +324,7 @@ impl ParamSlider {
         match &self.scale {
             Scale::Gain(db) => db.clone(),
             Scale::Pan => PAN_RANGE,
-            Scale::Steps { limit, .. } => -limit..=*limit,
+            Scale::Steps { min, max, .. } => *min..=*max,
         }
     }
 
@@ -313,7 +341,7 @@ impl ParamSlider {
             Scale::Gain(db) if value > 0. => (20. * value.log10()).clamp(*db.start(), *db.end()),
             Scale::Gain(db) => *db.start(),
             Scale::Pan => value.clamp(-1., 1.),
-            Scale::Steps { limit, .. } => value.clamp(-limit, *limit),
+            Scale::Steps { min, max, .. } => value.clamp(*min, *max),
         }
     }
 
@@ -580,7 +608,7 @@ mod tests {
             button(at, true),
             button(at, false),
         ];
-        let steps = |v| ParamSlider::steps(v, 24., 12., "st");
+        let steps = |v| ParamSlider::steps(v, -24.0..=24.0, 12., "st");
         let mut value = 0.;
         let edits = run(
             steps,
