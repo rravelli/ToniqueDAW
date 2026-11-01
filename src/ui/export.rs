@@ -1048,7 +1048,10 @@ fn arrangement_preview(
                 let pixels_per_beat = inner.width() / shown as f32;
                 let file_width = (seconds * bpm as f64 / 60.) as f32 * pixels_per_beat;
                 let clip_x = |beats: f64| clip_rect.left() + beats as f32 * pixels_per_beat;
-                for segment in clip.segments(bpm) {
+                // Only the passes in the overview: a short loop makes many.
+                let beats = |x: f32| ((x - clip_rect.left()) / pixels_per_beat) as f64;
+                let in_view = beats(inner.left()).max(0.)..beats(inner.right());
+                for segment in clip.segments(in_view, bpm) {
                     let (left, right) = (clip_x(segment.start), clip_x(segment.end));
                     let file_left = left - (segment.file_start / seconds) as f32 * file_width;
                     let file_rect =
