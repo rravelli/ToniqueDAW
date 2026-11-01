@@ -182,30 +182,67 @@ impl AudioClipNode {
         self.identity = Some(id);
         self
     }
+}
 
+impl ClipPlacement {
+    /// The fades' gain at `rel` from the clip's start.
     #[inline]
     fn fade(&self, rel: SamplePos) -> f32 {
-        let p = &self.place;
         let mut g = 1.0;
-        if p.fade_in > 0 && rel < p.fade_in {
-            g *= rel as f32 / p.fade_in as f32;
+        if self.fade_in > 0 && rel < self.fade_in {
+            g *= rel as f32 / self.fade_in as f32;
         }
-        let to_end = p.length - rel;
-        if p.fade_out > 0 && to_end < p.fade_out {
-            g *= to_end as f32 / p.fade_out as f32;
+        let to_end = self.length - rel;
+        if self.fade_out > 0 && to_end < self.fade_out {
+            g *= to_end as f32 / self.fade_out as f32;
         }
         g
     }
+}
 
-    /// The source's frame at `at` (going on past a loop's end, crossfaded
-    /// at its seam); silence outside the source.
-    #[inline]
-    fn frame(&self, at: SamplePos) -> (f32, f32) {
-        let source = &*self.source;
-        frame(source, self.place.looped, at)
+/// A source's channels and loop, looked up once a block rather than at
+/// each frame.
+#[derive(Clone, Copy)]
+struct SourceView<'a> {
+    left: &'a [f32],
+    right: &'a [f32],
+    len: SamplePos,
+    looped: Option<LoopPlacement>,
+}
+
+impl<'a> SourceView<'a> {
+    fn new(source: &'a SampleBuffer, looped: Option<LoopPlacement>) -> Self {
+        Self {
+            left: source.channel(0),
+            right: source.channel(1.min(source.num_channels() - 1)),
+            len: source.len() as SamplePos,
+            looped,
+        }
     }
 
-    /// The source at `at` and a fraction, between frames: a cubic through
+    /// The frame at `at` (going on past a loop's end, crossfaded at its
+    /// seam); silence outside the source.
+    #[inline]
+    fn frame(&self, at: SamplePos) -> (f32, f32) {
+        let (si, blend) = match self.looped {
+            Some(looped) => looped.read(at),
+            None => (at, None),
+        };
+        if !(0..self.len).contains(&si) {
+            return (0.0, 0.0);
+        }
+        let (mut l, mut r) = (self.left[si as usize], self.right[si as usize]);
+        if let Some((from, mix)) = blend
+            && (0..self.len).contains(&from)
+        {
+            let from = from as usize;
+            l += (self.left[from] - l) * mix;
+            r += (self.right[from] - r) * mix;
+        }
+        (l, r)
+    }
+
+    /// The frame at `at` and a fraction, between frames: a cubic through
     /// the four around it.
     #[inline]
     fn frame_between(&self, at: f64) -> (f32, f32) {
@@ -218,32 +255,6 @@ impl AudioClipNode {
             hermite(a.1, b.1, c.1, d.1, f),
         )
     }
-}
-
-/// `source`'s frame at `at` with its loop, as [`AudioClipNode::frame`].
-#[inline]
-fn frame(source: &SampleBuffer, looped: Option<LoopPlacement>, at: SamplePos) -> (f32, f32) {
-    let len = source.len() as SamplePos;
-    let (left, right) = (
-        source.channel(0),
-        source.channel(1.min(source.num_channels() - 1)),
-    );
-    let (si, blend) = match looped {
-        Some(looped) => looped.read(at),
-        None => (at, None),
-    };
-    if !(0..len).contains(&si) {
-        return (0.0, 0.0);
-    }
-    let (mut l, mut r) = (left[si as usize], right[si as usize]);
-    if let Some((from, mix)) = blend
-        && (0..len).contains(&from)
-    {
-        let from = from as usize;
-        l += (left[from] - l) * mix;
-        r += (right[from] - r) * mix;
-    }
-    (l, r)
 }
 
 /// Catmull-Rom between `b` and `c` (at `t` from 0 to 1), `a` before and `d`
@@ -265,14 +276,42 @@ fn fill(
     from: SamplePos,
     frames: usize,
 ) {
+    let source = SourceView::new(source, looped);
     for (k, pair) in out[..frames * 2]
         .as_chunks_mut::<2>()
         .0
         .iter_mut()
         .enumerate()
     {
-        let (l, r) = frame(source, looped, from + k as SamplePos);
+        let (l, r) = source.frame(from + k as SamplePos);
         *pair = [l, r];
+    }
+}
+
+/// Where a clip node writes a block: through its gain, pan and fades.
+struct Output<'a> {
+    left: &'a mut [f32],
+    right: &'a mut [f32],
+    block_start: SamplePos,
+    place: &'a ClipPlacement,
+    gain_s: &'a mut Smoother,
+    pan_s: &'a mut Smoother,
+}
+
+impl Output<'_> {
+    /// Write the clip from `a` to `b` (timeline positions in the block),
+    /// each frame as `frame` gives it.
+    #[inline(always)]
+    fn write(&mut self, a: SamplePos, b: SamplePos, frame: impl Fn(SamplePos) -> (f32, f32)) {
+        for t in a..b {
+            let gain = self.gain_s.next();
+            let (gain_l, gain_r) = balance(self.pan_s.next());
+            let (l, r) = frame(t);
+            let g = gain * self.place.fade(t - self.place.start);
+            let at = (t - self.block_start) as usize;
+            self.left[at] = l * g * gain_l;
+            self.right[at] = r * g * gain_r;
+        }
     }
 }
 
@@ -416,23 +455,27 @@ impl Node for AudioClipNode {
             st.next = Some(b);
         }
 
+        // One loop per way of playing, so none decides it at each frame.
         let (left, right) = ctx.audio_out.channel_pair_mut(0, 1);
-        for t in a..b {
-            let gain = self.gain_s.next();
-            let (gain_l, gain_r) = balance(self.pan_s.next());
-            let rel = t - p.start;
-            let (l, r) = match (&self.stretching, self.warp) {
-                (Some(st), _) => {
-                    let k = (t - a) as usize * 2;
-                    (st.output[k], st.output[k + 1])
-                }
-                (None, ClipWarp::None) => self.frame(rel + p.source_offset),
-                (None, _) => self.frame_between(p.source_offset as f64 + rel as f64 * speed),
-            };
-            let g = gain * self.fade(rel);
-            let at = (t - block_start) as usize;
-            left[at] = l * g * gain_l;
-            right[at] = r * g * gain_r;
+        let mut out = Output {
+            left,
+            right,
+            block_start,
+            place: &p,
+            gain_s: &mut self.gain_s,
+            pan_s: &mut self.pan_s,
+        };
+        let source = SourceView::new(&self.source, p.looped);
+        let offset = p.source_offset;
+        match (&self.stretching, self.warp) {
+            (Some(st), _) => out.write(a, b, |t| {
+                let k = (t - a) as usize * 2;
+                (st.output[k], st.output[k + 1])
+            }),
+            (None, ClipWarp::None) => out.write(a, b, |t| source.frame(t - p.start + offset)),
+            (None, _) => out.write(a, b, |t| {
+                source.frame_between(offset as f64 + (t - p.start) as f64 * speed)
+            }),
         }
     }
 
