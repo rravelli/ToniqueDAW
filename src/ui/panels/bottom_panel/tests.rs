@@ -390,7 +390,8 @@ fn removed_effects_editors_are_dropped() {
     assert_eq!(panel.rack.len(), 1);
 }
 
-/// The rename shortcut types a name in the selected effect's header;
+/// The rename shortcut types a name in the selected effect's header, over
+/// the old one;
 /// Enter keeps it. Double-click the header to collapse an effect to a
 /// strip, and the strip to expand it.
 #[test]
@@ -418,7 +419,6 @@ fn effects_are_renamed_and_collapsed_in_place() {
         &mut panel,
         &mut state,
         vec![
-            key(egui::Key::A, egui::Modifiers::COMMAND),
             egui::Event::Text("Lows".into()),
             key(egui::Key::Enter, Default::default()),
         ],
@@ -513,4 +513,41 @@ fn shown_effects_meter_their_output() {
         "filter: its spectrum's input, and its meter"
     );
     assert_eq!(effects[1].plugin.tap.take_block(1), [false, false]);
+}
+
+/// Dragging an effect's header picks that effect up, for the track list and
+/// the lanes to take.
+#[test]
+fn dragged_effects_say_where_they_come_from() {
+    let (ctx, mut panel, mut state, track) = setup();
+    run(&ctx, &mut panel, &mut state, vec![], &[]);
+    let header = panel.rects[0].left_top() + vec2(100., 10.);
+    let plugin = state.effects(&track)[0].plugin.id;
+    let press = egui::Event::PointerButton {
+        pos: header,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    };
+    run(
+        &ctx,
+        &mut panel,
+        &mut state,
+        vec![egui::Event::PointerMoved(header)],
+        &[],
+    );
+    run(&ctx, &mut panel, &mut state, vec![press], &[]);
+    let away = header + vec2(30., -30.);
+    run(
+        &ctx,
+        &mut panel,
+        &mut state,
+        vec![egui::Event::PointerMoved(away)],
+        &[],
+    );
+    let payload = egui::DragAndDrop::payload::<DragPayload>(&ctx).expect("picked up");
+    assert!(matches!(
+        *payload,
+        DragPayload::MovedEffect { track: t, plugin: p } if t == track && p == plugin
+    ));
 }

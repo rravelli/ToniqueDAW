@@ -78,6 +78,9 @@ pub struct ClipView<'a> {
     pub collapsed: bool,
     /// Its track is muted or soloed out: drawn faded, in muted ink.
     pub silenced: bool,
+    /// What a drag leaves in the clip's place, until it's dropped: its
+    /// waveform stays black, however dark the faded body.
+    pub ghost: bool,
 }
 
 impl ClipView<'_> {
@@ -202,11 +205,14 @@ impl ClipView<'_> {
             egui::StrokeKind::Inside,
         );
         let rect = Rect::from_min_max(pos2(pos.x, pos.y + HEADER_HEIGHT), pos + size);
-        // Black, or a wash of the track's colour on silenced clips; faded
+        // Black (white on what's too dark for it, but for a ghost), or a
+        // wash of the track's colour on silenced clips; faded
         // on collapsed ones.
         let waveform = |painter: &Painter, bg: Color32| {
             let ink = if self.silenced {
                 tint(color, SILENCED_WAVE_TINT)
+            } else if self.ghost {
+                Color32::BLACK
             } else {
                 wave_ink(bg)
             };
@@ -494,6 +500,7 @@ mod tests {
                     zone: None,
                     collapsed: false,
                     silenced: false,
+                    ghost: false,
                 }
                 .ui(ui, &mut state);
             });
@@ -561,6 +568,7 @@ mod tests {
                     zone: None,
                     collapsed: false,
                     silenced: false,
+                    ghost: false,
                 }
                 .ui(ui, &mut state);
             });
@@ -603,6 +611,7 @@ mod tests {
             zone: None,
             collapsed: false,
             silenced: false,
+            ghost: false,
         };
         let input = egui::RawInput {
             screen_rect: Some(viewport),

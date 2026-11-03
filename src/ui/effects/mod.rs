@@ -550,6 +550,7 @@ impl EffectRack {
         );
         if !renaming.focused {
             edit.request_focus();
+            crate::ui::widget::text_edit::select_all(ui.ctx(), edit.id, &renaming.text);
             renaming.focused = true;
         } else if edit.lost_focus() || !edit.has_focus() {
             if !ui.input(|i| i.key_pressed(Key::Escape)) {

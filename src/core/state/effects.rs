@@ -82,6 +82,20 @@ impl ProjectState {
             s.perform(AddPlugin::at(channel, plugin, target));
         });
     }
+    /// Move an effect to the end of another channel's chain, as an undo
+    /// step. It stays the same effect: settings, name and all.
+    pub fn move_effect_to_track(&mut self, from: &TrackId, plugin: PluginId, to: &TrackId) {
+        if from == to {
+            return;
+        }
+        let Some(effect) = self.effect(from, plugin) else {
+            return;
+        };
+        self.transaction("Move effect", |s| {
+            s.perform(RemovePlugin::new(s.channel_ref(*from), plugin));
+            s.perform(AddPlugin::at(s.channel_ref(*to), effect.plugin, usize::MAX));
+        });
+    }
     /// Where the effect at `index` is among all of a channel's plugins,
     /// past the plugins that aren't effects; `usize::MAX` for the end.
     fn effect_position(&self, id: &TrackId, index: usize) -> usize {

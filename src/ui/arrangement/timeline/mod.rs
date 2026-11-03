@@ -31,6 +31,8 @@ mod selection;
 const PREVIEW_ALPHA: u8 = 80;
 /// The same for a silenced track: fainter, but still its colour.
 const SILENCED_PREVIEW_ALPHA: u8 = 30;
+/// Width of the line showing where playback starts, on selected lanes.
+const START_LINE_WIDTH: f32 = 1.5;
 /// How much of its colour a selected track's lane is tinted with.
 const SELECTED_LANE_ALPHA: u8 = 24;
 
@@ -125,9 +127,12 @@ impl Timeline {
             state.set_edit_cursor(state.grid.snap(beats, alt));
         }
         // Ctrl+wheel (and pinch) zooms; egui reports it as a zoom factor.
+        // Anywhere over the lanes, clips included (they take the hover from
+        // `response`), but not through a menu or dialog above.
         let zoom = ui.input(|i| i.zoom_delta());
         if zoom != 1.
-            && let Some(mouse_pos) = response.hover_pos()
+            && ui.ctx().rect_contains_pointer(ui.layer_id(), viewport)
+            && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
         {
             state.grid.zoom_by(zoom, mouse_pos.x, viewport);
         }
@@ -254,6 +259,9 @@ impl Timeline {
                 }
             }
 
+            if track.selected {
+                paint_start_line(ui, state, track_rect);
+            }
             self.handle_track_hover(ui, state, workspace, track, track_rect);
             self.paint_track_separator(ui, viewport, row.y.max);
         }
@@ -281,9 +289,9 @@ impl Timeline {
             && ui.input(|i| i.pointer.any_released())
             && track_rect.contains(pointer)
             && let Some(payload) = DragAndDrop::payload::<DragPayload>(ui.ctx())
-            && let DragPayload::Effect(id) = *payload
+            && payload.puts_effect_on(track.id)
         {
-            state.add_effect(&track.id, id, usize::MAX);
+            payload.drop_effect(state, track.id);
             state.select_track(&track.id);
             workspace.bottom_panel_open = true;
             DragAndDrop::take_payload::<DragPayload>(ui.ctx());
@@ -335,6 +343,7 @@ impl Timeline {
                 .map(|b| (b.start_pos, b.end_pos)),
             collapsed: track.collapsed,
             silenced: track.is_silenced(),
+            ghost: dragged,
         }
         .ui(ui, state);
         // Select clip
@@ -454,6 +463,7 @@ impl Timeline {
                 zone: None,
                 collapsed,
                 silenced,
+                ghost: false,
             }
             .preview(ui, state);
 
@@ -576,4 +586,14 @@ fn paint_new_track_lanes(
         );
     }
     colors
+}
+
+/// A line down `lane`, over its clips, where playback will start from.
+fn paint_start_line(ui: &Ui, state: &ProjectState, lane: Rect) {
+    let x = state.grid.beats_to_x(state.edit_cursor(), lane);
+    ui.painter_at(lane).vline(
+        x,
+        lane.y_range(),
+        Stroke::new(START_LINE_WIDTH, ui.app_theme().edit_cursor),
+    );
 }

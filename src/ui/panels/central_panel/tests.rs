@@ -492,8 +492,8 @@ fn effects_drop_on_the_master() {
     }
 }
 
-/// The rename shortcut types a name in the selected track's header;
-/// Enter keeps it, as an undo step.
+/// The rename shortcut types a name in the selected track's header, over
+/// the old one; Enter keeps it, as an undo step.
 #[test]
 fn rename_shortcut_renames_the_selected_track() {
     let (engine, _processor) = Engine::new(EngineConfig::default());
@@ -537,7 +537,6 @@ fn rename_shortcut_renames_the_selected_track() {
     frame(
         &mut state,
         vec![
-            key(egui::Key::A, egui::Modifiers::COMMAND),
             egui::Event::Text("Bass".into()),
             key(egui::Key::Enter, Default::default()),
         ],
@@ -548,4 +547,136 @@ fn rename_shortcut_renames_the_selected_track() {
     assert_eq!(name(&state), "Bass");
     state.undo();
     assert_ne!(name(&state), "Bass");
+}
+
+/// Ctrl+wheel zooms over a clip's header as over the empty lane.
+#[test]
+fn ctrl_wheel_zooms_over_clip_headers() {
+    use crate::ui::arrangement::ruler::RULER_HEIGHT;
+    use crate::{analysis::AudioInfo, core::clip::AudioClip};
+    use egui::{Event, Modifiers, MouseWheelUnit, Pos2, TouchPhase};
+    use tonique_engine::time::BeatPos;
+
+    let (engine, _processor) = Engine::new(EngineConfig::default());
+    let mut state = ProjectState::new(engine);
+    let track = state.add_track();
+    let clip = state.new_clip_id();
+    let audio = AudioInfo::silent(60.);
+    state.add_clips(
+        &track,
+        vec![AudioClip::new(clip, audio, BeatPos::ZERO, 120.)],
+    );
+    let ctx = egui::Context::default();
+    ctx.set_fonts(crate::ui::font::fonts());
+    let mut panel = CentralPanel::new();
+    let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            panel.show(
+                ui,
+                state,
+                &mut Workspace::default(),
+                &mut Commands::default(),
+            )
+        });
+        output.textures_delta.clear();
+    };
+    // The clip's header, at the top of the first lane.
+    let header = Pos2::new(100., RULER_HEIGHT + 6.);
+    frame(&mut state, vec![Event::PointerMoved(header)]);
+    let before = state.grid.beats_to_width(1.);
+    frame(
+        &mut state,
+        vec![Event::MouseWheel {
+            unit: MouseWheelUnit::Line,
+            delta: vec2(0., 1.),
+            phase: TouchPhase::Move,
+            modifiers: Modifiers::CTRL,
+        }],
+    );
+    for _ in 0..30 {
+        frame(&mut state, Vec::new());
+    }
+    assert!(state.grid.beats_to_width(1.) > before);
+}
+
+/// An effect from a track's chain dragged to another track's header or
+/// lane moves there; on its own track's, nothing happens.
+#[test]
+fn effects_are_moved_to_other_tracks() {
+    use crate::ui::arrangement::ruler::RULER_HEIGHT;
+    use crate::{core::effect::EffectKind, ui::dnd::DragPayload};
+    use egui::{Event, PointerButton, Pos2};
+
+    let (engine, _processor) = Engine::new(EngineConfig::default());
+    let mut state = ProjectState::new(engine);
+    let first = state.add_track();
+    let second = state.add_track();
+    state.add_effect(&first, EffectKind::Echo, 0);
+    let plugin = state.effects(&first)[0].plugin.id;
+
+    let ctx = egui::Context::default();
+    ctx.set_fonts(crate::ui::font::fonts());
+    crate::ui::theme::Theme::default().install(&ctx);
+    let mut panel = CentralPanel::new();
+    let mut workspace = Workspace::default();
+    let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            panel.show(ui, state, &mut workspace, &mut Commands::default())
+        });
+        output.textures_delta.clear();
+    };
+    frame(&mut state, Vec::new()); // lay out once
+    let layout = RowLayout::new(&state, RULER_HEIGHT, 0.);
+    let on = |index: usize, x: f32| Pos2::new(x, layout.rows()[index].y.center());
+    let (first_lane, first_header) = (on(0, 300.), on(0, 1100.));
+    let (second_lane, second_header) = (on(1, 300.), on(1, 1100.));
+    let mut drop_at = |state: &mut ProjectState, from: tonique_engine::edit::TrackId, at: Pos2| {
+        egui::DragAndDrop::set_payload(
+            &ctx,
+            DragPayload::MovedEffect {
+                track: from,
+                plugin,
+            },
+        );
+        frame(state, vec![Event::PointerMoved(at)]);
+        frame(
+            state,
+            vec![Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }],
+        );
+        frame(state, Vec::new());
+    };
+    let counts = |state: &ProjectState| (state.effects(&first).len(), state.effects(&second).len());
+
+    drop_at(&mut state, first, first_lane);
+    assert_eq!(counts(&state), (1, 0), "its own track");
+
+    drop_at(&mut state, first, second_lane);
+    assert_eq!(counts(&state), (0, 1), "another track's lane");
+    assert_eq!(state.selected_track().unwrap().id, second, "shown there");
+
+    drop_at(&mut state, second, first_header);
+    assert_eq!(counts(&state), (1, 0), "another track's header");
+
+    drop_at(&mut state, first, second_header);
+    assert_eq!(counts(&state), (0, 1));
+    assert_eq!(
+        state.effects(&second)[0].plugin.id,
+        plugin,
+        "the same effect"
+    );
 }

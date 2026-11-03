@@ -15,6 +15,7 @@ use crate::{
             flat_button::FlatButton,
             meter::LevelMeter,
             param_slider::{ParamSlider, SliderEdit},
+            text_edit::select_all,
         },
     },
     utils::display_name,
@@ -276,6 +277,7 @@ impl TrackHeader {
             );
             if !text_edit.has_focus() && !self.focus_requested {
                 text_edit.request_focus();
+                select_all(ui.ctx(), text_edit.id, &track_view_mut.name);
                 self.focus_requested = true
             }
             if text_edit.lost_focus() {

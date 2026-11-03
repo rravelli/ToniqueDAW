@@ -19,11 +19,14 @@ use crate::{
     analysis::AudioInfo,
     audio::host::engine_without_audio,
     config::{config_dir, settings::Settings},
-    core::clip::AudioClip,
+    core::{clip::AudioClip, effect::EffectKind},
     ui::font::fonts,
 };
 use egui::{Event, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, Vec2, pos2, vec2};
-use egui_kittest::{Harness, kittest::NodeT};
+use egui_kittest::{
+    Harness,
+    kittest::{NodeT, Queryable},
+};
 use rand::{Rng, SeedableRng, rngs::StdRng, seq::IndexedRandom};
 use std::{
     collections::VecDeque,
@@ -614,6 +617,51 @@ fn screenshots() {
     let mut harness = app();
     harness.run_steps(10);
     screenshot(&mut harness, "start");
+}
+
+/// The window's position of the name of track `index`, in its header.
+fn track_name_pos(harness: &Harness<'_, ToniqueApp>, index: usize) -> Pos2 {
+    let row = &harness.state().state.rows()[index];
+    let name = crate::utils::display_name(&row.name, row.first_track_index);
+    harness.get_by_label(&name).rect().center()
+}
+
+/// An effect dragged out of the panel, onto another track, moves there.
+#[test]
+fn effects_are_dragged_onto_other_tracks() {
+    let mut harness = app();
+    let tracks: Vec<_> = harness.state().state.tracks().map(|t| t.id).collect();
+    let app_state = harness.state_mut();
+    app_state.state.select_track(&tracks[0]);
+    app_state.state.add_effect(&tracks[0], EffectKind::Echo, 0);
+    app_state.workspace.bottom_panel_open = true;
+    harness.run_steps(4);
+
+    let from = harness.state().bottom_panel.rects[0].left_top() + vec2(100., 10.);
+    let to = track_name_pos(&harness, 1);
+    Input::Drag(from, to, Modifiers::NONE).apply(&mut harness);
+    harness.run_steps(4);
+
+    let state = &harness.state().state;
+    assert!(state.effects(&tracks[0]).is_empty());
+    assert_eq!(state.effects(&tracks[1]).len(), 1);
+    assert_eq!(state.selected_track().unwrap().id, tracks[1]);
+}
+
+/// "Rename" in a track's menu selects its name: typing replaces it.
+#[test]
+fn renaming_from_the_menu_types_over_the_name() {
+    let mut harness = app();
+    let pos = track_name_pos(&harness, 1);
+    Input::Click(pos, PointerButton::Secondary, Modifiers::NONE).apply(&mut harness);
+    harness.run_steps(2);
+    harness.get_by_label("Rename").click();
+    harness.run_steps(4);
+    harness.event(Event::Text("Bass".into()));
+    harness.step();
+    harness.key_press(Key::Enter);
+    harness.run_steps(2);
+    assert_eq!(harness.state().state.rows()[1].name, "Bass");
 }
 
 mod readme;

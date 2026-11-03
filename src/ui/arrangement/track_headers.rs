@@ -544,9 +544,8 @@ fn effect_drop(
     lane: Rect,
     on_lane: bool,
 ) -> Option<Rangef> {
-    if !dragging_effect(ui) {
-        return None;
-    }
+    let payload = egui::DragAndDrop::payload::<DragPayload>(ui.ctx())
+        .filter(|payload| payload.puts_effect_on(id))?;
     let pointer = ui.input(|i| i.pointer.hover_pos())?;
     let over_lane = lane.contains(pointer);
     if !over_lane && !header.rect.contains(pointer) {
@@ -554,23 +553,14 @@ fn effect_drop(
     }
     paint_drop_target(ui, header.rect);
     let released = ui.input(|i| i.pointer.any_released());
-    if released
-        && (!over_lane || on_lane)
-        && let Some(payload) = egui::DragAndDrop::take_payload::<DragPayload>(ui.ctx())
-        && let DragPayload::Effect(kind) = *payload
-    {
-        state.add_effect(&id, kind, usize::MAX);
+    if released && (!over_lane || on_lane) {
+        egui::DragAndDrop::clear_payload(ui.ctx());
+        payload.drop_effect(state, id);
         state.select_track(&id);
         workspace.bottom_panel_open = true;
         workspace.bottom_view = BottomView::Effects;
     }
     Some(header.rect.y_range())
-}
-
-/// Whether an effect is being dragged.
-fn dragging_effect(ui: &Ui) -> bool {
-    egui::DragAndDrop::payload::<DragPayload>(ui.ctx())
-        .is_some_and(|p| matches!(*p, DragPayload::Effect(_)))
 }
 
 /// A row an effect would be dropped on, lit and outlined in the accent:
