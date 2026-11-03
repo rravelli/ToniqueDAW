@@ -9,8 +9,8 @@ use std::{
 use egui::Vec2;
 use tonique_engine::{
     edit::{
-        Bus, BusId, Channel, ClipLoop, Edit, MAX_TRANSPOSE, Output, SourceId, StretchSettings,
-        Track, TrackId, WarpMode,
+        Bus, BusId, Channel, ClipFades, ClipLoop, Edit, MAX_TRANSPOSE, Output, SourceId,
+        StretchSettings, Track, TrackId, WarpMode,
         commands::{AddBus, SetBypass, SetOutput, SetSolo},
     },
     time::BeatPos,
@@ -164,6 +164,9 @@ impl ProjectState {
                 transpose: clip.pitch(),
                 window: clip.stretch.window.into(),
                 formants: clip.stretch.formants,
+                fade_in: clip.fades.fade_in.into(),
+                fade_out: clip.fades.fade_out.into(),
+                crossfade: clip.fades.crossfade.into(),
             })
             .collect();
         clips.sort_by(|a, b| a.position.total_cmp(&b.position));
@@ -312,6 +315,12 @@ impl ProjectState {
         restored.stretch = StretchSettings {
             window: clip.window.into(),
             formants: clip.formants,
+        };
+        restored.fades = ClipFades {
+            fade_in: clip.fade_in.into(),
+            fade_out: clip.fade_out.into(),
+            crossfade: clip.crossfade.into(),
+            ..Default::default()
         };
         restored.looped = clip.looped.map(|l| ClipLoop {
             start_s: l.start,

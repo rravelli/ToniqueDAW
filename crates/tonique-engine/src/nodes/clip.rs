@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use super::fade::FadeCurve;
 use crate::graph::{ContentId, Node, NodeIdentity, NodeProperties, ProcessContext, StateTransfer};
 use crate::midi::{ActiveNotes, MidiMessage};
 use crate::param::{AtomicParam, Smoother};
@@ -18,6 +19,10 @@ pub struct ClipPlacement {
     pub source_offset: SamplePos,
     pub fade_in: SamplePos,
     pub fade_out: SamplePos,
+    /// How the gain rises over `fade_in`.
+    pub fade_in_curve: FadeCurve,
+    /// How the gain rises over `fade_out`, played backwards from the end.
+    pub fade_out_curve: FadeCurve,
     /// Reading reaches the loop's end, then goes on from its start.
     pub looped: Option<LoopPlacement>,
 }
@@ -212,11 +217,13 @@ impl ClipPlacement {
     fn fade(&self, rel: SamplePos) -> f32 {
         let mut g = 1.0;
         if self.fade_in > 0 && rel < self.fade_in {
-            g *= rel as f32 / self.fade_in as f32;
+            g *= self.fade_in_curve.gain(rel as f32 / self.fade_in as f32);
         }
         let to_end = self.length - rel;
         if self.fade_out > 0 && to_end < self.fade_out {
-            g *= to_end as f32 / self.fade_out as f32;
+            g *= self
+                .fade_out_curve
+                .gain(to_end as f32 / self.fade_out as f32);
         }
         g
     }
@@ -726,6 +733,8 @@ mod tests {
             source_offset: 0,
             fade_in: 0,
             fade_out: 0,
+            fade_in_curve: FadeCurve::LINEAR,
+            fade_out_curve: FadeCurve::LINEAR,
             looped: None,
         };
         let node = AudioClipNode::new(

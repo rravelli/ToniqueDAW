@@ -1,6 +1,7 @@
 //! The bottom panel's view of one clip.
 
 mod audio;
+mod fades;
 mod inspector;
 mod markers;
 #[cfg(test)]

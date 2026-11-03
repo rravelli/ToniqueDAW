@@ -17,7 +17,7 @@ pub use undo::{Effects, UndoManager};
 
 use crate::automation::BeatPoint;
 use crate::meter::{ChannelMeter, PluginTap};
-use crate::nodes::{ClipWarp, Envelope, FilterMode};
+use crate::nodes::{ClipWarp, Envelope, FadeCurve, FilterMode};
 use crate::param::{AtomicParam, ParamId};
 use crate::sample::SampleBuffer;
 use crate::time::{BeatPos, TempoMap};
@@ -310,14 +310,167 @@ impl ClipLoop {
     }
 }
 
+/// The shortest ramp at either end of an audio clip, in seconds: so short
+/// it's not heard as a fade, it keeps the clip from clicking.
+pub const ANTI_CLICK_S: f64 = 0.005;
+
+/// A fade at one end of a clip.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fade {
+    /// In seconds, on the timeline: how long it takes whatever the clip's
+    /// speed.
+    pub length_s: f64,
+    pub curve: FadeCurve,
+}
+
+impl Default for Fade {
+    fn default() -> Self {
+        Self {
+            length_s: 0.,
+            curve: FadeCurve::LINEAR,
+        }
+    }
+}
+
+/// How an audio clip fades in and out, and crosses the clip before it.
+///
+/// These are what was asked for: a clip's length and its neighbours can
+/// leave less room, see [`Self::heard`] and [`SeamRoom`]. Nothing is lost
+/// that way: a clip shortened gets its fades back once it's long enough again.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClipFades {
+    pub fade_in: Fade,
+    pub fade_out: Fade,
+    /// Across its seam with the clip ending where it starts, if any, over
+    /// this long: it fades in this way as that clip fades out the
+    /// [`FadeCurve::crossing`] way, each playing on past the seam. None when
+    /// the length is 0.
+    pub crossfade: Fade,
+    /// The shortest ramp at either end, in seconds.
+    pub min_s: f64,
+}
+
+impl Default for ClipFades {
+    fn default() -> Self {
+        Self {
+            fade_in: Fade::default(),
+            fade_out: Fade::default(),
+            crossfade: Fade {
+                length_s: 0.,
+                curve: FadeCurve::EQUAL_POWER,
+            },
+            min_s: ANTI_CLICK_S,
+        }
+    }
+}
+
+impl ClipFades {
+    /// The fades in and out as heard on a clip of `length_s` seconds with
+    /// crossfades at its ends, if any: those replace the fades there, and
+    /// what's left of the clip holds the others, scaled down together if
+    /// they don't fit. Not counting [`Self::min_s`].
+    pub fn heard(
+        &self,
+        length_s: f64,
+        cross_in: Option<Fade>,
+        cross_out: Option<Fade>,
+    ) -> (Fade, Fade) {
+        let across = |cross: Option<Fade>| cross.map_or(0., |f| f.length_s);
+        let room = (length_s - across(cross_in) - across(cross_out)).max(0.);
+        // `max` also takes anything not a number to none.
+        let wanted = |fade: Fade, cross: Option<Fade>| {
+            if cross.is_some() {
+                0.
+            } else {
+                fade.length_s.max(0.)
+            }
+        };
+        let (fade_in, fade_out) = (
+            wanted(self.fade_in, cross_in),
+            wanted(self.fade_out, cross_out),
+        );
+        let scale = if fade_in + fade_out > room {
+            room / (fade_in + fade_out)
+        } else {
+            1.
+        };
+        let fitted = |fade: Fade, length_s: f64| Fade {
+            length_s: length_s * scale,
+            ..fade
+        };
+        (
+            cross_in.unwrap_or_else(|| fitted(self.fade_in, fade_in)),
+            cross_out.unwrap_or_else(|| fitted(self.fade_out, fade_out)),
+        )
+    }
+}
+
+/// How far a crossfade can reach either side of a seam, in seconds: as far
+/// as there's audio trimmed off the clip that plays on into it, and no
+/// further than the clip it crosses.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SeamRoom {
+    /// Before the seam: the later clip starting early.
+    pub before_s: f64,
+    /// After the seam: the earlier clip playing on.
+    pub after_s: f64,
+}
+
+impl SeamRoom {
+    /// From what's trimmed off the later clip's start and the earlier
+    /// clip's end, and how long each clip is.
+    pub fn new(later_spare_s: f64, earlier_spare_s: f64, earlier_s: f64, later_s: f64) -> Self {
+        Self {
+            before_s: later_spare_s.min(earlier_s).max(0.),
+            after_s: earlier_spare_s.min(later_s).max(0.),
+        }
+    }
+
+    /// The part of a crossfade of `length_s` before and after the seam:
+    /// half each, one side taking what the other has no room for. Shorter
+    /// than asked when there's not room for it all.
+    pub fn window(&self, length_s: f64) -> (f64, f64) {
+        let length_s = length_s.max(0.);
+        let before = (length_s / 2.).min(self.before_s);
+        let after = (length_s - before).min(self.after_s);
+        ((length_s - after).min(self.before_s), after)
+    }
+
+    /// The length of the crossfade whose longer side reaches `distance_s`
+    /// from the seam.
+    pub fn length_reaching(&self, distance_s: f64) -> f64 {
+        let distance_s = distance_s.max(0.);
+        distance_s.min(self.before_s) + distance_s.min(self.after_s)
+    }
+}
+
+/// Clips closer than this, in beats, touch: rounding keeps a clip split in
+/// two from ending exactly where the next starts.
+const SEAM_TOLERANCE: f64 = 1e-6;
+
+/// For each of `spans` (a clip's start and end, in beats), the index of the
+/// one ending where it starts, if any: the seams a crossfade can go on.
+pub fn seams(spans: &[(f64, f64)]) -> Vec<Option<usize>> {
+    let mut found = vec![None; spans.len()];
+    let mut order: Vec<usize> = (0..spans.len()).collect();
+    order.sort_by(|a, b| spans[*a].0.total_cmp(&spans[*b].0));
+    for pair in order.windows(2) {
+        let (earlier, later) = (pair[0], pair[1]);
+        if (spans[earlier].1 - spans[later].0).abs() < SEAM_TOLERANCE {
+            found[later] = Some(earlier);
+        }
+    }
+    found
+}
+
 #[derive(Clone, Debug)]
 pub struct Clip {
     pub id: ClipId,
     pub start: BeatPos,
     /// Length in beats.
     pub length: f64,
-    pub fade_in_s: f64,
-    pub fade_out_s: f64,
+    /// Heard on audio clips only.
+    pub fades: ClipFades,
     pub content: ClipContent,
 }
 
@@ -327,8 +480,7 @@ impl Clip {
             id: ClipId(edit.next_id()),
             start,
             length,
-            fade_in_s: 0.0,
-            fade_out_s: 0.0,
+            fades: ClipFades::default(),
             content: ClipContent::Midi { notes, channel: 0 },
         }
     }
@@ -338,8 +490,7 @@ impl Clip {
             id: ClipId(edit.next_id()),
             start,
             length,
-            fade_in_s: 0.005,
-            fade_out_s: 0.005,
+            fades: ClipFades::default(),
             content: ClipContent::Audio {
                 source,
                 source_offset_s: 0.0,

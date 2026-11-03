@@ -2,6 +2,7 @@
 //! the ruler above, laid out by one [`row_layout::RowLayout`] a frame.
 
 pub mod clip;
+pub mod clip_fades;
 pub mod grid;
 pub mod row_layout;
 pub mod ruler;

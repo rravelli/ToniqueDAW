@@ -154,11 +154,15 @@ impl ProjectState {
                 if before {
                     let mut left = clip.with_id(s.new_clip_id());
                     left.trim_end_at(start, bpm);
+                    // Its start stays as it was, with what crosses it.
+                    left.fades.crossfade = clip.fades.crossfade;
+                    left.fades.fade_out.length_s = 0.;
                     ops.push(ClipOp::Add(track, left));
                 }
                 if after {
                     let mut right = clip.with_id(s.new_clip_id());
                     right.trim_start_at(end, bpm);
+                    right.fades.fade_in.length_s = 0.;
                     ops.push(ClipOp::Add(track, right));
                 }
             }

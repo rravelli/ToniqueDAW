@@ -10,11 +10,11 @@ use crate::{
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tonique_engine::{
     edit::{
-        ClipContent, ClipId, ClipLoop, PluginKind, StretchSettings, StretchWindow, TrackId,
-        WarpMode,
+        ClipContent, ClipFades, ClipId, ClipLoop, PluginKind, StretchSettings, StretchWindow,
+        TrackId, WarpMode,
     },
     engine::{Engine, EngineConfig},
-    nodes::FilterMode,
+    nodes::{FadeCurve, FadeShape, FilterMode},
     sample::SampleBuffer,
     time::{BeatPos, TimeSignature},
 };
@@ -131,6 +131,172 @@ fn adding_clips_trims_overlaps_in_one_undo_step() {
     assert_eq!(spans(&state, track), [(0., 8.)]);
     state.redo();
     assert_eq!(spans(&state, track), [(0., 4.), (4., 6.), (6., 8.)]);
+}
+
+/// Two clips cut from one, their seam crossfaded as `seconds` says.
+fn crossfaded(state: &mut ProjectState, track: TrackId, seconds: f64) -> (ClipId, ClipId) {
+    let first = add_clip(state, track, 0., 4.); // beats 0..8
+    state.cut_clip_at(&track, BeatPos(4.));
+    let second = state
+        .clip_views_of(track)
+        .iter()
+        .find(|c| c.position == BeatPos(4.))
+        .unwrap()
+        .id;
+    let mut edited = state.find_clip(second).unwrap().1;
+    edited.fades.crossfade.length_s = seconds;
+    state.commit_resize_clip(edited);
+    (first, second)
+}
+
+/// A crossfade moves nothing, is one undo step, and shows at both ends.
+#[test]
+fn a_crossfade_goes_across_the_seam_of_touching_clips() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let (first, second) = crossfaded(&mut state, track, 0.5);
+    assert_eq!(spans(&state, track), [(0., 4.), (4., 8.)]);
+    let at_first = state.crossfades_of(first);
+    let at_second = state.crossfades_of(second);
+    assert_eq!(at_first.end.map(|f| f.length_s), Some(0.5));
+    assert_eq!(at_second.start.map(|f| f.length_s), Some(0.5));
+    assert_eq!(at_first.start, None);
+    state.undo();
+    assert_eq!(state.crossfades_of(second).start, None);
+    assert!(
+        state.crossfades_of(second).start_seam,
+        "the seam's still there"
+    );
+    state.redo();
+    assert_eq!(
+        state.crossfades_of(second).start.map(|f| f.length_s),
+        Some(0.5)
+    );
+}
+
+/// Clips dragged over others cut them, as ever: nothing crossfades by
+/// accident.
+#[test]
+fn clips_over_others_cut_them() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    add_clip(&mut state, track, 0., 2.); // beats 0..4
+    let b = add_clip(&mut state, track, 6., 2.); // beats 6..10
+    state.move_clip(&b, &track, BeatPos(3.), &[]);
+    assert_eq!(spans(&state, track), [(0., 3.), (3., 7.)]);
+    assert_eq!(state.crossfades_of(b).start, None, "only touching");
+}
+
+/// A crossfade lasts as long as its seam, in the same undo step: it doesn't
+/// come back on whatever lands there later.
+#[test]
+fn crossfades_go_with_their_seam() {
+    let bpm = 120.;
+    // The earlier clip moved away.
+    let mut state = setup_state();
+    let track = state.add_track();
+    let (first, second) = crossfaded(&mut state, track, 0.5);
+    state.move_clip(&first, &track, BeatPos(20.), &[]);
+    let length = |state: &ProjectState| state.find_clip(second).unwrap().1.fades.crossfade.length_s;
+    assert_eq!(length(&state), 0.);
+    state.undo();
+    assert_eq!(length(&state), 0.5);
+
+    // The later one moved away, and back.
+    state.move_clip(&second, &track, BeatPos(20.), &[]);
+    assert_eq!(length(&state), 0.);
+    state.move_clip(&second, &track, BeatPos(4.), &[]);
+    assert_eq!(length(&state), 0.);
+    state.undo();
+    state.undo();
+    assert_eq!(length(&state), 0.5);
+
+    // Trimmed apart.
+    let mut trimmed = state.find_clip(first).unwrap().1;
+    trimmed.trim_end_at(BeatPos(3.), bpm);
+    state.commit_resize_clip(trimmed);
+    assert_eq!(length(&state), 0.);
+    state.undo();
+
+    // Moved together, it stays.
+    state.begin_batch();
+    state.move_clip(&first, &track, BeatPos(10.), &[first, second]);
+    state.move_clip(&second, &track, BeatPos(14.), &[first, second]);
+    state.commit_batch();
+    assert_eq!(spans(&state, track), [(10., 14.), (14., 18.)]);
+    assert_eq!(length(&state), 0.5);
+    state.undo();
+
+    // A copy has none, even right after the clip.
+    let copies = state.duplicate_clips(&[second], None);
+    assert_eq!(
+        state
+            .find_clip(copies[0])
+            .unwrap()
+            .1
+            .fades
+            .crossfade
+            .length_s,
+        0.
+    );
+}
+
+/// With no room, a crossfade asked for isn't one.
+#[test]
+fn clips_with_nothing_trimmed_off_have_no_room_to_cross() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    add_clip(&mut state, track, 0., 2.); // the whole of a file, beats 0..4
+    let b = add_clip(&mut state, track, 4., 2.);
+    let mut edited = state.find_clip(b).unwrap().1;
+    edited.fades.crossfade.length_s = 0.5;
+    state.commit_resize_clip(edited);
+    assert_eq!(state.crossfades_of(b).start, None);
+    assert!(state.crossfades_of(b).start_seam);
+}
+
+#[test]
+fn fades_are_one_undo_step_and_follow_copies() {
+    let mut state = setup_state();
+    let track = state.add_track();
+    let id = add_clip(&mut state, track, 0., 2.);
+    let bpm = state.bpm();
+    let mut edited = state.find_clip(id).unwrap().1;
+    edited.set_fade_in(0.5, Default::default(), bpm);
+    edited.fades.fade_in.curve = FadeCurve::of(FadeShape::Exponential).with_curvature(0.5);
+    edited.set_fade_out(0.25, Default::default(), bpm);
+    let fades = edited.fades;
+
+    // Shown as dragged, not applied until committed.
+    state.resize_clip(edited.clone());
+    assert_ne!(state.find_clip(id).unwrap().1.fades, fades);
+    assert_eq!(
+        state.shown_clip(&state.find_clip(id).unwrap().1).fades,
+        fades
+    );
+    state.commit_resize_clip(edited.clone());
+    assert_eq!(state.find_clip(id).unwrap().1.fades, fades);
+    assert!(!state.is_resizing(id));
+    state.undo();
+    assert_ne!(state.find_clip(id).unwrap().1.fades, fades);
+    state.redo();
+    assert_eq!(state.find_clip(id).unwrap().1.fades, fades);
+
+    // As they were: no new step.
+    state.commit_resize_clip(edited);
+    state.undo();
+    assert_ne!(state.find_clip(id).unwrap().1.fades, fades);
+    state.redo();
+
+    // A copy has them too.
+    let copies = state.duplicate_clips(&[id], None);
+    assert_eq!(state.find_clip(copies[0]).unwrap().1.fades, fades);
+
+    // Cut in two, its fades stay at its ends.
+    state.cut_clip_at(&track, BeatPos(1.));
+    let left = state.find_clip(id).unwrap().1;
+    assert_eq!(left.fades.fade_in, fades.fade_in);
+    assert_eq!(left.fades.fade_out.length_s, 0.);
 }
 
 #[test]
@@ -1189,7 +1355,7 @@ mod projects {
     use crate::{
         cache::AUDIO_ANALYSIS_CACHE,
         core::{
-            project::{ClipFile, LoopFile, ProjectFile},
+            project::{ClipFile, CrossfadeFile, FadeFile, LoopFile, ProjectFile, ShapeFile},
             state::MASTER_TRACK_ID,
         },
     };
@@ -1337,6 +1503,57 @@ mod projects {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Fades are saved and loaded; what an older project has none of (nor
+    /// in range) gets none, and the crossfade its default.
+    #[test]
+    fn fades_are_saved_and_older_projects_have_none() {
+        let dir = temp_dir("fades");
+        write_wav(&dir.join("loop.wav"));
+        let mut faded = clip_file("loop.wav", 0., 0., Some(1.));
+        faded.fade_in = FadeFile {
+            length: 0.25,
+            shape: ShapeFile::Exponential,
+            curvature: 0.5,
+        };
+        faded.fade_out = FadeFile {
+            length: -3.,
+            shape: ShapeFile::Linear,
+            curvature: 7.,
+        };
+        faded.crossfade = CrossfadeFile {
+            length: 0.125,
+            shape: ShapeFile::Linear,
+            curvature: -0.5,
+        };
+        let project = project_with(&dir, vec![faded]);
+        let mut state = setup_state();
+        let problems = state.load_project(&project, &dir);
+        assert!(problems.is_empty(), "{problems:?}");
+        let clip = state.tracks().next().unwrap().clips[0].clone();
+        assert_eq!(clip.fades.fade_in.length_s, 0.25);
+        assert_eq!(clip.fades.fade_in.curve.shape, FadeShape::Exponential);
+        assert_eq!(clip.fades.fade_out.length_s, 0., "in range");
+        assert_eq!(clip.fades.fade_out.curve.curvature, 1., "in range");
+        assert_eq!(clip.fades.crossfade.curve.curvature, -0.5);
+        assert_eq!(clip.fades.min_s, tonique_engine::edit::ANTI_CLICK_S);
+        let saved = state.project(Some(&dir));
+        assert_eq!(saved.tracks[0].clips[0].fade_in.length, 0.25);
+
+        // Written as an older version would: no mention of fades.
+        let text = serde_json::to_string(&project_with(
+            &dir,
+            vec![clip_file("loop.wav", 0., 0., Some(1.))],
+        ))
+        .unwrap();
+        assert!(!text.contains("fade"), "defaults aren't written");
+        let older: ProjectFile = serde_json::from_str(&text).unwrap();
+        let mut state = setup_state();
+        state.load_project(&older, &dir);
+        let clip = &state.tracks().next().unwrap().clips[0];
+        assert_eq!(clip.fades, ClipFades::default());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     fn clip_file(path: &str, position: f64, offset: f64, length: Option<f64>) -> ClipFile {
         ClipFile {
             path: path.into(),
@@ -1354,6 +1571,9 @@ mod projects {
             transpose: 0.,
             window: Default::default(),
             formants: false,
+            fade_in: Default::default(),
+            fade_out: Default::default(),
+            crossfade: Default::default(),
         }
     }
 
@@ -1523,6 +1743,9 @@ mod projects {
                 transpose: 0.,
                 window: Default::default(),
                 formants: false,
+                fade_in: Default::default(),
+                fade_out: Default::default(),
+                crossfade: Default::default(),
             }],
         });
         let mut state = setup_state();

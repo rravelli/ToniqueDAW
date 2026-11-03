@@ -4,7 +4,7 @@
 
 use crate::core::clip::AudioClip;
 use tonique_engine::{
-    edit::{ClipId, TrackId},
+    edit::{ClipFades, ClipId, TrackId},
     time::BeatPos,
 };
 
@@ -14,6 +14,8 @@ pub enum ClipOp {
     Remove(TrackId, ClipId),
     /// Change the clip's position and trims to those of the given clip.
     Resize(TrackId, AudioClip),
+    /// Change the clip's fades.
+    Fades(TrackId, ClipId, ClipFades),
     Move {
         from: TrackId,
         to: TrackId,
@@ -56,11 +58,15 @@ impl TrackClips<'_> {
             let right = (clip.end(bpm) > end).then(|| {
                 let mut c = clip.clone();
                 c.trim_start_at(end, bpm);
+                c.fades.crossfade.length_s = 0.;
                 c
             });
             match (left, right) {
-                (Some(l), Some(r)) => {
-                    let r = r.with_id(new_id());
+                (Some(mut l), Some(r)) => {
+                    let mut r = r.with_id(new_id());
+                    // Its fades stay at its ends: none where it's cut.
+                    l.fades.fade_out.length_s = 0.;
+                    r.fades.fade_in.length_s = 0.;
                     self.ops.push(ClipOp::Resize(self.track, l.clone()));
                     self.ops.push(ClipOp::Add(self.track, r.clone()));
                     kept.extend([l, r]);
@@ -84,7 +90,7 @@ impl TrackClips<'_> {
         }
     }
 
-    /// Split the clip under `position` in two.
+    /// Split the clip under `position` in two, its fades staying at its ends.
     pub fn cut_at(&mut self, position: BeatPos, new_id: &mut impl FnMut() -> ClipId) {
         let bpm = self.bpm;
         let Some(clip) = self
@@ -96,8 +102,10 @@ impl TrackClips<'_> {
         };
         let mut left = clip.clone();
         left.trim_end_at(position, bpm);
+        left.fades.fade_out.length_s = 0.;
         let mut right = clip.with_id(new_id());
         right.trim_start_at(position, bpm);
+        right.fades.fade_in.length_s = 0.;
         self.ops.push(ClipOp::Resize(self.track, left));
         self.ops.push(ClipOp::Add(self.track, right));
     }
@@ -187,6 +195,45 @@ mod tests {
             ]
         );
         assert!(matches!(ops[1], ClipOp::Remove(_, ClipId(2))));
+    }
+
+    #[test]
+    fn fades_stay_at_the_ends_of_a_clip_cut_in_two() {
+        let mut ops = Vec::new();
+        let mut faded = clip(1, 0., 4.);
+        faded.fades.fade_in.length_s = 0.5;
+        faded.fades.fade_out.length_s = 0.25;
+        let mut t = TrackClips {
+            track: TrackId(1),
+            clips: vec![faded],
+            bpm: BPM,
+            ops: &mut ops,
+        };
+        t.cut_at(BeatPos(2.), &mut ids());
+        let (ClipOp::Resize(_, left), ClipOp::Add(_, right)) = (&ops[0], &ops[1]) else {
+            panic!("{ops:?}")
+        };
+        let fades = |c: &AudioClip| (c.fades.fade_in.length_s, c.fades.fade_out.length_s);
+        assert_eq!(fades(left), (0.5, 0.));
+        assert_eq!(fades(right), (0., 0.25));
+
+        // The same for one split by a clip added inside it.
+        let mut ops = Vec::new();
+        let mut faded = clip(1, 0., 4.);
+        faded.fades.fade_in.length_s = 0.5;
+        faded.fades.fade_out.length_s = 0.25;
+        let mut t = TrackClips {
+            track: TrackId(1),
+            clips: vec![faded],
+            bpm: BPM,
+            ops: &mut ops,
+        };
+        t.add(vec![clip(2, 1., 1.)], &mut ids());
+        let (ClipOp::Resize(_, left), ClipOp::Add(_, right)) = (&ops[0], &ops[1]) else {
+            panic!("{ops:?}")
+        };
+        assert_eq!(fades(left), (0.5, 0.));
+        assert_eq!(fades(right), (0., 0.25));
     }
 
     #[test]

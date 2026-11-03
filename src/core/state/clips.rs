@@ -2,7 +2,7 @@
 //! them.
 
 use crate::core::{
-    clip::{AudioClip, split_pitch},
+    clip::{AudioClip, Crossfades, clip_seams, crossfades, split_pitch},
     state::clip_ops::{ClipOp, TrackClips},
     track::TrackRow,
 };
@@ -11,8 +11,8 @@ use tonique_engine::{
     edit::{
         Clip, ClipContent, ClipId, Parameter, TrackId,
         commands::{
-            AddClip, MoveClip, RemoveClip, ResizeClip, SetClipLoop, SetClipOrigin, SetClipStretch,
-            SetClipWarp, SetParam,
+            AddClip, MoveClip, RemoveClip, ResizeClip, SetClipFades, SetClipLoop, SetClipOrigin,
+            SetClipStretch, SetClipWarp, SetParam,
         },
     },
     time::BeatPos,
@@ -31,6 +31,11 @@ impl ProjectState {
         self.transaction(label, |s| {
             for op in ops {
                 s.apply_clip_op(op);
+            }
+            // With a batch, once it's done: clips moving together come apart
+            // on the way.
+            if !s.batching {
+                s.drop_stray_crossfades();
             }
         });
     }
@@ -60,6 +65,8 @@ impl ProjectState {
         });
     }
     /// Move clip to a new position and a new track fixing all overlaps on this track.
+    /// A clip moving alone leaves its crossfade behind, one moving with others
+    /// (`ignore`) keeps it, as they stay as they were to each other.
     /// Clips never start before the first beat.
     pub fn move_clip(
         &mut self,
@@ -75,6 +82,12 @@ impl ProjectState {
         self.clip_ops("Move clips", |s, ops| {
             let mut moved = clip.clone();
             moved.position = to_pos;
+            let alone = ignore.iter().all(|other| other == id);
+            if alone && clip.fades.crossfade.length_s > 0. {
+                let mut fades = clip.fades;
+                fades.crossfade.length_s = 0.;
+                ops.push(ClipOp::Fades(from, *id, fades));
+            }
             let mut ignore = ignore.to_vec();
             ignore.push(*id);
             let end = moved.end(s.bpm());
@@ -129,8 +142,8 @@ impl ProjectState {
     pub fn resize_clip(&mut self, resized: AudioClip) {
         self.resized_clip = Some(resized);
     }
-    /// Apply a trim as one undo step, trimming the clips it now overlaps.
-    /// Nothing changes (and no step is recorded) when it's as in the edit.
+    /// Apply a trim as one undo step, trimming the clips it now overlaps, or
+    /// new fades. Nothing changes (and no step is recorded) when it's as in the edit.
     pub fn commit_resize_clip(&mut self, resized: AudioClip) {
         self.resized_clip = None;
         let Some((track, clip)) = self.find_clip(resized.id) else {
@@ -138,7 +151,13 @@ impl ProjectState {
         };
         let region = |c: &AudioClip| (c.position, c.length, c.offset, c.looped);
         let warp = |c: &AudioClip| (c.warp, c.bpm, c.transpose, c.detune, c.stretch);
-        if region(&clip) == region(&resized) && warp(&clip) == warp(&resized) {
+        let same_place = region(&clip) == region(&resized) && warp(&clip) == warp(&resized);
+        if same_place {
+            if clip.fades != resized.fades {
+                self.clip_ops("Clip fades", |_, ops| {
+                    ops.push(ClipOp::Resize(track, resized))
+                });
+            }
             return;
         }
         let label = if warp(&clip) != warp(&resized) {
@@ -222,8 +241,30 @@ impl ProjectState {
             .clone()
     }
 
+    /// Take away the crossfades left without a seam: one should exist only
+    /// while its clips touch, or it'd come back when another clip lands
+    /// there. Part of the step that left them so.
+    pub(super) fn drop_stray_crossfades(&mut self) {
+        let bpm = self.bpm();
+        let tracks: Vec<TrackId> = self.edit().tracks.iter().map(|t| t.id).collect();
+        for track in tracks {
+            let clips = self.clip_views(track);
+            let seams = clip_seams(&clips, bpm);
+            for clip in clips {
+                if clip.fades.crossfade.length_s > 0. && !seams.iter().any(|s| s.later == clip.id) {
+                    let mut fades = clip.fades;
+                    fades.crossfade.length_s = 0.;
+                    self.perform(SetClipFades::new(track, clip.id, fades));
+                }
+            }
+        }
+    }
+
     fn apply_clip_op(&mut self, op: ClipOp) {
         match op {
+            ClipOp::Fades(track, id, fades) => {
+                self.perform(SetClipFades::new(track, id, fades));
+            }
             ClipOp::Add(track, clip) => {
                 let clip = self.engine_clip(&clip);
                 self.perform(AddClip::new(track, clip));
@@ -243,10 +284,10 @@ impl ProjectState {
                             transpose,
                             stretch,
                             ..
-                        } => Some((*looped, (*warp, *source_bpm, *transpose), *stretch)),
+                        } => Some((*looped, (*warp, *source_bpm, *transpose), *stretch, c.fades)),
                         ClipContent::Midi { .. } => None,
                     });
-                if let Some((looped, warp, stretch)) = current {
+                if let Some((looped, warp, stretch, fades)) = current {
                     if looped != clip.looped {
                         self.perform(SetClipLoop::new(track, clip.id, clip.looped));
                     }
@@ -258,6 +299,9 @@ impl ProjectState {
                     }
                     if stretch != clip.stretch {
                         self.perform(SetClipStretch::new(track, clip.id, clip.stretch));
+                    }
+                    if fades != clip.fades {
+                        self.perform(SetClipFades::new(track, clip.id, clip.fades));
                     }
                 }
                 self.perform(ResizeClip::new(
@@ -287,6 +331,7 @@ impl ProjectState {
             .session
             .create(|e| Clip::audio(e, clip.position, clip.length, source));
         engine_clip.id = clip.id;
+        engine_clip.fades = clip.fades;
         if let ClipContent::Audio {
             source_offset_s,
             gain,
@@ -353,7 +398,22 @@ impl ProjectState {
             transpose: semitones,
             detune: cents,
             stretch,
+            fades: clip.fades,
         })
+    }
+
+    /// Clip `id`'s crossfades with the other clips on its track.
+    pub fn crossfades_of(&self, id: ClipId) -> Crossfades {
+        self.find_clip(id)
+            .and_then(|(track, _)| {
+                crossfades(&clip_seams(&self.clip_views(track), self.bpm())).remove(&id)
+            })
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn clip_views_of(&self, track: TrackId) -> Vec<AudioClip> {
+        self.clip_views(track)
     }
 
     fn clip_views(&self, track: TrackId) -> Vec<AudioClip> {

@@ -118,6 +118,9 @@ impl Widget for ContextMenuButton {
 
         // Allocate a rectangular region for interaction
         let (rect, response) = ui.allocate_exact_size(desired_size, Sense::all());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &self.text)
+        });
 
         let theme = ui.app_theme();
         // Paint hover/click background

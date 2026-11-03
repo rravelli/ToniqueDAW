@@ -495,6 +495,7 @@ impl ProjectState {
     }
     /// Close the undo step opened by `begin_batch`.
     pub fn commit_batch(&mut self) {
+        self.drop_stray_crossfades();
         self.batching = false;
         self.session.commit_transaction();
         if let Some(steps) = self.batch_steps.take() {
