@@ -1,8 +1,11 @@
 use crate::analysis::AudioInfo;
-use std::{fmt::Debug, ops::Range};
+use std::{collections::HashMap, fmt::Debug, ops::Range};
 use tonique_engine::{
-    edit::{ClipId, ClipLoop, MAX_SPEED, MAX_TRANSPOSE, MIN_SPEED, StretchSettings, WarpMode},
-    nodes::ClipWarp,
+    edit::{
+        ClipFades, ClipId, ClipLoop, Fade, MAX_SPEED, MAX_TRANSPOSE, MIN_SPEED, SeamRoom,
+        StretchSettings, WarpMode, seams,
+    },
+    nodes::{ClipWarp, FadeCurve},
     time::BeatPos,
 };
 
@@ -71,6 +74,90 @@ pub struct AudioClip {
     pub detune: f32,
     /// How it's stretched, warped.
     pub stretch: StretchSettings,
+    /// How it fades in and out, and crosses the clip before it.
+    pub fades: ClipFades,
+}
+
+/// Where two clips of a track touch, a crossfade possible across it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Seam {
+    pub earlier: ClipId,
+    pub later: ClipId,
+    /// Where they touch, in beats.
+    pub at: BeatPos,
+    pub room: SeamRoom,
+    /// How far its crossfade reaches before and after it, in seconds: none
+    /// without one.
+    pub before_s: f64,
+    pub after_s: f64,
+    /// The later clip's fade in; the earlier one's is
+    /// [`crossing`](tonique_engine::nodes::FadeCurve::crossing) it.
+    pub curve: FadeCurve,
+}
+
+impl Seam {
+    pub fn length_s(&self) -> f64 {
+        self.before_s + self.after_s
+    }
+}
+
+/// The seams between `clips`, those of a track.
+pub fn clip_seams(clips: &[AudioClip], bpm: f32) -> Vec<Seam> {
+    let spans: Vec<_> = clips.iter().map(|c| (c.position.0, c.end(bpm).0)).collect();
+    clips
+        .iter()
+        .zip(seams(&spans))
+        .filter_map(|(later, earlier)| {
+            let earlier = &clips[earlier?];
+            let room = SeamRoom::new(
+                later.spare_before(bpm),
+                earlier.spare_after(bpm),
+                earlier.seconds(bpm),
+                later.seconds(bpm),
+            );
+            let crossfade = later.fades.crossfade;
+            let (before_s, after_s) = room.window(crossfade.length_s);
+            Some(Seam {
+                earlier: earlier.id,
+                later: later.id,
+                at: later.position,
+                room,
+                before_s,
+                after_s,
+                curve: crossfade.curve,
+            })
+        })
+        .collect()
+}
+
+/// What's at a clip's ends: whether another clip touches it there, and the
+/// fade of its crossfade across that if there's one.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Crossfades {
+    pub start_seam: bool,
+    pub end_seam: bool,
+    pub start: Option<Fade>,
+    pub end: Option<Fade>,
+}
+
+/// What's at the ends of each clip of `seams` that has a seam.
+pub fn crossfades(seams: &[Seam]) -> HashMap<ClipId, Crossfades> {
+    let mut found: HashMap<ClipId, Crossfades> = HashMap::new();
+    for seam in seams {
+        let fade = |curve| {
+            (seam.length_s() > 0.).then_some(Fade {
+                length_s: seam.length_s(),
+                curve,
+            })
+        };
+        let later = found.entry(seam.later).or_default();
+        later.start_seam = true;
+        later.start = fade(seam.curve);
+        let earlier = found.entry(seam.earlier).or_default();
+        earlier.end_seam = true;
+        earlier.end = fade(seam.curve.crossing());
+    }
+    found
 }
 
 /// A stretch of a clip playing one stretch of its file, without a jump.
@@ -103,14 +190,18 @@ impl AudioClip {
             transpose: 0,
             detune: 0.,
             stretch: StretchSettings::default(),
+            fades: ClipFades::default(),
         };
         clip.length = clip.source_beats(bpm);
         clip
     }
 
+    /// A copy under `id`. A crossfade is across a seam, which a copy isn't
+    /// on: it has none.
     pub fn with_id(&self, id: ClipId) -> Self {
         let mut clone = self.clone();
         clone.id = id;
+        clone.fades.crossfade.length_s = 0.;
         clone
     }
 
@@ -287,11 +378,66 @@ impl AudioClip {
     }
 
     /// Keep only the part of the clip inside `start..end` (in beats). Never
-    /// reveals audio that was trimmed away.
+    /// reveals audio that was trimmed away. A fade stays only at an end that
+    /// stays.
     pub fn crop(&mut self, start: BeatPos, end: BeatPos, bpm: f32) {
         let clip_end = self.end(bpm);
+        if start > self.position {
+            self.fades.fade_in.length_s = 0.;
+            self.fades.crossfade.length_s = 0.;
+        }
+        if end < clip_end {
+            self.fades.fade_out.length_s = 0.;
+        }
         self.trim_start_at(start.max(self.position), bpm);
         self.trim_end_at(end.min(clip_end), bpm);
+    }
+
+    /// How long it lasts on the timeline, in seconds.
+    pub fn seconds(&self, bpm: f32) -> f64 {
+        to_seconds(self.length, bpm)
+    }
+
+    /// Seconds of the timeline it could start earlier, reading what's
+    /// trimmed off its start.
+    pub fn spare_before(&self, bpm: f32) -> f64 {
+        self.offset / self.speed(bpm)
+    }
+
+    /// Seconds of the timeline it could play on past its end, reading
+    /// what's trimmed off it: for ever with a loop.
+    pub fn spare_after(&self, bpm: f32) -> f64 {
+        to_seconds(self.max_length(bpm) - self.length, bpm).max(0.)
+    }
+
+    /// Its fades in and out as heard with `crossed`, its crossfades.
+    pub fn heard_fades(&self, crossed: Crossfades, bpm: f32) -> (Fade, Fade) {
+        self.fades
+            .heard(self.seconds(bpm), crossed.start, crossed.end)
+    }
+
+    /// Fade in over `seconds`, as far as what's at its end leaves room: its
+    /// fade out, as heard from now on, or a crossfade from `crossed`.
+    pub fn set_fade_in(&mut self, seconds: f64, crossed: Crossfades, bpm: f32) {
+        let start = None;
+        let (_, end) = self.heard_fades(Crossfades { start, ..crossed }, bpm);
+        if crossed.end.is_none() {
+            self.fades.fade_out.length_s = end.length_s;
+        }
+        let room = (self.seconds(bpm) - end.length_s).max(0.);
+        self.fades.fade_in.length_s = seconds.clamp(0., room);
+    }
+
+    /// Fade out over `seconds`, as far as what's at its start leaves room:
+    /// its fade in, as heard from now on, or a crossfade from `crossed`.
+    pub fn set_fade_out(&mut self, seconds: f64, crossed: Crossfades, bpm: f32) {
+        let end = None;
+        let (start, _) = self.heard_fades(Crossfades { end, ..crossed }, bpm);
+        if crossed.start.is_none() {
+            self.fades.fade_in.length_s = start.length_s;
+        }
+        let room = (self.seconds(bpm) - start.length_s).max(0.);
+        self.fades.fade_out.length_s = seconds.clamp(0., room);
     }
 
     /// Start (or stop) looping `looped`. Turning a loop off cuts the clip
@@ -410,7 +556,7 @@ mod tests {
         assert_eq!(carried(24, 10.), (24, 0.));
         assert_eq!(carried(-24, -60.), (-24, 0.));
     }
-    use tonique_engine::edit::WarpMode;
+    use tonique_engine::{edit::WarpMode, nodes::FadeShape};
 
     /// 120 bpm: two beats a second.
     const BPM: f32 = 120.;
@@ -623,5 +769,100 @@ mod tests {
         let mut l = looped();
         l.slip_to(10., BPM);
         assert_eq!(l.offset, 3., "up to the loop's end");
+    }
+
+    #[test]
+    fn crops_keep_fades_only_at_the_ends_that_stay() {
+        let faded = || {
+            let mut c = clip(); // beats 10 to 14
+            c.fades.fade_in.length_s = 0.25;
+            c.fades.fade_out.length_s = 0.5;
+            c
+        };
+        let fades = |c: &AudioClip| (c.fades.fade_in.length_s, c.fades.fade_out.length_s);
+        let mut c = faded();
+        c.crop(BeatPos(0.), BeatPos(20.), BPM);
+        assert_eq!(fades(&c), (0.25, 0.5), "all of it");
+        let mut c = faded();
+        c.crop(BeatPos(11.), BeatPos(20.), BPM);
+        assert_eq!(fades(&c), (0., 0.5), "its start cut");
+        let mut c = faded();
+        c.crop(BeatPos(10.), BeatPos(12.), BPM);
+        assert_eq!(fades(&c), (0.25, 0.), "its end cut");
+    }
+
+    /// One fade stops at the other; a clip too short for both shows them
+    /// fitted, and setting one keeps the other where it shows.
+    #[test]
+    fn fades_stop_at_each_other() {
+        let mut c = clip(); // 2 s
+        c.set_fade_in(1.5, Crossfades::default(), BPM);
+        c.set_fade_out(1., Crossfades::default(), BPM);
+        assert_eq!(
+            (c.fades.fade_in.length_s, c.fades.fade_out.length_s),
+            (1.5, 0.5)
+        );
+        c.set_fade_in(5., Crossfades::default(), BPM);
+        assert_eq!(c.fades.fade_in.length_s, 1.5);
+        c.set_fade_in(-1., Crossfades::default(), BPM);
+        assert_eq!(c.fades.fade_in.length_s, 0.);
+
+        c.set_fade_in(1.5, Crossfades::default(), BPM);
+        c.trim_end_at(BeatPos(11.), BPM); // half a second
+        let (i, o) = c.heard_fades(Crossfades::default(), BPM);
+        assert_eq!((i.length_s, o.length_s), (0.375, 0.125));
+        c.set_fade_in(0.25, Crossfades::default(), BPM);
+        assert_eq!(
+            (c.fades.fade_in.length_s, c.fades.fade_out.length_s),
+            (0.25, 0.125)
+        );
+    }
+
+    #[test]
+    fn touching_clips_have_a_seam_with_what_is_trimmed_off_them() {
+        // Beats 10 to 14, 1 s into a 4 s file: 1 s before, 1 s after it.
+        let mut early = clip();
+        early.id = ClipId(1);
+        let mut late = clip();
+        late.id = ClipId(2);
+        late.position = BeatPos(14.);
+        let curve = FadeCurve::of(FadeShape::Linear).with_curvature(0.5);
+        late.fades.crossfade = Fade {
+            length_s: 1.,
+            curve,
+        };
+        let found = clip_seams(&[late.clone(), early.clone()], BPM);
+        assert_eq!(found.len(), 1);
+        let seam = found[0];
+        assert_eq!((seam.earlier, seam.later), (ClipId(1), ClipId(2)));
+        assert_eq!(seam.at, BeatPos(14.));
+        assert_eq!((seam.room.before_s, seam.room.after_s), (1., 1.));
+        assert_eq!((seam.before_s, seam.after_s), (0.5, 0.5));
+        let ends = crossfades(&found);
+        assert_eq!(ends[&ClipId(1)].end.unwrap().curve, curve.crossing());
+        assert_eq!(ends[&ClipId(2)].start.unwrap().curve, curve);
+        assert!(ends[&ClipId(2)].start_seam && ends[&ClipId(1)].end_seam);
+        assert!(!ends[&ClipId(1)].start_seam);
+
+        // Without a crossfade: the seam, nothing across it.
+        late.fades.crossfade.length_s = 0.;
+        let ends = crossfades(&clip_seams(&[late.clone(), early.clone()], BPM));
+        assert!(ends[&ClipId(2)].start_seam && ends[&ClipId(2)].start.is_none());
+
+        // Apart: none.
+        late.position = BeatPos(15.);
+        assert!(clip_seams(&[late, early], BPM).is_empty());
+    }
+
+    #[test]
+    fn copies_have_no_crossfade() {
+        let mut c = clip();
+        c.fades.crossfade.length_s = 1.;
+        assert_eq!(c.with_id(ClipId(9)).fades.crossfade.length_s, 0.);
+        let mut kept = c.clone();
+        kept.crop(BeatPos(0.), BeatPos(12.), BPM);
+        assert_eq!(kept.fades.crossfade.length_s, 1., "its start stays");
+        c.crop(BeatPos(11.), BeatPos(20.), BPM);
+        assert_eq!(c.fades.crossfade.length_s, 0., "its start cut");
     }
 }

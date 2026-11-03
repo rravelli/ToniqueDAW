@@ -3,6 +3,7 @@
 mod automation;
 mod basic;
 mod clip;
+mod fade;
 mod fx;
 mod metronome;
 mod synth;
@@ -14,6 +15,7 @@ pub use clip::{
     AudioClipNode, ClipPlacement, ClipWarp, LoopPlacement, MidiClipNode, TimedMidi, TimelineNote,
     balance,
 };
+pub use fade::{FadeCurve, FadeShape};
 pub use fx::{EchoNode, FilterMode, FilterNode, UTILITY_SILENT_DB, UtilityNode};
 pub use metronome::MetronomeNode;
 pub use synth::{Envelope, SynthNode};

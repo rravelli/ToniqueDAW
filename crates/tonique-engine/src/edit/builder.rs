@@ -13,16 +13,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::{
-    Bus, BusId, Channel, ClipContent, ClipLoop, Edit, Output, Parameter, PluginKind, Track,
+    Bus, BusId, Channel, Clip, ClipContent, ClipLoop, Edit, Fade, Output, Parameter, PluginKind,
+    SeamRoom, Track, seams,
 };
 use crate::automation::AutomationCurve;
 use crate::graph::{GraphDescription, NodeId, NodeIdentity};
 use crate::nodes::{
-    AudioClipNode, AutomationNode, ClipPlacement, ClipWarp, DelayNode, EchoNode, FilterMode,
-    FilterNode, LoopPlacement, MetronomeNode, MidiClipNode, SumNode, SynthNode, TappedNode,
-    ThroughNode, TimelineNote, UtilityNode, VolumePanNode,
+    AudioClipNode, AutomationNode, ClipPlacement, ClipWarp, DelayNode, EchoNode, FadeCurve,
+    FilterMode, FilterNode, LoopPlacement, MetronomeNode, MidiClipNode, SumNode, SynthNode,
+    TappedNode, ThroughNode, TimelineNote, UtilityNode, VolumePanNode,
 };
 use crate::param::ParamId;
+use crate::sample::SampleBuffer;
 use crate::stretch::Stretchers;
 
 /// Crossfade at a clip loop's seam: long enough not to click, short enough
@@ -54,6 +56,24 @@ pub fn automation_curve(edit: &Edit, param: &Parameter, sample_rate: f64) -> Arc
         &edit.tempo,
         sample_rate,
     ))
+}
+
+/// A clip's side of a crossfade across one of its ends, in samples.
+#[derive(Clone, Copy)]
+struct Crossing {
+    /// How far it reaches past that end.
+    past: SamplePos,
+    /// How far it reaches inside the clip from that end.
+    inside: SamplePos,
+    /// Its gain, rising towards the clip's middle.
+    curve: FadeCurve,
+}
+
+/// The crossfades across a clip's ends.
+#[derive(Clone, Copy, Default)]
+struct Crossings {
+    start: Option<Crossing>,
+    end: Option<Crossing>,
 }
 
 struct Builder<'a> {
@@ -133,9 +153,139 @@ impl Builder<'_> {
         self.edit.tempo.beats_to_samples(BeatPos(beat), self.sr)
     }
 
+    /// A span of the timeline, in seconds.
+    fn seconds(&self, from: BeatPos, to: BeatPos) -> f64 {
+        self.edit.tempo.beats_to_seconds(to) - self.edit.tempo.beats_to_seconds(from)
+    }
+
+    /// The source playing `clip`, if it's loaded and it's an audio clip.
+    fn audio_source(&self, clip: &Clip) -> Option<&Arc<SampleBuffer>> {
+        match &clip.content {
+            ClipContent::Audio { source, .. } => self.edit.source(*source),
+            ClipContent::Midi { .. } => None,
+        }
+    }
+
+    /// Seconds of the timeline `clip` can start earlier, reading what's
+    /// trimmed off its start.
+    fn spare_before(&self, clip: &Clip) -> f64 {
+        let speed = clip.warp(&self.edit.tempo).map_or(1., |w| w.speed());
+        match &clip.content {
+            ClipContent::Audio {
+                source_offset_s, ..
+            } => source_offset_s / speed,
+            ClipContent::Midi { .. } => 0.,
+        }
+    }
+
+    /// Seconds of the timeline `clip` can play on past its end, reading
+    /// what's trimmed off it: for ever with a loop.
+    fn spare_after(&self, clip: &Clip) -> f64 {
+        let speed = clip.warp(&self.edit.tempo).map_or(1., |w| w.speed());
+        let (
+            Some(source),
+            ClipContent::Audio {
+                source_offset_s,
+                looped,
+                ..
+            },
+        ) = (self.audio_source(clip), &clip.content)
+        else {
+            return 0.;
+        };
+        if looped.is_some_and(|l| l.is_valid()) {
+            return f64::INFINITY;
+        }
+        let seconds = source.len() as f64 / self.sr;
+        (seconds - source_offset_s) / speed - self.seconds(clip.start, clip.end())
+    }
+
+    /// Where each of `track`'s clips crosses the ones around it.
+    fn crossings(&self, track: &Track) -> Vec<Crossings> {
+        let spans: Vec<(f64, f64)> = track.clips.iter().map(|c| (c.start.0, c.end().0)).collect();
+        let mut found = vec![Crossings::default(); track.clips.len()];
+        for (later_at, earlier_at) in seams(&spans).into_iter().enumerate() {
+            let later = &track.clips[later_at];
+            let Some(earlier_at) = earlier_at else {
+                continue;
+            };
+            let earlier = &track.clips[earlier_at];
+            if later.fades.crossfade.length_s <= 0.
+                || self.audio_source(later).is_none()
+                || self.audio_source(earlier).is_none()
+            {
+                continue;
+            }
+            let room = SeamRoom::new(
+                self.spare_before(later),
+                self.spare_after(earlier),
+                self.seconds(earlier.start, earlier.end()),
+                self.seconds(later.start, later.end()),
+            );
+            let (before, after) = room.window(later.fades.crossfade.length_s);
+            let (before, after) = (
+                (before * self.sr).round() as SamplePos,
+                (after * self.sr).round() as SamplePos,
+            );
+            if before + after <= 0 {
+                continue;
+            }
+            let curve = later.fades.crossfade.curve;
+            found[later_at].start = Some(Crossing {
+                past: before,
+                inside: after,
+                curve,
+            });
+            found[earlier_at].end = Some(Crossing {
+                past: after,
+                inside: before,
+                curve: curve.crossing(),
+            });
+        }
+        found
+    }
+
+    /// `clip`'s fades as heard, in samples and with their curves: a crossing
+    /// takes the place of one, the others have their short ramp at least,
+    /// none longer than half a clip so short.
+    fn fades(
+        &self,
+        clip: &Clip,
+        length: SamplePos,
+        crossings: Crossings,
+    ) -> ((SamplePos, FadeCurve), (SamplePos, FadeCurve)) {
+        let across = |crossing: Option<Crossing>| {
+            crossing.map(|c| Fade {
+                length_s: c.inside as f64 / self.sr,
+                curve: c.curve,
+            })
+        };
+        let seconds = self.seconds(clip.start, clip.end());
+        let (fade_in, fade_out) =
+            clip.fades
+                .heard(seconds, across(crossings.start), across(crossings.end));
+        let shortest = ((clip.fades.min_s.max(0.) * self.sr) as SamplePos).min(length / 2);
+        let ramp = |fade: Fade, crossing: Option<Crossing>| {
+            if let Some(c) = crossing {
+                return (c.past + c.inside, c.curve);
+            }
+            let samples = (fade.length_s * self.sr).round() as SamplePos;
+            if samples < shortest {
+                (shortest, FadeCurve::LINEAR)
+            } else {
+                (samples, fade.curve)
+            }
+        };
+        (
+            ramp(fade_in, crossings.start),
+            ramp(fade_out, crossings.end),
+        )
+    }
+
     fn track(&mut self, track: &Track) -> NodeId {
         let mut sources = Vec::new();
-        for clip in &track.clips {
+        let crossings = self.crossings(track);
+        for (clip, crossings) in track.clips.iter().zip(crossings) {
             let start = self.samples(clip.start.0);
             let end = self.samples(clip.end().0);
             let node = match &clip.content {
@@ -151,12 +301,22 @@ impl Builder<'_> {
                     let Some(source) = self.edit.source(*source) else {
                         continue;
                     };
+                    let ((fade_in, fade_in_curve), (fade_out, fade_out_curve)) =
+                        self.fades(clip, end - start, crossings);
+                    // Crossing a seam, it reaches past its own ends: from
+                    // earlier in its source, or further on.
+                    let early = crossings.start.map_or(0, |c| c.past);
+                    let late = crossings.end.map_or(0, |c| c.past);
+                    let speed = clip.warp(&self.edit.tempo).map_or(1., |w| w.speed());
+                    let source_offset = source_offset_s - early as f64 / self.sr * speed;
                     let place = ClipPlacement {
-                        start,
-                        length: end - start,
-                        source_offset: (source_offset_s * self.sr).round() as SamplePos,
-                        fade_in: (clip.fade_in_s * self.sr) as SamplePos,
-                        fade_out: (clip.fade_out_s * self.sr) as SamplePos,
+                        start: start - early,
+                        length: end - start + early + late,
+                        source_offset: (source_offset * self.sr).round() as SamplePos,
+                        fade_in,
+                        fade_out,
+                        fade_in_curve,
+                        fade_out_curve,
                         looped: looped.filter(ClipLoop::is_valid).map(|l| {
                             LoopPlacement::new(
                                 (l.start_s * self.sr).round() as SamplePos,

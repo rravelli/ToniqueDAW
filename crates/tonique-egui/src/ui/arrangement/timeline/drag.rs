@@ -227,6 +227,7 @@ impl Timeline {
                         collapsed,
                         silenced,
                         ghost: false,
+                        crossfades: Default::default(),
                     }
                     .preview(ui, state);
                 }

@@ -3,6 +3,7 @@
 use crate::ui::RectSpan;
 use crate::ui::theme::ToEgui;
 mod audio;
+mod fades;
 mod inspector;
 mod markers;
 #[cfg(test)]

@@ -4,13 +4,14 @@ use crate::{
     analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,
     core::{
-        clip::AudioClip,
+        clip::{AudioClip, Crossfades, Seam, clip_seams, crossfades},
         state::ProjectState,
         track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow},
     },
     ui::arrangement::{grid::PaintGrid, grid_menu::grid_menu},
     ui::{
-        arrangement::clip::ClipView,
+        arrangement::clip::{BODY_TINT, ClipView, wave_ink},
+        arrangement::clip_fades::SeamView,
         arrangement::{
             row_layout::RowLayout,
             timeline::{drag::ClipDrag, selection::RubberBand},
@@ -243,11 +244,20 @@ impl Timeline {
             // A clip being trimmed goes on top of its neighbours, so what it
             // grows over shows (applying the trim cuts them there).
             clips.sort_by_key(|c| state.is_resizing(c.id));
-            for clip in clips {
-                let clip = state.shown_clip(&clip);
+            let clips: Vec<AudioClip> = clips.iter().map(|c| state.shown_clip(c)).collect();
+            // As they'd be heard once dropped: without the clips dragged away.
+            let staying: Vec<AudioClip> = clips
+                .iter()
+                .filter(|c| !dragged_ids.contains(&c.id))
+                .cloned()
+                .collect();
+            let seams = clip_seams(&staying, state.bpm());
+            let crossed = crossfades(&seams);
+            for clip in &clips {
                 let dragged = self.clip_ui(
                     track,
-                    &clip,
+                    clip,
+                    crossed.get(&clip.id).copied().unwrap_or_default(),
                     ui,
                     state,
                     workspace,
@@ -260,6 +270,8 @@ impl Timeline {
                     dragged_track_index = Some(track.first_track_index)
                 }
             }
+            // Over the clips they're between.
+            seams_ui(ui, state, track, &staying, &seams, viewport, row.y.min);
 
             if track.selected {
                 paint_start_line(ui, state, track_rect);
@@ -305,6 +317,7 @@ impl Timeline {
         &mut self,
         track: &TrackRow,
         clip: &AudioClip,
+        crossfades: Crossfades,
         ui: &mut Ui,
         state: &mut ProjectState,
         workspace: &mut Workspace,
@@ -346,6 +359,7 @@ impl Timeline {
             collapsed: track.collapsed,
             silenced: track.is_silenced(),
             ghost: dragged,
+            crossfades,
         }
         .ui(ui, state);
         // Select clip
@@ -466,6 +480,7 @@ impl Timeline {
                 collapsed,
                 silenced,
                 ghost: false,
+                crossfades: Crossfades::default(),
             }
             .preview(ui, state);
 
@@ -480,6 +495,48 @@ impl Timeline {
                 state.commit_batch();
             }
         };
+    }
+}
+
+/// The `seams` between `clips` on `track`, in a lane from `top`.
+fn seams_ui(
+    ui: &mut Ui,
+    state: &mut ProjectState,
+    track: &TrackRow,
+    clips: &[AudioClip],
+    seams: &[Seam],
+    viewport: Rect,
+    top: f32,
+) {
+    let body = ui
+        .app_theme()
+        .bg_base
+        .lerp_to_gamma(track.color.to_egui(), BODY_TINT);
+    let bpm = state.bpm();
+    for seam in seams {
+        let find = |id| clips.iter().find(|c: &&AudioClip| c.id == id);
+        let (Some(earlier), Some(later)) = (find(seam.earlier), find(seam.later)) else {
+            continue;
+        };
+        let area = Rect::from_x_y_ranges(
+            state.grid.beats_to_x(earlier.position, viewport.span())
+                ..=state.grid.beats_to_x(later.end(bpm), viewport.span()),
+            top..=top + track.height,
+        );
+        if !area.intersects(viewport) {
+            continue;
+        }
+        SeamView {
+            seam: *seam,
+            later,
+            area,
+            top,
+            height: track.height,
+            viewport,
+            ink: wave_ink(body),
+            collapsed: track.collapsed,
+        }
+        .ui(ui, state);
     }
 }
 

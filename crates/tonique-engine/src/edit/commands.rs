@@ -3,8 +3,8 @@
 //! or only an automation curve swapped, or nothing (atomic param changes).
 
 use super::{
-    Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, ClipLoop, Edit, EditError, Effects, Output,
-    Plugin, PluginId, Send, StretchSettings, Track, TrackId, WarpMode,
+    Bus, BusId, ChannelRef, Clip, ClipContent, ClipFades, ClipId, ClipLoop, Edit, EditError,
+    Effects, Output, Plugin, PluginId, Send, StretchSettings, Track, TrackId, WarpMode,
 };
 use crate::automation::BeatPoint;
 use crate::param::ParamId;
@@ -481,6 +481,45 @@ impl SetClipStretch {
 impl EditCommand for SetClipStretch {
     fn label(&self) -> &'static str {
         "Clip stretch"
+    }
+    fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+    fn revert(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        self.swap(edit)
+    }
+}
+
+/// How an audio clip fades in and out, and crosses the clip before it.
+pub struct SetClipFades {
+    track: TrackId,
+    id: ClipId,
+    fades: ClipFades,
+}
+
+impl SetClipFades {
+    pub fn new(track: TrackId, id: ClipId, fades: ClipFades) -> Self {
+        Self { track, id, fades }
+    }
+
+    fn swap(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
+        let c = edit
+            .track_mut(self.track)?
+            .clips
+            .iter_mut()
+            .find(|c| c.id == self.id)
+            .ok_or(EditError::ClipNotFound(self.id))?;
+        if !matches!(c.content, ClipContent::Audio { .. }) {
+            return Err(EditError::Invalid("not an audio clip"));
+        }
+        std::mem::swap(&mut c.fades, &mut self.fades);
+        Ok(Effects::rebuild())
+    }
+}
+
+impl EditCommand for SetClipFades {
+    fn label(&self) -> &'static str {
+        "Clip fades"
     }
     fn apply(&mut self, edit: &mut Edit) -> Result<Effects, EditError> {
         self.swap(edit)
