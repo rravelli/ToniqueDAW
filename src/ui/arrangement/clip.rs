@@ -1,6 +1,9 @@
 use crate::ui::theme::font_size;
 use crate::{
-    core::{clip::AudioClip, state::ProjectState},
+    core::{
+        clip::{AudioClip, Crossfades},
+        state::ProjectState,
+    },
     ui::arrangement::grid::PaintGrid,
     ui::{
         font::PHOSPHOR_REGULAR,
@@ -22,7 +25,7 @@ use std::{ops::Range, time::Duration};
 use tonique_engine::time::BeatPos;
 
 const PADDING_TEXT: f32 = 4.;
-const HEADER_HEIGHT: f32 = 16.;
+pub(super) const HEADER_HEIGHT: f32 = 16.;
 /// How opaque the line through a clip's header where its loop starts over
 /// is, in the header's ink: discreet, the header still reading as one.
 const LOOP_LINE_ALPHA: u8 = 70;
@@ -30,13 +33,13 @@ const LOOP_LINE_ALPHA: u8 = 70;
 /// starts (as after a split) shows as a cut through both.
 const CUT_GAP: f32 = 1.;
 /// Width of the trim handles inside each edge of a clip.
-const TRIM_HANDLE_WIDTH: f32 = 7.;
+pub(super) const TRIM_HANDLE_WIDTH: f32 = 7.;
 const MIN_TRIM_HANDLE_WIDTH: f32 = 2.;
 /// How much of its track's colour a clip's body has, mixed into the
 /// timeline's background: most of it, so its black waveform reads, but
 /// set off from its solid header, so the header reads as the clip to grab
 /// and the body as time. Opaque, so clips dragged over others hide them.
-const BODY_TINT: f32 = 0.7;
+pub(super) const BODY_TINT: f32 = 0.7;
 /// The selected part of a clip's body (all of it, or a selection zone's
 /// part): lit towards the theme's neutral selection colour,
 /// keeping a hint of the clip's, its waveform and grid in contrasting ink.
@@ -78,6 +81,9 @@ pub struct ClipView<'a> {
     pub collapsed: bool,
     /// Its track is muted or soloed out: drawn faded, in muted ink.
     pub silenced: bool,
+    /// Where it crosses other clips on its track, which take the place of
+    /// its fades there.
+    pub crossfades: Crossfades,
 }
 
 impl ClipView<'_> {
@@ -121,7 +127,11 @@ impl ClipView<'_> {
             pos2(pos.x + size.x - handle_width, pos.y + size.y),
         )
         .intersect(viewport);
-        self.body_hover(ui, state, body);
+        // Over the body, its fades' handles and curves.
+        let on_fade = self.fades_ui(ui, state);
+        if !on_fade {
+            self.body_hover(ui, state, body);
+        }
 
         response.context_menu(|ui| self.context_menu(ui, clip, state));
         if response.dragged() {
@@ -243,6 +253,15 @@ impl ClipView<'_> {
                 );
             }
         }
+        self.paint_fades(
+            &painter,
+            state,
+            if selected && self.zone.is_none() {
+                wave_ink(selection)
+            } else {
+                wave_ink(body)
+            },
+        );
         let header = if lit {
             header.blend(theme.hover_overlay)
         } else {
@@ -393,7 +412,7 @@ impl ClipView<'_> {
 
 /// The ink of a waveform on `bg`: black, unless `bg` is too dark for it to
 /// read (a dark track colour, a selection lit towards black), then white.
-fn wave_ink(bg: Color32) -> Color32 {
+pub(super) fn wave_ink(bg: Color32) -> Color32 {
     if contrast(Color32::BLACK, bg) >= WAVE_CONTRAST {
         Color32::BLACK
     } else {
@@ -496,6 +515,7 @@ mod tests {
                     zone: None,
                     collapsed: false,
                     silenced: false,
+                    crossfades: Crossfades::default(),
                 }
                 .ui(ui, &mut state);
             });
@@ -563,6 +583,7 @@ mod tests {
                     zone: None,
                     collapsed: false,
                     silenced: false,
+                    crossfades: Crossfades::default(),
                 }
                 .ui(ui, &mut state);
             });
@@ -586,6 +607,172 @@ mod tests {
         assert!((played - 4.).abs() < 1e-6, "the same audio: {played} s");
     }
 
+    /// The clip, a 4 s file at beat 0 where the grid has it, once `prepare`d
+    /// and dragged from where `from` says to `to`, each given its rect.
+    fn drag_fade(
+        prepare: impl FnOnce(&mut AudioClip),
+        from: impl Fn(Rect) -> Pos2,
+        to: impl Fn(Rect) -> Pos2,
+        modifiers: egui::Modifiers,
+    ) -> (AudioClip, CursorIcon) {
+        let (engine, _processor) = Engine::new(EngineConfig::default());
+        let mut state = ProjectState::new(engine);
+        let track = state.add_track();
+        let id = state.new_clip_id();
+        let mut clip = AudioClip::new(id, AudioInfo::silent(4.), BeatPos(0.), 120.);
+        prepare(&mut clip);
+        state.add_clips(&track, vec![clip]);
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        let viewport = Rect::from_min_size(Pos2::ZERO, vec2(1600., 200.));
+        state.grid.fit(BeatPos(0.), BeatPos(8.), 800.);
+        let rect = Rect::from_min_size(
+            pos2(state.grid.beats_to_x(BeatPos(0.), viewport), 0.),
+            vec2(state.grid.beats_to_width(8.), 80.),
+        );
+        let (from, to) = (from(rect), to(rect));
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers,
+        };
+        // Over the clip first: its handles show, to be grabbed.
+        let mut frames = vec![
+            vec![egui::Event::ModifiersChanged(modifiers)],
+            vec![egui::Event::PointerMoved(rect.center())],
+            vec![egui::Event::PointerMoved(from)],
+            vec![],
+            vec![button(from, true)],
+        ];
+        for step in 1..=4 {
+            frames.push(vec![egui::Event::PointerMoved(
+                from.lerp(to, step as f32 / 4.),
+            )]);
+        }
+        frames.push(vec![button(to, false)]);
+        let mut cursor = CursorIcon::Default;
+        for (i, events) in frames.into_iter().enumerate() {
+            let input = egui::RawInput {
+                screen_rect: Some(viewport),
+                time: Some(i as f64),
+                events,
+                ..Default::default()
+            };
+            let clip = state.shown_clip(&state.find_clip(id).unwrap().1);
+            let mut output = ctx.run_ui(input, |ui| {
+                ClipView {
+                    clip: &clip,
+                    rect,
+                    viewport,
+                    color: crate::ui::theme::Theme::dark().accent,
+                    selected: false,
+                    zone: None,
+                    collapsed: false,
+                    silenced: false,
+                    crossfades: Crossfades::default(),
+                }
+                .ui(ui, &mut state);
+            });
+            output.textures_delta.clear();
+            if i == 3 {
+                cursor = output.platform_output.cursor_icon;
+            }
+        }
+        (state.find_clip(id).unwrap().1, cursor)
+    }
+
+    /// Just inside the start of the clip, where a fade in of none has its
+    /// handle.
+    fn start_handle(rect: Rect) -> Pos2 {
+        pos2(
+            rect.left() + TRIM_HANDLE_WIDTH + 6.,
+            rect.top() + HEADER_HEIGHT + 6.,
+        )
+    }
+
+    fn end_handle(rect: Rect) -> Pos2 {
+        pos2(
+            rect.right() - TRIM_HANDLE_WIDTH - 6.,
+            rect.top() + HEADER_HEIGHT + 6.,
+        )
+    }
+
+    /// A beat in a 120 bpm clip is half a second.
+    fn beat_x(rect: Rect, beats: f32) -> f32 {
+        rect.left() + rect.width() * beats / 8.
+    }
+
+    #[test]
+    fn dragging_a_handle_sets_the_fade_snapped_to_the_grid() {
+        let to = |rect: Rect| pos2(beat_x(rect, 2.03), rect.center().y);
+        let (clip, cursor) = drag_fade(|_| {}, start_handle, to, egui::Modifiers::NONE);
+        assert_eq!(cursor, CursorIcon::ResizeHorizontal);
+        assert_eq!(clip.fades.fade_in.length_s, 1., "two beats");
+        assert_eq!(clip.fades.fade_out.length_s, 0.);
+
+        // Alt: exactly where it's dropped.
+        let (free, _) = drag_fade(|_| {}, start_handle, to, egui::Modifiers::ALT);
+        assert!(
+            free.fades.fade_in.length_s > 1.,
+            "{}",
+            free.fades.fade_in.length_s
+        );
+
+        // From the end, fading out.
+        let to = |rect: Rect| pos2(beat_x(rect, 7.), rect.center().y);
+        let (clip, _) = drag_fade(|_| {}, end_handle, to, egui::Modifiers::NONE);
+        assert_eq!(clip.fades.fade_out.length_s, 0.5, "the last beat");
+        assert_eq!(clip.fades.fade_in.length_s, 0.);
+    }
+
+    #[test]
+    fn a_handle_stops_at_the_other_fade() {
+        let to = |rect: Rect| pos2(beat_x(rect, 7.5), rect.center().y);
+        let (clip, _) = drag_fade(
+            |c| c.fades.fade_out.length_s = 2.,
+            start_handle,
+            to,
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(clip.fades.fade_in.length_s, 2., "half of 4 s");
+        assert_eq!(clip.fades.fade_out.length_s, 2.);
+    }
+
+    /// Dragging the curve up bends it up: louder sooner.
+    #[test]
+    fn dragging_a_curve_changes_its_curvature() {
+        // A second-long linear fade: half way up, half way through.
+        let on_curve = |rect: Rect| {
+            let body_top = rect.top() + HEADER_HEIGHT;
+            pos2(beat_x(rect, 1.), (body_top + rect.bottom()) / 2.)
+        };
+        let up = |rect: Rect| on_curve(rect) - vec2(0., 20.);
+        let (clip, cursor) = drag_fade(
+            |c| c.fades.fade_in.length_s = 1.,
+            on_curve,
+            up,
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(cursor, CursorIcon::ResizeVertical);
+        assert!(clip.fades.fade_in.curve.curvature > 0.);
+        assert_eq!(clip.fades.fade_in.length_s, 1., "the length stays");
+    }
+
+    /// Away from its curve, a fade's body is still the timeline's.
+    #[test]
+    fn the_body_of_a_fade_away_from_its_curve_is_the_timelines() {
+        let off = |rect: Rect| pos2(beat_x(rect, 1.5), rect.bottom() - 4.);
+        let (clip, cursor) = drag_fade(
+            |c| c.fades.fade_in.length_s = 1.,
+            off,
+            off,
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(cursor, CursorIcon::Text);
+        assert_eq!(clip.fades.fade_in.curve.curvature, 0.);
+    }
+
     /// Whether egui warned of two widgets with one ID, drawing `clip` with
     /// `ui`, then again (as its drag does) on another track at the same
     /// time with `ui` or as a preview.
@@ -605,6 +792,7 @@ mod tests {
             zone: None,
             collapsed: false,
             silenced: false,
+            crossfades: Crossfades::default(),
         };
         let input = egui::RawInput {
             screen_rect: Some(viewport),

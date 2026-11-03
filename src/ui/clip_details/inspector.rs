@@ -25,6 +25,7 @@ use crate::{
 
 use super::{
     audio::audio_panel,
+    fades::fades_panel,
     markers::{TrimEdge, default_loop, trimmed, with_loop},
 };
 
@@ -52,6 +53,8 @@ pub(super) struct Panels {
     clip: bool,
     /// How it sounds: gain, pan, warp and transposition.
     audio: bool,
+    /// How it fades in and out.
+    fades: bool,
 }
 
 impl Default for Panels {
@@ -59,6 +62,7 @@ impl Default for Panels {
         Self {
             clip: true,
             audio: true,
+            fades: true,
         }
     }
 }
@@ -78,7 +82,7 @@ impl Panels {
 
     /// The inspector's width: its rail and the panels shown.
     pub(super) fn width(self) -> f32 {
-        let shown = self.clip as u8 + self.audio as u8;
+        let shown = self.clip as u8 + self.audio as u8 + self.fades as u8;
         RAIL_WIDTH + shown as f32 * (PANEL_GAP + PANEL_WIDTH)
     }
 }
@@ -87,6 +91,7 @@ impl Panels {
 enum Panel {
     Clip,
     Audio,
+    Fades,
 }
 
 /// The clip's properties in panels side by side, each shown or hidden from
@@ -102,6 +107,7 @@ pub(super) fn inspector_ui(
     let bpm = state.bpm();
     let bpb = state.time_signature();
     let shown = state.shown_clip(clip);
+    let crossed = state.crossfades_of(clip.id);
     // The clip as edited, and whether the edit is done: shown as edited
     // until then, or (`live`) heard as it's edited, one undo step either way.
     let mut change: Option<(AudioClip, bool)> = None;
@@ -115,6 +121,7 @@ pub(super) fn inspector_ui(
     for (on, icon, name) in [
         (&mut panels.clip, icons::BROWSER, "Clip"),
         (&mut panels.audio, icons::WAVEFORM, "Audio"),
+        (&mut panels.fades, icons::CHART_LINE_UP, "Fades"),
     ] {
         let button = FlatButton::ghost(icon)
             .square(RAIL_WIDTH)
@@ -130,10 +137,14 @@ pub(super) fn inspector_ui(
     panels.set(ui.ctx());
 
     // Too narrow for them all, the panels scroll sideways under the rail.
-    let shown_panels: Vec<Panel> = [(panels.clip, Panel::Clip), (panels.audio, Panel::Audio)]
-        .into_iter()
-        .filter_map(|(on, panel)| on.then_some(panel))
-        .collect();
+    let shown_panels: Vec<Panel> = [
+        (panels.clip, Panel::Clip),
+        (panels.audio, Panel::Audio),
+        (panels.fades, Panel::Fades),
+    ]
+    .into_iter()
+    .filter_map(|(on, panel)| on.then_some(panel))
+    .collect();
     let area = rect.with_min_x(rect.left() + RAIL_WIDTH);
     ui.scope_builder(UiBuilder::new().max_rect(area), |ui| {
         // Shown whenever they're cut, not only on hover.
@@ -166,6 +177,7 @@ pub(super) fn inspector_ui(
                             .auto_shrink(false)
                             .show(ui, |ui| match panel {
                                 Panel::Clip => clip_panel(ui, &shown, bpm, bpb, &mut change),
+                                Panel::Fades => fades_panel(ui, &shown, crossed, bpm, &mut change),
                                 Panel::Audio => audio_panel(
                                     ui,
                                     &shown,

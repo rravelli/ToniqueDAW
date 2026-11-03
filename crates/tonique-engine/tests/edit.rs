@@ -3,11 +3,14 @@ use std::sync::Arc;
 use tonique_engine::automation::{BeatPoint, CurveShape};
 use tonique_engine::edit::commands::*;
 use tonique_engine::edit::{
-    Bus, BusId, ChannelRef, Clip, ClipContent, ClipId, ClipLoop, Edit, EditError, EditSession,
-    Note, Output, Plugin, PluginKind, Send, StretchSettings, Track, TrackId, WarpMode,
+    Bus, BusId, ChannelRef, Clip, ClipContent, ClipFades, ClipId, ClipLoop, Edit, EditError,
+    EditSession, Fade, Note, Output, Plugin, PluginKind, SeamRoom, Send, StretchSettings, Track,
+    TrackId, WarpMode, seams,
 };
 use tonique_engine::engine::{AudioProcessor, Engine, EngineConfig, render_offline};
-use tonique_engine::nodes::{ClipWarp, Envelope, FilterMode, UTILITY_SILENT_DB};
+use tonique_engine::nodes::{
+    ClipWarp, Envelope, FadeCurve, FadeShape, FilterMode, UTILITY_SILENT_DB,
+};
 use tonique_engine::sample::SampleBuffer;
 use tonique_engine::time::{BeatPos, TempoMap};
 
@@ -247,8 +250,7 @@ fn identical_clips_are_deduplicated_and_latency_is_compensated() {
     let mut edit = Edit::new(120.0);
     let src = edit.add_source(impulse());
     let mut clip = Clip::audio(&mut edit, BeatPos(0.0), 4.0, src);
-    clip.fade_in_s = 0.0;
-    clip.fade_out_s = 0.0;
+    clip.fades.min_s = 0.0;
     for latency in [0, 100] {
         let mut t = Track::new(&mut edit, "t");
         // The same clip on both tracks, gain included: the same output.
@@ -539,8 +541,7 @@ fn playing_clip(
     let mut track = Track::new(&mut edit, "t");
     // 120 bpm: two beats a second.
     let mut clip = Clip::audio(&mut edit, BeatPos(0.0), seconds * 2., src);
-    clip.fade_in_s = 0.0;
-    clip.fade_out_s = 0.0;
+    clip.fades.min_s = 0.0;
     if let ClipContent::Audio { looped: l, .. } = &mut clip.content {
         *l = looped;
     }
@@ -1561,4 +1562,376 @@ fn utility_inverts_each_side() {
         assert!((frame[0] + frame[1]).abs() < 1e-5, "{frame:?}");
     }
     assert!(peak(&out) > 0.4);
+}
+
+/// A source at unity all along, `seconds` long.
+fn level(seconds: f64) -> Arc<SampleBuffer> {
+    Arc::new(SampleBuffer::new(
+        vec![vec![1.0; (seconds * SR) as usize]],
+        SR,
+    ))
+}
+
+/// The left channel of a session of `clips` at 120 bpm (two beats a second)
+/// over a level, each `(start, length)` in beats with its fades, for
+/// `seconds`. The clips are hard left and hard right in turn.
+fn faded(clips: &[(f64, f64, ClipFades)], seconds: f64) -> (Vec<f32>, Vec<f32>) {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(level(60.0));
+    let mut track = Track::new(&mut edit, "t");
+    for (i, (start, length, fades)) in clips.iter().enumerate() {
+        let mut clip = Clip::audio(&mut edit, BeatPos(*start), *length, src);
+        clip.fades = *fades;
+        if clips.len() > 1 {
+            clip.pan()
+                .expect("audio")
+                .value
+                .set(if i == 0 { -1.0 } else { 1.0 }, 0.0);
+        }
+        track.clips.push(clip);
+    }
+    edit.tracks.push(track);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).expect("session");
+    s.play().expect("play");
+    channels(&render_offline(&mut p, (seconds * SR) as usize, 2))
+}
+
+fn channels(out: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    (
+        out.iter().step_by(2).copied().collect(),
+        out.iter().skip(1).step_by(2).copied().collect(),
+    )
+}
+
+fn at(out: &[f32], seconds: f64) -> f32 {
+    out[(seconds * SR) as usize]
+}
+
+fn fade(length_s: f64, curve: FadeCurve) -> Fade {
+    Fade { length_s, curve }
+}
+
+fn near(a: f32, b: f32) -> bool {
+    (a - b).abs() < 2e-3
+}
+
+#[test]
+fn fades_have_their_shapes_gain_at_their_start_middle_and_end() {
+    for shape in FadeShape::ALL {
+        let curve = FadeCurve::of(shape).with_curvature(0.25);
+        let fades = ClipFades {
+            fade_in: fade(0.5, curve),
+            fade_out: fade(0.25, curve),
+            ..Default::default()
+        };
+        // Two seconds.
+        let (out, _) = faded(&[(0.0, 4.0, fades)], 2.5);
+        assert_eq!(out[0], 0.0, "{shape:?} starts silent");
+        assert!(near(at(&out, 0.25), curve.gain(0.5)), "{shape:?} fading in");
+        assert!(near(at(&out, 0.5), 1.0), "{shape:?} faded in");
+        assert!(near(at(&out, 1.0), 1.0), "{shape:?} between its fades");
+        assert!(near(at(&out, 1.75), 1.0), "{shape:?} about to fade out");
+        assert!(
+            near(at(&out, 1.875), curve.gain(0.5)),
+            "{shape:?} fading out"
+        );
+        assert!(at(&out, 1.9999) < 0.01, "{shape:?} ends silent");
+        assert_eq!(at(&out, 2.1), 0.0, "{shape:?} over");
+    }
+}
+
+/// With no fade, a short ramp all the same, so a clip doesn't click.
+#[test]
+fn clips_without_fades_still_have_their_short_ramp() {
+    let (out, _) = faded(&[(0.0, 2.0, ClipFades::default())], 1.5);
+    assert_eq!(out[0], 0.0);
+    assert!(near(at(&out, 0.0025), 0.5));
+    assert!(near(at(&out, 0.005), 1.0));
+    assert!(near(at(&out, 1.0 - 0.0025), 0.5));
+}
+
+#[test]
+fn setting_fades_is_an_undo_step() {
+    let (mut s, mut p, track, clip) = {
+        let mut edit = Edit::new(120.0);
+        let src = edit.add_source(level(4.0));
+        let mut t = Track::new(&mut edit, "t");
+        let c = Clip::audio(&mut edit, BeatPos(0.0), 4.0, src);
+        let ids = (t.id, c.id);
+        t.clips.push(c);
+        edit.tracks.push(t);
+        let (e, p) = engine(0);
+        (EditSession::new(edit, e).expect("session"), p, ids.0, ids.1)
+    };
+    let fades = ClipFades {
+        fade_in: fade(1.0, FadeCurve::LINEAR),
+        ..Default::default()
+    };
+    s.perform(SetClipFades::new(track, clip, fades))
+        .expect("set");
+    s.play().expect("play");
+    let (out, _) = channels(&render_offline(&mut p, 24000, 2));
+    assert!(near(at(&out, 0.25), 0.25), "heard at once");
+    let clip_fades = |s: &EditSession| s.edit().track(track).unwrap().clip(clip).unwrap().fades;
+    assert_eq!(clip_fades(&s), fades);
+    s.undo().expect("undo");
+    assert_eq!(clip_fades(&s), ClipFades::default());
+    s.redo().expect("redo");
+    assert_eq!(clip_fades(&s), fades);
+    // Heard on audio clips only.
+    let mut edit = Edit::new(120.0);
+    let t = synth_track(&mut edit, vec![], 4.0);
+    let mut command = SetClipFades::new(t.id, t.clips[0].id, fades);
+    edit.tracks.push(t);
+    let midi = command.apply(&mut edit).unwrap_err();
+    assert_eq!(midi, EditError::Invalid("not an audio clip"));
+}
+
+/// Fades that don't fit are heard scaled down together, on a clip resized
+/// (or at a tempo) that leaves them too little room; given the room again,
+/// they're back.
+#[test]
+fn fades_stay_inside_their_clip_when_it_is_resized() {
+    let fades = ClipFades {
+        fade_in: fade(0.75, FadeCurve::LINEAR),
+        fade_out: fade(0.25, FadeCurve::LINEAR),
+        ..Default::default()
+    };
+    // Half a second: 3/8 and 1/8 of a second.
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(level(4.0));
+    let mut t = Track::new(&mut edit, "t");
+    let mut c = Clip::audio(&mut edit, BeatPos(0.0), 4.0, src);
+    c.fades = fades;
+    let (track, clip) = (t.id, c.id);
+    t.clips.push(c);
+    edit.tracks.push(t);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).expect("session");
+    s.perform(ResizeClip::new(track, clip, BeatPos(0.0), 1.0, 0.0))
+        .expect("resize");
+    s.play().expect("play");
+    let (out, _) = channels(&render_offline(&mut p, 24000, 2));
+    assert!(near(at(&out, 0.1875), 0.5), "half way in");
+    assert!(near(at(&out, 0.375), 1.0), "faded in");
+    assert!(near(at(&out, 0.4375), 0.5), "half way out");
+
+    let heard = fades.heard(0.5, None, None);
+    assert_eq!((heard.0.length_s, heard.1.length_s), (0.375, 0.125));
+    let heard = fades.heard(2.0, None, None);
+    assert_eq!((heard.0.length_s, heard.1.length_s), (0.75, 0.25));
+}
+
+/// Fades belong to the clip, not to the passes of its loop.
+#[test]
+fn looped_clips_fade_once_over_their_whole_length() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(level(0.25));
+    let mut t = Track::new(&mut edit, "t");
+    let mut c = Clip::audio(&mut edit, BeatPos(0.0), 4.0, src);
+    c.fades.fade_in = fade(0.5, FadeCurve::LINEAR);
+    c.fades.fade_out = fade(0.5, FadeCurve::LINEAR);
+    if let ClipContent::Audio { looped, .. } = &mut c.content {
+        *looped = Some(ClipLoop {
+            start_s: 0.0,
+            end_s: 0.25,
+        });
+    }
+    t.clips.push(c);
+    edit.tracks.push(t);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).expect("session");
+    s.play().expect("play");
+    let (out, _) = channels(&render_offline(&mut p, 96000, 2));
+    assert!(near(at(&out, 0.3), 0.6), "through the second pass");
+    assert!(near(at(&out, 1.0), 1.0), "between the fades");
+    assert!(near(at(&out, 1.75), 0.5), "fading out in its last passes");
+}
+
+/// A render apart from the edit (an export) hears the fades and crossfades.
+#[test]
+fn fades_are_heard_in_a_detached_edit() {
+    let mut edit = Edit::new(120.0);
+    let src = edit.add_source(level(4.0));
+    let mut t = Track::new(&mut edit, "t");
+    let mut c = Clip::audio(&mut edit, BeatPos(0.0), 2.0, src);
+    c.fades.fade_in = fade(0.5, FadeCurve::EQUAL_POWER);
+    let mut late = Clip::audio(&mut edit, BeatPos(2.0), 2.0, src);
+    late.fades.fade_out = fade(0.5, FadeCurve::LINEAR);
+    t.clips.extend([c, late]);
+    edit.tracks.push(t);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit.detached(), e).expect("session");
+    s.play().expect("play");
+    let (out, _) = channels(&render_offline(&mut p, 96000, 2));
+    assert!(near(at(&out, 0.25), FadeCurve::EQUAL_POWER.gain(0.5)));
+    assert!(near(at(&out, 1.75), 0.5), "the later clip fading out");
+}
+
+/// A session of a level's two clips touching at a second, hard left and
+/// hard right, the later one crossing as `crossfade` says. Each plays `spare`
+/// seconds of file trimmed off at the seam (`spare.0` off the later clip's
+/// start, `spare.1` off the earlier clip's end).
+fn seam(crossfade: Fade, spare: (f64, f64), seconds: f64) -> (Vec<f32>, Vec<f32>) {
+    let mut edit = Edit::new(120.0);
+    // Its first second, and what's after, for the earlier clip to read on.
+    let earlier_src = edit.add_source(level(1.0 + spare.1));
+    let later_src = edit.add_source(level(2.0 + spare.0));
+    let mut t = Track::new(&mut edit, "t");
+    let earlier = Clip::audio(&mut edit, BeatPos(0.0), 2.0, earlier_src);
+    let mut later = Clip::audio(&mut edit, BeatPos(2.0), 2.0, later_src);
+    later.fades.crossfade = crossfade;
+    if let ClipContent::Audio {
+        source_offset_s, ..
+    } = &mut later.content
+    {
+        *source_offset_s = spare.0;
+    }
+    earlier.pan().expect("audio").value.set(-1.0, 0.0);
+    later.pan().expect("audio").value.set(1.0, 0.0);
+    t.clips.extend([earlier, later]);
+    edit.tracks.push(t);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).expect("session");
+    s.play().expect("play");
+    channels(&render_offline(&mut p, (seconds * SR) as usize, 2))
+}
+
+/// Across a seam, each clip plays on past it as the other fades in, neither
+/// moving: equal power by default, keeping the power at any curvature.
+#[test]
+fn a_crossfade_plays_both_clips_on_past_their_seam() {
+    for curvature in [0.0, 0.6, -0.6] {
+        let curve = FadeCurve::EQUAL_POWER.with_curvature(curvature);
+        let (l, r) = seam(fade(0.5, curve), (1.0, 1.0), 1.5);
+        assert!(near(at(&l, 0.5), 1.0), "the first alone");
+        assert_eq!(at(&r, 0.5), 0.0, "the second not yet");
+        for t in [0.76, 0.85, 1.0, 1.1, 1.24] {
+            let power = at(&l, t).powi(2) + at(&r, t).powi(2);
+            assert!(near(power, 1.0), "{curvature} at {t}: {power}");
+        }
+        let half = FadeCurve::EQUAL_POWER.with_curvature(curvature).gain(0.5);
+        assert!(near(at(&r, 1.0), half), "half way, at the seam");
+        assert!(near(at(&r, 1.3), 1.0), "the second alone");
+        assert_eq!(at(&l, 1.3), 0.0);
+    }
+}
+
+/// The later clip starting early reads what's before it in its file, so
+/// after the crossfade it plays where it always did.
+#[test]
+fn a_crossfade_reads_what_is_trimmed_off() {
+    let mut edit = Edit::new(120.0);
+    let ramp: Vec<f32> = (0..96000).map(|i| i as f32 / 96000.0).collect();
+    let src = edit.add_source(Arc::new(SampleBuffer::new(vec![ramp], SR)));
+    let mut t = Track::new(&mut edit, "t");
+    let earlier = Clip::audio(&mut edit, BeatPos(0.0), 1.0, src);
+    let mut later = Clip::audio(&mut edit, BeatPos(1.0), 2.0, src);
+    later.fades.crossfade = fade(0.2, FadeCurve::LINEAR);
+    if let ClipContent::Audio {
+        source_offset_s, ..
+    } = &mut later.content
+    {
+        *source_offset_s = 1.0;
+    }
+    earlier.pan().expect("audio").value.set(-1.0, 0.0);
+    later.pan().expect("audio").value.set(1.0, 0.0);
+    t.clips.extend([earlier, later]);
+    edit.tracks.push(t);
+    let (e, mut p) = engine(0);
+    let mut s = EditSession::new(edit, e).expect("session");
+    s.play().expect("play");
+    let (l, r) = channels(&render_offline(&mut p, 48000, 2));
+    // At the seam, half a second in: half of each.
+    assert!(
+        near(at(&l, 0.5), 0.25 * 0.5),
+        "the earlier one's file reads on"
+    );
+    assert!(near(at(&r, 0.5), 0.5 * 0.5), "the later one's from 1 s");
+    assert!(near(at(&r, 0.75), 0.625), "past it: as it always did");
+}
+
+/// With nothing trimmed off one side, it all goes on the other side; with
+/// nothing on either, no crossfade: each ends with its short ramp.
+#[test]
+fn a_crossfade_only_goes_where_there_is_audio() {
+    // Nothing before the later clip's start: all after the seam.
+    let (l, r) = seam(fade(0.5, FadeCurve::LINEAR), (0.0, 1.0), 1.75);
+    assert_eq!(at(&r, 0.9), 0.0, "not starting early");
+    assert!(near(at(&l, 0.9), 1.0));
+    assert!(near(at(&r, 1.25), 0.5), "half way");
+    assert!(near(at(&l, 1.25), 0.5));
+    assert!(near(at(&r, 1.5), 1.0), "done");
+
+    // Nothing past the earlier clip's end: all before the seam.
+    let (l, r) = seam(fade(0.5, FadeCurve::LINEAR), (1.0, 0.0), 1.25);
+    assert!(near(at(&l, 0.75), 0.5), "half way");
+    assert!(near(at(&r, 0.75), 0.5));
+    assert_eq!(at(&l, 1.1), 0.0, "over at its end");
+
+    // Neither: as if there were none.
+    let (l, r) = seam(fade(0.5, FadeCurve::LINEAR), (0.0, 0.0), 1.25);
+    assert!(near(at(&l, 0.9), 1.0));
+    assert_eq!(at(&r, 0.9), 0.0);
+    assert!(near(at(&r, 1.1), 1.0));
+}
+
+/// A crossfade replaces the clip's own fade at that end, which comes back
+/// once they no longer touch.
+#[test]
+fn crossfades_replace_the_fades_at_their_ends_only_at_a_seam() {
+    let long = ClipFades {
+        fade_out: fade(0.75, FadeCurve::LINEAR),
+        ..Default::default()
+    };
+    let crossing = ClipFades {
+        crossfade: fade(0.5, FadeCurve::EQUAL_POWER),
+        ..Default::default()
+    };
+    // Both from the start of a long file: it all goes after the seam.
+    let clips = [(0.0, 2.0, long), (2.0, 2.0, crossing)];
+    let (l, _) = faded(&clips, 1.4);
+    assert!(near(at(&l, 0.9), 1.0), "not fading before the seam");
+    assert!(near(
+        at(&l, 1.25),
+        FadeCurve::EQUAL_POWER.crossing().gain(0.5)
+    ));
+    // Apart: its own fade, and no crossfade.
+    let clips = [(0.0, 2.0, long), (2.5, 2.0, crossing)];
+    let (l, r) = faded(&clips, 1.3);
+    assert!(near(at(&l, 0.625), 0.5), "its fade");
+    assert_eq!(at(&r, 1.2), 0.0, "not starting early");
+}
+
+#[test]
+fn seams_are_where_a_clip_starts_as_another_ends() {
+    let found = seams(&[(4.0, 8.0), (0.0, 4.0), (9.0, 10.0), (8.0000001, 9.0)]);
+    assert_eq!(found, [Some(1), None, Some(3), Some(0)]);
+    assert_eq!(
+        seams(&[(0.0, 4.0), (3.0, 5.0)]),
+        [None, None],
+        "overlapping"
+    );
+}
+
+#[test]
+fn seam_room_shares_a_crossfade_between_its_sides() {
+    let room = SeamRoom::new(10.0, 10.0, 10.0, 10.0);
+    assert_eq!(room.window(2.0), (1.0, 1.0), "half each");
+    assert_eq!(room.length_reaching(1.0), 2.0);
+    // Little before the seam: the rest goes after it.
+    let room = SeamRoom::new(0.5, 10.0, 10.0, 10.0);
+    assert_eq!(room.window(2.0), (0.5, 1.5));
+    assert_eq!(room.length_reaching(1.5), 2.0, "reaching where it goes");
+    // Nothing either side: no crossfade.
+    let room = SeamRoom::new(0.0, 0.0, 10.0, 10.0);
+    assert_eq!(room.window(2.0), (0.0, 0.0));
+    assert_eq!(room.length_reaching(2.0), 0.0);
+    // No further than the clip it crosses, however much file there is.
+    let room = SeamRoom::new(10.0, 10.0, 1.0, 2.0);
+    assert_eq!(room.window(8.0), (1.0, 2.0));
+    // Not more than asked of a looped clip's endless audio.
+    let room = SeamRoom::new(1.0, f64::INFINITY, 10.0, 10.0);
+    assert_eq!(room.window(1.0), (0.5, 0.5));
 }

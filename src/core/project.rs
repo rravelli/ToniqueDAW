@@ -10,7 +10,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tonique_engine::{
-    edit::{StretchWindow, WarpMode},
+    edit::{Fade, StretchWindow, WarpMode},
+    nodes::{FadeCurve, FadeShape},
     time::TimeSignature,
 };
 
@@ -23,8 +24,8 @@ pub const EXTENSION: &str = "tonique";
 /// (filter `mode`, echo `time`) among effect parameters, and effect names;
 /// 4 the time signature; 5 clip gain, pan, loops and bar 1, clips saved by
 /// offset and length rather than by trims; 6 clip warp, tempo and
-/// transposition.
-pub const VERSION: u32 = 6;
+/// transposition; 7 clip fades and crossfades.
+pub const VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
@@ -166,6 +167,127 @@ pub struct ClipFile {
     /// Stretched and transposed, whether its formants stay where they are.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub formants: bool,
+    /// Older projects' clips have none, only the short ramp all clips have.
+    #[serde(default, skip_serializing_if = "FadeFile::is_none")]
+    pub fade_in: FadeFile,
+    #[serde(default, skip_serializing_if = "FadeFile::is_none")]
+    pub fade_out: FadeFile,
+    /// How it crosses the clip ending where it starts; none when absent.
+    #[serde(default, skip_serializing_if = "CrossfadeFile::is_equal_power")]
+    pub crossfade: CrossfadeFile,
+}
+
+/// See [`Fade`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FadeFile {
+    /// In seconds.
+    pub length: f64,
+    #[serde(default)]
+    pub shape: ShapeFile,
+    #[serde(default)]
+    pub curvature: f32,
+}
+
+impl FadeFile {
+    fn is_none(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl From<Fade> for FadeFile {
+    fn from(fade: Fade) -> Self {
+        Self {
+            length: fade.length_s,
+            shape: fade.curve.shape.into(),
+            curvature: fade.curve.curvature,
+        }
+    }
+}
+
+impl From<FadeFile> for Fade {
+    /// In range, whatever a project file says.
+    fn from(file: FadeFile) -> Self {
+        Self {
+            length_s: file.length.max(0.),
+            curve: FadeCurve::of(file.shape.into()).with_curvature(file.curvature),
+        }
+    }
+}
+
+/// See [`Fade`]: a clip's crossfade, equal power unless it says otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CrossfadeFile {
+    /// In seconds.
+    pub length: f64,
+    pub shape: ShapeFile,
+    #[serde(default)]
+    pub curvature: f32,
+}
+
+impl Default for CrossfadeFile {
+    fn default() -> Self {
+        Self {
+            length: 0.,
+            shape: ShapeFile::EqualPower,
+            curvature: 0.,
+        }
+    }
+}
+
+impl CrossfadeFile {
+    fn is_equal_power(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl From<Fade> for CrossfadeFile {
+    fn from(fade: Fade) -> Self {
+        Self {
+            length: fade.length_s,
+            shape: fade.curve.shape.into(),
+            curvature: fade.curve.curvature,
+        }
+    }
+}
+
+impl From<CrossfadeFile> for Fade {
+    /// In range, whatever a project file says.
+    fn from(file: CrossfadeFile) -> Self {
+        Self {
+            length_s: file.length.max(0.),
+            curve: FadeCurve::of(file.shape.into()).with_curvature(file.curvature),
+        }
+    }
+}
+
+/// See [`FadeShape`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ShapeFile {
+    #[default]
+    Linear,
+    EqualPower,
+    Exponential,
+}
+
+impl From<FadeShape> for ShapeFile {
+    fn from(shape: FadeShape) -> Self {
+        match shape {
+            FadeShape::Linear => Self::Linear,
+            FadeShape::EqualPower => Self::EqualPower,
+            FadeShape::Exponential => Self::Exponential,
+        }
+    }
+}
+
+impl From<ShapeFile> for FadeShape {
+    fn from(file: ShapeFile) -> Self {
+        match file {
+            ShapeFile::Linear => Self::Linear,
+            ShapeFile::EqualPower => Self::EqualPower,
+            ShapeFile::Exponential => Self::Exponential,
+        }
+    }
 }
 
 /// See [`WarpMode`].
@@ -432,6 +554,21 @@ mod tests {
                     transpose: -2.5,
                     window: WindowFile::Short,
                     formants: true,
+                    fade_in: FadeFile {
+                        length: 0.5,
+                        shape: ShapeFile::Exponential,
+                        curvature: -0.25,
+                    },
+                    fade_out: FadeFile {
+                        length: 0.25,
+                        shape: ShapeFile::Linear,
+                        curvature: 0.,
+                    },
+                    crossfade: CrossfadeFile {
+                        length: 0.125,
+                        shape: ShapeFile::Linear,
+                        curvature: 0.5,
+                    },
                 }],
             }],
         };
