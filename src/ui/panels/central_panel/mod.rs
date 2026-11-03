@@ -161,7 +161,11 @@ impl CentralPanel {
         ui.set_width(state.grid.beats_to_width(end));
         // The track list is a panel of its own, so its rows don't size this
         // ui: scroll as far down as they go. The footer isn't content.
-        let content_size = vec2(ui.min_size().x, viewport.top() + content_height(&layout));
+        // Both from the screen's origin, as the viewport's edges are.
+        let content_size = vec2(
+            viewport.left() + ui.min_size().x,
+            viewport.top() + content_height(&layout),
+        );
 
         let mut scrolled_x = false;
         if ui.input(|i| i.smooth_scroll_delta != Vec2::ZERO && !i.modifiers.ctrl) {
@@ -244,7 +248,7 @@ impl CentralPanel {
                     track,
                     &mut offset.x,
                     content_size.x - viewport.right(),
-                    viewport.width() / content_size.x,
+                    viewport.width() / (content_size.x - viewport.left()),
                 ))
                 .dragged();
         }

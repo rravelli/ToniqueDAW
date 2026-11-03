@@ -5,7 +5,7 @@ use egui::{
 };
 use egui_phosphor::{
     fill::SIDEBAR_SIMPLE,
-    regular::{CPU, GRAPH, MAGNET, RECORD, SPEAKER_SLASH, WARNING},
+    regular::{CPU, GRAPH, RECORD, SPEAKER_SLASH, WARNING},
 };
 use tonique_engine::time::TimeSignature;
 
@@ -197,14 +197,11 @@ impl TransportBar {
         self.time_signature_ui(ui, state);
         ui.add_space(GROUP_GAP);
         self.grid_ui(ui, state);
-        if self.snap_ui(ui, state).clicked() {
-            commands.push(Action::ToggleSnap);
-        }
     }
 
     /// The grid's step, choosing it (and the rest of the grid's settings)
     /// from a menu. Adaptive, it's the step at the arrangement's zoom,
-    /// muted.
+    /// muted. Dimmed further while edits don't snap.
     fn grid_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let grid = &state.grid;
         let theme = ui.app_theme();
@@ -213,6 +210,11 @@ impl TransportBar {
         } else {
             (grid.snap_step(), theme.text)
         };
+        let color = if grid.settings.snap {
+            color
+        } else {
+            theme.text_disabled
+        };
         let response = ui.add(
             FlatButton::new(grid.step_name(step))
                 .size(vec2(GRID_STEP_WIDTH, BUTTON_SIZE))
@@ -220,27 +222,6 @@ impl TransportBar {
                 .color(color),
         );
         Popup::menu(&response).show(|ui| grid_menu(ui, state));
-    }
-
-    fn snap_ui(&mut self, ui: &mut Ui, state: &ProjectState) -> Response {
-        let snap = state.grid.settings.snap;
-        ui.add(
-            FlatButton::ghost(MAGNET)
-                .square(BUTTON_SIZE)
-                .font(FontId::new(
-                    15.,
-                    FontFamily::Name(
-                        if snap {
-                            PHOSPHOR_FILL
-                        } else {
-                            PHOSPHOR_REGULAR
-                        }
-                        .into(),
-                    ),
-                ))
-                .selected(snap)
-                .tooltip(tooltip(ui, state, "Snap to grid", Action::ToggleSnap)),
-        )
     }
 
     /// Beats per bar over the note that counts them, each typed or dragged.

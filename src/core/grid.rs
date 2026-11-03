@@ -15,7 +15,7 @@ const MIN_LINE_SPACING: f32 = 6.;
 /// them, in any signature.
 const TICKS: f64 = 96.;
 /// Bars the coarsest lines span.
-const MAX_BARS: u32 = 256;
+const MAX_BARS: u32 = 1024;
 /// Estimated width of a digit or dot of a ruler label, and the room left
 /// between two labels.
 pub const LABEL_CHAR_WIDTH: f32 = 6.;
@@ -233,7 +233,7 @@ impl GridService {
             pixels_per_beat: 10.,
             time_signature: TimeSignature::default(),
             settings: GridSettings::default(),
-            min_pixels_per_beat: 0.5,
+            min_pixels_per_beat: 0.05,
             max_pixels_per_beat: 5000.,
             offset: Vec2::ZERO,
             negative_offset: false,

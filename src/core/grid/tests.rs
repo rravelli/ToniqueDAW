@@ -325,7 +325,7 @@ const SIGNATURES: [(u32, u32); 11] = [
 
 /// Every zoom from the farthest out to the farthest in.
 fn zooms() -> impl Iterator<Item = f32> {
-    (0..=80).map(|n| 0.5 * 1.122_f32.powi(n))
+    (0..=100).map(|n| 0.05 * 1.122_f32.powi(n))
 }
 
 /// Whatever the signature and zoom, labels fit between their lines and
