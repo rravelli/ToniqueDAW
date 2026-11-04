@@ -17,6 +17,6 @@ pub use clip::{
 };
 pub use fx::{EchoNode, FilterMode, FilterNode, UTILITY_SILENT_DB, UtilityNode};
 pub use input::InputNode;
-pub use metronome::MetronomeNode;
+pub use metronome::{Click, MetronomeNode};
 pub use synth::{Envelope, SynthNode};
 pub use tap::TappedNode;
