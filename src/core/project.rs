@@ -14,7 +14,7 @@ use tonique_engine::{
     time::TimeSignature,
 };
 
-use crate::core::effect::EffectKind;
+use crate::core::{effect::EffectKind, grid::GridSettings};
 
 /// Extension of project files.
 pub const EXTENSION: &str = "tonique";
@@ -23,8 +23,8 @@ pub const EXTENSION: &str = "tonique";
 /// (filter `mode`, echo `time`) among effect parameters, and effect names;
 /// 4 the time signature; 5 clip gain, pan, loops and bar 1, clips saved by
 /// offset and length rather than by trims; 6 clip warp, tempo and
-/// transposition.
-pub const VERSION: u32 = 6;
+/// transposition; 7 the grid settings.
+pub const VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
@@ -36,6 +36,9 @@ pub struct ProjectFile {
     /// Loop region in beats.
     pub loop_range: (f64, f64),
     pub looping: bool,
+    /// The defaults in projects from before grid settings.
+    #[serde(default)]
+    pub grid: GridSettings,
     pub master: ChannelFile,
     /// Parents before their subgroups.
     #[serde(default)]
@@ -387,6 +390,10 @@ mod tests {
             },
             loop_range: (4., 12.),
             looping: true,
+            grid: GridSettings {
+                step: crate::core::grid::GridStep::Quarter,
+                ..Default::default()
+            },
             master: ChannelFile {
                 volume: 0.8,
                 pan: 0.,

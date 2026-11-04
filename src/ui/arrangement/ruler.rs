@@ -113,12 +113,12 @@ impl Ruler {
             }
         };
 
+        // Snapped to the grid when snapping, which Alt inverts.
+        let alt = ui.input(|i| i.modifiers.alt);
         if response.drag_started()
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         {
-            let anchor = state
-                .grid
-                .snap_to_step(state.grid.x_to_beats(origin.x, lane));
+            let anchor = state.grid.snap(state.grid.x_to_beats(origin.x, lane), alt);
             self.loop_drag = Some(grab_at(origin.x).unwrap_or(LoopDrag::Create { anchor }));
         }
         if response.dragged()
@@ -126,13 +126,13 @@ impl Ruler {
             && let Some(pos) = response.interact_pointer_pos()
         {
             let beats = state.grid.x_to_beats(pos.x, lane);
-            let snapped = state.grid.snap_to_step(beats);
-            let step = state.grid.step_beats();
+            let snapped = state.grid.snap(beats, alt);
+            let step = state.grid.snap_step();
             match drag {
                 LoopDrag::Start => state.set_loop_range(snapped.min(end - step), end),
                 LoopDrag::End => state.set_loop_range(start, snapped.max(start + step)),
                 LoopDrag::Move { offset } => {
-                    let new_start = state.grid.snap_to_step(beats - offset).max(BeatPos::ZERO);
+                    let new_start = state.grid.snap(beats - offset, alt).max(BeatPos::ZERO);
                     state.set_loop_range(new_start, new_start + (end - start));
                 }
                 LoopDrag::Create { anchor } => {

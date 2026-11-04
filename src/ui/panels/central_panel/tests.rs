@@ -126,6 +126,73 @@ fn the_wheel_scrolls_tracks_vertically() {
     assert_eq!(state.grid.offset, offset, "a dialog is open");
 }
 
+/// A long clip can be zoomed out to whole, and scrolled to its end with
+/// a panel left of the timeline.
+#[test]
+fn the_wheel_scrolls_to_the_end_of_a_long_clip() {
+    use crate::{analysis::AudioInfo, core::clip::AudioClip};
+    use egui::{Event, MouseWheelUnit, Pos2, TouchPhase};
+    use tonique_engine::time::BeatPos;
+
+    let (engine, _processor) = Engine::new(EngineConfig::default());
+    let mut state = ProjectState::new(engine);
+    let track = state.add_track();
+    let id = state.new_clip_id();
+    let clip = AudioClip::new(id, AudioInfo::silent(31. * 60.), BeatPos(0.), 120.);
+    state.add_clips(&track, vec![clip]);
+    let end = state.arrangement_end();
+
+    let ctx = egui::Context::default();
+    ctx.set_fonts(crate::ui::font::fonts());
+    let mut panel = CentralPanel::new();
+    // The lanes where they were drawn.
+    let mut frame = |state: &mut ProjectState, events: Vec<Event>| -> Rect {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            egui::Panel::left("browser")
+                .exact_size(300.)
+                .show(ui, |_| {});
+            panel.show(
+                ui,
+                state,
+                &mut Workspace::default(),
+                &mut Commands::default(),
+            );
+        });
+        output.textures_delta.clear();
+        panel.tracks.lanes()
+    };
+    let lanes = frame(&mut state, Vec::new());
+    state.grid.fit(BeatPos::ZERO, end, lanes.width());
+    assert!(
+        state.grid.beats_to_width(end.0) <= lanes.width(),
+        "the whole clip fits"
+    );
+
+    state.grid.zoom_by(20., lanes.left(), lanes);
+    frame(&mut state, vec![Event::PointerMoved(lanes.center())]);
+    frame(
+        &mut state,
+        vec![Event::MouseWheel {
+            unit: MouseWheelUnit::Point,
+            delta: vec2(-1_000_000., 0.),
+            phase: TouchPhase::Move,
+            modifiers: Default::default(),
+        }],
+    );
+    for _ in 0..60 {
+        frame(&mut state, Vec::new());
+    }
+    assert!(
+        state.grid.beats_to_x(end, lanes) <= lanes.right(),
+        "scrolls to the clip's end"
+    );
+}
+
 /// Dragging a file over a collapsed group expands it; leaving collapses
 /// it again; dropping inside leaves it expanded.
 #[test]
@@ -318,8 +385,8 @@ fn dropping_past_the_last_track_shows_its_header_at_once() {
     assert_eq!(dropped, ghost, "the real header, in the ghost's place");
 }
 
-/// A rubber band starts where the button went down, between grid lines
-/// as much as on them.
+/// A rubber band starts where the button went down (not snapping, between
+/// grid lines as much as on them).
 #[test]
 fn rubber_bands_start_where_pressed() {
     use crate::ui::arrangement::ruler::RULER_HEIGHT;
@@ -327,6 +394,7 @@ fn rubber_bands_start_where_pressed() {
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
+    state.grid.settings.snap = false;
     state.add_track();
     state.add_track();
     let ctx = egui::Context::default();

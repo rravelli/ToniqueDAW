@@ -2,16 +2,24 @@
 
 use crate::ui::theme::font_size;
 use egui::{Align2, Color32, FontId, Painter, Rect, Stroke, pos2};
+use tonique_engine::time::BeatPos;
 
 use crate::{
-    core::grid::{GridLine, GridResolution, GridService},
+    core::grid::{GridLine, GridService},
     ui::theme::{Theme, with_alpha},
+    utils::format_time,
 };
 
+/// Room left of a label, from its line.
+const LABEL_INSET: f32 = 3.;
+/// Least room between two labels: one that would come closer is left out.
+const LABEL_MIN_GAP: f32 = 4.;
+
 pub trait PaintGrid {
-    /// Bar lines across a clip, when zoomed in enough to show beats.
+    /// Bar lines across a clip, and its beats when zoomed in enough to
+    /// show them.
     fn paint_clip_grid(&self, painter: &Painter, viewport: Rect, rect: Rect, color: Color32);
-    /// The timeline's lines at the current resolution.
+    /// The timeline's lines at the current zoom.
     fn paint_grid(&self, painter: &Painter, viewport: Rect, theme: &Theme);
     /// Bar and beat numbers along the ruler's bottom, times along its top.
     fn paint_labels(&self, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme);
@@ -21,71 +29,48 @@ pub trait PaintGrid {
 
 impl PaintGrid for GridService {
     fn paint_clip_grid(&self, painter: &Painter, viewport: Rect, rect: Rect, color: Color32) {
-        if self.resolution() <= GridResolution::Bar {
+        let (bar, pulse) = (self.beats_per_bar(), self.pulse());
+        let step = self.line_step();
+        if step >= bar {
             return;
         }
-        // pixel spacing between bar lines
-        let step = self.beats_per_bar() as f32 * self.pixels_per_beat();
-        let clip_offset = self.offset.x + rect.left() - viewport.left();
-        let mut step_index = (clip_offset / step).floor() as i64;
-        let mut x = rect.left() - clip_offset.rem_euclid(step);
-        // Jump to the first visible line
-        let skipped = ((viewport.left() - x) / step).floor().max(0.);
-        x += skipped * step;
-        step_index += skipped as i64;
-        let right = rect.right().min(viewport.right());
-        while x < right {
-            // Skip if out of bounds
-            if step_index < 0 && !self.allows_negative() {
-                step_index += 1;
-                x += step;
-                continue;
-            }
-
-            painter.line_segment(
-                [pos2(x, rect.top()), pos2(x, rect.bottom())],
+        let step = if step <= pulse { pulse } else { bar };
+        let shown = Rect::from_x_y_ranges(
+            rect.left().max(viewport.left())..=rect.right().min(viewport.right()),
+            rect.y_range(),
+        );
+        if !shown.is_positive() {
+            return;
+        }
+        let (from, to) = self.visible_beats_in(shown, viewport);
+        for (at, line) in self.lines(from, to, step) {
+            let color = match line {
+                GridLine::Bar(_) => color,
+                _ => with_alpha(color, color.a() / 2),
+            };
+            painter.vline(
+                self.beats_to_x(at, viewport),
+                rect.y_range(),
                 Stroke::new(1.0, color),
             );
-
-            step_index += 1;
-            x += step;
         }
     }
 
     fn paint_grid(&self, painter: &Painter, viewport: Rect, theme: &Theme) {
-        // pixel spacing between grid lines
-        let step = self.step_beats() as f32 * self.pixels_per_beat();
-
-        let mut step_index = (self.offset.x / step).floor() as i64;
-        let right = viewport.right();
-        let mut x = viewport.left() - self.offset.x.rem_euclid(step);
-
-        while x < right {
-            // Skip if out of bounds
-            if step_index < 0 && !self.allows_negative() {
-                step_index += 1;
-                x += step;
-                continue;
-            }
-            let line = self.line(step_index);
-            let color = match line {
-                GridLine::Bar(_) => theme.grid_bar,
-                GridLine::Beat { .. } => theme.grid_beat,
-                GridLine::Division => with_alpha(theme.grid_beat, theme.grid_beat.a() / 2),
+        let (from, to) = self.visible_beats(viewport);
+        for (at, line) in self.lines(from, to, self.line_step()) {
+            let (color, width) = match line {
+                GridLine::Bar(_) => (theme.grid_bar, 2.0),
+                GridLine::Beat { .. } => (theme.grid_beat, 1.0),
+                GridLine::Division { .. } => {
+                    (with_alpha(theme.grid_beat, theme.grid_beat.a() / 2), 1.0)
+                }
             };
-            let width = if matches!(line, GridLine::Bar(_)) {
-                2.0
-            } else {
-                1.0
-            };
-
-            painter.line_segment(
-                [pos2(x, viewport.top()), pos2(x, viewport.bottom())],
+            painter.vline(
+                self.beats_to_x(at, viewport),
+                viewport.y_range(),
                 Stroke::new(width, color),
             );
-
-            step_index += 1;
-            x += step;
         }
     }
 
@@ -97,90 +82,121 @@ impl PaintGrid for GridService {
     }
 
     fn paint_bar_labels(&self, painter: &Painter, rect: Rect, theme: &Theme) {
-        // pixel spacing between grid lines
-        let step = self.step_beats() as f32 * self.pixels_per_beat();
-        // Beats are only numbered when zoomed in past them.
-        let number_beats = self.resolution() > GridResolution::Beat;
-
-        let mut step_index = (self.offset.x / step).floor() as i64;
-        let right = rect.right();
-        let mut x = rect.left() - self.offset.x.rem_euclid(step);
-
-        while x < right {
-            // Skip if out of bounds
-            if step_index < 0 && !self.allows_negative() {
-                step_index += 1;
-                x += step;
+        let (from, to) = self.visible_beats(rect);
+        // A line just left of the view can have its label in it.
+        let from = from - self.width_to_beats(LABEL_INSET + 40.);
+        let from = if self.allows_negative() {
+            from
+        } else {
+            from.max(BeatPos::ZERO)
+        };
+        let step = self.label_step(from, to);
+        let font = FontId::new(font_size::SMALL, egui::FontFamily::Proportional);
+        let mut last_right = f32::NEG_INFINITY;
+        for (at, line) in self.lines(from, to, step) {
+            let x = self.beats_to_x(at, rect);
+            let (text, top) = match line {
+                GridLine::Bar(bar) => (bar.to_string(), rect.top()),
+                GridLine::Beat { bar, beat } => (format!("{bar}.{beat}"), rect.center().y),
+                GridLine::Division {
+                    bar,
+                    beat,
+                    sub: Some(sub),
+                } => (format!("{bar}.{beat}.{sub}"), rect.center().y),
+                GridLine::Division { sub: None, .. } => continue,
+            };
+            let width = if matches!(line, GridLine::Bar(_)) {
+                2.0
+            } else {
+                1.0
+            };
+            painter.vline(
+                x,
+                top..=rect.bottom(),
+                Stroke::new(width, theme.text_disabled),
+            );
+            // Never over the one before, whatever the estimate said.
+            let galley = painter.layout_no_wrap(text, font.clone(), theme.text_muted);
+            let left = x + LABEL_INSET;
+            if left < last_right + LABEL_MIN_GAP {
                 continue;
             }
-
-            match self.line(step_index) {
-                GridLine::Bar(bar) => {
-                    painter.text(
-                        pos2(x + 3.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        bar.to_string(),
-                        FontId::new(font_size::SMALL, egui::FontFamily::Proportional),
-                        theme.text_muted,
-                    );
-                    painter.line_segment(
-                        [pos2(x, rect.top()), pos2(x, rect.bottom())],
-                        Stroke::new(2.0, theme.text_disabled),
-                    );
-                }
-                GridLine::Beat { bar, beat } if number_beats => {
-                    painter.text(
-                        pos2(x + 3.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        format!("{bar}.{beat}"),
-                        FontId::new(font_size::SMALL, egui::FontFamily::Proportional),
-                        theme.text_muted,
-                    );
-                    painter.line_segment(
-                        [pos2(x, rect.center().y), pos2(x, rect.bottom())],
-                        Stroke::new(1.0, theme.text_disabled),
-                    );
-                }
-                _ => {}
-            }
-
-            step_index += 1;
-            x += step;
+            last_right = left + galley.size().x;
+            painter.galley(
+                pos2(left, rect.center().y - galley.size().y / 2.),
+                galley,
+                theme.text_muted,
+            );
         }
     }
 }
 
-fn paint_time_labels(grid: &GridService, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
-    let seconds_step = grid.resolution().step_size_secs();
-    let step = grid.pixels_per_beat() * bpm / 60. * seconds_step;
-    let mut step_index = (grid.offset.x / step).floor() as i32;
-    let mut x = rect.left() - grid.offset.x.rem_euclid(step);
+impl GridService {
+    /// The beats `shown` covers, drawn in `viewport`'s coordinates.
+    fn visible_beats_in(&self, shown: Rect, viewport: Rect) -> (BeatPos, BeatPos) {
+        let from = self.x_to_beats(shown.left(), viewport);
+        let from = if self.allows_negative() {
+            from
+        } else {
+            from.max(BeatPos::ZERO)
+        };
+        (from, self.x_to_beats(shown.right(), viewport))
+    }
+}
 
-    while x < rect.right() {
-        // Skip if out of bounds
-        if step_index < 0 && !grid.allows_negative() {
-            step_index += 1;
-            x += step;
+/// Times at a "nice" step for the zoom (1, 2, 5, 10, 15, 30 s…), with
+/// milliseconds once it's under a second.
+fn paint_time_labels(grid: &GridService, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
+    let step = grid.time_step(bpm);
+    let step_ms = (step * 1000.).round() as i64;
+    let seconds = |beats: BeatPos| beats.0 * 60. / bpm as f64;
+    let (from, to) = grid.visible_beats(rect);
+    let from = from - grid.width_to_beats(LABEL_INSET + 60.);
+    let first = (seconds(from) * 1000. / step_ms as f64).floor() as i64;
+    let last = (seconds(to) * 1000. / step_ms as f64).ceil() as i64;
+    let font = FontId::new(font_size::SMALL, egui::FontFamily::Proportional);
+    for n in first..=last {
+        if n < 0 && !grid.allows_negative() {
             continue;
         }
-        let time = (step_index as f32 * seconds_step).floor() as i32;
-        let sign = if time < 0 { "-" } else { "" };
-        let time = time.abs();
-        let seconds = time % 60;
-        let minutes = (time / 60) % 60;
-        let text = format!("{sign}{}:{:0>2}", minutes, seconds);
+        let ms = n * step_ms;
+        let x = grid.beats_to_x(BeatPos(ms as f64 / 1000. * bpm as f64 / 60.), rect);
+        let text = if step < 1. {
+            format_time(ms as f64 / 1000.)
+        } else {
+            format_clock(ms / 1000)
+        };
         painter.text(
-            pos2(x + 3.0, rect.center().y),
+            pos2(x + LABEL_INSET, rect.center().y),
             Align2::LEFT_CENTER,
             text,
-            FontId::new(font_size::SMALL, egui::FontFamily::Proportional),
+            font.clone(),
             theme.text_disabled,
         );
-        painter.line_segment(
-            [pos2(x, rect.center().y), pos2(x, rect.bottom())],
+        painter.vline(
+            x,
+            rect.center().y..=rect.bottom(),
             Stroke::new(1.0, theme.text_disabled),
         );
-        step_index += 1;
-        x += step;
+    }
+}
+
+/// Whole `seconds` as `m:ss`, with a `-` before zero.
+fn format_clock(seconds: i64) -> String {
+    let sign = if seconds < 0 { "-" } else { "" };
+    let seconds = seconds.unsigned_abs();
+    format!("{sign}{}:{:02}", seconds / 60, seconds % 60)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_clock;
+
+    #[test]
+    fn clock_times_count_minutes_past_the_hour() {
+        assert_eq!(format_clock(0), "0:00");
+        assert_eq!(format_clock(75), "1:15");
+        assert_eq!(format_clock(-5), "-0:05");
+        assert_eq!(format_clock(3725), "62:05");
     }
 }

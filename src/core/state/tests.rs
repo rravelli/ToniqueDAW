@@ -1154,20 +1154,25 @@ fn snap_targets_are_other_clips_loop_and_edit_cursor() {
 fn snapping_prefers_targets_in_reach_over_the_grid() {
     use crate::core::grid::{GridService, TARGET_REACH};
 
-    let grid = GridService::new(); // one grid line per beat
+    let mut grid = GridService::new();
+    grid.fit(BeatPos(0.), BeatPos(10.), 200.); // one grid line per beat
+    assert_eq!(grid.snap_step(), 1.);
     let reach = grid.width_to_beats(TARGET_REACH);
     let target = BeatPos(2.1 + reach * 0.9);
     // A target in reach wins over a nearer grid line.
     assert_eq!(
         grid.snap_to_targets(BeatPos(2.1), &[target]),
-        Some((target, true))
+        (target, true)
     );
-    // Out of reach: the grid, when close enough to a line.
+    // Out of reach: the nearest grid line, however far.
     assert_eq!(
         grid.snap_to_targets(BeatPos(2.1), &[BeatPos(2.1 + reach * 2.)]),
-        Some((BeatPos(2.), false))
+        (BeatPos(2.), false)
     );
-    assert_eq!(grid.snap_to_targets(BeatPos(2.5), &[]), None);
+    assert_eq!(
+        grid.snap_to_targets(BeatPos(2.4), &[]),
+        (BeatPos(2.), false)
+    );
 }
 
 #[test]
@@ -1189,6 +1194,7 @@ mod projects {
     use crate::{
         cache::AUDIO_ANALYSIS_CACHE,
         core::{
+            grid::{GridDensity, GridSettings, GridStep},
             project::{ClipFile, LoopFile, ProjectFile},
             state::MASTER_TRACK_ID,
         },
@@ -1252,6 +1258,13 @@ mod projects {
         state.set_time_signature(TimeSignature::new(7, 8).unwrap());
         state.set_loop_range(BeatPos(4.), BeatPos(12.));
         state.set_looping(true);
+        state.grid.settings = GridSettings {
+            adaptive: false,
+            density: GridDensity::Wider,
+            step: GridStep::Eighth,
+            triplet: true,
+            snap: false,
+        };
         let track = state.add_track();
         let audio = AUDIO_ANALYSIS_CACHE
             .get_or_analyze(dir.join("loop.wav"))
@@ -1333,7 +1346,11 @@ mod projects {
         let problems = loaded.load_project(&ProjectFile::read(&path).unwrap(), &dir);
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(rounded(loaded.project(Some(&dir))), rounded(saved));
+        assert_eq!(loaded.grid.settings.step, GridStep::Eighth);
         assert!(!loaded.can_undo(), "loading isn't undoable");
+        // A new project starts with the default grid.
+        loaded.new_project();
+        assert_eq!(loaded.grid.settings, GridSettings::default());
         let _ = fs::remove_dir_all(&dir);
     }
 

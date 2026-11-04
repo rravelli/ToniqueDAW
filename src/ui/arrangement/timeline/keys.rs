@@ -40,7 +40,7 @@ impl Timeline {
             // cursor when nothing is selected.
             Action::NudgeLeft | Action::NudgeRight => {
                 let direction = if action == Action::NudgeLeft { -1. } else { 1. };
-                let step = direction * state.grid.step_beats();
+                let step = direction * state.grid.snap_step();
                 if state.selected_clips().is_empty() {
                     let cursor = state.grid.snap_to_step(state.edit_cursor() + step);
                     state.set_edit_cursor(cursor);

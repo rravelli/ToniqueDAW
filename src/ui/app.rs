@@ -165,6 +165,11 @@ impl ToniqueApp {
             }
             Action::ToggleMetronome => state.toggle_metronome(),
             Action::ToggleFollowPlayhead => state.set_follow_playhead(!state.follow_playhead()),
+            Action::NarrowGrid => state.grid.narrow(),
+            Action::WidenGrid => state.grid.widen(),
+            Action::ToggleTripletGrid => state.grid.settings.triplet ^= true,
+            Action::ToggleAdaptiveGrid => state.grid.toggle_adaptive(),
+            Action::ToggleSnap => state.grid.settings.snap ^= true,
             Action::Undo => state.undo(),
             Action::Redo => state.redo(),
             Action::AddTrack => {

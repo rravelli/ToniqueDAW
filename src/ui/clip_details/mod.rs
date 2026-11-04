@@ -98,6 +98,8 @@ impl ClipDetails {
         let bpm = state.bpm();
         // Bars as the project counts them.
         self.grid.set_time_signature(state.time_signature());
+        // The arrangement's grid settings, at this view's zoom.
+        self.grid.settings = state.grid.settings;
         // Played faster or slower: the file spans fewer or more beats, the
         // view kept as it was (its zoom and scroll, in beats).
         self.speed = clip.speed(bpm);
@@ -159,14 +161,10 @@ impl ClipDetails {
     }
 
     /// The time in the file drawn at `x`, snapped to the grid (counted from
-    /// the start marker) unless Alt is held.
+    /// the start marker) when snapping, which Alt inverts.
     fn file_at_x(&self, ui: &Ui, x: f32, bpm: f32, lane: Rect) -> f64 {
         let beats = self.grid.x_to_beats(x, lane);
-        let beats = if ui.input(|i| i.modifiers.alt) {
-            beats
-        } else {
-            self.grid.snap_at_grid(beats)
-        };
+        let beats = self.grid.snap(beats, ui.input(|i| i.modifiers.alt));
         self.origin + self.seconds(beats.0, bpm)
     }
 

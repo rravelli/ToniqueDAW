@@ -33,6 +33,12 @@ pub enum Action {
     NudgeRight,
     MoveTrackUp,
     MoveTrackDown,
+    // Grid
+    NarrowGrid,
+    WidenGrid,
+    ToggleTripletGrid,
+    ToggleAdaptiveGrid,
+    ToggleSnap,
     // View
     ToggleBrowser,
     ToggleEffectsPanel,
@@ -43,7 +49,7 @@ pub enum Action {
 
 impl Action {
     /// In the order shown in the settings.
-    pub const ALL: [Action; 27] = [
+    pub const ALL: [Action; 32] = [
         Action::NewProject,
         Action::OpenProject,
         Action::SaveProject,
@@ -66,6 +72,11 @@ impl Action {
         Action::NudgeRight,
         Action::MoveTrackUp,
         Action::MoveTrackDown,
+        Action::NarrowGrid,
+        Action::WidenGrid,
+        Action::ToggleTripletGrid,
+        Action::ToggleAdaptiveGrid,
+        Action::ToggleSnap,
         Action::ToggleBrowser,
         Action::ToggleEffectsPanel,
         Action::ToggleTrackList,
@@ -93,6 +104,11 @@ impl Action {
             Action::NudgeRight => "nudge_right",
             Action::MoveTrackUp => "move_track_up",
             Action::MoveTrackDown => "move_track_down",
+            Action::NarrowGrid => "narrow_grid",
+            Action::WidenGrid => "widen_grid",
+            Action::ToggleTripletGrid => "toggle_triplet_grid",
+            Action::ToggleAdaptiveGrid => "toggle_adaptive_grid",
+            Action::ToggleSnap => "toggle_snap",
             Action::ToggleBrowser => "toggle_browser",
             Action::ToggleEffectsPanel => "toggle_effects_panel",
             Action::ToggleTrackList => "toggle_track_list",
@@ -129,6 +145,11 @@ impl Action {
             Action::NudgeRight => "Nudge selection or cursor right",
             Action::MoveTrackUp => "Move selection to track above",
             Action::MoveTrackDown => "Move selection to track below",
+            Action::NarrowGrid => "Narrow grid",
+            Action::WidenGrid => "Widen grid",
+            Action::ToggleTripletGrid => "Triplet grid",
+            Action::ToggleAdaptiveGrid => "Switch fixed / adaptive grid",
+            Action::ToggleSnap => "Snap to grid",
             Action::ToggleBrowser => "Show / hide browser",
             Action::ToggleEffectsPanel => "Show / hide effects panel",
             Action::ToggleTrackList => "Expand / collapse track list",
@@ -158,6 +179,11 @@ impl Action {
             | Action::ToggleTrackList
             | Action::ToggleGraphView
             | Action::OpenSettings => "View",
+            Action::NarrowGrid
+            | Action::WidenGrid
+            | Action::ToggleTripletGrid
+            | Action::ToggleAdaptiveGrid
+            | Action::ToggleSnap => "Grid",
             _ => "Edit",
         }
     }
@@ -213,6 +239,11 @@ impl Action {
             Action::NudgeRight => vec![none(Key::ArrowRight)],
             Action::MoveTrackUp => vec![none(Key::ArrowUp)],
             Action::MoveTrackDown => vec![none(Key::ArrowDown)],
+            Action::NarrowGrid => vec![cmd(Key::Num1)],
+            Action::WidenGrid => vec![cmd(Key::Num2)],
+            Action::ToggleTripletGrid => vec![cmd(Key::Num3)],
+            Action::ToggleAdaptiveGrid => vec![cmd(Key::Num4)],
+            Action::ToggleSnap => vec![cmd(Key::Num5)],
             Action::ToggleBrowser => vec![cmd(Key::B)],
             Action::NewProject => vec![cmd(Key::N)],
             Action::OpenProject => vec![cmd(Key::O)],

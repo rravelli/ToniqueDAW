@@ -57,6 +57,7 @@ impl ProjectState {
         self.batching = false;
         self.resized_clip = None;
         self.grid.offset = Vec2::ZERO;
+        self.grid.settings = Default::default();
         self.sync_time_signature();
         self.loop_range = (
             BeatPos::ZERO,
@@ -131,6 +132,7 @@ impl ProjectState {
             time_signature: edit.tempo.time_signature.into(),
             loop_range: (self.loop_range.0.0, self.loop_range.1.0),
             looping: self.looping,
+            grid: self.grid.settings,
             master: self.channel_file(&edit.master),
             groups,
             tracks,
@@ -214,6 +216,7 @@ impl ProjectState {
         }
         self.set_loop_range(BeatPos(project.loop_range.0), BeatPos(project.loop_range.1));
         self.set_looping(project.looping);
+        self.grid.settings = project.grid;
         self.restore_channel(MASTER_TRACK_ID, &project.master, &mut problems);
         let bar = self.grid.beats_per_bar();
         let reach = reach_by_file(project, self.bpm(), bar);
