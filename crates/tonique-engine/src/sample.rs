@@ -178,6 +178,12 @@ impl WavWriter {
         data.iter().try_for_each(|s| self.write_sample(*s))
     }
 
+    /// Bring the file up to date, header included: if the program dies now,
+    /// what was written so far can still be played.
+    pub fn flush(&mut self) -> Result<(), hound::Error> {
+        self.inner.flush()
+    }
+
     pub fn finalize(self) -> Result<(), hound::Error> {
         self.inner.finalize()
     }
@@ -186,6 +192,21 @@ impl WavWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What's flushed can be read without the writer ever finishing.
+    #[test]
+    fn a_flushed_file_is_playable_without_finalizing() {
+        let dir = std::env::temp_dir().join(format!("tonique-flush-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("crash.wav");
+        let mut wav = WavWriter::create(&path, 1, 48000.).unwrap();
+        wav.write_interleaved(&[0.25, 0.5]).unwrap();
+        wav.flush().unwrap();
+        let read = SampleBuffer::load_wav(&path, 48000.).unwrap();
+        assert_eq!(read.channel(0), [0.25, 0.5]);
+        std::mem::forget(wav); // as a crash would
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Integer formats scale full scale to their largest value and clip.
     #[test]

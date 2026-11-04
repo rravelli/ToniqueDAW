@@ -14,6 +14,7 @@ use tonique_engine::edit::{
 use tonique_engine::engine::{Engine, EngineConfig};
 use tonique_engine::input::{InputFeed, InputRoute};
 use tonique_engine::nodes::{Envelope, FilterMode};
+use tonique_engine::record::{CountIn, RecordOptions, RecordTrack};
 use tonique_engine::rt::{self, CheckingAllocator};
 use tonique_engine::sample::SampleBuffer;
 use tonique_engine::time::BeatPos;
@@ -111,12 +112,14 @@ fn rt_path_never_allocates() {
     let (feed, mut input) = new_input();
     let mut status = feed.status();
     let mut saw_trouble = false;
+    let mut reports = 0;
     s.engine_mut().set_input(Some(feed)).unwrap();
     s.set_track_monitor(tracks[0].0, Some(InputRoute::Stereo(2)))
         .unwrap();
 
     // Odd device buffer size, so blocks get split and loops land mid-buffer.
     let mut device = vec![0.0f32; 2 * 441];
+    let takes = std::env::temp_dir().join(format!("tonique-rt-{}", std::process::id()));
     let captured = [0.25f32; 4 * 441];
     for block in 0..2000 {
         // Runs dry and overflows now and then, for those paths too.
@@ -168,6 +171,29 @@ fn rt_path_never_allocates() {
             23 => s
                 .set_track_monitor(tracks[0].0, Some(InputRoute::Mono(block % 5)))
                 .unwrap(), // rebuild
+            // Takes start, count in and end.
+            31 if block % 200 == 31 => {
+                let tempo = s.edit().tempo.clone();
+                let count_in = (block % 400 == 31)
+                    .then(|| CountIn::new(&tempo, BeatPos(0.0), 1, 48000.0, 0.5))
+                    .flatten();
+                if !s.engine().is_recording() {
+                    s.stop().unwrap();
+                    s.engine_mut()
+                        .record_start(RecordOptions {
+                            directory: takes.clone(),
+                            tracks: vec![RecordTrack {
+                                track: 1,
+                                route: InputRoute::Stereo(0),
+                                name: "t".into(),
+                            }],
+                            latency_offset_frames: 0,
+                            count_in,
+                        })
+                        .unwrap();
+                }
+            }
+            41 if block % 200 == 141 => s.engine_mut().record_stop().unwrap(),
             // Preview: new streams arrive, old ones are retired.
             3 => s
                 .engine_mut()
@@ -184,10 +210,15 @@ fn rt_path_never_allocates() {
         }
         if block % 10 == 0 {
             s.engine().collect_garbage();
+            if s.engine_mut().take_report().is_some() {
+                reports += 1;
+            }
         }
     }
     assert!(s.engine().graphs_adopted() > 30);
     assert!(saw_trouble, "underruns and overflows were exercised");
+    assert!(reports > 0, "takes finished");
+    let _ = std::fs::remove_dir_all(&takes);
     assert_eq!(rt::alloc_violations(), 0, "allocation on the RT path");
 
     // And the checker itself works.

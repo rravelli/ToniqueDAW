@@ -42,6 +42,7 @@ pub struct InputStatus {
     overflows: AtomicU64,
     latency: AtomicUsize,
     fill: AtomicUsize,
+    mean_fill: AtomicUsize,
 }
 
 impl InputStatus {
@@ -52,6 +53,7 @@ impl InputStatus {
             overflows: AtomicU64::new(0),
             latency: AtomicUsize::new(0),
             fill: AtomicUsize::new(0),
+            mean_fill: AtomicUsize::new(0),
         }
     }
 
@@ -87,7 +89,17 @@ impl InputStatus {
     pub fn fill_frames(&self) -> usize {
         self.fill.load(Ordering::Relaxed)
     }
+
+    /// Frames the ring delays the input by: how many it holds as an output
+    /// callback starts, on average, as that moves with both callbacks' timing.
+    pub fn mean_fill_frames(&self) -> usize {
+        self.mean_fill.load(Ordering::Relaxed)
+    }
 }
+
+/// Share of each new reading in [`InputStatus::mean_fill_frames`]: settles
+/// in about 50 callbacks.
+const MEAN_FILL_WEIGHT: f64 = 0.02;
 
 /// Input callback's end of the ring (or a test's). RT-safe.
 #[derive(Debug)]
@@ -142,6 +154,7 @@ pub struct InputFeed {
     filling: bool,
     /// The input has delivered audio: silence from now on is an underrun.
     started: bool,
+    mean_fill: f64,
     status: Arc<InputStatus>,
 }
 
@@ -155,6 +168,7 @@ impl InputFeed {
         let high_water = target_fill * 2 + max_block;
         let (producer, consumer) = rtrb::RingBuffer::new(high_water * 2 * channels);
         let status = Arc::new(InputStatus::new(channels));
+        status.mean_fill.store(target_fill, Ordering::Relaxed);
         let feed = Self {
             ring: consumer,
             channels,
@@ -164,6 +178,7 @@ impl InputFeed {
             buffer: vec![0.0; channels * max_block].into_boxed_slice(),
             filling: true,
             started: false,
+            mean_fill: target_fill as f64,
             status: status.clone(),
         };
         let writer = InputWriter {
@@ -184,6 +199,18 @@ impl InputFeed {
 
     pub fn status(&self) -> Arc<InputStatus> {
         self.status.clone()
+    }
+
+    /// Note how full the ring is as an output callback starts.
+    pub(crate) fn begin_callback(&mut self) {
+        if self.filling {
+            return;
+        }
+        let fill = (self.ring.slots() / self.channels) as f64;
+        self.mean_fill += (fill - self.mean_fill) * MEAN_FILL_WEIGHT;
+        self.status
+            .mean_fill
+            .store(self.mean_fill.round() as usize, Ordering::Relaxed);
     }
 
     /// Take the next `frames` frames (at most `max_block`). Allocation-free
@@ -416,6 +443,27 @@ mod tests {
         assert_eq!(status.take_peak(2), 0.0);
         assert_eq!(status.take_peak(0), 0.0, "reset");
         assert_eq!(status.take_peak(9), 0.0, "no such channel");
+    }
+
+    #[test]
+    fn the_mean_fill_starts_at_the_target_and_follows_callbacks() {
+        let (mut f, mut w) = feed();
+        let status = f.status();
+        assert_eq!(status.mean_fill_frames(), TARGET);
+        // Still filling: not representative.
+        f.begin_callback();
+        assert_eq!(status.mean_fill_frames(), TARGET);
+
+        push_frames(&mut w, 1..TARGET + 1);
+        f.pull(BLOCK);
+        // Holding 12 frames as callbacks start, from now on.
+        push_frames(&mut w, 0..BLOCK * 2);
+        for _ in 0..1000 {
+            f.begin_callback();
+            f.pull(BLOCK);
+            push_frames(&mut w, 0..BLOCK);
+        }
+        assert_eq!(status.mean_fill_frames(), 12);
     }
 
     #[test]

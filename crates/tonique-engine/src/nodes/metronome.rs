@@ -13,15 +13,49 @@ const DECAY_PER_S: f32 = 80.0;
 /// Past this the decay is inaudible (below -55 dB).
 const CLICK_S: f32 = 0.08;
 
+/// One click at a time: a square wave with a short attack and decay.
+#[derive(Clone, Debug, Default)]
+pub struct Click {
+    /// Time since the click started, in seconds; `None` when idle.
+    t: Option<f32>,
+    freq: f32,
+}
+
+impl Click {
+    pub(crate) fn start(&mut self, accent: bool) {
+        self.t = Some(0.0);
+        self.freq = if accent { ACCENT_HZ } else { TICK_HZ };
+    }
+
+    pub(crate) fn stop(&mut self) {
+        self.t = None;
+    }
+
+    /// The next sample at full gain, `dt` seconds apart.
+    pub(crate) fn next(&mut self, dt: f32) -> f32 {
+        let Some(t) = self.t else { return 0.0 };
+        let env = if t < ATTACK_S {
+            t / ATTACK_S
+        } else {
+            (-(t - ATTACK_S) * DECAY_PER_S).exp()
+        };
+        let square = if (t * self.freq).fract() < 0.5 {
+            1.0
+        } else {
+            -1.0
+        };
+        self.t = (t + dt < CLICK_S).then_some(t + dt);
+        square * env
+    }
+}
+
 /// Square-wave click on every beat the time signature counts, higher-pitched
 /// on the first beat of a bar. Silent while stopped; `gain` of 0 turns it off.
 pub struct MetronomeNode {
     tempo: TempoMap,
     gain: Arc<AtomicParam>,
     gain_s: Smoother,
-    /// Time since the current click started, in seconds; `None` when idle.
-    click_t: Option<f32>,
-    freq: f32,
+    click: Click,
     identity: Option<NodeIdentity>,
 }
 
@@ -31,8 +65,7 @@ impl MetronomeNode {
             tempo,
             gain_s: Smoother::new(gain.get()),
             gain,
-            click_t: None,
-            freq: TICK_HZ,
+            click: Click::default(),
             identity: None,
         }
     }
@@ -81,7 +114,7 @@ impl Node for MetronomeNode {
 
     fn process(&mut self, ctx: &mut ProcessContext) {
         if !ctx.playing || ctx.jumped {
-            self.click_t = None;
+            self.click.stop();
         }
         if !ctx.playing {
             return;
@@ -98,25 +131,12 @@ impl Node for MetronomeNode {
             if let Some((at, accent)) = trigger
                 && at == i
             {
-                self.click_t = Some(0.0);
-                self.freq = if accent { ACCENT_HZ } else { TICK_HZ };
+                self.click.start(accent);
             }
             let g = self.gain_s.next();
-            let Some(t) = self.click_t else { continue };
-            let env = if t < ATTACK_S {
-                t / ATTACK_S
-            } else {
-                (-(t - ATTACK_S) * DECAY_PER_S).exp()
-            };
-            let square = if (t * self.freq).fract() < 0.5 {
-                1.0
-            } else {
-                -1.0
-            };
-            let s = square * env * g;
+            let s = self.click.next(dt) * g;
             l[i] = s;
             r[i] = s;
-            self.click_t = (t + dt < CLICK_S).then_some(t + dt);
         }
     }
 
@@ -124,8 +144,7 @@ impl Node for MetronomeNode {
     /// click that's already sounding ring out.
     fn take_state_from(&mut self, previous: &mut dyn Node) -> StateTransfer {
         if let Some(prev) = previous.as_any_mut().and_then(|a| a.downcast_mut::<Self>()) {
-            self.click_t = prev.click_t;
-            self.freq = prev.freq;
+            self.click = prev.click.clone();
             self.gain_s = prev.gain_s.clone();
         }
         StateTransfer::KeepNew

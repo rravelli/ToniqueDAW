@@ -11,6 +11,7 @@
 //!   housekeeping ◀── Garbage ─────────  old graphs, swapped-out curves
 //!   position()   ◀── atomics ─────────  transport position, stats
 //!   input callback ── InputFeed ring ─▶  pulled per chunk (see [`crate::input`])
+//!   take writer ◀── Capture rings ─────  input and transport log (see [`crate::record`])
 //! ```
 //!
 //! The processor never frees memory: everything it lets go of goes back
@@ -18,6 +19,7 @@
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -27,8 +29,9 @@ use crate::graph::{
     BlockInfo, CompileError, CompileOptions, CompileStats, CompiledGraph, GraphDescription,
     GraphTopology, NodeIdentity, NodeMessage, compile,
 };
-use crate::input::{InputFeed, InputView};
+use crate::input::{InputFeed, InputStatus, InputView};
 use crate::preview::{PreviewControl, PreviewShared, PreviewSource, PreviewStream};
+use crate::record::{self, Capture, CountIn, RecordOptions, TakeReport};
 use crate::rt;
 use crate::time::{BeatPos, SamplePos, TempoMap};
 
@@ -89,6 +92,17 @@ pub enum Command {
     },
     /// Replace the input (`None` removes it).
     SetInput(Option<Box<InputFeed>>),
+    /// Start capturing a take (see [`Engine::record_start`]).
+    RecordStart(Box<RecordStart>),
+    /// Punch out, once what was played has come back.
+    RecordStop,
+}
+
+/// What [`Command::RecordStart`] hands over.
+#[derive(Debug)]
+pub struct RecordStart {
+    capture: Option<Box<Capture>>,
+    count_in: Option<Box<CountIn>>,
 }
 
 /// Things the RT thread has let go of, to be dropped elsewhere.
@@ -96,6 +110,8 @@ pub enum Garbage {
     Graph(Box<CompiledGraph>),
     Message(NodeMessage),
     Command(Command),
+    Capture(Box<Capture>),
+    CountIn(Box<CountIn>),
 }
 
 #[derive(Debug)]
@@ -103,6 +119,8 @@ pub enum EngineError {
     Compile(CompileError),
     CommandQueueFull,
     Incompatible(&'static str),
+    /// A take couldn't start.
+    Record(String),
 }
 
 impl fmt::Display for EngineError {
@@ -111,6 +129,7 @@ impl fmt::Display for EngineError {
             Self::Compile(e) => write!(f, "compile error: {e}"),
             Self::CommandQueueFull => write!(f, "command queue full"),
             Self::Incompatible(why) => write!(f, "incompatible graph: {why}"),
+            Self::Record(why) => write!(f, "can't record: {why}"),
         }
     }
 }
@@ -139,6 +158,7 @@ struct Shared {
     load_permille: AtomicU64,
     /// Frames from a callback rendering audio to the device playing it.
     output_latency: AtomicUsize,
+    counting_in: AtomicBool,
 }
 
 /// Graphs on their way to the RT thread. If the ring is full (the audio
@@ -172,6 +192,11 @@ pub struct Engine {
     /// Structure of the latest published graph.
     topology: Option<Arc<GraphTopology>>,
     graph_metering: bool,
+    /// Latency of the output of the latest published graph.
+    graph_latency: usize,
+    input: Option<Arc<InputStatus>>,
+    /// Where the report of the take being written comes from.
+    take: Option<Receiver<TakeReport>>,
 }
 
 /// RT-side processor. Move it into the audio callback; call
@@ -199,6 +224,8 @@ pub struct AudioProcessor {
     preview_generation: u64,
     preview_shared: Arc<PreviewShared>,
     input: Option<Box<InputFeed>>,
+    capture: Option<Box<Capture>>,
+    count_in: Option<Box<CountIn>>,
 }
 
 const COMMAND_CAPACITY: usize = 1024;
@@ -261,6 +288,8 @@ impl Engine {
             preview_generation: 0,
             preview_shared: preview.shared(),
             input: None,
+            capture: None,
+            count_in: None,
         };
         let engine = Engine {
             config,
@@ -272,6 +301,9 @@ impl Engine {
             preview,
             topology: None,
             graph_metering: false,
+            graph_latency: 0,
+            input: None,
+            take: None,
         };
         (engine, processor)
     }
@@ -303,6 +335,7 @@ impl Engine {
         if graph.max_block() < self.config.max_block {
             return Err(EngineError::Incompatible("max block smaller than engine's"));
         }
+        self.graph_latency = graph.stats().output_latency;
         let topology = graph.topology();
         topology.meters().set_enabled(self.graph_metering);
         self.topology = Some(topology);
@@ -462,7 +495,89 @@ impl Engine {
                 "input feed's max block smaller than engine's",
             ));
         }
+        self.input = feed.as_ref().map(InputFeed::status);
         self.send(Command::SetInput(feed.map(Box::new)))
+    }
+
+    /// Start capturing the input, from the next block, into new WAV files
+    /// next to each other: one per track and per pass over the timeline
+    /// (see [`crate::record`]). Doesn't touch the transport, unless with a
+    /// count-in from stopped, which starts it at the end.
+    ///
+    /// Takes are moved back by the audio's round trip, fixed here: the
+    /// input's latency and ring, the output's, the graph's, and the offset.
+    pub fn record_start(&mut self, options: RecordOptions) -> Result<(), EngineError> {
+        if self.take.is_some() {
+            return Err(EngineError::Record("already recording".into()));
+        }
+        if options.tracks.is_empty() {
+            return Err(EngineError::Record("no tracks".into()));
+        }
+        let Some(input) = self.input.clone() else {
+            return Err(EngineError::Record("no input".into()));
+        };
+        std::fs::create_dir_all(&options.directory)
+            .map_err(|e| EngineError::Record(format!("{}: {e}", options.directory.display())))?;
+        let latency = input.latency_frames() as i64
+            + input.mean_fill_frames() as i64
+            + self.output_latency_frames() as i64
+            + self.graph_latency as i64
+            + options.latency_offset_frames;
+        let sample_rate = self.config.sample_rate;
+        let sources = record::sources_of(&options.tracks);
+        let mut options = options;
+        let count_in = options.count_in.take().map(Box::new);
+        let (capture, writer) = record::new_take(
+            options,
+            sources,
+            record::ring_frames(sample_rate),
+            latency.max(0) as u64,
+            sample_rate,
+            input,
+        );
+        let (report, take) = channel();
+        std::thread::Builder::new()
+            .name("tonique-takes".into())
+            .spawn(move || writer.run(report))
+            .map_err(|e| EngineError::Record(e.to_string()))?;
+        self.send(Command::RecordStart(Box::new(RecordStart {
+            capture: Some(Box::new(capture)),
+            count_in,
+        })))?;
+        self.take = Some(take);
+        Ok(())
+    }
+
+    /// Punch out, and cancel a count-in. The take's report follows once
+    /// what was played has come back: see [`Self::take_report`]. The
+    /// transport goes on.
+    pub fn record_stop(&mut self) -> Result<(), EngineError> {
+        self.send(Command::RecordStop)
+    }
+
+    /// Whether a take is being written, from [`Self::record_start`] until
+    /// its report has been picked up.
+    pub fn is_recording(&self) -> bool {
+        self.take.is_some()
+    }
+
+    /// Whether a count-in is playing.
+    pub fn is_counting_in(&self) -> bool {
+        self.shared.counting_in.load(Ordering::Relaxed)
+    }
+
+    /// The report of the take just finished, if there's one to pick up.
+    pub fn take_report(&mut self) -> Option<TakeReport> {
+        let report = match self.take.as_ref()?.try_recv() {
+            Ok(report) => report,
+            Err(TryRecvError::Empty) => return None,
+            Err(TryRecvError::Disconnected) => TakeReport {
+                error: Some("the take writer stopped".into()),
+                ..Default::default()
+            },
+        };
+        self.take = None;
+        Some(report)
     }
 
     /// Frames from the audio thread rendering audio to the output device
@@ -527,10 +642,18 @@ impl AudioProcessor {
             self.adopt_graphs();
             self.place_beats();
             self.keep_in_loop();
+            if let Some(feed) = &mut self.input {
+                feed.begin_callback();
+            }
             let frames = out.len() / channels;
             let mut done = 0;
             while done < frames {
                 let mut n = (frames - done).min(self.config.max_block);
+                if let Some(count_in) = &self.count_in
+                    && count_in.remaining() > 0
+                {
+                    n = n.min(count_in.remaining().min(usize::MAX as u64) as usize);
+                }
                 if let (true, Some((_, le))) = (self.playing, self.loop_range)
                     && self.position < le
                     && self.position + n as SamplePos > le
@@ -542,6 +665,7 @@ impl AudioProcessor {
                     channels,
                     n,
                 );
+                self.mix_count_in(&mut out[done * channels..(done + n) * channels], channels);
                 done += n;
             }
             self.mix_preview(out, channels);
@@ -558,6 +682,9 @@ impl AudioProcessor {
                 .position_beats
                 .store(beats.to_bits(), Ordering::Relaxed);
             self.shared.playing.store(self.playing, Ordering::Relaxed);
+            self.shared
+                .counting_in
+                .store(self.count_in.is_some(), Ordering::Relaxed);
             self.shared.blocks.fetch_add(1, Ordering::Relaxed);
         });
         let budget = frames_to_secs(out.len() / channels.max(1), self.config.sample_rate);
@@ -566,6 +693,27 @@ impl AudioProcessor {
             self.shared
                 .load_permille
                 .store((load * 1000.0) as u64, Ordering::Relaxed);
+        }
+    }
+
+    /// Add the count-in's click to a chunk, and roll at its end.
+    fn mix_count_in(&mut self, out: &mut [f32], channels: usize) {
+        let Some(count_in) = &mut self.count_in else {
+            return;
+        };
+        count_in.mix(out, channels);
+        if count_in.remaining() == 0 && self.garbage.slots() > 0 {
+            self.playing = true;
+            self.jumped = true;
+            self.retire_count_in();
+        }
+    }
+
+    fn retire_count_in(&mut self) {
+        if self.garbage.slots() > 0
+            && let Some(count_in) = self.count_in.take()
+        {
+            let _ = self.garbage.push(Garbage::CountIn(count_in));
         }
     }
 
@@ -603,6 +751,15 @@ impl AudioProcessor {
             Some(feed) => feed.pull(n),
             None => InputView::NONE,
         };
+        if let Some(capture) = &mut self.capture {
+            capture.record(input, n, self.position, self.playing, self.loop_range);
+            if capture.is_finished()
+                && self.garbage.slots() > 0
+                && let Some(capture) = self.capture.take()
+            {
+                let _ = self.garbage.push(Garbage::Capture(capture));
+            }
+        }
         let info = BlockInfo {
             block_len: n,
             sample_rate: self.config.sample_rate,
@@ -653,12 +810,16 @@ impl AudioProcessor {
             let Ok(cmd) = self.commands.pop() else { return };
             match cmd {
                 Command::Play => {
+                    self.retire_count_in();
                     if !self.playing {
                         self.playing = true;
                         self.jumped = true;
                     }
                 }
-                Command::Stop => self.playing = false,
+                Command::Stop => {
+                    self.retire_count_in();
+                    self.playing = false;
+                }
                 Command::Seek(pos) => {
                     self.position = pos;
                     self.seek_beats = None;
@@ -701,6 +862,24 @@ impl AudioProcessor {
                     std::mem::swap(&mut self.input, &mut feed);
                     // The old feed is freed off the RT thread.
                     let _ = self.garbage.push(Garbage::Command(Command::SetInput(feed)));
+                }
+                Command::RecordStart(mut start) => {
+                    if self.playing {
+                        // Nothing to count in to: it's freed with the rest.
+                    } else {
+                        std::mem::swap(&mut self.count_in, &mut start.count_in);
+                    }
+                    std::mem::swap(&mut self.capture, &mut start.capture);
+                    // Whatever this replaces is freed off the RT thread.
+                    let _ = self
+                        .garbage
+                        .push(Garbage::Command(Command::RecordStart(start)));
+                }
+                Command::RecordStop => {
+                    self.retire_count_in();
+                    if let Some(capture) = &mut self.capture {
+                        capture.stop();
+                    }
                 }
             }
         }

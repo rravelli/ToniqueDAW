@@ -22,6 +22,7 @@ pub mod nodes;
 pub mod param;
 pub mod peaks;
 pub mod preview;
+pub mod record;
 pub mod resample;
 pub mod rt;
 pub mod sample;
