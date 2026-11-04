@@ -162,7 +162,12 @@ fn rt_path_never_allocates() {
                 .unwrap(),
             // A new input arrives, the old one is retired.
             19 if block % 200 == 19 => {
-                let (feed, writer) = new_input();
+                // Every other one at another rate, through the resampler.
+                let (feed, writer) = if block % 400 == 19 {
+                    InputFeed::resampled(4, 128, 441, 44100.0, 48000.0)
+                } else {
+                    new_input()
+                };
                 input = writer;
                 let old = std::mem::replace(&mut status, feed.status());
                 saw_trouble |= old.underruns() > 0 && old.overflows() > 0;

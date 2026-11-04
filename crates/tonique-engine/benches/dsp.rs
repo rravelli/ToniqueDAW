@@ -6,7 +6,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use tonique_engine::audio::AudioBuffer;
 use tonique_engine::meter::ChannelMeter;
 use tonique_engine::peaks::WaveformPeaks;
-use tonique_engine::resample::resample_offline;
+use tonique_engine::resample::{SincResampler, resample_offline};
 use tonique_engine::sample::SampleBuffer;
 use tonique_engine::spectrum::Spectrum;
 
@@ -27,6 +27,30 @@ fn resample(c: &mut Criterion) {
             &input,
             |b, input| b.iter(|| resample_offline(black_box(input), from, to)),
         );
+    }
+    group.finish();
+}
+
+/// Live input through the resampler, on the audio thread: 256 frames per
+/// call, for inputs of several channels.
+fn resample_live(c: &mut Criterion) {
+    const FRAMES: usize = 256;
+    let mut group = c.benchmark_group("resample_live/256_frames");
+    group.throughput(Throughput::Elements(FRAMES as u64));
+    for channels in [2, 8, 32] {
+        for (from, to) in [(44100.0, 48000.0), (96000.0, 48000.0)] {
+            let ratio = from / to;
+            let input_frames = (FRAMES as f64 * ratio).ceil() as usize + 1;
+            let input: Vec<f32> = sine(input_frames * channels, from);
+            let mut out = vec![0.0; channels * FRAMES];
+            let mut resampler = SincResampler::new(channels, ratio);
+            group.bench_function(BenchmarkId::new(format!("{from}->{to}"), channels), |b| {
+                b.iter(|| {
+                    resampler.process(black_box(&input), &mut out, FRAMES, 0, FRAMES);
+                    black_box(&out);
+                })
+            });
+        }
     }
     group.finish();
 }
@@ -92,5 +116,5 @@ fn spectrum(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, resample, peaks, spectrum);
+criterion_group!(benches, resample, resample_live, peaks, spectrum);
 criterion_main!(benches);

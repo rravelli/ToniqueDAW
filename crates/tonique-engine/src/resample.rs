@@ -4,6 +4,8 @@
 //!   run once at load time off the RT thread.
 //! - Device clock drift: [`HermiteResampler`] / [`LinearResampler`], cheap
 //!   and RT-safe, steered by a [`DriftCorrector`].
+//! - Live input at another rate or on another clock: [`SincResampler`], as
+//!   clean as the offline one and RT-safe, steered the same way.
 //! - Musical varispeed: [`BackgroundVarispeedNode`], which does the DSP on a
 //!   helper thread and hands audio to the RT thread through an SPSC ring.
 
@@ -134,6 +136,119 @@ impl Kernel {
     }
 }
 
+/// Phases of [`SincResampler`]'s weight table. It interpolates between them,
+/// which leaves an error around -100 dB.
+const LIVE_PHASES: usize = 512;
+
+/// Streaming windowed sinc over several channels: the weights for each output
+/// frame are interpolated from a table made up front, so the ratio can move
+/// and nothing allocates. The filter is fixed by the ratio it's created with,
+/// for ratios staying close to it.
+#[derive(Debug)]
+pub struct SincResampler {
+    channels: usize,
+    taps: usize,
+    /// `LIVE_PHASES + 1` rows of `taps` weights.
+    table: Box<[f32]>,
+    /// The last `taps` input samples, per channel, written twice `taps` apart
+    /// so they're always contiguous.
+    history: Box<[f32]>,
+    write: usize,
+    /// Position of the next output frame past the centre of the window, in
+    /// input frames; 1 or more needs another input frame.
+    frac: f64,
+    ratio: RatioGlide,
+    weights: Box<[f32]>,
+}
+
+impl SincResampler {
+    /// `ratio` is input frames consumed per output frame. Allocates.
+    pub fn new(channels: usize, ratio: f64) -> Self {
+        let kernel = Kernel::new(1.0 / ratio);
+        let taps = 2 * kernel.reach as usize;
+        let table = (0..=LIVE_PHASES)
+            .flat_map(|p| kernel.weights(p as f64 / LIVE_PHASES as f64))
+            .map(|w| w as f32)
+            .collect();
+        Self {
+            channels,
+            taps,
+            table,
+            history: vec![0.0; channels * taps * 2].into_boxed_slice(),
+            write: 0,
+            frac: 1.0,
+            ratio: RatioGlide::new(ratio),
+            weights: vec![0.0; taps].into_boxed_slice(),
+        }
+    }
+
+    /// How far output lags input, in input frames.
+    pub fn delay_frames(&self) -> usize {
+        self.taps / 2
+    }
+
+    /// Moved to gradually, over about 20 ms.
+    pub fn set_ratio(&mut self, ratio: f64) {
+        self.ratio.target = ratio;
+    }
+
+    /// Fill `out[start..start + frames]` of each channel (channels are
+    /// `stride` apart in `out`) from interleaved `input`. Returns the input
+    /// frames consumed and the frames produced; it stops when either side
+    /// runs out, and goes on from there on the next call.
+    pub fn process(
+        &mut self,
+        input: &[f32],
+        out: &mut [f32],
+        stride: usize,
+        start: usize,
+        frames: usize,
+    ) -> (usize, usize) {
+        let mut frames_in = input.chunks_exact(self.channels);
+        let (mut consumed, mut produced) = (0, 0);
+        while produced < frames {
+            while self.frac >= 1.0 {
+                let Some(frame) = frames_in.next() else {
+                    return (consumed, produced);
+                };
+                self.push_frame(frame);
+                consumed += 1;
+                self.frac -= 1.0;
+            }
+            self.load_weights();
+            for c in 0..self.channels {
+                let history = &self.history[c * self.taps * 2 + self.write..][..self.taps];
+                let sum: f32 = history.iter().zip(&self.weights).map(|(h, w)| h * w).sum();
+                out[c * stride + start + produced] = sum;
+            }
+            produced += 1;
+            self.frac += self.ratio.next();
+        }
+        (consumed, produced)
+    }
+
+    fn push_frame(&mut self, frame: &[f32]) {
+        for (c, &sample) in frame.iter().enumerate() {
+            let history = &mut self.history[c * self.taps * 2..][..self.taps * 2];
+            history[self.write] = sample;
+            history[self.write + self.taps] = sample;
+        }
+        self.write = (self.write + 1) % self.taps;
+    }
+
+    /// The weights at the current position, between two rows of the table.
+    fn load_weights(&mut self) {
+        let position = self.frac * LIVE_PHASES as f64;
+        let phase = (position as usize).min(LIVE_PHASES - 1);
+        let t = (position - phase as f64) as f32;
+        let row = |r: usize| &self.table[r * self.taps..][..self.taps];
+        let (a, b) = (row(phase), row(phase + 1));
+        for ((w, a), b) in self.weights.iter_mut().zip(a).zip(b) {
+            *w = a + (b - a) * t;
+        }
+    }
+}
+
 /// Streaming, RT-safe resampler. `ratio` is input samples consumed per
 /// output sample (1.0 = unity, 2.0 = twice as fast / an octave up).
 pub trait Resampler: Send {
@@ -257,12 +372,20 @@ impl Resampler for HermiteResampler {
     }
 }
 
+/// How quickly a [`DriftCorrector`] reacts, in radians per second, critically
+/// damped. Clocks differ by a few frames a second at most, so it can be slow,
+/// which keeps its effect on pitch far below what can be heard.
+const DRIFT_LOOP_RATE: f64 = 0.25;
+
 /// PI controller that nudges a resampling ratio so that a FIFO between two
-/// clock domains stays near its target fill level.
+/// clock domains stays near its target fill level. Give it the fill smoothed
+/// over callbacks: a raw one jumps by a whole buffer each time, and the ratio
+/// with it.
 #[derive(Clone, Debug)]
 pub struct DriftCorrector {
     nominal: f64,
     target_fill: f64,
+    /// Sum of the fill's error over time, in frame-seconds.
     integral: f64,
     kp: f64,
     ki: f64,
@@ -270,22 +393,32 @@ pub struct DriftCorrector {
 }
 
 impl DriftCorrector {
-    pub fn new(nominal_ratio: f64, target_fill: usize) -> Self {
+    /// `input_rate` is the rate the FIFO fills at.
+    pub fn new(nominal_ratio: f64, target_fill: usize, input_rate: f64) -> Self {
         Self {
             nominal: nominal_ratio,
             target_fill: target_fill as f64,
             integral: 0.0,
-            kp: 1e-6,
-            ki: 1e-9,
+            kp: 2.0 * DRIFT_LOOP_RATE / input_rate,
+            ki: DRIFT_LOOP_RATE * DRIFT_LOOP_RATE / input_rate,
             max_deviation: 0.005,
         }
     }
 
-    /// Call once per block with the FIFO's current fill; returns the ratio
-    /// to feed to the resampler that drains it. Too full -> consume faster.
-    pub fn update(&mut self, fill: usize) -> f64 {
-        let err = fill as f64 - self.target_fill;
-        self.integral = (self.integral + err).clamp(-1e6, 1e6);
+    /// Hold the FIFO at this fill from now on, as if it had always been the
+    /// target.
+    pub fn set_target_fill(&mut self, target_fill: f64) {
+        self.target_fill = target_fill;
+    }
+
+    /// Call regularly with the FIFO's fill and the `seconds` since the last
+    /// call; returns the ratio to feed to the resampler that drains it. Too
+    /// full -> consume faster.
+    pub fn update(&mut self, fill: f64, seconds: f64) -> f64 {
+        let err = fill - self.target_fill;
+        // No further than the correction can use, or it would overshoot.
+        let limit = self.max_deviation / self.ki;
+        self.integral = (self.integral + err * seconds).clamp(-limit, limit);
         let adj = (self.kp * err + self.ki * self.integral)
             .clamp(-self.max_deviation, self.max_deviation);
         self.nominal * (1.0 + adj)
@@ -482,13 +615,124 @@ mod tests {
     fn drift_corrector_pulls_fill_towards_target() {
         // Producer at 48000 Hz, consumer resamples at `ratio` per output
         // sample while emitting 48010 samples/s (a slightly faster clock).
-        let mut dc = DriftCorrector::new(48000.0 / 48010.0, 4800);
+        let mut dc = DriftCorrector::new(48000.0 / 48010.0, 4800, 48000.0);
         let mut fill = 9600.0f64;
         let mut ratio = 48000.0 / 48010.0;
         for _ in 0..20000 {
             fill += 480.0 - 480.1 * ratio; // 10 ms blocks
-            ratio = dc.update(fill.max(0.0) as usize);
+            ratio = dc.update(fill.max(0.0), 0.01);
         }
-        assert!((fill - 4800.0).abs() < 300.0, "fill {fill}");
+        assert!((fill - 4800.0).abs() < 1.0, "fill {fill}");
+    }
+
+    /// A clock off by 100 ppm: the fill barely moves, and the correction
+    /// ends up constant, on the clock's difference.
+    #[test]
+    fn drift_corrector_settles_without_moving_the_pitch() {
+        let (rate, offset) = (48000.0, 1.0001);
+        let mut dc = DriftCorrector::new(1.0, 1024, rate);
+        let (mut fill, mut ratio) = (1024.0f64, 1.0);
+        let mut furthest = 0.0f64;
+        let mut last_second = (f64::MAX, f64::MIN);
+        for block in 0..6000 {
+            fill += 480.0 * offset - 480.0 * ratio;
+            ratio = dc.update(fill, 0.01);
+            furthest = furthest.max((fill - 1024.0).abs());
+            if block >= 5900 {
+                last_second = (last_second.0.min(ratio), last_second.1.max(ratio));
+            }
+        }
+        assert!(furthest < 15.0, "fill went {furthest} frames off");
+        assert!((fill - 1024.0).abs() < 0.5, "fill {fill}");
+        assert!((ratio - offset).abs() < 1e-6, "ratio {ratio}");
+        assert!(last_second.1 - last_second.0 < 1e-7, "{last_second:?}");
+    }
+
+    /// `frames` frames of a sine through a [`SincResampler`] of a fixed ratio,
+    /// fed and drained in uneven chunks.
+    fn sinc_stream(ratio: f64, hz: f64, rate: f64, frames: usize) -> (Vec<f32>, usize) {
+        let input: Vec<f32> = sine(hz, rate, ((frames + 200) as f64 * ratio) as usize);
+        let mut resampler = SincResampler::new(1, ratio);
+        let mut out = vec![0.0; frames];
+        let (mut at_in, mut at_out, mut chunk) = (0, 0, 1);
+        while at_out < frames {
+            chunk = chunk % 777 + 13;
+            let until = (at_in + chunk).min(input.len());
+            let wanted = (chunk / 2 + 1).min(frames - at_out);
+            let (consumed, produced) =
+                resampler.process(&input[at_in..until], &mut out, frames, at_out, wanted);
+            at_in += consumed;
+            at_out += produced;
+        }
+        (out, resampler.delay_frames())
+    }
+
+    #[test]
+    fn sinc_stream_tracks_a_sine_both_ways() {
+        for (from, to) in [(44100.0, 48000.0), (48000.0, 44100.0), (48000.0, 96000.0)] {
+            let ratio = from / to;
+            for hz in [440.0, 5000.0, 15000.0] {
+                let frames = 40000;
+                let (out, delay) = sinc_stream(ratio, hz, from, frames);
+                // Output frame n is at input frame n * ratio, minus the delay.
+                let err = (1000..frames - 1000)
+                    .map(|n| {
+                        let at = n as f64 * ratio - delay as f64;
+                        (out[n] as f64 - (2.0 * PI * hz * at / from).sin()).abs()
+                    })
+                    .fold(0.0, f64::max);
+                assert!(err < 2e-4, "{from}->{to} at {hz} Hz: err {err}");
+            }
+        }
+    }
+
+    #[test]
+    fn sinc_stream_filters_what_the_lower_rate_cannot_hold() {
+        // 23 kHz doesn't exist at 44.1 kHz: it mustn't fold back.
+        let (out, _) = sinc_stream(48000.0 / 44100.0, 23000.0, 48000.0, 20000);
+        let peak = |s: &[f32]| s[1000..19000].iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        let live = peak(&out);
+        // This close to the new Nyquist it's in the filter's transition: as
+        // good as importing a file, which has the same filter.
+        let offline = resample_offline(&sine(23000.0, 48000.0, 24000), 48000.0, 44100.0);
+        assert!(live < peak(&offline) * 1.1, "{live}, {}", peak(&offline));
+        assert!(live < 3e-3, "alias peak {live}");
+    }
+
+    #[test]
+    fn sinc_stream_keeps_channels_apart() {
+        let mut resampler = SincResampler::new(2, 1.0);
+        let input: Vec<f32> = (0..400).flat_map(|_| [0.5, -0.25]).collect();
+        let mut out = vec![0.0; 2 * 100];
+        let (consumed, produced) = resampler.process(&input, &mut out, 100, 0, 100);
+        assert_eq!((consumed, produced), (100, 100));
+        assert!((out[99] - 0.5).abs() < 1e-3, "{}", out[99]);
+        assert!((out[199] + 0.25).abs() < 1e-3, "{}", out[199]);
+    }
+
+    /// Moving the ratio neither clicks nor loses the signal.
+    #[test]
+    fn sinc_stream_stays_clean_while_the_ratio_moves() {
+        let (hz, rate) = (1000.0, 48000.0);
+        let mut resampler = SincResampler::new(1, 1.0);
+        let input = sine(hz, rate, 96000);
+        let mut out = vec![0.0; 90000];
+        let (mut at_in, mut at_out) = (0, 0);
+        let mut block = 0;
+        while at_out < 90000 {
+            // Far more than clock drift ever asks for.
+            resampler.set_ratio(if block % 200 < 100 { 1.002 } else { 0.998 });
+            block += 1;
+            let wanted = 128.min(90000 - at_out);
+            let (consumed, produced) =
+                resampler.process(&input[at_in..], &mut out, 90000, at_out, wanted);
+            at_in += consumed;
+            at_out += produced;
+        }
+        // A sine at most this far from its neighbours has no jump in it.
+        let step = (2.0 * PI * hz * 1.003 / rate) as f32;
+        for n in 1000..90000 {
+            assert!((out[n] - out[n - 1]).abs() <= step, "jump at {n}");
+        }
     }
 }
