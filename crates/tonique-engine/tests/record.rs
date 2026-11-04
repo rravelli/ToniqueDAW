@@ -601,3 +601,134 @@ fn a_take_is_playable_while_it_is_being_written() {
         loopback.callback(&mut p);
     });
 }
+
+/// Sound in the room, in real time: a soft pulse (well below any Nyquist)
+/// each time the transport, rolling at `roll` seconds, reaches a beat. What
+/// an input at any rate records of it can be compared to the timeline.
+fn room(t: f64, roll: f64, beat: f64) -> f32 {
+    const WIDTH: f64 = 0.001;
+    let since = t - roll;
+    if since < -5.0 * WIDTH {
+        return 0.0;
+    }
+    let nearest = (since / beat).round() * beat;
+    let x = (since - nearest) / WIDTH;
+    (-0.5 * x * x).exp() as f32
+}
+
+/// Where a pulse near `around` peaks, in frames, to a fraction of a frame.
+fn pulse_at(samples: &[f32], around: usize) -> f64 {
+    let window = 200;
+    let range = around - window..around + window;
+    let weight: f64 = samples[range.clone()].iter().map(|s| *s as f64).sum();
+    let moment: f64 = range.map(|i| i as f64 * samples[i] as f64).sum();
+    moment / weight
+}
+
+/// A device with a clock of its own, capturing the room.
+struct RoomInput {
+    writer: InputWriter,
+    real_rate: f64,
+    captured: usize,
+    /// When the transport rolled, once it has.
+    roll: Option<f64>,
+    callbacks: usize,
+}
+
+impl RoomInput {
+    /// In a size sharing no factor with `BLOCK`: its deliveries fall at every
+    /// point of the output's callbacks, as those of a real device do.
+    const BLOCK: usize = 479;
+
+    fn now(&self) -> f64 {
+        (self.callbacks * BLOCK) as f64 / SR
+    }
+
+    fn run(&mut self, p: &mut AudioProcessor, callbacks: usize) {
+        let beat = BEAT as f64 / SR;
+        for _ in 0..callbacks {
+            let delivered = self.now() * self.real_rate;
+            while ((self.captured + Self::BLOCK) as f64) <= delivered {
+                let (captured, real_rate, roll) = (self.captured, self.real_rate, self.roll);
+                self.writer.push((0..Self::BLOCK).map(|i| {
+                    let t = (captured + i) as f64 / real_rate;
+                    roll.map_or(0.0, |roll| room(t, roll, beat))
+                }));
+                self.captured += Self::BLOCK;
+            }
+            render_offline(p, BLOCK, 2);
+            self.callbacks += 1;
+            if self.callbacks.is_multiple_of(200) {
+                std::thread::sleep(Duration::from_millis(1)); // for the writer
+            }
+        }
+    }
+}
+
+/// Record the room for `seconds` from an input with a clock of its own, and
+/// return how far each pulse landed from its beat, in engine frames.
+#[allow(clippy::unwrap_used)]
+fn recorded_pulse_errors(name: &str, nominal: f64, real: f64, seconds: f64) -> Vec<(f64, f64)> {
+    let dir = TempDir::new(name);
+    let (mut s, mut p) = session();
+    let target = RoomInput::BLOCK + (BLOCK as f64 * nominal / SR).ceil() as usize;
+    let (feed, writer) = InputFeed::resampled(1, BLOCK, target, nominal, SR);
+    let status = feed.status();
+    s.engine_mut().set_input(Some(feed)).unwrap();
+    let mut input = RoomInput {
+        writer,
+        real_rate: real,
+        captured: 0,
+        roll: None,
+        callbacks: 0,
+    };
+    input.run(&mut p, 600); // settled, as an input opened a while before
+
+    s.engine_mut()
+        .record_start(options(&dir.0, InputRoute::Mono(0)))
+        .unwrap();
+    s.play().unwrap();
+    input.roll = Some(input.now());
+    input.run(&mut p, (seconds * SR) as usize / BLOCK);
+    s.engine_mut().record_stop().unwrap();
+    s.stop().unwrap();
+    let report = finish(&mut s, || input.run(&mut p, 1));
+
+    assert_eq!(report.dropouts, 0, "{status:?}");
+    assert_eq!(report.passes.len(), 1);
+    assert_eq!(report.passes[0].start, 0);
+    let samples = read(&report.passes[0].files[0].path);
+    (1..)
+        .map(|n| n * BEAT)
+        .take_while(|at| at + 1000 < samples.len())
+        .map(|at| (at as f64 / SR, pulse_at(&samples, at) - at as f64))
+        .collect()
+}
+
+fn assert_on_the_beat(errors: &[(f64, f64)], tolerance: f64) {
+    assert!(errors.len() > 3);
+    for (time, error) in errors {
+        assert!(error.abs() < tolerance, "{error} frames off at {time} s");
+    }
+}
+
+#[test]
+fn takes_at_another_rate_land_on_their_beats() {
+    for (name, rate) in [("44k", 44100.0), ("96k", 96000.0), ("22k", 22050.0)] {
+        let errors = recorded_pulse_errors(name, rate, rate, 5.0);
+        assert_on_the_beat(&errors, 5.0);
+    }
+}
+
+/// Two clocks: well within a millisecond (48 frames) from the start, as the
+/// correction finds the clocks' difference, and no drift over a long take.
+#[test]
+fn takes_from_a_separate_clock_stay_on_their_beats() {
+    for (name, ppm) in [("fast", 100.0), ("slow", -100.0)] {
+        let real = SR * (1.0 + ppm * 1e-6);
+        let errors = recorded_pulse_errors(name, SR, real, 120.0);
+        assert_on_the_beat(&errors, 8.0);
+        let settled: Vec<_> = errors.iter().filter(|e| e.0 > 30.0).copied().collect();
+        assert_on_the_beat(&settled, 1.5);
+    }
+}

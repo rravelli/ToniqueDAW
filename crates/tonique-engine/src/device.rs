@@ -7,7 +7,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ErrorKind, FromSample, SampleFormat, SizedSample, SupportedStreamConfigRange};
 
 use crate::engine::AudioProcessor;
-use crate::input::InputWriter;
+use crate::input::{InputFeed, InputWriter, target_fill};
 use crate::rt;
 
 pub type DeviceError = Box<dyn std::error::Error + Send + Sync>;
@@ -139,6 +139,11 @@ impl OutputDevice {
         device_name(&self.device)
     }
 
+    /// Stable identifier (see [`DeviceInfo::id`]).
+    pub fn id(&self) -> Option<String> {
+        self.device.id().ok().map(|id| id.to_string())
+    }
+
     /// Sample rates the device supports with its channel count, lowest first.
     pub fn supported_sample_rates(&self) -> Vec<u32> {
         let Ok(configs) = self.device.supported_output_configs() else {
@@ -237,42 +242,61 @@ impl OutputStream {
     }
 }
 
+/// Which input to open and how.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InputOptions {
+    /// A [`DeviceInfo::id`], or `None` for the system default.
+    pub device_id: Option<String>,
+    /// The rate to run at if the device can.
+    pub engine_rate: f64,
+    /// Frames per device callback.
+    pub buffer_frames: Option<u32>,
+    /// The output device playing ([`OutputDevice::id`]): the same device
+    /// shares its clock, and needs no resampling.
+    pub output_id: Option<String>,
+}
+
 /// An input device and the configuration it will be opened with.
 pub struct InputDevice {
     device: cpal::Device,
     config: cpal::StreamConfig,
     format: SampleFormat,
+    engine_rate: f64,
+    /// On the output's clock, at the engine's rate.
+    same_clock: bool,
 }
 
 impl InputDevice {
-    /// A device (a [`DeviceInfo::id`], or `None` for the system default) at
-    /// the engine's rate. Doesn't start capturing yet. Unlike an output, a
-    /// device that's gone is an error rather than the default: recording
+    /// Doesn't start capturing yet. At the engine's rate if the device can
+    /// run at it, otherwise at its own (see [`Self::feed`]). Unlike an output,
+    /// a device that's gone is an error rather than the default: recording
     /// from another microphone than the one chosen would go unnoticed.
-    pub fn open(
-        device_id: Option<&str>,
-        sample_rate: f64,
-        buffer_frames: Option<u32>,
-    ) -> Result<Self, DeviceError> {
+    pub fn open(options: &InputOptions) -> Result<Self, DeviceError> {
         let host = cpal::default_host();
-        let device = match device_id {
+        let device = match &options.device_id {
             Some(id) => host
                 .input_devices()?
-                .find(|d| d.id().is_ok_and(|d| d.to_string() == id))
+                .find(|d| d.id().is_ok_and(|d| d.to_string() == *id))
                 .ok_or("input device not found")?,
             None => host
                 .default_input_device()
                 .ok_or("no input device available")?,
         };
-        let rate = sample_rate.round() as u32;
+        let engine_rate = options.engine_rate.round() as u32;
         let default = device.default_input_config()?;
         let supported: Vec<_> = device.supported_input_configs()?.collect();
-        let picked = pick_input_config(
-            &supported,
-            default.channels(),
-            default.sample_format(),
-            rate,
-        );
+        let pick = |rate| {
+            pick_input_config(
+                &supported,
+                default.channels(),
+                default.sample_format(),
+                rate,
+            )
+        };
+        let (rate, picked) = match pick(engine_rate) {
+            Some(range) => (engine_rate, Some(range)),
+            None => (default.sample_rate(), pick(default.sample_rate())),
+        };
         let (channels, format, buffer_range) = match picked {
             Some(range) => (
                 range.channels(),
@@ -280,14 +304,15 @@ impl InputDevice {
                 buffer_range(range.buffer_size()),
             ),
             // Not every host lists its default configuration.
-            None if default.sample_rate() == rate && can_convert(default.sample_format()) => (
+            None if can_convert(default.sample_format()) => (
                 default.channels(),
                 default.sample_format(),
                 buffer_range(default.buffer_size()),
             ),
-            None => return Err(format!("input device can't run at {rate} Hz").into()),
+            None => return Err("input device has no usable format".into()),
         };
-        let frames = buffer_frames
+        let frames = options
+            .buffer_frames
             .or_else(|| on_sound_server(&device).then_some(SERVER_BUFFER_FRAMES))
             .filter(|f| buffer_range.is_none_or(|(min, max)| (min..=max).contains(f)));
         let config = cpal::StreamConfig {
@@ -295,11 +320,42 @@ impl InputDevice {
             sample_rate: rate,
             buffer_size: frames.map_or(cpal::BufferSize::Default, cpal::BufferSize::Fixed),
         };
+        let id = device.id().ok().map(|id| id.to_string());
+        let same_clock = rate == engine_rate && id.is_some() && id == options.output_id;
         Ok(Self {
             device,
             config,
             format,
+            engine_rate: options.engine_rate,
+            same_clock,
         })
+    }
+
+    /// Whether audio from this device needs resampling: it's at another rate
+    /// than the engine, or may be on another clock, which only the same
+    /// device as the output is sure not to be.
+    pub fn needs_resampling(&self) -> bool {
+        !self.same_clock
+    }
+
+    /// The feed for this device, for an engine whose blocks are at most
+    /// `max_block` frames, playing to an output of `output_frames` frames
+    /// per callback.
+    pub fn feed(&self, max_block: usize, output_frames: usize) -> (InputFeed, InputWriter) {
+        let ratio = self.sample_rate() / self.engine_rate;
+        let input_frames = self.buffer_frames().unwrap_or(SERVER_BUFFER_FRAMES) as usize;
+        let target_fill = target_fill(input_frames, (output_frames as f64 * ratio).ceil() as usize);
+        if self.needs_resampling() {
+            InputFeed::resampled(
+                self.channels(),
+                max_block,
+                target_fill,
+                self.sample_rate(),
+                self.engine_rate,
+            )
+        } else {
+            InputFeed::new(self.channels(), max_block, target_fill)
+        }
     }
 
     pub fn name(&self) -> String {

@@ -505,7 +505,8 @@ impl Engine {
     /// count-in from stopped, which starts it at the end.
     ///
     /// Takes are moved back by the audio's round trip, fixed here: the
-    /// input's latency and ring, the output's, the graph's, and the offset.
+    /// input's delay ([`InputStatus::delay_frames`]), the output's latency,
+    /// the graph's, and the offset.
     pub fn record_start(&mut self, options: RecordOptions) -> Result<(), EngineError> {
         if self.take.is_some() {
             return Err(EngineError::Record("already recording".into()));
@@ -518,8 +519,7 @@ impl Engine {
         };
         std::fs::create_dir_all(&options.directory)
             .map_err(|e| EngineError::Record(format!("{}: {e}", options.directory.display())))?;
-        let latency = input.latency_frames() as i64
-            + input.mean_fill_frames() as i64
+        let latency = input.delay_frames() as i64
             + self.output_latency_frames() as i64
             + self.graph_latency as i64
             + options.latency_offset_frames;
@@ -643,7 +643,7 @@ impl AudioProcessor {
             self.place_beats();
             self.keep_in_loop();
             if let Some(feed) = &mut self.input {
-                feed.begin_callback();
+                feed.begin_callback(out.len() / channels.max(1));
             }
             let frames = out.len() / channels;
             let mut done = 0;
