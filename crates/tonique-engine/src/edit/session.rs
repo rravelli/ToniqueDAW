@@ -2,9 +2,10 @@ use super::builder::{automation_curve, automation_identity, build_graph};
 use super::commands::EditCommand;
 use std::sync::Arc;
 
-use super::{Edit, EditError, Effects, SourceId, UndoManager};
+use super::{Edit, EditError, Effects, SourceId, TrackId, UndoManager};
 use crate::engine::{Command, Engine, EngineError};
 use crate::graph::{CompileStats, NodeMessage};
+use crate::input::InputRoute;
 use crate::sample::SampleBuffer;
 use crate::stretch::Stretchers;
 use crate::time::BeatPos;
@@ -94,6 +95,21 @@ impl EditSession {
     /// and rebuild. Not part of the undo history.
     pub fn set_source(&mut self, id: SourceId, data: Arc<SampleBuffer>) -> Result<(), EditError> {
         self.edit.set_source(id, data);
+        self.rebuild().map(|_| ())
+    }
+
+    /// Hear input channels through a track, or stop (`None`). Not part of
+    /// the undo history: undoing an edit shouldn't start or stop live sound.
+    pub fn set_track_monitor(
+        &mut self,
+        track: TrackId,
+        route: Option<InputRoute>,
+    ) -> Result<(), EditError> {
+        let track = self.edit.track_mut(track)?;
+        if track.monitor == route {
+            return Ok(());
+        }
+        track.monitor = route;
         self.rebuild().map(|_| ())
     }
 

@@ -226,6 +226,7 @@ impl CompiledGraph {
             timeline_pos: info.timeline_pos,
             playing: info.playing,
             jumped: info.jumped,
+            input_view: info.input,
         };
         ctx.audio_out.clear();
         ctx.midi_out.clear();
