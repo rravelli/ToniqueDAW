@@ -225,8 +225,9 @@ impl CentralPanel {
         state.grid.offset.x = (x - viewport.width() / 2.).max(0.);
     }
 
-    /// The timeline's scrollbars, when the content overflows. Returns
-    /// whether the horizontal one was dragged.
+    /// The timeline's scrollbars, when the content overflows: along the
+    /// bottom of the lanes, and down the far side of the track list, which
+    /// scrolls with them. Returns whether the horizontal one was dragged.
     fn scrollbars_ui(
         &self,
         ui: &mut Ui,
@@ -234,12 +235,11 @@ impl CentralPanel {
         content_size: Vec2,
         offset: &mut Vec2,
     ) -> bool {
-        let lanes_right = viewport.right();
         let mut scrolled_x = false;
         if content_size.x > viewport.max.x {
             let track = Rect::from_min_max(
                 pos2(viewport.left(), viewport.bottom() - SCROLLBAR_WIDTH),
-                pos2(lanes_right - SCROLLBAR_WIDTH, viewport.bottom()),
+                viewport.max,
             );
             scrolled_x = ui
                 .add(ScrollBar::new(
@@ -252,11 +252,14 @@ impl CentralPanel {
                 ))
                 .dragged();
         }
-        if content_size.y > viewport.max.y {
+        let rows = self.tracks.rows_rect();
+        if content_size.y > viewport.max.y && rows.is_positive() {
             let track = Rect::from_min_max(
-                pos2(lanes_right - SCROLLBAR_WIDTH, viewport.top()),
-                pos2(lanes_right, viewport.bottom()),
+                pos2(rows.right() - SCROLLBAR_WIDTH, viewport.top()),
+                pos2(rows.right(), viewport.bottom()),
             );
+            let clip = ui.clip_rect();
+            ui.set_clip_rect(track);
             ui.add(ScrollBar::new(
                 "vscroll",
                 Axis::Vertical,
@@ -265,6 +268,7 @@ impl CentralPanel {
                 content_size.y - viewport.bottom(),
                 viewport.height() / (content_size.y - viewport.top()),
             ));
+            ui.set_clip_rect(clip);
         }
         scrolled_x
     }

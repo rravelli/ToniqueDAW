@@ -626,6 +626,37 @@ fn track_name_pos(harness: &Harness<'_, ToniqueApp>, index: usize) -> Pos2 {
     harness.get_by_label(&name).rect().center()
 }
 
+/// The fields in the transport bar's well are still dragged one by one.
+#[test]
+fn tempo_and_time_signature_are_dragged_in_their_well() {
+    let mut harness = app();
+    let tempo = harness.state().transport_bar.tempo_rect;
+    let beats = harness.state().transport_bar.numerator_rect;
+    let bpm = harness.state().state.bpm();
+    let numerator = harness.state().state.time_signature().numerator;
+
+    Input::Drag(
+        tempo.center(),
+        tempo.center() + vec2(30., 0.),
+        Modifiers::NONE,
+    )
+    .apply(&mut harness);
+    harness.run_steps(4);
+    assert!(harness.state().state.bpm() > bpm);
+    assert_eq!(harness.state().state.time_signature().numerator, numerator);
+
+    let bpm = harness.state().state.bpm();
+    Input::Drag(
+        beats.center(),
+        beats.center() - vec2(6., 0.),
+        Modifiers::NONE,
+    )
+    .apply(&mut harness);
+    harness.run_steps(4);
+    assert!(harness.state().state.time_signature().numerator < numerator);
+    assert_eq!(harness.state().state.bpm(), bpm);
+}
+
 /// An effect dragged out of the panel, onto another track, moves there.
 #[test]
 fn effects_are_dragged_onto_other_tracks() {

@@ -32,6 +32,8 @@ pub struct NumberInput {
     /// The only values taken, in ascending order, each step moving to the
     /// next; any value in `range` when empty.
     values: Vec<f32>,
+    /// No box of its own, to sit in something that has one.
+    frameless: bool,
 }
 
 impl NumberInput {
@@ -48,7 +50,15 @@ impl NumberInput {
             draggable: false,
             drag_rest: 0.,
             values: Vec::new(),
+            frameless: false,
         }
+    }
+
+    /// Without a box: only a tint while hovered, and the outline while
+    /// focused or dragged.
+    pub fn frameless(mut self) -> Self {
+        self.frameless = true;
+        self
     }
 
     pub fn range(mut self, range: Rangef) -> Self {
@@ -126,13 +136,17 @@ impl NumberInput {
         let rect = res.rect;
         let theme = ui.app_theme();
         // Paint widget
-        painter.rect(
-            rect,
-            1.0,
-            theme.bg_control,
-            Stroke::new(1., theme.control_border),
-            StrokeKind::Inside,
-        );
+        if !self.frameless {
+            painter.rect(
+                rect,
+                1.0,
+                theme.bg_control,
+                Stroke::new(1., theme.control_border),
+                StrokeKind::Inside,
+            );
+        } else if res.hovered() {
+            painter.rect_filled(rect, 1.0, theme.hover_overlay);
+        }
 
         let mut text = self.format_value(self.value) + &self.suffix;
         // Text

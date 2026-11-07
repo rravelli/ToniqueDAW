@@ -8,13 +8,11 @@ use crate::{
             preview::{PREVIEW_HEIGHT, PreviewSettings, preview_ui},
         },
         commands::Commands,
-        font::PHOSPHOR_FILL,
         theme::{ThemeExt, with_alpha},
         widget::flat_button::FlatButton,
     },
 };
 use egui::{Color32, FontId, Rect, RichText, Stroke, Ui};
-use egui_phosphor::fill::FOLDER_PLUS;
 use rfd::FileDialog;
 use std::{
     collections::HashMap,
@@ -24,9 +22,6 @@ use std::{
 pub mod file_tree;
 mod items;
 mod preview;
-
-/// Side of the button adding a folder.
-pub const ADD_FOLDER_SIZE: f32 = 22.;
 
 /// The files of the folders added to it, each a section of one tree,
 /// searchable together or one at a time; the files and folders given a
@@ -51,6 +46,7 @@ impl FileBrowser {
     pub fn new() -> Self {
         let config = Config::load();
         let mut items = FileList::new();
+        items.add_row = true;
         items.set_roots(config.list_dirs(), config.collapsed_dirs());
         items.auto_preview = config.auto_preview();
         let mut labelled = FileList::new();
@@ -244,6 +240,7 @@ impl FileBrowser {
             FolderAction::SearchEverywhere => self.items.set_scope(None),
             FolderAction::Refresh => self.refresh(),
             FolderAction::Add(dir) => self.add_folder(dir),
+            FolderAction::Pick => self.pick_folder(),
             FolderAction::SetLabel(path, label) => {
                 self.config.edit_labels(|labels| labels.set(path, label));
                 self.refresh_labels();
@@ -268,20 +265,6 @@ impl FileBrowser {
     fn reload(&mut self) {
         self.items
             .set_roots(self.config.list_dirs(), self.config.collapsed_dirs());
-    }
-
-    /// The button adding a folder, beside the search bar.
-    pub fn add_folder_button(&mut self, ui: &mut Ui) {
-        let button = FlatButton::ghost(FOLDER_PLUS)
-            .square(ADD_FOLDER_SIZE)
-            .font(FontId::new(
-                15.,
-                egui::FontFamily::Name(PHOSPHOR_FILL.into()),
-            ))
-            .tooltip("Add a folder");
-        if ui.add(button).clicked() {
-            self.pick_folder();
-        }
     }
 
     /// Keep what the preview changed, and hand its volume to the engine.

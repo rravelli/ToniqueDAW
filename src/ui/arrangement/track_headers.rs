@@ -24,7 +24,10 @@ use crate::{
         },
         dnd::DragPayload,
         font::PHOSPHOR_REGULAR,
-        widget::{context_menu::ContextMenuButton, flat_button::FlatButton, meter::LevelMeter},
+        widget::{
+            context_menu::ContextMenuButton, flat_button::FlatButton, meter::LevelMeter,
+            scroll_bar::SCROLLBAR_WIDTH,
+        },
         workspace::{BottomView, Workspace},
     },
     utils::display_name,
@@ -203,7 +206,8 @@ impl TrackHeaders {
     ) -> Option<Rangef> {
         let rect = ui.max_rect();
         let rename = self.rename.take();
-        let x = rect.left() + PANEL_MARGIN..=rect.right() - PANEL_MARGIN;
+        // Clear of the timeline's scrollbar, down the right edge.
+        let x = rect.left() + PANEL_MARGIN..=rect.right() - SCROLLBAR_WIDTH - 1.;
         let mut rows = ui.new_child(
             UiBuilder::new()
                 .max_rect(Rect::from_x_y_ranges(
