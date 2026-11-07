@@ -1,6 +1,6 @@
 [package]
 name = "tonique_daw"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Rémi Ravelli <remi.ravelli@gmail.com>"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -20,7 +20,10 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tonique-engine = { path = "crates/tonique-engine", features = ["device", "signalsmith"] }
+tonique-engine = { path = "crates/tonique-engine", features = [
+    "device",
+    "signalsmith",
+] }
 eframe = "0.36"
 cpal = "0.18"
 creek = { version = "1.2.2", features = ["decode-mp3"] }
