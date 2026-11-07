@@ -2,7 +2,7 @@ use crate::ui::theme::font_size;
 use crate::{
     core::{effect::EffectKind, state::ProjectState},
     ui::{
-        browser::{ADD_FOLDER_SIZE, FileBrowser},
+        browser::FileBrowser,
         commands::Commands,
         dnd::DragPayload,
         missing_files::{self, MissingFilesView},
@@ -11,7 +11,7 @@ use crate::{
         workspace::Workspace,
     },
 };
-use egui::{Frame, Margin, RichText, Stroke, Ui, UiBuilder, vec2};
+use egui::{Frame, Margin, RichText, Stroke, Ui, UiBuilder};
 use egui_phosphor::regular as icons;
 
 /// Space around the search bar, and above the rail.
@@ -107,8 +107,7 @@ impl LeftPanel {
                         right: 2,
                         top: 0,
                     })
-                    .fill(ui.app_theme().bg_panel)
-                    .corner_radius(4.0),
+                    .fill(ui.app_theme().bg_panel),
             )
             .default_size(220.)
             .show_collapsible(ui, &mut open, |ui| {
@@ -168,7 +167,7 @@ impl LeftPanel {
             Frame::new()
                 .inner_margin(Margin::symmetric(2, HEADER_SPACING as i8))
                 .show(ui, |ui| match self.source {
-                    // The search bar, and the button adding a folder.
+                    // The search bar, kept to a folder or not.
                     BrowserSource::Files => {
                         self.file_search
                             .set_hint(match self.file_browser.search_scope() {
@@ -176,22 +175,14 @@ impl LeftPanel {
                                 None => "Search all folders".into(),
                             });
                         self.file_search.set_busy(self.file_browser.is_searching());
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 2.;
-                            let width = ui.available_width() - ADD_FOLDER_SIZE - 2.;
-                            let query = ui
-                                .allocate_ui(vec2(width, ADD_FOLDER_SIZE), |ui| {
-                                    ui.push_id("file-search", |ui| {
-                                        self.file_search.ui(ui).map(str::to_owned)
-                                    })
-                                    .inner
-                                })
-                                .inner;
-                            self.file_browser.add_folder_button(ui);
-                            if let Some(query) = query {
-                                self.file_browser.trigger_search(&query);
-                            }
-                        });
+                        let query = ui
+                            .push_id("file-search", |ui| {
+                                self.file_search.ui(ui).map(str::to_owned)
+                            })
+                            .inner;
+                        if let Some(query) = query {
+                            self.file_browser.trigger_search(&query);
+                        }
                     }
                     BrowserSource::Labels => {
                         self.label_search

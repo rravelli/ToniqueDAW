@@ -15,3 +15,4 @@ pub mod section;
 pub mod select;
 pub mod slider;
 pub mod tab_bar;
+pub mod text_edit;

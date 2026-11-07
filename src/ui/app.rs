@@ -173,7 +173,7 @@ impl ToniqueApp {
             Action::Undo => state.undo(),
             Action::Redo => state.redo(),
             Action::AddTrack => {
-                state.add_track();
+                state.add_track_below_selection();
             }
             Action::GroupTracks => {
                 let selected = state.selected_tracks().clone();

@@ -23,7 +23,8 @@ use std::ffi::OsStr;
 use super::{FileList, FolderAction, PLAYABLE_FORMAT, ROW_HEIGHT};
 
 impl FileList {
-    /// A section's header: one of the browser's folders (its name in small
+    /// A section's header, a band across the list to set it apart from the
+    /// rows under it: one of the browser's folders (its name in small
     /// capitals, its path on hover) or a label's (its colour, name and how
     /// many items it has), with a menu of what can be done with it on its
     /// right while hovered, or on a right-click. Returns whether it was
@@ -41,6 +42,7 @@ impl FileList {
             ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
         let selected = self.selected == Some(index);
         let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0., theme.bg_raised);
         if selected {
             painter.rect_filled(rect, 0., with_alpha(theme.accent, 60));
         } else if response.hovered() {
@@ -65,7 +67,7 @@ impl FileList {
             Align2::CENTER_CENTER,
             caret,
             FontId::proportional(12.),
-            theme.text_muted,
+            theme.text,
         );
         let section = self.sections.get(&file.path).copied();
         let menu_width = ROW_HEIGHT;
@@ -131,12 +133,10 @@ impl FileList {
         painter.galley(
             pos2(name_x, rect.center().y - galley.size().y / 2.),
             galley,
-            if scoped {
-                theme.text
-            } else if empty {
+            if empty {
                 theme.text_disabled
             } else {
-                theme.text_muted
+                theme.text
             },
         );
         if let Some(label) = folder_label

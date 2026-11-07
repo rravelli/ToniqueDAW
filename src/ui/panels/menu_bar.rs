@@ -11,10 +11,20 @@ use crate::{
         workspace::{MainView, Workspace},
     },
 };
-use egui::{Button, Context, Frame, Margin, MenuBar, Ui};
+use egui::{Align, Button, Context, Frame, Layout, Margin, MenuBar, RichText, Ui};
 use std::path::PathBuf;
 
 const ZOOM_STEP: f32 = 0.1;
+
+/// The interface's frame rate and time, in debug builds.
+fn fps_ui(ui: &mut Ui) {
+    let dt = ui.input(|i| i.stable_dt).max(1e-5);
+    ui.label(
+        RichText::new(format!("{:.0} fps · {:.1} ms", 1. / dt, dt * 1000.))
+            .small()
+            .color(ui.app_theme().text_muted),
+    );
+}
 
 /// Application menus at the very top of the window.
 pub struct AppMenuBar {
@@ -61,6 +71,11 @@ impl AppMenuBar {
                         commands.push(Action::OpenSettings);
                     }
                     self.help_menu(ui);
+                    // Tests run on a clock of their own: their rate means
+                    // nothing.
+                    if cfg!(debug_assertions) && !cfg!(test) {
+                        ui.with_layout(Layout::right_to_left(Align::Center), fps_ui);
+                    }
                 });
             });
         self.about.show(ui);

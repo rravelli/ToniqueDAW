@@ -1,7 +1,7 @@
 use crate::ui::theme::font_size;
 use egui::{
-    Align, Align2, FontFamily, FontId, Frame, Layout, Margin, Popup, Rangef, Rect, Response,
-    RichText, Sense, Ui, UiBuilder, Vec2, pos2, vec2,
+    Align, Align2, Color32, FontFamily, FontId, Frame, Layout, Margin, Popup, Rangef, Rect,
+    Response, Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 use egui_phosphor::{
     fill::SIDEBAR_SIMPLE,
@@ -18,7 +18,7 @@ use crate::{
         commands::Commands,
         font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
         missing_files,
-        theme::{ThemeExt, with_alpha},
+        theme::{Theme, ThemeExt, with_alpha},
         widget::{flat_button::FlatButton, input::NumberInput},
         workspace::{MainView, Workspace},
     },
@@ -33,9 +33,25 @@ const GROUP_GAP: f32 = 8.;
 const POSITION_WIDTH: f32 = 140.;
 /// The position in bars alone, when the bar is too narrow for the time.
 const POSITION_BARS_WIDTH: f32 = 72.;
-const USAGE_WIDTH: f32 = 46.;
+const USAGE_WIDTH: f32 = 50.;
+/// Left of the load's icon, in its room.
+const USAGE_PADDING: f32 = 4.;
+/// Audio processing load from which it's shown as a warning, then as a
+/// danger: past 1, it can't keep up.
+const USAGE_WARNING: f32 = 0.7;
+const USAGE_DANGER: f32 = 0.9;
+const TEMPO_WIDTH: f32 = 76.;
+/// Between the tempo and the time signature, a line down its middle.
+const TEMPO_DIVIDER_WIDTH: f32 = 5.;
 /// Each of the time signature's two fields.
 const TIME_SIGNATURE_FIELD_WIDTH: f32 = 22.;
+/// Between the time signature's two fields, for the slash.
+const TIME_SIGNATURE_SLASH_WIDTH: f32 = 8.;
+/// The well of the tempo and the time signature.
+const SONG_WIDTH: f32 = TEMPO_WIDTH
+    + TEMPO_DIVIDER_WIDTH
+    + 2. * TIME_SIGNATURE_FIELD_WIDTH
+    + TIME_SIGNATURE_SLASH_WIDTH;
 /// The grid's step, `1/16T` or `8 bars`.
 const GRID_STEP_WIDTH: f32 = 48.;
 
@@ -45,23 +61,35 @@ pub struct TransportBar {
     numerator_input: NumberInput,
     /// The time signature's note value.
     denominator_input: NumberInput,
+    /// Where the tempo and the time signature's beats were last drawn.
+    #[cfg(test)]
+    pub tempo_rect: Rect,
+    #[cfg(test)]
+    pub numerator_rect: Rect,
 }
 
 impl TransportBar {
     pub fn new() -> Self {
         Self {
-            bpm_input: NumberInput::new(Vec2::new(76., BUTTON_SIZE))
+            bpm_input: NumberInput::new(Vec2::new(TEMPO_WIDTH, BUTTON_SIZE))
                 .range(Rangef::new(10., 1000.))
                 .suffix(" BPM")
-                .draggable(),
+                .draggable()
+                .frameless(),
             numerator_input: NumberInput::new(Vec2::new(TIME_SIGNATURE_FIELD_WIDTH, BUTTON_SIZE))
                 .range(Rangef::new(1., TimeSignature::MAX_NUMERATOR as f32))
                 .decimals(0)
-                .draggable(),
+                .draggable()
+                .frameless(),
             denominator_input: NumberInput::new(Vec2::new(TIME_SIGNATURE_FIELD_WIDTH, BUTTON_SIZE))
                 .values(TimeSignature::DENOMINATORS.map(|d| d as f32))
                 .decimals(0)
-                .draggable(),
+                .draggable()
+                .frameless(),
+            #[cfg(test)]
+            tempo_rect: Rect::NOTHING,
+            #[cfg(test)]
+            numerator_rect: Rect::NOTHING,
         }
     }
 
@@ -84,8 +112,8 @@ impl TransportBar {
             });
     }
 
-    /// Three groups: the views on the left, the transport centred, the
-    /// project's tempo and the status on the right.
+    /// Three groups: the views and undo on the left, the transport centred,
+    /// the grid, the song's tempo and the status on the right.
     pub fn ui(
         &mut self,
         ui: &mut Ui,
@@ -101,6 +129,13 @@ impl TransportBar {
             }
             if self.graph_view_ui(ui, state, workspace).clicked() {
                 commands.push(Action::ToggleGraphView);
+            }
+            ui.add_space(GROUP_GAP - BUTTON_GAP);
+            if self.undo_ui(ui, state).clicked() {
+                commands.push(Action::Undo);
+            }
+            if self.redo_ui(ui, state).clicked() {
+                commands.push(Action::Redo);
             }
 
             let left = ui.min_rect().right();
@@ -162,21 +197,10 @@ impl TransportBar {
         });
     }
 
-    /// Undo and redo, the status, the tempo, the time signature and the
-    /// grid, laid out right to left.
+    /// The status, the song's tempo and time signature, and the grid, laid
+    /// out right to left.
     fn right_ui(&mut self, ui: &mut Ui, state: &mut ProjectState, commands: &mut Commands) {
-        if self.redo_ui(ui, state).clicked() {
-            commands.push(Action::Redo);
-        }
-        if self.undo_ui(ui, state).clicked() {
-            commands.push(Action::Undo);
-        }
-        ui.add_space(GROUP_GAP);
         self.usage_ui(ui, state);
-        // Tests run on a clock of their own: their rate means nothing.
-        if cfg!(debug_assertions) && !cfg!(test) {
-            self.fps_ui(ui);
-        }
         if state.audio_lost() && self.no_audio_ui(ui, state).clicked() {
             commands.push(Action::OpenSettings);
         }
@@ -186,17 +210,45 @@ impl TransportBar {
             missing_files::request(ui.ctx(), None);
         }
         ui.add_space(GROUP_GAP);
-        self.bpm_input.value = state.bpm();
-        self.bpm_input
-            .ui(ui)
-            .on_hover_text("Tempo: drag or double-click to edit");
-        if self.bpm_input.value != state.bpm() {
-            state.set_bpm(self.bpm_input.value);
-        }
-        ui.add_space(BUTTON_GAP);
-        self.time_signature_ui(ui, state);
+        self.song_ui(ui, state);
         ui.add_space(GROUP_GAP);
         self.grid_ui(ui, state);
+    }
+
+    /// The tempo and the time signature, in one well like the playhead's
+    /// position.
+    fn song_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
+        let (rect, _) = ui.allocate_exact_size(vec2(SONG_WIDTH, BUTTON_SIZE), Sense::hover());
+        let theme = ui.app_theme();
+        ui.painter().rect_filled(rect, 2.0, theme.bg_deep);
+        ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(rect)
+                .layout(Layout::left_to_right(Align::Center)),
+            |ui| {
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                self.bpm_input.value = state.bpm();
+                let _tempo = self
+                    .bpm_input
+                    .ui(ui)
+                    .on_hover_text("Tempo: drag or double-click to edit");
+                #[cfg(test)]
+                {
+                    self.tempo_rect = _tempo.rect;
+                }
+                if self.bpm_input.value != state.bpm() {
+                    state.set_bpm(self.bpm_input.value);
+                }
+                let (divider, _) =
+                    ui.allocate_exact_size(vec2(TEMPO_DIVIDER_WIDTH, BUTTON_SIZE), Sense::hover());
+                ui.painter().vline(
+                    divider.center().x,
+                    divider.y_range().shrink(4.),
+                    Stroke::new(1., theme.separator),
+                );
+                self.time_signature_ui(ui, state);
+            },
+        );
     }
 
     /// The grid's step, choosing it (and the rest of the grid's settings)
@@ -225,21 +277,36 @@ impl TransportBar {
     }
 
     /// Beats per bar over the note that counts them, each typed or dragged.
-    /// Laid out right to left, like the rest of this side of the bar.
     fn time_signature_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let current = state.time_signature();
+        self.numerator_input.value = current.numerator as f32;
+        let _numerator = self
+            .numerator_input
+            .ui(ui)
+            .on_hover_text("Beats per bar: drag or double-click to edit");
+        #[cfg(test)]
+        {
+            self.numerator_rect = _numerator.rect;
+        }
+        // Shift-dragging moves in tenths: only whole beats count.
+        let numerator = self.numerator_input.value.round() as u32;
+        let (slash, _) = ui.allocate_exact_size(
+            vec2(TIME_SIGNATURE_SLASH_WIDTH, BUTTON_SIZE),
+            Sense::hover(),
+        );
+        let theme = ui.app_theme();
+        ui.painter().text(
+            slash.center(),
+            Align2::CENTER_CENTER,
+            "/",
+            FontId::proportional(font_size::BODY),
+            theme.text_muted,
+        );
         self.denominator_input.value = current.denominator as f32;
         self.denominator_input
             .ui(ui)
             .on_hover_text("Note value of a beat: drag or double-click to edit");
         let denominator = self.denominator_input.value as u32;
-        ui.label(RichText::new("/").color(ui.app_theme().text_muted));
-        self.numerator_input.value = current.numerator as f32;
-        self.numerator_input
-            .ui(ui)
-            .on_hover_text("Beats per bar: drag or double-click to edit");
-        // Shift-dragging moves in tenths: only whole beats count.
-        let numerator = self.numerator_input.value.round() as u32;
         if let Some(signature) = TimeSignature::new(numerator, denominator)
             && signature != current
         {
@@ -409,20 +476,21 @@ impl TransportBar {
         )
     }
 
-    fn usage_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) -> Response {
-        ui.add(
-            FlatButton::new(format!(
-                "{CPU} {:.0}%",
-                (state.metrics.latency * 100.).round()
-            ))
-            .size(vec2(USAGE_WIDTH, BUTTON_SIZE))
-            .font(FontId::new(
-                font_size::SMALL,
-                egui::FontFamily::Proportional,
-            ))
-            .color(ui.app_theme().text_muted)
-            .tooltip("Audio processing load"),
-        )
+    /// The audio processing load, drawn from the left of its room so its
+    /// icon stays put as the digits change.
+    fn usage_ui(&mut self, ui: &mut Ui, state: &ProjectState) {
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(USAGE_WIDTH, BUTTON_SIZE), Sense::hover());
+        let theme = ui.app_theme();
+        let load = state.metrics.latency;
+        ui.painter_at(rect).text(
+            rect.left_center() + vec2(USAGE_PADDING, 0.),
+            Align2::LEFT_CENTER,
+            format!("{CPU} {:.0}%", (load * 100.).round()),
+            FontId::proportional(font_size::SMALL),
+            usage_color(load, &theme),
+        );
+        response.on_hover_text("Audio load");
     }
 
     /// Shown while there's no audio output; opens the settings.
@@ -457,22 +525,6 @@ impl TransportBar {
         )
     }
 
-    fn fps_ui(&mut self, ui: &mut Ui) -> Response {
-        ui.add(
-            FlatButton::new(format!(
-                "{:.0}",
-                1.0 / ui.ctx().input(|i| i.stable_dt).max(1e-5)
-            ))
-            .square(BUTTON_SIZE)
-            .font(FontId::new(
-                font_size::SMALL,
-                egui::FontFamily::Proportional,
-            ))
-            .color(ui.app_theme().text_muted)
-            .tooltip("FPS"),
-        )
-    }
-
     fn undo_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) -> Response {
         ui.add_enabled(
             state.can_undo(),
@@ -497,6 +549,17 @@ impl TransportBar {
                 ))
                 .tooltip(tooltip(ui, state, "Redo", Action::Redo)),
         )
+    }
+}
+
+/// Muted unless `load` is high.
+fn usage_color(load: f32, theme: &Theme) -> Color32 {
+    if load >= USAGE_DANGER {
+        theme.danger
+    } else if load >= USAGE_WARNING {
+        theme.warning
+    } else {
+        theme.text_muted
     }
 }
 
@@ -557,6 +620,16 @@ mod tests {
 
     fn signature(numerator: u32, denominator: u32) -> TimeSignature {
         TimeSignature::new(numerator, denominator).unwrap()
+    }
+
+    #[test]
+    fn usage_only_stands_out_when_high() {
+        let theme = Theme::default();
+        assert_eq!(usage_color(0., &theme), theme.text_muted);
+        assert_eq!(usage_color(0.69, &theme), theme.text_muted);
+        assert_eq!(usage_color(0.7, &theme), theme.warning);
+        assert_eq!(usage_color(0.9, &theme), theme.danger);
+        assert_eq!(usage_color(1.5, &theme), theme.danger);
     }
 
     #[test]

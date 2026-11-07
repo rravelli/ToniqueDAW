@@ -12,7 +12,8 @@ use std::{
     thread,
 };
 
-use egui::{Key, Rect, RichText, ScrollArea, Stroke, Ui, pos2, vec2};
+use egui::{FontId, Key, Rect, RichText, ScrollArea, Stroke, Ui, pos2, vec2};
+use egui_phosphor::regular::PLUS;
 
 use crate::{
     analysis::AudioInfo,
@@ -22,6 +23,7 @@ use crate::{
     ui::{
         browser::file_tree::{FileNode, FileTree, pinned},
         theme::ThemeExt,
+        widget::flat_button::FlatButton,
     },
 };
 
@@ -48,6 +50,8 @@ pub enum FolderAction {
     Refresh,
     /// Add a folder inside one of them as a folder of its own.
     Add(PathBuf),
+    /// Pick a folder to add, from the system's dialog.
+    Pick,
     /// Give a file or folder a label, or take its label off.
     SetLabel(PathBuf, Option<usize>),
     RenameLabel(usize, String),
@@ -91,6 +95,8 @@ pub struct FileList {
     /// The labels' sections (in the labels' list), by their headers'
     /// paths: their labels, and how many items they have.
     sections: HashMap<PathBuf, (usize, usize)>,
+    /// "Add folder" ends the list, unless it's showing search results.
+    pub add_row: bool,
 }
 
 impl FileList {
@@ -111,6 +117,7 @@ impl FileList {
             labels: Vec::new(),
             item_labels: HashMap::new(),
             sections: HashMap::new(),
+            add_row: false,
         }
     }
 
@@ -251,7 +258,9 @@ impl FileList {
 
         let mut folder_toggles = Vec::new();
         let files_arc = self.files.clone();
-        ScrollArea::vertical().show_rows(ui, ROW_HEIGHT, item_count, |ui, row_range| {
+        let add_row = self.add_row && self.query.is_empty();
+        let row_count = item_count + usize::from(add_row);
+        ScrollArea::vertical().show_rows(ui, ROW_HEIGHT, row_count, |ui, row_range| {
             let visible_rows = files_arc
                 .lock()
                 .map(|files| {
@@ -300,6 +309,9 @@ impl FileList {
                     folder_toggles.push(index);
                 }
             }
+            if add_row && row_range.contains(&item_count) {
+                add_folder_ui(ui, &mut actions);
+            }
             let ends: Vec<Option<f32>> = files_arc
                 .lock()
                 .map(|files| {
@@ -331,13 +343,6 @@ impl FileList {
                 );
                 let theme = ui.app_theme();
                 ui.painter().rect_filled(rect, 0., theme.bg_panel);
-                if level + 1 == pinned.len() {
-                    ui.painter().hline(
-                        rect.x_range(),
-                        rect.bottom() - 0.5,
-                        Stroke::new(1., theme.separator),
-                    );
-                }
                 let toggled = ui
                     .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                         if file.depth == 0 {
@@ -347,6 +352,14 @@ impl FileList {
                         }
                     })
                     .inner;
+                // Over the row: a folder's band would hide it.
+                if level + 1 == pinned.len() {
+                    ui.painter().hline(
+                        rect.x_range(),
+                        rect.bottom() - 0.5,
+                        Stroke::new(1., theme.separator),
+                    );
+                }
                 if toggled {
                     folder_toggles.push(*index);
                 }
@@ -534,6 +547,18 @@ fn folder_names(roots: &[PathBuf]) -> HashMap<PathBuf, String> {
 /// The path naming label `index`'s section in the labels' list: no file's.
 pub fn section_path(index: usize) -> PathBuf {
     PathBuf::from(format!("\u{0}label-{index}"))
+}
+
+/// The row ending the folders, adding one.
+fn add_folder_ui(ui: &mut Ui, actions: &mut Vec<FolderAction>) {
+    let button = FlatButton::ghost(format!("{PLUS} Add folder"))
+        .font(FontId::proportional(font_size::LABEL))
+        .color(ui.app_theme().text_muted)
+        // A row high: the list scrolls by rows.
+        .size(vec2(ui.available_width(), ROW_HEIGHT));
+    if ui.add(button).clicked() {
+        actions.push(FolderAction::Pick);
+    }
 }
 
 #[cfg(test)]

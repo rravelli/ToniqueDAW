@@ -11,7 +11,7 @@ const BUTTON_SIZE: Vec2 = Vec2::new(14., 8.0);
 
 const BUTTONS_GAP: f32 = 1.0;
 const STROKE_SIZE: f32 = 1.0;
-/// Points of vertical drag per step, when draggable.
+/// Points of horizontal drag per step, when draggable.
 const DRAG_PIXELS_PER_STEP: f32 = 3.0;
 /// Step while dragging with Shift held; a whole unit otherwise.
 const FINE_STEP: f32 = 0.1;
@@ -25,13 +25,15 @@ pub struct NumberInput {
     range: Rangef,
     decimals: usize,
     suffix: String,
-    /// Dragged up and down to change, without arrow buttons.
+    /// Dragged left and right to change, without arrow buttons.
     draggable: bool,
     /// Drag not yet turned into a step.
     drag_rest: f32,
     /// The only values taken, in ascending order, each step moving to the
     /// next; any value in `range` when empty.
     values: Vec<f32>,
+    /// No box of its own, to sit in something that has one.
+    frameless: bool,
 }
 
 impl NumberInput {
@@ -48,7 +50,15 @@ impl NumberInput {
             draggable: false,
             drag_rest: 0.,
             values: Vec::new(),
+            frameless: false,
         }
+    }
+
+    /// Without a box: only a tint while hovered, and the outline while
+    /// focused or dragged.
+    pub fn frameless(mut self) -> Self {
+        self.frameless = true;
+        self
     }
 
     pub fn range(mut self, range: Rangef) -> Self {
@@ -67,7 +77,7 @@ impl NumberInput {
         self
     }
 
-    /// Drag up or down to change the value (Shift for finer steps), in
+    /// Drag right or left to change the value (Shift for finer steps), in
     /// place of the arrow buttons.
     pub fn draggable(mut self) -> Self {
         self.draggable = true;
@@ -126,13 +136,17 @@ impl NumberInput {
         let rect = res.rect;
         let theme = ui.app_theme();
         // Paint widget
-        painter.rect(
-            rect,
-            1.0,
-            theme.bg_control,
-            Stroke::new(1., theme.control_border),
-            StrokeKind::Inside,
-        );
+        if !self.frameless {
+            painter.rect(
+                rect,
+                1.0,
+                theme.bg_control,
+                Stroke::new(1., theme.control_border),
+                StrokeKind::Inside,
+            );
+        } else if res.hovered() {
+            painter.rect_filled(rect, 1.0, theme.hover_overlay);
+        }
 
         let mut text = self.format_value(self.value) + &self.suffix;
         // Text
@@ -262,7 +276,7 @@ impl NumberInput {
             } else {
                 1.0
             };
-            self.drag_rest -= res.drag_delta().y / DRAG_PIXELS_PER_STEP;
+            self.drag_rest += res.drag_delta().x / DRAG_PIXELS_PER_STEP;
             let steps = self.drag_rest.trunc();
             self.drag_rest -= steps;
             if steps != 0. && !self.values.is_empty() {
@@ -288,7 +302,7 @@ impl NumberInput {
             }
         }
         ui.allocate_rect(res.rect, Sense::empty());
-        res.on_hover_cursor(egui::CursorIcon::ResizeVertical)
+        res.on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
     }
 
     fn make_button(
@@ -316,5 +330,52 @@ impl NumberInput {
         );
 
         res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Event, PointerButton, pos2, vec2};
+
+    /// Dragged right it goes up, left down; up and down do nothing.
+    #[test]
+    fn drags_horizontally() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        crate::ui::theme::Theme::default().install(&ctx);
+        let mut input = NumberInput::new(vec2(80., 20.)).draggable();
+        input.value = 100.;
+        let frame = |input: &mut NumberInput, events: Vec<Event>| {
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400., 400.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(raw, |ui| {
+                input.ui(ui);
+            });
+            output.textures_delta.clear();
+        };
+        let start = pos2(20., 10.);
+        let button = |pos, pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut input, vec![Event::PointerMoved(start)]);
+        frame(&mut input, vec![button(start, true)]);
+        for (to, value) in [
+            (pos2(20., 100.), 100.),
+            (pos2(50., 100.), 110.),
+            (pos2(20., 10.), 100.),
+            (pos2(-10., 10.), 90.),
+        ] {
+            frame(&mut input, vec![Event::PointerMoved(to)]);
+            frame(&mut input, Vec::new());
+            assert_eq!(input.value, value, "at {to:?}");
+        }
+        frame(&mut input, vec![button(pos2(-10., 10.), false)]);
     }
 }

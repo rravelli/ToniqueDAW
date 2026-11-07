@@ -2375,3 +2375,78 @@ fn stretch_settings_are_applied_and_undone() {
     state.undo();
     assert_eq!(in_engine(&state), StretchSettings::default());
 }
+
+/// A new track goes right below the selected row and gets selected: in the
+/// selected track's group, even as its last; beside a selected group.
+#[test]
+fn new_tracks_go_below_the_selection() {
+    let mut state = setup_state();
+    let order = |state: &ProjectState| -> Vec<TrackId> { state.tracks().map(|t| t.id).collect() };
+    // Nothing selected: at the end.
+    let a = state.add_track_below_selection();
+    state.clear_track_selection();
+    let c = state.add_track_below_selection();
+    assert_eq!(order(&state), [a, c]);
+    assert_eq!(state.selected_tracks(), &vec![c]);
+
+    state.select_track(&a);
+    let b = state.add_track_below_selection();
+    assert_eq!(order(&state), [a, b, c]);
+    assert_eq!(state.selected_tracks(), &vec![b]);
+
+    // The master isn't in the list: at the end.
+    state.select_track(&MASTER_TRACK_ID);
+    let d = state.add_track_below_selection();
+    assert_eq!(order(&state), [a, b, c, d]);
+
+    // Last in a group: stays in it.
+    let group = state.group(&[a, b]).unwrap();
+    state.select_track(&b);
+    let in_group = state.add_track_below_selection();
+    assert_eq!(order(&state), [a, b, in_group, c, d]);
+    assert_eq!(state.parent(in_group), Some(group));
+
+    // A group: below all of it, not in it.
+    state.select_track(&group);
+    let after_group = state.add_track_below_selection();
+    assert_eq!(order(&state), [a, b, in_group, after_group, c, d]);
+    assert_eq!(state.parent(after_group), None);
+
+    state.undo();
+    assert_eq!(order(&state), [a, b, in_group, c, d]);
+}
+
+/// Moved to another track, an effect keeps its settings; one undo brings it
+/// back where it was.
+#[test]
+fn effects_move_between_tracks() {
+    let mut state = setup_state();
+    let from = state.add_track();
+    let to = state.add_track();
+    state.add_effect(&from, EffectKind::Utility, 0);
+    state.add_effect(&from, EffectKind::Echo, 1);
+    state.add_effect(&to, EffectKind::Echo, 0);
+    let moved = state.effects(&from)[0].plugin.id;
+    let param = state.effects(&from)[0].plugin.params[0].id;
+    state.commit_params(&[(param, 0., 0.5)]);
+    let ids = |state: &ProjectState, track| -> Vec<_> {
+        state.effects(track).iter().map(|e| e.plugin.id).collect()
+    };
+    let (kept, there) = (ids(&state, &from)[1], ids(&state, &to)[0]);
+
+    state.move_effect_to_track(&from, moved, &to);
+    assert_eq!(ids(&state, &from), [kept]);
+    assert_eq!(ids(&state, &to), [there, moved], "at the end of the chain");
+    assert_eq!(state.effects(&to)[1].plugin.params[0].get(), 0.5);
+
+    state.undo();
+    assert_eq!(ids(&state, &from), [moved, kept]);
+    assert_eq!(ids(&state, &to), [there]);
+    state.redo();
+    assert_eq!(ids(&state, &to), [there, moved]);
+
+    // To its own track: nothing to do, no undo step.
+    state.move_effect_to_track(&to, moved, &to);
+    state.undo();
+    assert_eq!(ids(&state, &to), [there]);
+}

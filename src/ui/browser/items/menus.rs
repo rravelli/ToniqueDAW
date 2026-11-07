@@ -2,7 +2,10 @@
 
 use crate::{
     config::labels as label_colors,
-    ui::{theme::ThemeExt, widget::context_menu::ContextMenuButton},
+    ui::{
+        theme::ThemeExt,
+        widget::{context_menu::ContextMenuButton, text_edit::select_all},
+    },
 };
 use egui::{Key, Sense, Stroke, Ui, vec2};
 use egui_phosphor::regular::{ARROW_SQUARE_OUT, ARROWS_IN_LINE_VERTICAL, MAGNIFYING_GLASS};
@@ -72,6 +75,19 @@ impl FileList {
         // the room they're given.
         ui.set_max_width(LABEL_MENU_WIDTH);
         let id = ui.id().with(("label-name", index));
+        // Drawn every pass while open, so a gap means it was just opened:
+        // start from the current name, selected, ready to be typed over.
+        let pass = ui.ctx().cumulative_pass_nr();
+        let last_pass = id.with("last-pass");
+        let opened = ui
+            .data(|d| d.get_temp::<u64>(last_pass))
+            .is_none_or(|last| last + 1 < pass);
+        ui.data_mut(|d| {
+            d.insert_temp(last_pass, pass);
+            if opened {
+                d.remove::<String>(id);
+            }
+        });
         let mut name = ui
             .data(|d| d.get_temp::<String>(id))
             .unwrap_or_else(|| label.name.clone());
@@ -80,6 +96,10 @@ impl FileList {
                 .hint_text("Name")
                 .desired_width(ui.available_width()),
         );
+        if opened {
+            field.request_focus();
+            select_all(ui.ctx(), field.id, &name);
+        }
         if field.changed() {
             ui.data_mut(|d| d.insert_temp(id, name.clone()));
         }
@@ -148,5 +168,62 @@ impl FileList {
                 ui.close();
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::browser::items::LabelView;
+
+    /// Opened, a label's menu has its name selected: typing replaces it.
+    /// What was typed last time it was open is gone.
+    #[test]
+    fn a_labels_menu_starts_with_its_name_selected() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::font::fonts());
+        crate::ui::theme::Theme::default().install(&ctx);
+        let mut list = FileList::new();
+        list.labels = vec![LabelView {
+            name: "Drums".into(),
+            color: egui::Color32::RED,
+        }];
+        let frame = |open: bool, events: Vec<egui::Event>| {
+            let mut actions = Vec::new();
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                if open {
+                    list.section_menu(ui, 0, &mut actions);
+                }
+            });
+            output.textures_delta.clear();
+            actions
+        };
+        let enter = || egui::Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        let renamed = |actions: Vec<FolderAction>| {
+            actions.into_iter().find_map(|action| match action {
+                FolderAction::RenameLabel(0, name) => Some(name),
+                _ => None,
+            })
+        };
+
+        frame(true, vec![]);
+        frame(true, vec![egui::Event::Text("Lost".into())]);
+        frame(false, vec![]);
+        frame(false, vec![]);
+
+        frame(true, vec![]);
+        frame(true, vec![egui::Event::Text("Bass".into())]);
+        let actions = frame(true, vec![enter()]);
+        assert_eq!(renamed(actions).as_deref(), Some("Bass"));
     }
 }

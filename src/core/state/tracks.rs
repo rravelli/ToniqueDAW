@@ -16,9 +16,29 @@ impl ProjectState {
     }
     /// Add track at specific index
     pub fn add_track_at(&mut self, index: usize) -> TrackId {
-        let mut track = self.session.create(|e| Track::new(e, TRACK_NAME));
         // Inside the group its neighbours share, so no group is split.
-        if let Some(group) = self.insertion_parent(index) {
+        self.add_track_in(index, self.insertion_parent(index))
+    }
+    /// Add a track right below the selected row and select it: next to a
+    /// track, in the same group; past all of a group, beside it. At the end
+    /// when no track or group is selected.
+    pub fn add_track_below_selection(&mut self) -> TrackId {
+        let below = self.selected_track().and_then(|row| {
+            let last = *self.tracks_in(row.id).last()?;
+            Some((self.track_index(last)? + 1, self.parent(row.id)))
+        });
+        let id = match below {
+            Some((index, parent)) => self.add_track_in(index, parent),
+            None => self.add_track(),
+        };
+        self.select_track(&id);
+        id
+    }
+    /// Add a track at `index`, directly inside `parent` (or at the top
+    /// level).
+    fn add_track_in(&mut self, index: usize, parent: Option<TrackId>) -> TrackId {
+        let mut track = self.session.create(|e| Track::new(e, TRACK_NAME));
+        if let Some(group) = parent {
             track.output = Output::Bus(BusId(group.0));
         }
         let id = track.id;

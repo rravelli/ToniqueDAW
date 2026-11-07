@@ -220,6 +220,7 @@ impl Timeline {
                         zone: None,
                         collapsed,
                         silenced,
+                        ghost: false,
                     }
                     .preview(ui, state);
                 }

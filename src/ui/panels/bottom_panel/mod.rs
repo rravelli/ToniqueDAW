@@ -33,10 +33,6 @@ const GAP: f32 = 8.;
 /// stretched) shows whole.
 const MIN_HEIGHT: f32 = 220.;
 
-/// One of the shown effects being dragged to another place, by index.
-#[derive(Clone, Copy)]
-struct MovedEffect(usize);
-
 pub struct BottomPanel {
     rack: EffectRack,
     clip_details: ClipDetails,
@@ -48,7 +44,7 @@ pub struct BottomPanel {
     focused: bool,
     /// The effects' frames, as last drawn.
     #[cfg(test)]
-    rects: Vec<Rect>,
+    pub(crate) rects: Vec<Rect>,
     /// Some effect's editor drew past its frame, last drawn.
     #[cfg(test)]
     overflows: bool,
@@ -196,9 +192,15 @@ impl BottomPanel {
         let ctx = ui.ctx().clone();
         let added = DragAndDrop::payload::<DragPayload>(&ctx).and_then(|p| match *p {
             DragPayload::Effect(kind) => Some(kind),
-            DragPayload::File(_) => None,
+            DragPayload::File(_) | DragPayload::MovedEffect { .. } => None,
         });
-        let moved = DragAndDrop::payload::<MovedEffect>(&ctx).map(|m| m.0);
+        let moved = DragAndDrop::payload::<DragPayload>(&ctx).and_then(|p| match *p {
+            DragPayload::MovedEffect {
+                track: from,
+                plugin,
+            } if from == track.id => effects.iter().position(|e| e.plugin.id == plugin),
+            _ => None,
+        });
         let pointer = ui
             .input(|i| i.pointer.hover_pos())
             .filter(|p| area.contains(*p));
@@ -236,7 +238,12 @@ impl BottomPanel {
                             let response =
                                 self.rack
                                     .effect_ui(ui, effect, height, sample_rate, selected);
-                            response.header.dnd_set_drag_payload(MovedEffect(i));
+                            response
+                                .header
+                                .dnd_set_drag_payload(DragPayload::MovedEffect {
+                                    track: track.id,
+                                    plugin: effect.plugin.id,
+                                });
                             response.header.on_hover_cursor(CursorIcon::Grab);
                             if pressed.is_some_and(|p| response.rect.contains(p)) {
                                 pressed_effect = Some(i);
