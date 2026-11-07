@@ -331,13 +331,6 @@ impl FileList {
                 );
                 let theme = ui.app_theme();
                 ui.painter().rect_filled(rect, 0., theme.bg_panel);
-                if level + 1 == pinned.len() {
-                    ui.painter().hline(
-                        rect.x_range(),
-                        rect.bottom() - 0.5,
-                        Stroke::new(1., theme.separator),
-                    );
-                }
                 let toggled = ui
                     .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                         if file.depth == 0 {
@@ -347,6 +340,14 @@ impl FileList {
                         }
                     })
                     .inner;
+                // Over the row: a folder's band would hide it.
+                if level + 1 == pinned.len() {
+                    ui.painter().hline(
+                        rect.x_range(),
+                        rect.bottom() - 0.5,
+                        Stroke::new(1., theme.separator),
+                    );
+                }
                 if toggled {
                     folder_toggles.push(*index);
                 }
