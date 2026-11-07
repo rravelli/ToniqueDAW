@@ -217,6 +217,7 @@ mod tests {
             timeline_pos: 0,
             playing: true,
             jumped: false,
+            input: crate::input::InputView::NONE,
         };
         let mut seq = wide_graph();
         seq.process_sequential(&info);

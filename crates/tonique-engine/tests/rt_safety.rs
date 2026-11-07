@@ -12,6 +12,7 @@ use tonique_engine::edit::{
     Bus, ChannelRef, Clip, Edit, EditSession, Note, Plugin, PluginKind, Send, Track,
 };
 use tonique_engine::engine::{Engine, EngineConfig};
+use tonique_engine::input::{InputFeed, InputRoute};
 use tonique_engine::nodes::{Envelope, FilterMode};
 use tonique_engine::rt::{self, CheckingAllocator};
 use tonique_engine::sample::SampleBuffer;
@@ -105,9 +106,24 @@ fn rt_path_never_allocates() {
     s.set_loop(Some((BeatPos(0.5), BeatPos(3.5)))).unwrap();
     s.play().unwrap();
 
+    // An input, monitored through a track.
+    let new_input = || InputFeed::new(4, 128, 441);
+    let (feed, mut input) = new_input();
+    let mut status = feed.status();
+    let mut saw_trouble = false;
+    s.engine_mut().set_input(Some(feed)).unwrap();
+    s.set_track_monitor(tracks[0].0, Some(InputRoute::Stereo(2)))
+        .unwrap();
+
     // Odd device buffer size, so blocks get split and loops land mid-buffer.
     let mut device = vec![0.0f32; 2 * 441];
+    let captured = [0.25f32; 4 * 441];
     for block in 0..2000 {
+        // Runs dry and overflows now and then, for those paths too.
+        let bursts = [1, 1, 1, 0, 0, 3, 1, 1, 12, 0, 0, 0][block % 12];
+        for _ in 0..bursts {
+            rt::no_alloc(|| input.push(captured.iter().copied()));
+        }
         processor.process_interleaved(&mut device, 2);
         assert!(device.iter().all(|x| x.is_finite()));
 
@@ -141,6 +157,17 @@ fn rt_path_never_allocates() {
             47 => s
                 .perform(ResizeClip::new(tid, cid, BeatPos(0.25), 3.0, 0.01))
                 .unwrap(),
+            // A new input arrives, the old one is retired.
+            19 if block % 200 == 19 => {
+                let (feed, writer) = new_input();
+                input = writer;
+                let old = std::mem::replace(&mut status, feed.status());
+                saw_trouble |= old.underruns() > 0 && old.overflows() > 0;
+                s.engine_mut().set_input(Some(feed)).unwrap();
+            }
+            23 => s
+                .set_track_monitor(tracks[0].0, Some(InputRoute::Mono(block % 5)))
+                .unwrap(), // rebuild
             // Preview: new streams arrive, old ones are retired.
             3 => s
                 .engine_mut()
@@ -160,6 +187,7 @@ fn rt_path_never_allocates() {
         }
     }
     assert!(s.engine().graphs_adopted() > 30);
+    assert!(saw_trouble, "underruns and overflows were exercised");
     assert_eq!(rt::alloc_violations(), 0, "allocation on the RT path");
 
     // And the checker itself works.

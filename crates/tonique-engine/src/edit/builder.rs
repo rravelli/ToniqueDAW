@@ -2,7 +2,7 @@
 //!
 //! ```text
 //!  clips ─▶ Σ ─▶ plugins… ─▶ fader(vol/pan/mute) ─┬─▶ Σ bus ─▶ plugins… ─▶ fader ─┐
-//!                                                 └─▶ send ─▶ Σ bus              ▼
+//!  input ─┘                                       └─▶ send ─▶ Σ bus              ▼
 //!                                                          Σ master ─▶ plugins… ─▶ fader ─▶ out
 //! ```
 //!
@@ -19,8 +19,8 @@ use crate::automation::AutomationCurve;
 use crate::graph::{GraphDescription, NodeId, NodeIdentity};
 use crate::nodes::{
     AudioClipNode, AutomationNode, ClipPlacement, ClipWarp, DelayNode, EchoNode, FilterMode,
-    FilterNode, LoopPlacement, MetronomeNode, MidiClipNode, SumNode, SynthNode, TappedNode,
-    ThroughNode, TimelineNote, UtilityNode, VolumePanNode,
+    FilterNode, InputNode, LoopPlacement, MetronomeNode, MidiClipNode, SumNode, SynthNode,
+    TappedNode, ThroughNode, TimelineNote, UtilityNode, VolumePanNode,
 };
 use crate::param::ParamId;
 use crate::stretch::Stretchers;
@@ -205,6 +205,11 @@ impl Builder<'_> {
                 }
             };
             self.label(node, format!("{} · clip", track.name));
+            sources.push(node);
+        }
+        if let Some(route) = track.monitor {
+            let node = self.d.add(InputNode::new(route), &[]);
+            self.label(node, format!("{} · input", track.name));
             sources.push(node);
         }
         let input = self.d.add(SumNode::new(2), &sources);
