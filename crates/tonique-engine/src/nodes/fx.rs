@@ -112,8 +112,7 @@ impl Node for FilterNode {
             }
             self.update_coefs(c, q);
             let k = self.coefs;
-            for ch in 0..2 {
-                let st = &mut self.state[ch];
+            for (ch, st) in self.state.iter_mut().enumerate() {
                 for x in &mut ctx.audio_out.channel_mut(ch)[start..end] {
                     let y = k.b0 * *x + k.b1 * st[0] + k.b2 * st[1] - k.a1 * st[2] - k.a2 * st[3];
                     st[1] = st[0];
