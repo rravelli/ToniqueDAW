@@ -1,0 +1,21 @@
+[package]
+name = "tonique-gpui"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Tonique's timeline and file browser rebuilt with gpui-fast, on Tonique's own core and engine, to compare with the egui UI."
+
+[lints]
+workspace = true
+
+[dependencies]
+gpui = { package = "gpui-fast", version = "0.1.17" }
+# Without these features the platform runs headless and no window shows.
+gpui_platform = { package = "gpui-fast-platform", version = "0.1.17", features = ["wayland", "x11"] }
+env_logger = "0.11"
+tonique-core.workspace = true
+tonique-engine.workspace = true
+# Waveform tiles are drawn into images (`src/wave.rs`), gpui-fast's image type.
+image = { version = "0.25", default-features = false }

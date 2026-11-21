@@ -1,10 +1,12 @@
-# Tonique: the engine, the core (no UI toolkit) and the app drawing it with
-# egui. The release is the egui app, `tonique_daw`.
+# Tonique: the engine, the core (no UI toolkit), and two apps drawing it:
+# with egui (`tonique_daw`, the one released) and with gpui-fast
+# (`tonique-gpui`, a prototype to compare with).
 [workspace]
 members = [
     "crates/tonique-core",
     "crates/tonique-egui",
     "crates/tonique-engine",
+    "crates/tonique-gpui",
 ]
 # `cargo run`, `cargo build` and `cargo test` at the root: the app and the
 # core. CI passes `--workspace` for the rest.

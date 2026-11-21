@@ -43,8 +43,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      # ALSA for audio; the rest for the gpui prototype's windowing and fonts.
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          libasound2-dev pkg-config libxkbcommon-dev libxkbcommon-x11-dev
+          libwayland-dev libfontconfig1-dev libfreetype-dev
       - id: week
         run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
@@ -62,8 +66,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+      # ALSA for audio; the rest for the gpui prototype's windowing and fonts.
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          libasound2-dev pkg-config libxkbcommon-dev libxkbcommon-x11-dev
+          libwayland-dev libfontconfig1-dev libfreetype-dev
       - id: week
         run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
