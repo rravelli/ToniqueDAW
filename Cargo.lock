@@ -4638,6 +4638,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
+name = "tonique-core"
+version = "0.3.0"
+dependencies = [
+ "creek",
+ "dashmap",
+ "directories",
+ "hound",
+ "libc",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "symphonia",
+ "tonique-engine",
+]
+
+[[package]]
 name = "tonique-engine"
 version = "0.1.0"
 dependencies = [
@@ -4656,25 +4672,19 @@ name = "tonique_daw"
 version = "0.3.0"
 dependencies = [
  "cpal",
- "creek",
- "dashmap",
- "directories",
  "eframe",
  "egui",
  "egui-phosphor",
  "egui_extras",
  "egui_kittest",
- "hound",
  "image",
- "once_cell",
  "rand 0.9.5",
  "rfd",
  "rustfft",
- "serde",
  "serde_json",
- "symphonia",
  "sysinfo",
  "toml",
+ "tonique-core",
  "tonique-engine",
  "zbus",
 ]

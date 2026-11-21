@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use egui::{Rect, Vec2};
 use serde::{Deserialize, Serialize};
 use tonique_engine::time::{BeatPos, TimeSignature};
 
@@ -26,6 +25,43 @@ const TIME_STEPS: [f64; 21] = [
     300., 600., 1800., 3600.,
 ];
 const EPSILON: f64 = 1e-6;
+
+/// Where a view is across the screen: what the grid maps beats onto. The UI
+/// implements it for its toolkit's rectangles.
+pub trait Viewport: Copy {
+    /// Screen x of its left edge.
+    fn left(&self) -> f32;
+    /// Screen x of its right edge.
+    fn right(&self) -> f32;
+}
+
+/// A view's left and right edges on screen: a [`Viewport`] of its own, for
+/// UIs whose rectangles the core can't know.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Span {
+    pub left: f32,
+    pub right: f32,
+}
+
+impl Viewport for Span {
+    fn left(&self) -> f32 {
+        self.left
+    }
+    fn right(&self) -> f32 {
+        self.right
+    }
+}
+
+/// How far a view is scrolled, in points: across (time) and down (rows).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Offset {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Offset {
+    pub const ZERO: Offset = Offset { x: 0., y: 0. };
+}
 
 /// A step the grid can be fixed to, from the coarsest to the finest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -206,7 +242,7 @@ pub struct GridService {
     pub settings: GridSettings,
     min_pixels_per_beat: f32,
     max_pixels_per_beat: f32,
-    pub offset: Vec2,
+    pub offset: Offset,
     /// Whether the view may scroll before beat 0, with grid lines and
     /// labels there too (bars count down from -1).
     negative_offset: bool,
@@ -227,6 +263,12 @@ fn digits(n: i64) -> u32 {
     n.unsigned_abs().max(1).ilog10() + 1 + u32::from(n < 0)
 }
 
+impl Default for GridService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GridService {
     pub fn new() -> Self {
         Self {
@@ -235,7 +277,7 @@ impl GridService {
             settings: GridSettings::default(),
             min_pixels_per_beat: 0.05,
             max_pixels_per_beat: 5000.,
-            offset: Vec2::ZERO,
+            offset: Offset::ZERO,
             negative_offset: false,
         }
     }
@@ -435,7 +477,7 @@ impl GridService {
     }
 
     /// The beats `rect` shows, none before 0 unless the view may go there.
-    pub fn visible_beats(&self, rect: Rect) -> (BeatPos, BeatPos) {
+    pub fn visible_beats(&self, rect: impl Viewport) -> (BeatPos, BeatPos) {
         let from = self.x_to_beats(rect.left(), rect);
         let from = if self.negative_offset {
             from
@@ -537,12 +579,28 @@ impl GridService {
     pub fn duration_to_width(&self, duration: Duration, bpm: f32) -> f32 {
         duration.as_secs_f32() / 60.0 * bpm * self.pixels_per_beat
     }
+    /// The beats `shown` covers, drawn in `viewport`'s coordinates, none
+    /// before 0 unless the view may go there.
+    pub fn visible_beats_in(
+        &self,
+        shown: impl Viewport,
+        viewport: impl Viewport,
+    ) -> (BeatPos, BeatPos) {
+        let from = self.x_to_beats(shown.left(), viewport);
+        let from = if self.negative_offset {
+            from
+        } else {
+            from.max(BeatPos::ZERO)
+        };
+        (from, self.x_to_beats(shown.right(), viewport))
+    }
+
     /// Position in beats to actual screen x position
-    pub fn beats_to_x(&self, beats: BeatPos, viewport: Rect) -> f32 {
+    pub fn beats_to_x(&self, beats: BeatPos, viewport: impl Viewport) -> f32 {
         viewport.left() + beats.0 as f32 * self.pixels_per_beat - self.offset.x
     }
     /// Actual x position to beats position
-    pub fn x_to_beats(&self, x: f32, viewport: Rect) -> BeatPos {
+    pub fn x_to_beats(&self, x: f32, viewport: impl Viewport) -> BeatPos {
         BeatPos(((x + self.offset.x - viewport.left()) / self.pixels_per_beat) as f64)
     }
     /// A width on screen, in beats.
@@ -555,12 +613,12 @@ impl GridService {
     }
 
     /// Zoom from a scroll delta, keeping the beat under `cursor_x` in place.
-    pub fn zoom_around(&mut self, delta: f32, cursor_x: f32, viewport: Rect) {
+    pub fn zoom_around(&mut self, delta: f32, cursor_x: f32, viewport: impl Viewport) {
         self.zoom_by((1.0 - delta * 0.007).clamp(0., 2.0), cursor_x, viewport);
     }
 
     /// Multiply the zoom by `factor`, keeping the beat under `cursor_x` in place.
-    pub fn zoom_by(&mut self, factor: f32, cursor_x: f32, viewport: Rect) {
+    pub fn zoom_by(&mut self, factor: f32, cursor_x: f32, viewport: impl Viewport) {
         let old_ppb = self.pixels_per_beat;
         let old_offset_x = self.offset.x;
 

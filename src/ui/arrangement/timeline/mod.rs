@@ -1,3 +1,5 @@
+use crate::ui::RectSpan;
+use crate::ui::theme::ToEgui;
 use crate::{
     analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,
@@ -122,7 +124,7 @@ impl Timeline {
             && let Some(mouse_pos) = response.interact_pointer_pos()
         {
             state.clear_clip_selection();
-            let beats = state.grid.x_to_beats(mouse_pos.x, viewport);
+            let beats = state.grid.x_to_beats(mouse_pos.x, viewport.span());
             let alt = ui.input(|i| i.modifiers.alt);
             state.set_edit_cursor(state.grid.snap(beats, alt));
         }
@@ -134,7 +136,7 @@ impl Timeline {
             && ui.ctx().rect_contains_pointer(ui.layer_id(), viewport)
             && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
         {
-            state.grid.zoom_by(zoom, mouse_pos.x, viewport);
+            state.grid.zoom_by(zoom, mouse_pos.x, viewport.span());
         }
     }
 
@@ -227,7 +229,7 @@ impl Timeline {
                 ui.painter().rect_filled(
                     track_rect,
                     1.0,
-                    with_alpha(track.color, SELECTED_LANE_ALPHA),
+                    with_alpha(track.color.to_egui(), SELECTED_LANE_ALPHA),
                 );
             }
 
@@ -310,7 +312,7 @@ impl Timeline {
         top: f32,
         dragged: bool,
     ) -> bool {
-        let x = state.grid.beats_to_x(clip.position, viewport);
+        let x = state.grid.beats_to_x(clip.position, viewport.span());
         let width = state.grid.beats_to_width(clip.length);
 
         if x + width < viewport.left()
@@ -326,7 +328,7 @@ impl Timeline {
         let color = if dragged {
             theme.hover_overlay
         } else {
-            track.color
+            track.color.to_egui()
         };
         let response = ClipView {
             clip,
@@ -388,7 +390,7 @@ impl Timeline {
                     && viewport.contains(mouse_pos)
                 {
                     // Convert x to beats and snap to grid
-                    let position = state.grid.x_to_beats(mouse_pos.x, viewport);
+                    let position = state.grid.x_to_beats(mouse_pos.x, viewport.span());
                     let alt = ui.input(|i| i.modifiers.alt);
                     let snapped_position = state.grid.snap(position, alt);
 
@@ -422,10 +424,10 @@ impl Timeline {
             && viewport.contains(mouse_pos)
         {
             // Calculate grid position in beats
-            let position = state.grid.x_to_beats(mouse_pos.x, viewport);
+            let position = state.grid.x_to_beats(mouse_pos.x, viewport.span());
             let alt = ui.input(|i| i.modifiers.alt);
             let snapped_position = state.grid.snap(position, alt);
-            let x = state.grid.beats_to_x(snapped_position, viewport);
+            let x = state.grid.beats_to_x(snapped_position, viewport.span());
             let mouse_y = mouse_pos.y;
 
             // Find corresponding track
@@ -440,7 +442,7 @@ impl Timeline {
             // Past the last track: on the one dropping it will add, in the
             // colour it will get.
             let color = match &track {
-                Some(t) => t.color,
+                Some(t) => t.color.to_egui(),
                 None => self
                     .new_track_lanes(ui, state, layout, viewport, 1)
                     .first()
@@ -508,10 +510,10 @@ fn paint_group_overview(ui: &Ui, state: &ProjectState, group: &TrackRow, lane: R
         } else {
             PREVIEW_ALPHA
         };
-        let color = with_alpha(track.color, alpha);
+        let color = with_alpha(track.color.to_egui(), alpha);
         for clip in &track.clips {
-            let x = state.grid.beats_to_x(clip.position, lane)
-                ..=state.grid.beats_to_x(clip.end(bpm), lane);
+            let x = state.grid.beats_to_x(clip.position, lane.span())
+                ..=state.grid.beats_to_x(clip.end(bpm), lane.span());
             painter.rect_filled(Rect::from_x_y_ranges(x, rows.clone()), 1., color);
         }
     }
@@ -573,7 +575,11 @@ fn paint_new_track_lanes(
     viewport: Rect,
     count: usize,
 ) -> Vec<Color32> {
-    let colors = state.new_track_colors(count);
+    let colors: Vec<Color32> = state
+        .new_track_colors(count)
+        .into_iter()
+        .map(ToEgui::to_egui)
+        .collect();
     let painter = ui.painter_at(viewport);
     for (i, color) in colors.iter().enumerate() {
         let top = layout.track_top(state.track_count() + i);
@@ -590,7 +596,7 @@ fn paint_new_track_lanes(
 
 /// A line down `lane`, over its clips, where playback will start from.
 fn paint_start_line(ui: &Ui, state: &ProjectState, lane: Rect) {
-    let x = state.grid.beats_to_x(state.edit_cursor(), lane);
+    let x = state.grid.beats_to_x(state.edit_cursor(), lane.span());
     ui.painter_at(lane).vline(
         x,
         lane.y_range(),

@@ -370,7 +370,7 @@ impl ProjectState {
         Some((track, clip))
     }
 
-    pub(crate) fn find_clip(&self, id: ClipId) -> Option<(TrackId, AudioClip)> {
+    pub fn find_clip(&self, id: ClipId) -> Option<(TrackId, AudioClip)> {
         let track = self.edit().tracks.iter().find(|t| t.clip(id).is_some())?;
         let clip = self.clip_view(track.clip(id)?)?;
         Some((track.id, clip))

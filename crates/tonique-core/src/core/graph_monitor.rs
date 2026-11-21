@@ -19,6 +19,12 @@ pub struct GraphMonitor {
     last_read: Instant,
 }
 
+impl Default for GraphMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GraphMonitor {
     pub fn new() -> Self {
         Self {

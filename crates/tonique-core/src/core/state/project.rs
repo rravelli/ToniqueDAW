@@ -6,7 +6,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use egui::Vec2;
 use tonique_engine::{
     edit::{
         Bus, BusId, Channel, ClipLoop, Edit, MAX_TRANSPOSE, Output, SourceId, StretchSettings,
@@ -25,6 +24,7 @@ use crate::{
     core::{
         clip::{AudioClip, MIN_LENGTH, split_pitch},
         effect::{EffectKind, Setting},
+        grid::Offset,
         project::{
             ChannelFile, ClipFile, EffectFile, GroupFile, LoopFile, ProjectFile, TrackFile,
             VERSION, resolve_path, store_path,
@@ -56,7 +56,7 @@ impl ProjectState {
         self.pending_actions.clear();
         self.batching = false;
         self.resized_clip = None;
-        self.grid.offset = Vec2::ZERO;
+        self.grid.offset = Offset::ZERO;
         self.grid.settings = Default::default();
         self.sync_time_signature();
         self.loop_range = (

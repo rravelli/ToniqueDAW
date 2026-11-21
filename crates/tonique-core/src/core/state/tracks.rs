@@ -1,7 +1,7 @@
 //! Adding, duplicating, deleting and folding tracks.
 
 use crate::core::track::{TRACK_COLLAPSED_HEIGHT, TrackView};
-use egui::Color32;
+use crate::utils::color::Color;
 
 use tonique_engine::edit::{BusId, Output, Track, TrackId, commands::AddTrack};
 
@@ -51,15 +51,15 @@ impl ProjectState {
 
     /// The palette colour the fewest tracks use, the first one on ties, so
     /// new tracks go through the palette before repeating a colour.
-    pub(super) fn next_track_color(&self) -> Color32 {
+    pub(super) fn next_track_color(&self) -> Color {
         self.new_track_colors(1)
             .first()
             .copied()
-            .unwrap_or(Color32::GRAY)
+            .unwrap_or(Color::GRAY)
     }
     /// The colours the next `count` new tracks will get, in order: each the
     /// palette's least used one so far. Grey without a palette.
-    pub fn new_track_colors(&self, count: usize) -> Vec<Color32> {
+    pub fn new_track_colors(&self, count: usize) -> Vec<Color> {
         let mut uses: Vec<usize> = self
             .track_palette
             .iter()
@@ -75,7 +75,7 @@ impl ProjectState {
                 // The first of the least used, as `min_by_key` picks.
                 let Some((index, _)) = uses.iter().enumerate().min_by_key(|(_, uses)| **uses)
                 else {
-                    return Color32::GRAY;
+                    return Color::GRAY;
                 };
                 uses[index] += 1;
                 self.track_palette[index]
@@ -84,7 +84,7 @@ impl ProjectState {
     }
 
     /// Colours for new tracks; the UI passes the installed theme's.
-    pub fn set_track_palette(&mut self, palette: &[Color32]) {
+    pub fn set_track_palette(&mut self, palette: &[Color]) {
         if self.track_palette != palette {
             self.track_palette = palette.to_vec();
         }

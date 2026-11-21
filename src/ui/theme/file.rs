@@ -1,6 +1,7 @@
 //! Theme files: TOML with a colour per key (`accent = "#00c896"`), an
 //! optional `name`, `extends` naming the theme it builds on, and `palette`.
 
+use crate::ui::theme::{ToColor, ToEgui};
 use std::fmt::Write;
 
 use egui::Color32;
@@ -36,7 +37,7 @@ impl ThemeSource {
                     let palette = values
                         .iter()
                         .filter_map(|value| match value.as_str().and_then(parse_color) {
-                            Some(color) => Some(color),
+                            Some(color) => Some(color.to_egui()),
                             None => {
                                 source.warnings.push(format!("palette: bad colour {value}"));
                                 None
@@ -47,7 +48,7 @@ impl ThemeSource {
                 }
                 (key, value) => match COLORS.iter().find(|role| role.key == key) {
                     Some(role) => match value.as_str().and_then(parse_color) {
-                        Some(color) => source.colors.push((role.key, color)),
+                        Some(color) => source.colors.push((role.key, color.to_egui())),
                         None => source
                             .warnings
                             .push(format!("{key}: expected \"#rrggbb\", got {value}")),
@@ -92,12 +93,12 @@ pub fn to_toml(theme: &Theme, base: Option<(&str, &Theme)>) -> String {
             group = role.group;
             let _ = writeln!(out, "\n# {group}");
         }
-        let _ = writeln!(out, "{} = \"{}\"", role.key, format_color(color));
+        let _ = writeln!(out, "{} = \"{}\"", role.key, format_color(color.to_color()));
     }
     if base.is_none_or(|(_, base)| base.palette != theme.palette) {
         out.push_str("\npalette = [\n");
         for color in &theme.palette {
-            let _ = writeln!(out, "    \"{}\",", format_color(*color));
+            let _ = writeln!(out, "    \"{}\",", format_color((*color).to_color()));
         }
         out.push_str("]\n");
     }

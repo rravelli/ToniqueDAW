@@ -1,3 +1,5 @@
+use crate::ui::RectSpan;
+use crate::ui::theme::ToEgui;
 use crate::{
     core::{clip::AudioClip, state::ProjectState, track::DEFAULT_TRACK_HEIGHT},
     ui::{
@@ -51,7 +53,7 @@ impl Timeline {
         {
             // Grabbing a clip outside the selection (or outside its zone)
             // drags that clip alone.
-            let grabbed = state.grid.x_to_beats(mouse_pos.x, viewport);
+            let grabbed = state.grid.x_to_beats(mouse_pos.x, viewport.span());
             let outside_zone = state
                 .selection_bounds()
                 .is_some_and(|b| grabbed < b.start_pos || grabbed > b.end_pos);
@@ -82,7 +84,7 @@ impl Timeline {
                         new_selected_clips.push(new_clip.clone().id);
                         let track_index_delta = track.first_track_index as i32 - old_track as i32;
                         min_track_delta = min_track_delta.min(track_index_delta);
-                        let x = state.grid.beats_to_x(new_clip.position, viewport);
+                        let x = state.grid.beats_to_x(new_clip.position, viewport.span());
                         clips.push(DraggedClip {
                             clip: new_clip,
                             grab_x: mouse_pos.x - x,
@@ -126,7 +128,7 @@ impl Timeline {
                 for dragged in clip_drag.clips.iter() {
                     let start = state
                         .grid
-                        .x_to_beats(mouse_pos.x - dragged.grab_x, viewport);
+                        .x_to_beats(mouse_pos.x - dragged.grab_x, viewport.span());
                     let end = start + (dragged.clip.end(bpm) - dragged.clip.position);
                     let candidates = [
                         Some((state.grid.snap_to_targets(start, &targets), start)),
@@ -149,7 +151,11 @@ impl Timeline {
             let first = clip_drag
                 .clips
                 .iter()
-                .map(|e| state.grid.x_to_beats(mouse_pos.x - e.grab_x, viewport))
+                .map(|e| {
+                    state
+                        .grid
+                        .x_to_beats(mouse_pos.x - e.grab_x, viewport.span())
+                })
                 .fold(BeatPos(f64::INFINITY), BeatPos::min);
             if -first.0 > beat_delta {
                 beat_delta = -first.0;
@@ -157,7 +163,7 @@ impl Timeline {
             }
             // Show what the clips snapped to.
             if let Some(beats) = snapped_to {
-                let x = state.grid.beats_to_x(beats, viewport);
+                let x = state.grid.beats_to_x(beats, viewport.span());
                 ui.painter_at(viewport).vline(
                     x,
                     viewport.y_range(),
@@ -190,10 +196,10 @@ impl Timeline {
                     // Calculate x pos
                     let new_position = state
                         .grid
-                        .x_to_beats(mouse_pos.x - dragged.grab_x, viewport)
+                        .x_to_beats(mouse_pos.x - dragged.grab_x, viewport.span())
                         + beat_delta;
                     dragged.clip.position = new_position;
-                    let x = state.grid.beats_to_x(new_position, viewport);
+                    let x = state.grid.beats_to_x(new_position, viewport.span());
 
                     let mut collapsed = false;
                     let mut color = track_index
@@ -205,7 +211,7 @@ impl Timeline {
                     if let Some(t) = state.track_from_index(track_index) {
                         collapsed = t.collapsed;
                         silenced = t.is_silenced();
-                        color = t.color;
+                        color = t.color.to_egui();
                         height = t.height;
                     }
                     let pos = pos2(x, y);

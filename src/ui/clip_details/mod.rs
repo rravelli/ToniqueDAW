@@ -1,5 +1,7 @@
 //! The bottom panel's view of one clip.
 
+use crate::ui::RectSpan;
+use crate::ui::theme::ToEgui;
 mod audio;
 mod inspector;
 mod markers;
@@ -136,10 +138,10 @@ impl ClipDetails {
         self.grid
             .paint_bar_labels(&ui.painter_at(labels), bars, &theme);
         self.paint_lane(ui, lane, &shown, track, state, &theme);
-        self.paint_markers(ui, ruler, lane, &shown, track.color, bpm, &theme);
+        self.paint_markers(ui, ruler, lane, &shown, track.color.to_egui(), bpm, &theme);
 
         ui.scope_builder(UiBuilder::new().max_rect(inspector), |ui| {
-            inspector_ui(ui, clip, track.color, state)
+            inspector_ui(ui, clip, track.color.to_egui(), state)
         });
         ui.allocate_rect(rect, Sense::hover());
     }
@@ -157,13 +159,13 @@ impl ClipDetails {
     /// Where `file` seconds into the file are drawn.
     fn x(&self, file: f64, bpm: f32, lane: Rect) -> f32 {
         self.grid
-            .beats_to_x(BeatPos(self.beats(file - self.origin, bpm)), lane)
+            .beats_to_x(BeatPos(self.beats(file - self.origin, bpm)), lane.span())
     }
 
     /// The time in the file drawn at `x`, snapped to the grid (counted from
     /// the start marker) when snapping, which Alt inverts.
     fn file_at_x(&self, ui: &Ui, x: f32, bpm: f32, lane: Rect) -> f64 {
-        let beats = self.grid.x_to_beats(x, lane);
+        let beats = self.grid.x_to_beats(x, lane.span());
         let beats = self.grid.snap(beats, ui.input(|i| i.modifiers.alt));
         self.origin + self.seconds(beats.0, bpm)
     }
@@ -210,9 +212,9 @@ impl ClipDetails {
         let scroll = ui.input(|i| i.smooth_scroll_delta);
         if let Some(pointer) = pointer.filter(|_| over_ruler || over_lane) {
             if zoom != 1. {
-                self.grid.zoom_by(zoom, pointer.x, lane);
+                self.grid.zoom_by(zoom, pointer.x, lane.span());
             } else if over_ruler && scroll.y != 0. {
-                self.grid.zoom_around(scroll.y, pointer.x, lane);
+                self.grid.zoom_around(scroll.y, pointer.x, lane.span());
             } else if over_lane {
                 // Only horizontal scrolling here: use the vertical wheel too.
                 self.grid.offset.x -= if scroll.x != 0. { scroll.x } else { scroll.y };
@@ -230,7 +232,7 @@ impl ClipDetails {
             .double_clicked()
             .then(|| response.interact_pointer_pos())
             .flatten()
-            .map(|p| clip.position + self.grid.x_to_beats(p.x, lane).0);
+            .map(|p| clip.position + self.grid.x_to_beats(p.x, lane.span()).0);
 
         let (min, max) = self.scroll_range(clip, bpm, lane);
         self.grid.offset.x = self.grid.offset.x.clamp(min, max);
@@ -253,7 +255,7 @@ impl ClipDetails {
             && let Some(pos) = ruler.interact_pointer_pos()
         {
             // Where the pointer is, not snapped: the grid being moved.
-            let at = self.origin + self.seconds(self.grid.x_to_beats(pos.x, lane).0, bpm);
+            let at = self.origin + self.seconds(self.grid.x_to_beats(pos.x, lane.span()).0, bpm);
             ui.data_mut(|d| d.insert_temp(clicked, at));
         }
         ruler.context_menu(|ui| {
@@ -330,7 +332,7 @@ impl ClipDetails {
             painter.rect_filled(
                 Rect::from_x_y_ranges(left..=right, lane.y_range()),
                 0.,
-                with_alpha(track.color, 24),
+                with_alpha(track.color.to_egui(), 24),
             );
         }
 
@@ -342,7 +344,7 @@ impl ClipDetails {
                 &clip.audio.data,
                 0.0..frames,
                 clip.audio.channels >= 2,
-                track.color,
+                track.color.to_egui(),
                 clip.gain,
                 clip.pan,
             );

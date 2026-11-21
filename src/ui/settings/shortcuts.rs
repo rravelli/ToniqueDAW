@@ -1,16 +1,16 @@
 use crate::ui::theme::font_size;
 use crate::{
-    config::keymap::{Action, FIXED_SHORTCUTS, Keymap, reserved_by, shortcut_from_press},
+    config::keymap::{self as keys, Action, FIXED_SHORTCUTS, Keymap, Mods, Shortcut, reserved_by},
     core::state::ProjectState,
     ui::{
         font::PHOSPHOR_REGULAR,
+        keymap::{format, shortcut_from_press},
         theme::ThemeExt,
         widget::{flat_button::FlatButton, section::SectionHeader},
     },
 };
 use egui::{
-    EventFilter, FontFamily, FontId, Grid, Id, Key, KeyboardShortcut, Layout, RichText, ScrollArea,
-    Sense, Ui, vec2,
+    EventFilter, FontFamily, FontId, Grid, Id, Layout, RichText, ScrollArea, Sense, Ui, vec2,
 };
 use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, PLUS};
 
@@ -80,10 +80,7 @@ impl ShortcutsTab {
                                 .on_hover_text("Handled by the system, can't be changed.");
                                 ui.horizontal(|ui| {
                                     for shortcut in fixed.shortcuts {
-                                        ui.add_enabled(
-                                            false,
-                                            chip(ui.ctx().format_shortcut(shortcut)),
-                                        );
+                                        ui.add_enabled(false, chip(format(ui.ctx(), shortcut)));
                                     }
                                 });
                                 ui.end_row();
@@ -144,7 +141,7 @@ impl ShortcutsTab {
                     continue;
                 }
                 let response = ui
-                    .add(chip(ui.ctx().format_shortcut(shortcut)))
+                    .add(chip(format(ui.ctx(), shortcut)))
                     .on_hover_text("Click to change, right-click to remove.");
                 if response.clicked() {
                     self.start(recording);
@@ -226,19 +223,19 @@ impl ShortcutsTab {
                     repeat: false,
                     modifiers,
                     ..
-                } => Some(shortcut_from_press(*key, *modifiers)),
+                } => shortcut_from_press(*key, *modifiers),
                 _ => None,
             })
         }) else {
             return;
         };
 
-        if shortcut == KeyboardShortcut::new(egui::Modifiers::NONE, Key::Escape) {
+        if shortcut == Shortcut::new(Mods::NONE, keys::Key::Escape) {
             self.recording = None;
         } else if let Some(fixed) = reserved_by(&shortcut) {
             self.message = Some(format!(
                 "{} is reserved for {}.",
-                ui.ctx().format_shortcut(&shortcut),
+                format(ui.ctx(), &shortcut),
                 fixed.label
             ));
         } else {
@@ -246,7 +243,7 @@ impl ShortcutsTab {
             self.message = previous.map(|other| {
                 format!(
                     "{} was removed from “{}”.",
-                    ui.ctx().format_shortcut(&shortcut),
+                    format(ui.ctx(), &shortcut),
                     other.label()
                 )
             });

@@ -16,6 +16,10 @@ pub fn native_options() -> NativeOptions {
     options.viewport.inner_size = Some(DEFAULT_SIZE.into());
     options.viewport.min_inner_size = Some(MIN_SIZE.into());
     options.window_builder = Some(Box::new(|vb| vb.with_title_shown(false)));
+    // Benched UIs are compared at the same size: the whole screen.
+    if crate::bench::Bench::requested() {
+        options.viewport.fullscreen = Some(true);
+    }
     options
 }
 

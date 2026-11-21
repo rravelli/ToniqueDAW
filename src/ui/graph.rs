@@ -1,3 +1,4 @@
+use crate::ui::theme::ToEgui;
 use crate::ui::theme::font_size;
 use crate::{
     core::{graph_monitor::GraphMonitor, state::ProjectState},
@@ -470,7 +471,7 @@ fn track_names(state: &ProjectState) -> HashMap<u64, (String, String, Color32)> 
                 (
                     t.name.clone(),
                     display_name(&t.name, t.first_track_index),
-                    t.color,
+                    t.color.to_egui(),
                 ),
             )
         })
@@ -533,6 +534,7 @@ fn elide(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::theme::ToColor;
     use tonique_engine::{
         edit::{Clip, Edit, EditSession, Plugin, PluginKind, Track},
         engine::{Engine, EngineConfig},
@@ -587,7 +589,12 @@ mod tests {
 
         let (engine, _p) = Engine::new(EngineConfig::default());
         let mut state = ProjectState::new(engine);
-        state.set_track_palette(&Theme::dark().palette);
+        let palette: Vec<crate::utils::color::Color> = Theme::dark()
+            .palette
+            .iter()
+            .map(|&c| c.to_color())
+            .collect();
+        state.set_track_palette(&palette);
         state.add_track();
         state.add_track();
         state.set_monitor_graph(true);
@@ -632,7 +639,7 @@ mod tests {
                 .map(|n| title(n, &owners))
                 .collect();
             let expected = format!("{} Audio Track · fader", track.first_track_index + 1);
-            assert_eq!(faders, [(expected, Some(track.color))]);
+            assert_eq!(faders, [(expected, Some(track.color.to_egui()))]);
         }
 
         // Leaving the view stops measuring.

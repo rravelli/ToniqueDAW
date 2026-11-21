@@ -1,5 +1,5 @@
 use crate::core::clip::AudioClip;
-use egui::Color32;
+use crate::utils::color::Color;
 use tonique_engine::edit::TrackId;
 
 #[derive(Debug, Clone)]
@@ -35,7 +35,7 @@ pub struct TrackRow {
     pub name: String,
     pub height: f32,
     pub collapsed: bool,
-    pub color: Color32,
+    pub color: Color,
     pub selected: bool,
     pub solo: TrackSoloState,
     /// Not heard, as the engine plays it: muted, in a muted group, or left
@@ -65,9 +65,15 @@ pub struct TrackView {
     pub collapsed: bool,
     /// Height to go back to when opened.
     pub expanded_height: f32,
-    pub color: Color32,
+    pub color: Color,
     /// Armed for recording.
     pub armed: bool,
+}
+
+impl Default for TrackView {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TrackView {
@@ -77,7 +83,7 @@ impl TrackView {
             height: DEFAULT_TRACK_HEIGHT,
             expanded_height: DEFAULT_TRACK_HEIGHT,
             // New tracks get a palette colour from `ProjectState`.
-            color: Color32::GRAY,
+            color: Color::GRAY,
             name: "# Audio Track".into(),
             armed: false,
         }

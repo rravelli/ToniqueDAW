@@ -12,6 +12,7 @@ mod effects;
 mod export;
 mod font;
 mod graph;
+mod keymap;
 mod missing_files;
 mod panels;
 mod project;
@@ -22,6 +23,21 @@ mod waveform;
 mod widget;
 mod window;
 mod workspace;
+
+/// The grid maps beats onto a view's left and right edges: an egui
+/// rectangle's, as the core's [`Span`](crate::core::grid::Span).
+pub trait RectSpan {
+    fn span(&self) -> crate::core::grid::Span;
+}
+
+impl RectSpan for egui::Rect {
+    fn span(&self) -> crate::core::grid::Span {
+        crate::core::grid::Span {
+            left: self.min.x,
+            right: self.max.x,
+        }
+    }
+}
 
 /// Recording isn't implemented yet: hides the record and arm buttons.
 const RECORDING: bool = false;

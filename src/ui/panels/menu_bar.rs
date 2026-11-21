@@ -1,3 +1,4 @@
+use crate::ui::keymap::KeymapExt;
 use crate::{
     config::{keymap::Action, settings::UI_SCALE_RANGE},
     core::project::project_name,

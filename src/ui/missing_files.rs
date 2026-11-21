@@ -16,8 +16,8 @@ use tonique_engine::edit::SourceId;
 
 use crate::{
     core::state::ProjectState,
+    file_tree::is_audio_file,
     ui::{
-        browser::file_tree::is_audio_file,
         theme::{ThemeExt, font_size},
         widget::{dialog, list_row::ListRow, search_bar::SearchBar},
     },

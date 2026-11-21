@@ -1,3 +1,4 @@
+use crate::ui::keymap::KeymapExt;
 use crate::ui::theme::font_size;
 use egui::{
     Align, Align2, Color32, FontFamily, FontId, Frame, Layout, Margin, Popup, Rangef, Rect,

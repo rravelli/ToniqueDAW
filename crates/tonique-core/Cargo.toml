@@ -1,0 +1,33 @@
+[package]
+name = "tonique-core"
+version = "0.3.0"
+authors = ["Rémi Ravelli <remi.ravelli@gmail.com>"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Tonique without its UI: project state, grid, clips, audio sources, configuration."
+
+[lints]
+workspace = true
+
+[features]
+# What its own tests get, for the app's tests too: a configuration of
+# their own instead of the user's, no audio devices, and a few helpers.
+test-support = []
+
+[dependencies]
+tonique-engine = { path = "../tonique-engine", features = ["device", "signalsmith"] }
+creek = { version = "1.2.2", features = ["decode-mp3"] }
+symphonia = "0.5.4"
+once_cell = "1.21.3"
+dashmap = "6.1.0"
+directories = "6.0.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = { version = "1.0.141", features = ["float_roundtrip"] }
+
+# Thread and process CPU time, for the UI bench (`bench.rs`).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+hound = "3.5"

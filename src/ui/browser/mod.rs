@@ -19,7 +19,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub mod file_tree;
 mod items;
 mod preview;
 

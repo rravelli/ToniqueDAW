@@ -1,11 +1,11 @@
-use egui::{Context, Event, InputState, Key, KeyboardShortcut, ModifierNames, Modifiers};
+pub use super::keys::Key;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// An app command that can be bound to keyboard shortcuts.
 ///
-/// Copy/cut/paste and zoom are not here: eframe and egui handle those keys
-/// themselves, so they can't be rebound.
+/// Copy/cut/paste and zoom are not here: the UI toolkit handles those keys
+/// itself, so they can't be rebound (see [`FIXED_SHORTCUTS`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Action {
     // File
@@ -217,10 +217,10 @@ impl Action {
         )
     }
 
-    pub fn default_bindings(self) -> Vec<KeyboardShortcut> {
-        let none = |key| KeyboardShortcut::new(Modifiers::NONE, key);
-        let cmd = |key| KeyboardShortcut::new(Modifiers::COMMAND, key);
-        let cmd_shift = |key| KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, key);
+    pub fn default_bindings(self) -> Vec<Shortcut> {
+        let none = |key| Shortcut::new(Mods::NONE, key);
+        let cmd = |key| Shortcut::new(Mods::COMMAND, key);
+        let cmd_shift = |key| Shortcut::new(Mods::COMMAND.with(Mods::SHIFT), key);
         match self {
             Action::PlayStop => vec![none(Key::Space)],
             Action::Loop => vec![cmd(Key::L)],
@@ -258,6 +258,60 @@ impl Action {
     }
 }
 
+/// The modifiers of a shortcut. `command` is Ctrl, or Cmd on macOS: both
+/// are saved as `Ctrl`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Mods {
+    pub command: bool,
+    pub alt: bool,
+    pub shift: bool,
+}
+
+impl Mods {
+    pub const NONE: Mods = Mods {
+        command: false,
+        alt: false,
+        shift: false,
+    };
+    pub const COMMAND: Mods = Mods {
+        command: true,
+        alt: false,
+        shift: false,
+    };
+    pub const ALT: Mods = Mods {
+        command: false,
+        alt: true,
+        shift: false,
+    };
+    pub const SHIFT: Mods = Mods {
+        command: false,
+        alt: false,
+        shift: true,
+    };
+
+    /// Both held.
+    pub const fn with(self, other: Mods) -> Mods {
+        Mods {
+            command: self.command || other.command,
+            alt: self.alt || other.alt,
+            shift: self.shift || other.shift,
+        }
+    }
+}
+
+/// A key pressed with exactly these modifiers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Shortcut {
+    pub mods: Mods,
+    pub key: Key,
+}
+
+impl Shortcut {
+    pub const fn new(mods: Mods, key: Key) -> Self {
+        Self { mods, key }
+    }
+}
+
 /// Keyboard shortcuts of every [`Action`]. Only the bindings the user
 /// changed are stored, so new actions and changed defaults reach existing
 /// settings files.
@@ -267,11 +321,11 @@ impl Action {
     into = "BTreeMap<String, Vec<String>>"
 )]
 pub struct Keymap {
-    overrides: BTreeMap<Action, Vec<KeyboardShortcut>>,
+    overrides: BTreeMap<Action, Vec<Shortcut>>,
 }
 
 impl Keymap {
-    pub fn bindings(&self, action: Action) -> Vec<KeyboardShortcut> {
+    pub fn bindings(&self, action: Action) -> Vec<Shortcut> {
         self.overrides
             .get(&action)
             .cloned()
@@ -279,7 +333,7 @@ impl Keymap {
     }
 
     /// Bind `action` to `bindings`, replacing its current ones.
-    pub fn set(&mut self, action: Action, bindings: Vec<KeyboardShortcut>) {
+    pub fn set(&mut self, action: Action, bindings: Vec<Shortcut>) {
         if bindings == action.default_bindings() {
             self.overrides.remove(&action);
         } else {
@@ -294,10 +348,10 @@ impl Keymap {
         &mut self,
         action: Action,
         index: Option<usize>,
-        shortcut: KeyboardShortcut,
+        shortcut: Shortcut,
     ) -> Option<Action> {
         let previous = self
-            .action_for(shortcut.logical_key, shortcut.modifiers)
+            .action_for(shortcut.key, shortcut.mods)
             .filter(|other| *other != action);
         if let Some(other) = previous {
             let mut bindings = self.bindings(other);
@@ -340,50 +394,13 @@ impl Keymap {
         self.overrides.is_empty()
     }
 
-    /// First binding of `action` as shown in menus, e.g. `Ctrl+Z`.
-    pub fn shortcut_text(&self, ctx: &Context, action: Action) -> String {
-        self.bindings(action)
-            .first()
-            .map(|shortcut| ctx.format_shortcut(shortcut))
-            .unwrap_or_default()
-    }
-
-    /// `text` followed by the first binding of `action`, for tooltips and
-    /// menu labels: `Loop (Ctrl+L)`.
-    pub fn with_shortcut(&self, ctx: &Context, text: &str, action: Action) -> String {
-        match self.shortcut_text(ctx, action).as_str() {
-            "" => text.to_string(),
-            shortcut => format!("{text} ({shortcut})"),
-        }
-    }
-
-    /// The action bound to `key` pressed with exactly `modifiers`.
-    pub fn action_for(&self, key: Key, modifiers: Modifiers) -> Option<Action> {
+    /// The action bound to `key` pressed with exactly `mods`.
+    pub fn action_for(&self, key: Key, mods: Mods) -> Option<Action> {
         Action::ALL.into_iter().find(|action| {
-            self.bindings(*action).iter().any(|shortcut| {
-                shortcut.logical_key == key && modifiers.matches_exact(shortcut.modifiers)
-            })
+            self.bindings(*action)
+                .iter()
+                .any(|shortcut| shortcut.key == key && shortcut.mods == mods)
         })
-    }
-
-    /// Actions triggered by this frame's key presses, in the order pressed.
-    pub fn triggered(&self, input: &InputState) -> Vec<Action> {
-        input
-            .events
-            .iter()
-            .filter_map(|event| match event {
-                Event::Key {
-                    key,
-                    pressed: true,
-                    repeat,
-                    modifiers,
-                    ..
-                } => self
-                    .action_for(*key, *modifiers)
-                    .filter(|action| !repeat || action.repeats()),
-                _ => None,
-            })
-            .collect()
     }
 }
 
@@ -417,88 +434,91 @@ impl From<Keymap> for BTreeMap<String, Vec<String>> {
     }
 }
 
-/// A shortcut handled by eframe or egui, shown but not rebindable.
+/// A shortcut the UI toolkit handles itself, shown but not rebindable.
 pub struct FixedShortcut {
     pub label: &'static str,
     pub group: &'static str,
-    pub shortcuts: &'static [KeyboardShortcut],
+    pub shortcuts: &'static [Shortcut],
 }
 
 pub const FIXED_SHORTCUTS: [FixedShortcut; 6] = [
     FixedShortcut {
         label: "Copy",
         group: "Edit",
-        shortcuts: &[KeyboardShortcut::new(Modifiers::COMMAND, Key::C)],
+        shortcuts: &[Shortcut::new(Mods::COMMAND, Key::C)],
     },
     FixedShortcut {
         label: "Cut",
         group: "Edit",
-        shortcuts: &[KeyboardShortcut::new(Modifiers::COMMAND, Key::X)],
+        shortcuts: &[Shortcut::new(Mods::COMMAND, Key::X)],
     },
     FixedShortcut {
         label: "Paste",
         group: "Edit",
-        shortcuts: &[KeyboardShortcut::new(Modifiers::COMMAND, Key::V)],
+        shortcuts: &[Shortcut::new(Mods::COMMAND, Key::V)],
     },
     FixedShortcut {
         label: "Zoom in",
         group: "View",
         shortcuts: &[
-            KeyboardShortcut::new(Modifiers::COMMAND, Key::Plus),
-            KeyboardShortcut::new(Modifiers::COMMAND, Key::Equals),
+            Shortcut::new(Mods::COMMAND, Key::Plus),
+            Shortcut::new(Mods::COMMAND, Key::Equals),
         ],
     },
     FixedShortcut {
         label: "Zoom out",
         group: "View",
-        shortcuts: &[KeyboardShortcut::new(Modifiers::COMMAND, Key::Minus)],
+        shortcuts: &[Shortcut::new(Mods::COMMAND, Key::Minus)],
     },
     FixedShortcut {
         label: "Reset zoom",
         group: "View",
-        shortcuts: &[KeyboardShortcut::new(Modifiers::COMMAND, Key::Num0)],
+        shortcuts: &[Shortcut::new(Mods::COMMAND, Key::Num0)],
     },
 ];
 
 /// The fixed shortcut `shortcut` would clash with.
-pub fn reserved_by(shortcut: &KeyboardShortcut) -> Option<&'static FixedShortcut> {
+pub fn reserved_by(shortcut: &Shortcut) -> Option<&'static FixedShortcut> {
     FIXED_SHORTCUTS
         .iter()
         .find(|fixed| fixed.shortcuts.contains(shortcut))
 }
 
-/// The shortcut for `key` pressed with `modifiers`, in the form bindings
-/// are stored: Ctrl and Cmd both become [`Modifiers::COMMAND`].
-pub fn shortcut_from_press(key: Key, modifiers: Modifiers) -> KeyboardShortcut {
-    let mut normalized = Modifiers::NONE;
-    normalized.alt = modifiers.alt;
-    normalized.shift = modifiers.shift;
-    normalized.command = modifiers.command || modifiers.ctrl || modifiers.mac_cmd;
-    KeyboardShortcut::new(normalized, key)
+/// `Ctrl+Alt+Shift+Z`, as saved. `Ctrl` stands for Cmd on macOS.
+pub fn format_shortcut(shortcut: &Shortcut) -> String {
+    let Mods {
+        command,
+        alt,
+        shift,
+    } = shortcut.mods;
+    let mut parts: Vec<&str> = Vec::new();
+    for (held, name) in [(command, "Ctrl"), (alt, "Alt"), (shift, "Shift")] {
+        if held {
+            parts.push(name);
+        }
+    }
+    parts.push(shortcut.key.name());
+    parts.join("+")
 }
 
-/// `Ctrl+Shift+Z`. `Ctrl` stands for Cmd on macOS.
-pub fn format_shortcut(shortcut: &KeyboardShortcut) -> String {
-    shortcut.format(&ModifierNames::NAMES, false)
-}
-
-/// Inverse of [`format_shortcut`]; also accepts `Cmd` and `Option`.
-pub fn parse_shortcut(text: &str) -> Option<KeyboardShortcut> {
+/// Inverse of [`format_shortcut`]; also accepts `Cmd` and `Option`, and
+/// keys by their symbol (`Ctrl++`).
+pub fn parse_shortcut(text: &str) -> Option<Shortcut> {
     // The key may itself be `+` (`Ctrl++`).
     let (modifiers, key) = match text.strip_suffix("++") {
         Some(modifiers) => (modifiers, "+"),
         None => text.rsplit_once('+').unwrap_or(("", text)),
     };
-    let mut parsed = Modifiers::NONE;
+    let mut mods = Mods::NONE;
     for name in modifiers.split('+').filter(|name| !name.is_empty()) {
-        parsed |= match name.trim() {
-            "Ctrl" | "Cmd" => Modifiers::COMMAND,
-            "Shift" => Modifiers::SHIFT,
-            "Alt" | "Option" => Modifiers::ALT,
+        mods = mods.with(match name.trim() {
+            "Ctrl" | "Cmd" => Mods::COMMAND,
+            "Shift" => Mods::SHIFT,
+            "Alt" | "Option" => Mods::ALT,
             _ => return None,
-        };
+        });
     }
-    Some(KeyboardShortcut::new(parsed, Key::from_name(key.trim())?))
+    Some(Shortcut::new(mods, Key::from_name(key.trim())?))
 }
 
 #[cfg(test)]
@@ -513,11 +533,37 @@ mod tests {
                 assert_eq!(parse_shortcut(&text), Some(shortcut), "{text}");
             }
         }
-        let plus = KeyboardShortcut::new(Modifiers::COMMAND, Key::Plus);
+        let plus = Shortcut::new(Mods::COMMAND, Key::Plus);
         assert_eq!(parse_shortcut("Ctrl++"), Some(plus));
         assert_eq!(parse_shortcut("Cmd+Plus"), Some(plus));
         assert_eq!(parse_shortcut("Hyper+A"), None);
         assert_eq!(parse_shortcut("Ctrl+NotAKey"), None);
+    }
+
+    /// As egui wrote them, so saved bindings read the same.
+    #[test]
+    fn shortcuts_are_written_as_before() {
+        let all = Mods::COMMAND.with(Mods::ALT).with(Mods::SHIFT);
+        assert_eq!(
+            format_shortcut(&Shortcut::new(all, Key::Z)),
+            "Ctrl+Alt+Shift+Z"
+        );
+        assert_eq!(
+            format_shortcut(&Shortcut::new(Mods::NONE, Key::Space)),
+            "Space"
+        );
+        assert_eq!(
+            format_shortcut(&Shortcut::new(Mods::COMMAND, Key::Num1)),
+            "Ctrl+1"
+        );
+        assert_eq!(
+            format_shortcut(&Shortcut::new(Mods::COMMAND, Key::Comma)),
+            "Ctrl+Comma"
+        );
+        assert_eq!(
+            format_shortcut(&Shortcut::new(Mods::NONE, Key::ArrowLeft)),
+            "Left"
+        );
     }
 
     #[test]
@@ -533,7 +579,7 @@ mod tests {
         for action in Action::ALL {
             for shortcut in keymap.bindings(action) {
                 assert_eq!(
-                    keymap.action_for(shortcut.logical_key, shortcut.modifiers),
+                    keymap.action_for(shortcut.key, shortcut.mods),
                     Some(action),
                     "{}",
                     format_shortcut(&shortcut)
@@ -545,22 +591,16 @@ mod tests {
     #[test]
     fn modifiers_must_match_exactly() {
         let keymap = Keymap::default();
-        let ctrl_shift = Modifiers::CTRL | Modifiers::COMMAND | Modifiers::SHIFT;
-        assert_eq!(keymap.action_for(Key::Z, ctrl_shift), Some(Action::Redo));
-        assert_eq!(
-            keymap.action_for(Key::Z, Modifiers::CTRL | Modifiers::COMMAND),
-            Some(Action::Undo)
-        );
-        assert_eq!(keymap.action_for(Key::ArrowLeft, Modifiers::SHIFT), None);
+        let cmd_shift = Mods::COMMAND.with(Mods::SHIFT);
+        assert_eq!(keymap.action_for(Key::Z, cmd_shift), Some(Action::Redo));
+        assert_eq!(keymap.action_for(Key::Z, Mods::COMMAND), Some(Action::Undo));
+        assert_eq!(keymap.action_for(Key::ArrowLeft, Mods::SHIFT), None);
     }
 
     #[test]
     fn only_overrides_are_saved() {
         let mut keymap = Keymap::default();
-        keymap.set(
-            Action::Undo,
-            vec![KeyboardShortcut::new(Modifiers::ALT, Key::U)],
-        );
+        keymap.set(Action::Undo, vec![Shortcut::new(Mods::ALT, Key::U)]);
         keymap.set(Action::Redo, Action::Redo.default_bindings());
         let json = serde_json::to_string(&keymap).unwrap();
         assert_eq!(json, r#"{"undo":["Alt+U"]}"#);
@@ -570,7 +610,7 @@ mod tests {
     #[test]
     fn assigning_takes_the_shortcut_from_other_actions() {
         let mut keymap = Keymap::default();
-        let ctrl_d = KeyboardShortcut::new(Modifiers::COMMAND, Key::D);
+        let ctrl_d = Shortcut::new(Mods::COMMAND, Key::D);
         assert_eq!(
             keymap.assign(Action::Loop, Some(0), ctrl_d),
             Some(Action::Duplicate)
@@ -588,33 +628,15 @@ mod tests {
     }
 
     #[test]
-    fn presses_normalize_to_command() {
-        let ctrl = Modifiers::CTRL | Modifiers::COMMAND;
-        let mac_cmd = Modifiers::MAC_CMD | Modifiers::COMMAND;
-        let expected = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
-        assert_eq!(
-            shortcut_from_press(Key::Z, ctrl | Modifiers::SHIFT),
-            expected
-        );
-        assert_eq!(
-            shortcut_from_press(Key::Z, mac_cmd | Modifiers::SHIFT),
-            expected
-        );
-        assert!(reserved_by(&shortcut_from_press(Key::C, ctrl)).is_some());
-        assert!(reserved_by(&shortcut_from_press(Key::C, Modifiers::NONE)).is_none());
-    }
-
-    #[test]
-    fn fixed_shortcuts_are_not_bound_by_default() {
+    fn fixed_shortcuts_are_reserved_and_not_bound_by_default() {
         let keymap = Keymap::default();
         for fixed in &FIXED_SHORTCUTS {
             for shortcut in fixed.shortcuts {
-                assert_eq!(
-                    keymap.action_for(shortcut.logical_key, shortcut.modifiers),
-                    None
-                );
+                assert_eq!(keymap.action_for(shortcut.key, shortcut.mods), None);
+                assert!(reserved_by(shortcut).is_some());
             }
         }
+        assert!(reserved_by(&Shortcut::new(Mods::NONE, Key::C)).is_none());
     }
 
     #[test]
@@ -623,7 +645,7 @@ mod tests {
             serde_json::from_str(r#"{"undo":["Alt+U","Bogus"],"not_an_action":["A"]}"#).unwrap();
         assert_eq!(
             keymap.bindings(Action::Undo),
-            vec![KeyboardShortcut::new(Modifiers::ALT, Key::U)]
+            vec![Shortcut::new(Mods::ALT, Key::U)]
         );
         assert_eq!(keymap.overrides.len(), 1);
     }

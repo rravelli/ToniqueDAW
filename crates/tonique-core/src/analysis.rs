@@ -57,7 +57,7 @@ pub struct AudioData {
 
 impl AudioData {
     /// Already decoded data.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn from_samples(buffer: SampleBuffer) -> Self {
         let data = Self::default();
         data.complete_peaks(WaveformPeaks::from_buffer(&buffer));
@@ -140,7 +140,7 @@ pub struct AudioInfo {
 impl AudioInfo {
     /// A decoded, silent file of `seconds`, for tests. At 120 bpm that's
     /// `2 * seconds` beats.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn silent(seconds: f32) -> Self {
         Self {
             name: "test.wav".into(),

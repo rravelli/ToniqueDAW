@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::RectSpan;
 
 #[test]
 fn the_edit_cursor_points_down_at_the_timeline() {
@@ -173,7 +174,7 @@ fn the_wheel_scrolls_to_the_end_of_a_long_clip() {
         "the whole clip fits"
     );
 
-    state.grid.zoom_by(20., lanes.left(), lanes);
+    state.grid.zoom_by(20., lanes.left(), lanes.span());
     frame(&mut state, vec![Event::PointerMoved(lanes.center())]);
     frame(
         &mut state,
@@ -188,7 +189,7 @@ fn the_wheel_scrolls_to_the_end_of_a_long_clip() {
         frame(&mut state, Vec::new());
     }
     assert!(
-        state.grid.beats_to_x(end, lanes) <= lanes.right(),
+        state.grid.beats_to_x(end, lanes.span()) <= lanes.right(),
         "scrolls to the clip's end"
     );
 }

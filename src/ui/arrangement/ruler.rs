@@ -1,3 +1,4 @@
+use crate::ui::RectSpan;
 use egui::{CursorIcon, Painter, Rect, Sense, Stroke, Ui, vec2};
 use tonique_engine::time::BeatPos;
 
@@ -65,7 +66,7 @@ impl Ruler {
             if (nav_bar_response.clicked() || nav_bar_response.dragged() || clicked_lane)
                 && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
             {
-                state.seek(state.grid.x_to_beats(mouse_pos.x, ruler_rect));
+                state.seek(state.grid.x_to_beats(mouse_pos.x, ruler_rect.span()));
             }
             // Zoom (the loop lane covers part of the bar, so don't rely on
             // the bar's own hover)
@@ -74,7 +75,9 @@ impl Ruler {
                 && ui.rect_contains_pointer(ruler_rect)
             {
                 let delta = ui.input(|i| i.smooth_scroll_delta.y);
-                state.grid.zoom_around(delta, mouse_pos.x, ruler_rect);
+                state
+                    .grid
+                    .zoom_around(delta, mouse_pos.x, ruler_rect.span());
             }
         });
     }
@@ -92,8 +95,8 @@ impl Ruler {
         let response = ui.interact(lane, ui.id().with("loop_lane"), Sense::click_and_drag());
         let (start, end) = state.loop_range();
         let (x0, x1) = (
-            state.grid.beats_to_x(start, lane),
-            state.grid.beats_to_x(end, lane),
+            state.grid.beats_to_x(start, lane.span()),
+            state.grid.beats_to_x(end, lane.span()),
         );
         let pixels_per_beat = state.grid.pixels_per_beat();
         let grab_at = |x: f32| -> Option<LoopDrag> {
@@ -118,14 +121,16 @@ impl Ruler {
         if response.drag_started()
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         {
-            let anchor = state.grid.snap(state.grid.x_to_beats(origin.x, lane), alt);
+            let anchor = state
+                .grid
+                .snap(state.grid.x_to_beats(origin.x, lane.span()), alt);
             self.loop_drag = Some(grab_at(origin.x).unwrap_or(LoopDrag::Create { anchor }));
         }
         if response.dragged()
             && let Some(drag) = self.loop_drag
             && let Some(pos) = response.interact_pointer_pos()
         {
-            let beats = state.grid.x_to_beats(pos.x, lane);
+            let beats = state.grid.x_to_beats(pos.x, lane.span());
             let snapped = state.grid.snap(beats, alt);
             let step = state.grid.snap_step();
             match drag {
@@ -170,7 +175,8 @@ impl Ruler {
 
         // Paint with the range as it is after this frame's edits.
         let (start, end) = state.loop_range();
-        let x_range = state.grid.beats_to_x(start, lane)..=state.grid.beats_to_x(end, lane);
+        let x_range =
+            state.grid.beats_to_x(start, lane.span())..=state.grid.beats_to_x(end, lane.span());
         self.paint_loop(
             ui,
             painter,

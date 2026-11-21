@@ -20,11 +20,8 @@ use crate::{
     cache::AUDIO_ANALYSIS_CACHE,
     config::keymap::Action,
     core::state::ProjectState,
-    ui::{
-        browser::file_tree::{FileNode, FileTree, pinned},
-        theme::ThemeExt,
-        widget::flat_button::FlatButton,
-    },
+    file_tree::{FileNode, FileTree, pinned},
+    ui::{theme::ThemeExt, widget::flat_button::FlatButton},
 };
 
 const PLAYABLE_FORMAT: &[&str] = &["mp3", "wav", "ogg"];

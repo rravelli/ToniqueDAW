@@ -12,7 +12,7 @@ use tonique_engine::{
 /// Open an output device. Every device the app opens goes through here, so
 /// tests can't: they'd play through the user's speakers.
 pub fn open_output(options: &DeviceOptions) -> Result<OutputDevice, DeviceError> {
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-support")) {
         return Err("tests don't open audio devices".into());
     }
     OutputDevice::open(options)
@@ -20,7 +20,7 @@ pub fn open_output(options: &DeviceOptions) -> Result<OutputDevice, DeviceError>
 
 /// The output devices there are; none in tests (see [`open_output`]).
 pub fn output_devices() -> Vec<DeviceInfo> {
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-support")) {
         return Vec::new();
     }
     device::output_devices()

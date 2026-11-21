@@ -1,5 +1,6 @@
 use crate::ui::font::semibold;
 use crate::ui::theme::font_size;
+use crate::ui::theme::{ToColor, ToEgui};
 use crate::{
     core::{
         state::{MASTER_TRACK_ID, MIN_EXPANDED_HEIGHT, ProjectState},
@@ -181,7 +182,7 @@ impl TrackHeader {
         let bar = if silenced {
             theme.text_disabled
         } else {
-            track.color
+            track.color.to_egui()
         };
         ui.painter().rect_filled(layout.bar, 1., bar);
 
@@ -374,7 +375,7 @@ impl TrackHeader {
 /// Volume in dB, filled from the left; with its unit when wide enough.
 fn volume_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState, size: Vec2) {
     let mut slider = ParamSlider::gain(track.volume, VOLUME_RANGE)
-        .color(track.color)
+        .color(track.color.to_egui())
         .size(size);
     if size.x >= VOLUME_UNIT_WIDTH {
         slider = slider.suffix(" dB");
@@ -391,7 +392,9 @@ fn volume_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState, size: 
 
 /// Pan, filled from the centre towards the side it leans to.
 fn pan_slider(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState, size: Vec2) {
-    let slider = ParamSlider::pan(track.pan).color(track.color).size(size);
+    let slider = ParamSlider::pan(track.pan)
+        .color(track.color.to_egui())
+        .size(size);
     match slider.show(ui).1 {
         SliderEdit::Moved(pan) => state.set_pan(track.id, pan),
         SliderEdit::Released { start, value } if value != start => {
@@ -413,7 +416,8 @@ pub fn ghost_header(ui: &mut Ui, track: &TrackRow) {
     ui.painter().rect_filled(rect, 2., theme.bg_raised);
     ui.disable();
     let layout = HeaderLayout::new(rect, track.depth, false, 2 + RECORDING as usize);
-    ui.painter().rect_filled(layout.bar, 1., track.color);
+    ui.painter()
+        .rect_filled(layout.bar, 1., track.color.to_egui());
     put(ui, layout.caret, collapse_button(false));
     in_rect(ui, layout.name, |ui| name_label(ui, track));
     for (rect, text) in layout.toggles.iter().zip(["M", "S", MUSIC_NOTE_SIMPLE]) {
@@ -422,13 +426,13 @@ pub fn ghost_header(ui: &mut Ui, track: &TrackRow) {
     if let Some((volume, pan)) = layout.sliders {
         in_rect(ui, volume, |ui| {
             ParamSlider::gain(track.volume, VOLUME_RANGE)
-                .color(track.color)
+                .color(track.color.to_egui())
                 .size(volume.size())
                 .show(ui)
         });
         in_rect(ui, pan, |ui| {
             ParamSlider::pan(track.pan)
-                .color(track.color)
+                .color(track.color.to_egui())
                 .size(pan.size())
                 .show(ui)
         });
@@ -483,10 +487,10 @@ fn collapse_button(collapsed: bool) -> FlatButton {
 /// "Color", opening a palette for the row's colour.
 fn color_menu(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
     ContextMenuButton::new(PALETTE, "Color").submenu(ui, |ui| {
-        let mut color = track.color;
+        let mut color = track.color.to_egui();
         let picker = ColorSelect::new(("track-color", track.id), &mut color);
         if ui.add(picker).changed() {
-            state.track_view_mut(&track.id).color = color;
+            state.track_view_mut(&track.id).color = color.to_color();
             state.commit_track_view(&track.id);
         }
     });
@@ -497,8 +501,8 @@ fn color_menu(ui: &mut Ui, track: &TrackRow, state: &mut ProjectState) {
 fn solo_button(solo: bool, track: &TrackRow, theme: &Theme) -> FlatButton {
     let fill = match (solo, track.is_silenced()) {
         (false, _) => None,
-        (true, false) => Some(track.color),
-        (true, true) => Some(with_alpha(track.color, 90)),
+        (true, false) => Some(track.color.to_egui()),
+        (true, true) => Some(with_alpha(track.color.to_egui(), 90)),
     };
     toggle_button("S", fill, theme)
 }
