@@ -348,17 +348,25 @@ pub fn contrast(a: Color32, b: Color32) -> f32 {
 }
 
 /// The project's colours (tracks', files') drawn with egui.
-impl From<crate::utils::color::Color> for Color32 {
-    fn from(c: crate::utils::color::Color) -> Self {
-        Color32::from_rgba_unmultiplied(c.r, c.g, c.b, c.a)
+pub trait ToEgui {
+    fn to_egui(self) -> Color32;
+}
+
+impl ToEgui for crate::utils::color::Color {
+    fn to_egui(self) -> Color32 {
+        Color32::from_rgba_unmultiplied(self.r, self.g, self.b, self.a)
     }
 }
 
 /// egui's colours (the theme's palette) given to the project.
-impl From<Color32> for crate::utils::color::Color {
-    fn from(c: Color32) -> Self {
-        let [r, g, b, a] = c.to_srgba_unmultiplied();
-        Self::rgba(r, g, b, a)
+pub trait ToColor {
+    fn to_color(self) -> crate::utils::color::Color;
+}
+
+impl ToColor for Color32 {
+    fn to_color(self) -> crate::utils::color::Color {
+        let [r, g, b, a] = self.to_srgba_unmultiplied();
+        crate::utils::color::Color::rgba(r, g, b, a)
     }
 }
 

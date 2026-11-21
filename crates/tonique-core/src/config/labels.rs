@@ -3,7 +3,7 @@
 //! projects: they're about a library, not one song).
 
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use std::path::Path;
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -69,7 +69,7 @@ impl Labels {
     }
 
     /// The label of `path` itself (not of a folder it's in).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn of(&self, path: &Path) -> Option<usize> {
         self.items.get(path).copied()
     }

@@ -1,5 +1,6 @@
 use crate::bench::Bench;
 use crate::ui::keymap::KeymapExt;
+use crate::ui::theme::ToColor;
 use crate::{
     audio::host::AudioHost,
     config::{keymap::Action, settings::Settings},
@@ -222,5 +223,5 @@ mod tests;
 
 /// The theme's palette, as the project gives it to new tracks.
 fn project_palette(palette: &[egui::Color32]) -> Vec<crate::utils::color::Color> {
-    palette.iter().map(|&c| c.into()).collect()
+    palette.iter().map(|&c| c.to_color()).collect()
 }

@@ -1,3 +1,4 @@
+use crate::ui::RectSpan;
 use crate::{
     core::state::{ProjectState, SelectionBounds},
     ui::{
@@ -31,7 +32,7 @@ impl Timeline {
             && let Some(mouse_pos) = ui.input(|i| i.pointer.press_origin())
         {
             let track = layout.track_at(mouse_pos.y).map(|(index, _)| index);
-            let snapped = snap(state.grid.x_to_beats(mouse_pos.x, response.rect));
+            let snapped = snap(state.grid.x_to_beats(mouse_pos.x, response.rect.span()));
 
             if state.track_count() > 0 {
                 let index = track.unwrap_or(state.track_count() - 1);
@@ -50,7 +51,7 @@ impl Timeline {
         {
             let current_track = layout.track_at(mouse_pos.y).map(|(index, _)| index);
 
-            let current_pos = snap(state.grid.x_to_beats(mouse_pos.x, response.rect));
+            let current_pos = snap(state.grid.x_to_beats(mouse_pos.x, response.rect.span()));
             let length = state.track_count();
             let track_index = current_track.unwrap_or(length - 1);
             state.select_in_bounds(SelectionBounds::between(
@@ -107,7 +108,7 @@ impl Timeline {
 fn zone_rect(state: &ProjectState, layout: &RowLayout, viewport: Rect) -> Option<Rect> {
     let bounds: SelectionBounds = state.selection_bounds()?;
     let min_point = Pos2::new(
-        state.grid.beats_to_x(bounds.start_pos, viewport),
+        state.grid.beats_to_x(bounds.start_pos, viewport.span()),
         layout.track_top(bounds.start_track_index),
     );
     // Down to the bottom of the row showing the last track (its collapsed
@@ -115,6 +116,9 @@ fn zone_rect(state: &ProjectState, layout: &RowLayout, viewport: Rect) -> Option
     let bottom = layout
         .track_row(bounds.end_track_index)
         .map_or(layout.track_top(bounds.end_track_index), |r| r.y.max);
-    let max_point = Pos2::new(state.grid.beats_to_x(bounds.end_pos, viewport), bottom);
+    let max_point = Pos2::new(
+        state.grid.beats_to_x(bounds.end_pos, viewport.span()),
+        bottom,
+    );
     Some(Rect::from_min_max(min_point, max_point))
 }

@@ -97,6 +97,12 @@ pub struct FileTree {
     open_before_search: Option<Vec<bool>>,
 }
 
+impl Default for FileTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileTree {
     pub fn new() -> Self {
         Self {
@@ -272,7 +278,7 @@ impl FileTree {
 
     /// Show only what matches `query` (case aside): in `scope`, one of the
     /// roots, or in all of them. Matching roots are opened for it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn search(&mut self, query: &str, scope: Option<&Path>) {
         let mut search = self.start_search();
         search.run(query, scope);

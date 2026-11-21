@@ -1,5 +1,6 @@
 //! Painting the timeline grid and ruler labels for a [`GridService`].
 
+use crate::ui::RectSpan;
 use crate::ui::theme::font_size;
 use egui::{Align2, Color32, FontId, Painter, Rect, Stroke, pos2};
 use tonique_engine::time::BeatPos;
@@ -42,14 +43,14 @@ impl PaintGrid for GridService {
         if !shown.is_positive() {
             return;
         }
-        let (from, to) = self.visible_beats_in(shown, viewport);
+        let (from, to) = self.visible_beats_in(shown.span(), viewport.span());
         for (at, line) in self.lines(from, to, step) {
             let color = match line {
                 GridLine::Bar(_) => color,
                 _ => with_alpha(color, color.a() / 2),
             };
             painter.vline(
-                self.beats_to_x(at, viewport),
+                self.beats_to_x(at, viewport.span()),
                 rect.y_range(),
                 Stroke::new(1.0, color),
             );
@@ -57,7 +58,7 @@ impl PaintGrid for GridService {
     }
 
     fn paint_grid(&self, painter: &Painter, viewport: Rect, theme: &Theme) {
-        let (from, to) = self.visible_beats(viewport);
+        let (from, to) = self.visible_beats(viewport.span());
         for (at, line) in self.lines(from, to, self.line_step()) {
             let (color, width) = match line {
                 GridLine::Bar(_) => (theme.grid_bar, 2.0),
@@ -67,7 +68,7 @@ impl PaintGrid for GridService {
                 }
             };
             painter.vline(
-                self.beats_to_x(at, viewport),
+                self.beats_to_x(at, viewport.span()),
                 viewport.y_range(),
                 Stroke::new(width, color),
             );
@@ -82,7 +83,7 @@ impl PaintGrid for GridService {
     }
 
     fn paint_bar_labels(&self, painter: &Painter, rect: Rect, theme: &Theme) {
-        let (from, to) = self.visible_beats(rect);
+        let (from, to) = self.visible_beats(rect.span());
         // A line just left of the view can have its label in it.
         let from = from - self.width_to_beats(LABEL_INSET + 40.);
         let from = if self.allows_negative() {
@@ -94,7 +95,7 @@ impl PaintGrid for GridService {
         let font = FontId::new(font_size::SMALL, egui::FontFamily::Proportional);
         let mut last_right = f32::NEG_INFINITY;
         for (at, line) in self.lines(from, to, step) {
-            let x = self.beats_to_x(at, rect);
+            let x = self.beats_to_x(at, rect.span());
             let (text, top) = match line {
                 GridLine::Bar(bar) => (bar.to_string(), rect.top()),
                 GridLine::Beat { bar, beat } => (format!("{bar}.{beat}"), rect.center().y),
@@ -131,26 +132,13 @@ impl PaintGrid for GridService {
     }
 }
 
-impl GridService {
-    /// The beats `shown` covers, drawn in `viewport`'s coordinates.
-    fn visible_beats_in(&self, shown: Rect, viewport: Rect) -> (BeatPos, BeatPos) {
-        let from = self.x_to_beats(shown.left(), viewport);
-        let from = if self.allows_negative() {
-            from
-        } else {
-            from.max(BeatPos::ZERO)
-        };
-        (from, self.x_to_beats(shown.right(), viewport))
-    }
-}
-
 /// Times at a "nice" step for the zoom (1, 2, 5, 10, 15, 30 s…), with
 /// milliseconds once it's under a second.
 fn paint_time_labels(grid: &GridService, painter: &Painter, rect: Rect, bpm: f32, theme: &Theme) {
     let step = grid.time_step(bpm);
     let step_ms = (step * 1000.).round() as i64;
     let seconds = |beats: BeatPos| beats.0 * 60. / bpm as f64;
-    let (from, to) = grid.visible_beats(rect);
+    let (from, to) = grid.visible_beats(rect.span());
     let from = from - grid.width_to_beats(LABEL_INSET + 60.);
     let first = (seconds(from) * 1000. / step_ms as f64).floor() as i64;
     let last = (seconds(to) * 1000. / step_ms as f64).ceil() as i64;
@@ -160,7 +148,7 @@ fn paint_time_labels(grid: &GridService, painter: &Painter, rect: Rect, bpm: f32
             continue;
         }
         let ms = n * step_ms;
-        let x = grid.beats_to_x(BeatPos(ms as f64 / 1000. * bpm as f64 / 60.), rect);
+        let x = grid.beats_to_x(BeatPos(ms as f64 / 1000. * bpm as f64 / 60.), rect.span());
         let text = if step < 1. {
             format_time(ms as f64 / 1000.)
         } else {

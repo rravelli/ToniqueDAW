@@ -35,6 +35,23 @@ pub trait Viewport: Copy {
     fn right(&self) -> f32;
 }
 
+/// A view's left and right edges on screen: a [`Viewport`] of its own, for
+/// UIs whose rectangles the core can't know.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Span {
+    pub left: f32,
+    pub right: f32,
+}
+
+impl Viewport for Span {
+    fn left(&self) -> f32 {
+        self.left
+    }
+    fn right(&self) -> f32 {
+        self.right
+    }
+}
+
 /// How far a view is scrolled, in points: across (time) and down (rows).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Offset {
@@ -244,6 +261,12 @@ fn ticks(beats: f64) -> i64 {
 /// Characters of `n` written out.
 fn digits(n: i64) -> u32 {
     n.unsigned_abs().max(1).ilog10() + 1 + u32::from(n < 0)
+}
+
+impl Default for GridService {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GridService {
@@ -556,6 +579,22 @@ impl GridService {
     pub fn duration_to_width(&self, duration: Duration, bpm: f32) -> f32 {
         duration.as_secs_f32() / 60.0 * bpm * self.pixels_per_beat
     }
+    /// The beats `shown` covers, drawn in `viewport`'s coordinates, none
+    /// before 0 unless the view may go there.
+    pub fn visible_beats_in(
+        &self,
+        shown: impl Viewport,
+        viewport: impl Viewport,
+    ) -> (BeatPos, BeatPos) {
+        let from = self.x_to_beats(shown.left(), viewport);
+        let from = if self.negative_offset {
+            from
+        } else {
+            from.max(BeatPos::ZERO)
+        };
+        (from, self.x_to_beats(shown.right(), viewport))
+    }
+
     /// Position in beats to actual screen x position
     pub fn beats_to_x(&self, beats: BeatPos, viewport: impl Viewport) -> f32 {
         viewport.left() + beats.0 as f32 * self.pixels_per_beat - self.offset.x

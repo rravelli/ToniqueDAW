@@ -51,6 +51,12 @@ pub struct AudioMetrics {
     scope_read: [Vec<f32>; 2],
 }
 
+impl Default for AudioMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AudioMetrics {
     pub fn new() -> Self {
         Self {
@@ -189,6 +195,12 @@ pub struct GlobalMetrics {
     pub master: AudioMetrics,
     pub tracks: HashMap<TrackId, AudioMetrics>,
     pub latency: f32,
+}
+
+impl Default for GlobalMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GlobalMetrics {

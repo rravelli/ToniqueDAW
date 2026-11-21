@@ -1,3 +1,4 @@
+use crate::ui::RectSpan;
 use crate::ui::theme::font_size;
 use crate::{
     core::{clip::AudioClip, state::ProjectState},
@@ -238,7 +239,7 @@ impl ClipView<'_> {
         // The selected part: lit, inside the outline, its waveform drawn
         // again over it.
         if let Some((start, stop)) = lit_range {
-            let x = |beats: BeatPos| state.grid.beats_to_x(beats, viewport);
+            let x = |beats: BeatPos| state.grid.beats_to_x(beats, viewport.span());
             let lit = Rect::from_x_y_ranges(x(start)..=x(stop), rect.top()..=rect.bottom())
                 .intersect(Rect::from_min_size(pos, size).shrink(1.));
             if lit.is_positive() {
@@ -325,11 +326,11 @@ impl ClipView<'_> {
             return;
         }
         ui.ctx().set_cursor_icon(CursorIcon::Text);
-        let beats = state.grid.x_to_beats(pointer.x, self.viewport);
+        let beats = state.grid.x_to_beats(pointer.x, self.viewport.span());
         let alt = ui.input(|i| i.modifiers.alt);
         let x = state
             .grid
-            .beats_to_x(state.grid.snap(beats, alt), self.viewport);
+            .beats_to_x(state.grid.snap(beats, alt), self.viewport.span());
         let theme = ui.app_theme();
         ui.painter_at(body).vline(
             x,
@@ -358,7 +359,7 @@ impl ClipView<'_> {
         if response.dragged()
             && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
         {
-            let beats = state.grid.x_to_beats(mouse_pos.x, self.viewport);
+            let beats = state.grid.x_to_beats(mouse_pos.x, self.viewport.span());
             let beats = if state.grid.snaps(ui.input(|i| i.modifiers.alt)) {
                 let targets = state.snap_targets(&[clip.id]);
                 state.grid.snap_to_targets(beats, &targets).0

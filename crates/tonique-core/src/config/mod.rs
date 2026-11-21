@@ -194,9 +194,9 @@ fn config_path() -> Option<PathBuf> {
 
 /// Where Tonique keeps its configuration, settings and themes.
 pub fn config_dir() -> Option<PathBuf> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     return Some(test_config_dir());
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     directories::ProjectDirs::from("com", "Bytenosis", "Tonique")
         .map(|dirs| dirs.config_dir().to_path_buf())
 }
@@ -204,7 +204,7 @@ pub fn config_dir() -> Option<PathBuf> {
 /// Tests keep their configuration away from the user's: an empty directory
 /// of their own for each thread (each test runs on one), made when first
 /// asked for.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn test_config_dir() -> PathBuf {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(0);

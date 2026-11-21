@@ -24,14 +24,18 @@ mod widget;
 mod window;
 mod workspace;
 
-/// The grid maps beats onto egui's rectangles: what it needs of a view is
-/// its left and right edges.
-impl crate::core::grid::Viewport for egui::Rect {
-    fn left(&self) -> f32 {
-        self.min.x
-    }
-    fn right(&self) -> f32 {
-        self.max.x
+/// The grid maps beats onto a view's left and right edges: an egui
+/// rectangle's, as the core's [`Span`](crate::core::grid::Span).
+pub trait RectSpan {
+    fn span(&self) -> crate::core::grid::Span;
+}
+
+impl RectSpan for egui::Rect {
+    fn span(&self) -> crate::core::grid::Span {
+        crate::core::grid::Span {
+            left: self.min.x,
+            right: self.max.x,
+        }
     }
 }
 

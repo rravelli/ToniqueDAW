@@ -70,6 +70,12 @@ pub struct TrackView {
     pub armed: bool,
 }
 
+impl Default for TrackView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TrackView {
     pub fn new() -> Self {
         Self {

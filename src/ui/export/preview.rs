@@ -1,5 +1,6 @@
 //! The project in miniature, above the options.
 
+use crate::ui::theme::ToEgui;
 use egui::{Align2, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
 use tonique_engine::time::BeatPos;
 
@@ -95,9 +96,9 @@ pub(super) fn arrangement_preview(
     for (i, track) in lanes.iter().enumerate() {
         let top = inner.top() + i as f32 * (lane_height + LANE_GAP);
         let color = if !selection.includes(state, track) {
-            egui::Color32::from(track.color).gamma_multiply(0.3)
+            track.color.to_egui().gamma_multiply(0.3)
         } else {
-            track.color.into()
+            track.color.to_egui()
         };
         let ink = with_alpha(theme.text_on(color), 170);
         for clip in &track.clips {

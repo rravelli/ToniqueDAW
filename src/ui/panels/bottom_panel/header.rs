@@ -1,6 +1,7 @@
 //! The panel's header: the track's name, the clip's, and the tabs.
 
 use crate::ui::font::semibold;
+use crate::ui::theme::ToEgui;
 use crate::ui::theme::font_size;
 use crate::{
     core::track::TrackRow,
@@ -31,7 +32,7 @@ impl BottomPanel {
         tabs: Option<(BottomView, ClipId)>,
     ) -> Option<BottomView> {
         let theme = ui.app_theme();
-        let color = Color32::from(track.color);
+        let color = track.color.to_egui();
         let ink = theme.text_on(color);
         let mut picked = None;
         // Drawn once the header is: (where, name, selected, hovered).

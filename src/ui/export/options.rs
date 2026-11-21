@@ -1,5 +1,6 @@
 //! What to export, the range and format, and where the files go.
 
+use crate::ui::theme::ToEgui;
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
@@ -118,7 +119,7 @@ pub(super) fn sources_ui(ui: &mut Ui, rows: &[TrackRow], selection: &mut Selecti
                     ui,
                     checked,
                     row.depth as f32 * INDENT,
-                    row.color.into(),
+                    row.color.to_egui(),
                     &display_name(&row.name, row.first_track_index),
                     detail,
                 );

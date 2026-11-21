@@ -1,4 +1,5 @@
 use crate::ui::keymap::KeymapExt;
+use crate::ui::theme::{ToColor, ToEgui};
 use egui::{
     Align, Color32, CursorIcon, FontFamily, FontId, Frame, Layout, Panel, Rangef, Rect, Sense,
     Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2,
@@ -380,7 +381,7 @@ impl TrackHeaders {
             let color = if track.is_silenced() {
                 theme.text_disabled
             } else {
-                track.color.into()
+                track.color.to_egui()
             };
             let painter = ui.painter().with_clip_rect(clip);
             if track.selected || response.hovered() {
@@ -621,7 +622,7 @@ fn paint_group_scopes(ui: &Ui, rows: &[Row], x: Rangef) {
         let color = if group.is_silenced() {
             theme.text_disabled
         } else {
-            group.color.into()
+            group.color.to_egui()
         };
         ui.painter().rect_filled(bar, 0., color);
     }
@@ -650,7 +651,7 @@ fn paint_new_track_headers(
             name: TRACK_NAME.into(),
             height: DEFAULT_TRACK_HEIGHT,
             collapsed: false,
-            color: (*color).into(),
+            color: (*color).to_color(),
             selected: false,
             solo: TrackSoloState::NotSoloing,
             silenced: false,

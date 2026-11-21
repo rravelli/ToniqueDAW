@@ -1,3 +1,4 @@
+use crate::ui::RectSpan;
 mod master_lane;
 #[cfg(test)]
 mod tests;
@@ -288,20 +289,20 @@ impl CentralPanel {
         if state.looping() {
             let (start, end) = state.loop_range();
             for beats in [start, end] {
-                let x = state.grid.beats_to_x(beats, rect);
+                let x = state.grid.beats_to_x(beats, rect.span());
                 painter.vline(x, rect.y_range(), Stroke::new(1.0, theme.loop_region));
             }
         }
         if state.edit_cursor() != state.playhead() {
             // An arrow on the ruler, pointing down at the timeline.
-            let x = state.grid.beats_to_x(state.edit_cursor(), rect);
+            let x = state.grid.beats_to_x(state.edit_cursor(), rect.span());
             painter.add(Shape::convex_polygon(
                 edit_cursor_arrow(x, lanes.top()).to_vec(),
                 theme.edit_cursor,
                 Stroke::NONE,
             ));
         }
-        let playhead_x = state.grid.beats_to_x(state.playhead(), rect);
+        let playhead_x = state.grid.beats_to_x(state.playhead(), rect.span());
         let line_stroke = Stroke::new(2.0, with_alpha(theme.playhead, 160));
 
         // Draw vertical playhead line
@@ -360,7 +361,7 @@ impl CentralPanel {
         if handle_response.dragged()
             && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
         {
-            state.seek(state.grid.x_to_beats(mouse_pos.x, rect));
+            state.seek(state.grid.x_to_beats(mouse_pos.x, rect.span()));
         }
     }
 }

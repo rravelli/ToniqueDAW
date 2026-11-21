@@ -7,16 +7,10 @@ use crate::{
     ui::run,
 };
 
-mod analysis;
-mod audio;
-mod bench;
-mod cache;
-mod config;
-mod core;
 mod ui;
 
-pub mod utils;
-mod waveform;
+// The core, in its own crate, at the paths it had here.
+use tonique_core::{analysis, audio, bench, cache, config, core, file_tree, utils};
 fn main() {
     // Audio output: the engine on the chosen device, or the default one if
     // that fails (e.g. the device was unplugged)

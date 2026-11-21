@@ -25,7 +25,7 @@ impl ProjectState {
     }
     /// Stop retrying the output tests don't have, so the app shows no
     /// warning about it (for screenshots).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn ignore_missing_audio(&mut self) {
         self.reconnect_at = None;
         self.probe = None;

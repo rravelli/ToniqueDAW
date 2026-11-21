@@ -4,8 +4,8 @@ use crate::ui::theme::font_size;
 use crate::{
     cache::AUDIO_ANALYSIS_CACHE,
     core::state::ProjectState,
+    file_tree::FileNode,
     ui::{
-        browser::file_tree::FileNode,
         dnd::DragPayload,
         font::PHOSPHOR_REGULAR,
         theme::{ThemeExt, with_alpha},

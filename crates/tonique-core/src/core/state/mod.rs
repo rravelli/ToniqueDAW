@@ -20,7 +20,7 @@ use crate::{
         clip::AudioClip,
         graph_monitor::GraphMonitor,
         grid::GridService,
-        metrics::{AudioMetrics, GlobalMetrics},
+        metrics::GlobalMetrics,
         state::{clipboard::Clipboard, selection::ClipSelection, sources::SourceRegistry},
         track::{TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow, TrackSoloState, TrackView},
     },
@@ -422,7 +422,7 @@ impl ProjectState {
     }
     /// Get mutable fields from track to be changed in place. Use `self.commit_track_view` to update the undo stack.
     pub fn track_view_mut(&mut self, id: &TrackId) -> &mut TrackView {
-        self.views.entry(*id).or_insert_with(TrackView::new)
+        self.views.entry(*id).or_default()
     }
     /// Commit changes made to the track mutable fields. Only the name is
     /// part of the undo history.
@@ -551,7 +551,7 @@ impl ProjectState {
         self.session.undo_manager().can_redo()
     }
     /// Steps there are to undo, and the last one's name.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn undo_history(&self) -> (usize, Option<&'static str>) {
         let undo = self.session.undo_manager();
         (undo.undo_len(), undo.undo_label())
@@ -582,7 +582,7 @@ impl ProjectState {
             self.metrics
                 .tracks
                 .entry(id)
-                .or_insert_with(AudioMetrics::new)
+                .or_default()
                 .update(channel.meter(), false);
         }
         self.metrics.latency = self.session.engine().cpu_load();
