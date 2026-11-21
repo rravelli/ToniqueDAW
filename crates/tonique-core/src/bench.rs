@@ -425,7 +425,14 @@ fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len().max(1) as f64
 }
 
+/// CPU time of the calling thread, in ms; not measured off Unix.
+#[cfg(not(unix))]
+fn thread_cpu_ms() -> f64 {
+    f64::NAN
+}
+
 /// CPU time of the calling thread, in ms.
+#[cfg(unix)]
 fn thread_cpu_ms() -> f64 {
     let mut ts = libc::timespec {
         tv_sec: 0,
@@ -440,7 +447,15 @@ fn thread_cpu_ms() -> f64 {
     }
 }
 
+/// CPU time of the whole process (all threads), in seconds; only read
+/// from Linux's `/proc`.
+#[cfg(not(unix))]
+fn process_cpu_seconds() -> Option<f64> {
+    None
+}
+
 /// CPU time of the whole process (all threads), in seconds.
+#[cfg(unix)]
 fn process_cpu_seconds() -> Option<f64> {
     let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
     // After the command name, which may hold spaces, in parentheses.

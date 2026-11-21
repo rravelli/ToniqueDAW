@@ -4650,7 +4650,6 @@ dependencies = [
  "serde",
  "serde_json",
  "symphonia",
- "toml",
  "tonique-engine",
 ]
 
