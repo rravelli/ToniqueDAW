@@ -157,8 +157,11 @@ fn screenshot(harness: &mut Harness<'_, ToniqueApp>, name: &str) -> Option<PathB
             return None;
         }
     };
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/ui-screenshots");
-    std::fs::create_dir_all(&dir).ok()?;
+    let dir = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../target/ui-screenshots"
+    ));
+    std::fs::create_dir_all(dir).ok()?;
     let path = dir.join(format!("{name}.png"));
     image.save(&path).ok()?;
     Some(path)

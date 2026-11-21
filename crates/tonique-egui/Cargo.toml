@@ -1,0 +1,39 @@
+[package]
+name = "tonique_daw"
+version = "0.3.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+tonique-core.workspace = true
+tonique-engine.workspace = true
+eframe = "0.36"
+cpal = "0.18"
+rfd = "0.15.4"
+egui-phosphor = { version = "0.14.0", features = ["fill"] }
+egui = "0.36"
+rand = "0.9.2"
+sysinfo = "0.36.1"
+rustfft = "6.4.0"
+toml = "1"
+egui_extras = { version = "0.36", features = ["svg"] }
+
+# Taskbar progress. Already in the build through rfd and accesskit; this only
+# adds the blocking API.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = [
+    "async-io",
+    "blocking-api",
+] }
+
+[dev-dependencies]
+# Its tests' configuration and no audio devices, for the app's tests too.
+tonique-core = { workspace = true, features = ["test-support"] }
+egui_kittest = { version = "0.36", features = ["eframe", "wgpu", "snapshot"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde_json = "1.0.141"

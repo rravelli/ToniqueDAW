@@ -26,8 +26,9 @@ const SHOWN_BEATS: f64 = 30. * 4.;
 /// Decoding the stems takes a moment; longer, something's wrong.
 const AUDIO_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The repository's root: the app is `crates/tonique-egui`.
 fn repo() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
 }
 
 /// Where the images go: `images/`, unless `TONIQUE_IMAGES_DIR` says.

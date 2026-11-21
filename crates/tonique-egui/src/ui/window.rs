@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use eframe::NativeOptions;
 
-const APP_ICON: &[u8] = include_bytes!("../../images/logo-256.png");
+const APP_ICON: &[u8] = include_bytes!("../../../../images/logo-256.png");
 /// Room for the browser, a useful stretch of timeline and the effects.
 const DEFAULT_SIZE: [f32; 2] = [1280., 800.];
 /// Below this the transport bar's groups would overlap.

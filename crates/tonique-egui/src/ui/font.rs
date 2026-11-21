@@ -17,15 +17,18 @@ pub fn fonts() -> FontDefinitions {
 
     fonts.font_data.insert(
         INTER.into(),
-        FontData::from_static(include_bytes!("../../fonts/Inter-Regular.ttf")).into(),
+        FontData::from_static(include_bytes!("../../../../fonts/Inter-Regular.ttf")).into(),
     );
     fonts.font_data.insert(
         SEMIBOLD.into(),
-        FontData::from_static(include_bytes!("../../fonts/Inter-SemiBold.ttf")).into(),
+        FontData::from_static(include_bytes!("../../../../fonts/Inter-SemiBold.ttf")).into(),
     );
     fonts.font_data.insert(
         JETBRAINS_MONO.into(),
-        FontData::from_static(include_bytes!("../../fonts/JetBrainsMonoNL-Regular.ttf")).into(),
+        FontData::from_static(include_bytes!(
+            "../../../../fonts/JetBrainsMonoNL-Regular.ttf"
+        ))
+        .into(),
     );
 
     fonts.font_data.insert(

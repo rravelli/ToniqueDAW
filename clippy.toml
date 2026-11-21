@@ -1,5 +1,5 @@
 # Colours come from the theme (`ui.app_theme()`), so themes can change them.
-# Only `src/ui/theme/` may build them from values (the core's own colours,
+# Only `crates/tonique-egui/src/ui/theme/` may build them from values (the core's own colours,
 # `crates/tonique-core/src/utils/color.rs`, aren't egui's).
 disallowed-methods = [
     { path = "egui::Color32::from_rgb", reason = "use a colour from `ui.app_theme()`" },
@@ -10,5 +10,5 @@ disallowed-methods = [
     { path = "egui::Color32::from_white_alpha", reason = "use a colour from `ui.app_theme()`" },
 ]
 
-# `unwrap_used` is denied (see Cargo.toml) outside tests only.
+# `unwrap_used` is denied (see the workspace Cargo.toml) outside tests only.
 allow-unwrap-in-tests = true
