@@ -15,40 +15,42 @@ struct Profile {
     totals: BTreeMap<&'static str, f64>,
 }
 
-/// Times `f` under `name`.
-pub fn time<R>(name: &'static str, f: impl FnOnce() -> R) -> R {
+/// Times `measured` under `name`.
+pub fn time<Output>(name: &'static str, measured: impl FnOnce() -> Output) -> Output {
     let start = Instant::now();
-    let r = f();
-    let ms = start.elapsed().as_secs_f64() * 1000.;
-    STATE.with(|s| {
-        if let Some(p) = s.borrow_mut().as_mut() {
-            *p.totals.entry(name).or_default() += ms;
+    let result = measured();
+    let milliseconds = start.elapsed().as_secs_f64() * 1000.;
+    STATE.with(|cell| {
+        if let Some(profile) = cell.borrow_mut().as_mut() {
+            *profile.totals.entry(name).or_default() += milliseconds;
         }
     });
-    r
+    result
 }
 
 /// Call once per frame.
 pub fn frame() {
-    STATE.with(|s| {
-        let mut s = s.borrow_mut();
-        let Some(p) = s.as_mut() else { return };
-        p.frames += 1;
-        let elapsed = p.since.elapsed().as_secs_f64();
+    STATE.with(|cell| {
+        let mut state = cell.borrow_mut();
+        let Some(profile) = state.as_mut() else {
+            return;
+        };
+        profile.frames += 1;
+        let elapsed = profile.since.elapsed().as_secs_f64();
         if elapsed >= 2. {
-            let per = |ms: f64| ms / p.frames as f64;
-            let parts: Vec<String> = p
+            let per_frame = |milliseconds: f64| milliseconds / profile.frames as f64;
+            let parts: Vec<String> = profile
                 .totals
                 .iter()
-                .map(|(k, v)| format!("{k} {:.2}", per(*v)))
+                .map(|(part, total)| format!("{part} {:.2}", per_frame(*total)))
                 .collect();
             eprintln!(
                 "profile: {:.1} fps, {:.1} ms/frame | ms per frame: {}",
-                p.frames as f64 / elapsed,
-                1000. * elapsed / p.frames as f64,
+                profile.frames as f64 / elapsed,
+                1000. * elapsed / profile.frames as f64,
                 parts.join(" · ")
             );
-            *p = Profile {
+            *profile = Profile {
                 since: Instant::now(),
                 frames: 0,
                 totals: BTreeMap::new(),

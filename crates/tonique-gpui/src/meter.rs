@@ -8,8 +8,8 @@ use gpui::{Window, linear_color_stop, linear_gradient};
 
 use crate::{
     core::metrics::AudioMetrics,
-    theme::{Color, Theme, h, mix},
-    wave::R,
+    geometry::Rect,
+    theme::{Color, Theme, hsla, mix},
 };
 
 const CHANNEL_GAP: f32 = 1.;
@@ -27,27 +27,27 @@ const PEAK_SHADE: f32 = 0.5;
 /// The meter's colours, by level.
 struct Zones {
     low: Color,
-    mid: Color,
+    middle: Color,
     high: Color,
     tick: Color,
 }
 
 impl Zones {
-    fn new(t: &Theme, disabled: bool) -> Self {
-        let tick = mix(t.bg_deep, t.text_disabled, 0.35);
+    fn new(theme: &Theme, disabled: bool) -> Self {
+        let tick = mix(theme.bg_deep, theme.text_disabled, 0.35);
         if disabled {
-            let grey = t.bg_control_hover;
+            let grey = theme.bg_control_hover;
             return Self {
                 low: grey,
-                mid: grey,
+                middle: grey,
                 high: grey,
                 tick,
             };
         }
         Self {
-            low: t.meter_low,
-            mid: t.meter_mid,
-            high: t.meter_high,
+            low: theme.meter_low,
+            middle: theme.meter_mid,
+            high: theme.meter_high,
             tick,
         }
     }
@@ -66,9 +66,9 @@ impl Zones {
         } else if db <= TURN_DB {
             self.low
         } else if db < WARM_DB {
-            mix(self.low, self.mid, (db - TURN_DB) / (WARM_DB - TURN_DB))
+            mix(self.low, self.middle, (db - TURN_DB) / (WARM_DB - TURN_DB))
         } else {
-            mix(self.mid, self.high, HOT * (db - WARM_DB) / -WARM_DB)
+            mix(self.middle, self.high, HOT * (db - WARM_DB) / -WARM_DB)
         }
     }
 }
@@ -100,48 +100,65 @@ pub fn scale(db: f32) -> f32 {
 }
 
 /// Whether the meter shows anything, so it needs redrawing as it falls.
-pub fn is_live(m: &AudioMetrics) -> bool {
-    m.peak_db()
+pub fn is_live(metrics: &AudioMetrics) -> bool {
+    metrics
+        .peak_db()
         .iter()
-        .chain(m.hold_db().iter())
+        .chain(metrics.hold_db().iter())
         .any(|db| scale(*db) > 0.)
 }
 
-pub fn paint_meter(window: &mut Window, r: R, m: &AudioMetrics, t: &Theme, disabled: bool) {
-    let lamps = r.h >= LAMP_MIN_HEIGHT;
+pub fn paint_meter(
+    window: &mut Window,
+    rect: Rect,
+    metrics: &AudioMetrics,
+    theme: &Theme,
+    disabled: bool,
+) {
+    let lamps = rect.height >= LAMP_MIN_HEIGHT;
     let bars = if lamps {
-        R::new(
-            r.x,
-            r.y + LAMP_HEIGHT + LAMP_GAP,
-            r.w,
-            r.h - LAMP_HEIGHT - LAMP_GAP,
+        Rect::new(
+            rect.left,
+            rect.top + LAMP_HEIGHT + LAMP_GAP,
+            rect.width,
+            rect.height - LAMP_HEIGHT - LAMP_GAP,
         )
     } else {
-        r
+        rect
     };
-    let width = (r.w - CHANNEL_GAP) / 2.;
-    let zones = Zones::new(t, disabled);
-    let y = |db: f32| bars.bottom() - scale(db) * bars.h;
-    let fill =
-        |window: &mut Window, rect: R, c: Color| window.paint_quad(gpui::fill(rect.bounds(), h(c)));
-    let (peaks, holds, rms, clipped) = (m.peak_db(), m.hold_db(), m.rms_db(), m.clipped());
-    for ch in 0..2 {
-        let left = r.x + ch as f32 * (width + CHANNEL_GAP);
-        let column = R::new(left, bars.y, width, bars.h);
-        fill(window, column, t.bg_deep);
-        if bars.h >= MARK_MIN_HEIGHT {
-            fill(window, R::new(left, y(0.).round(), width, 1.), zones.tick);
+    let width = (rect.width - CHANNEL_GAP) / 2.;
+    let zones = Zones::new(theme, disabled);
+    let height_of = |db: f32| bars.bottom() - scale(db) * bars.height;
+    let fill = |window: &mut Window, rect: Rect, color: Color| {
+        window.paint_quad(gpui::fill(rect.bounds(), hsla(color)))
+    };
+    let (peaks, holds, rms, clipped) = (
+        metrics.peak_db(),
+        metrics.hold_db(),
+        metrics.rms_db(),
+        metrics.clipped(),
+    );
+    for channel in 0..2 {
+        let left = rect.left + channel as f32 * (width + CHANNEL_GAP);
+        let column = Rect::new(left, bars.top, width, bars.height);
+        fill(window, column, theme.bg_deep);
+        if bars.height >= MARK_MIN_HEIGHT {
+            fill(
+                window,
+                Rect::new(left, height_of(0.).round(), width, 1.),
+                zones.tick,
+            );
         }
         // The peak, lighter, behind the RMS level.
-        for (top, shade) in [(peaks[ch], PEAK_SHADE), (rms[ch], 1.)] {
-            let shade = |c: Color| mix(t.bg_deep, c, shade);
+        for (top, shade) in [(peaks[channel], PEAK_SHADE), (rms[channel], 1.)] {
+            let shade = |color: Color| mix(theme.bg_deep, color, shade);
             for (from, to) in Zones::spans() {
                 let to = to.min(top);
                 if to <= from {
                     continue;
                 }
-                let (y0, y1) = (y(to), y(from));
-                if y1 - y0 <= 0. {
+                let (segment_top, segment_bottom) = (height_of(to), height_of(from));
+                if segment_bottom - segment_top <= 0. {
                     continue;
                 }
                 let bottom = shade(zones.color(from));
@@ -151,34 +168,38 @@ pub fn paint_meter(window: &mut Window, r: R, m: &AudioMetrics, t: &Theme, disab
                 } else {
                     shade(zones.color(to))
                 };
-                let segment = R::new(left, y0, width, y1 - y0);
+                let segment = Rect::new(left, segment_top, width, segment_bottom - segment_top);
                 window.paint_quad(gpui::fill(
                     segment.bounds(),
                     linear_gradient(
                         0.,
-                        linear_color_stop(h(bottom), 0.),
-                        linear_color_stop(h(top_color), 1.),
+                        linear_color_stop(hsla(bottom), 0.),
+                        linear_color_stop(hsla(top_color), 1.),
                     ),
                 ));
             }
         }
-        if scale(holds[ch]) > 0. {
-            let at = y(holds[ch]).max(column.y + 1.);
+        if scale(holds[channel]) > 0. {
+            let at = height_of(holds[channel]).max(column.top + 1.);
             fill(
                 window,
-                R::new(left, at - 1., width, 1.),
-                zones.color(holds[ch]),
+                Rect::new(left, at - 1., width, 1.),
+                zones.color(holds[channel]),
             );
         }
-        if clipped[ch] {
+        if clipped[channel] {
             let lamp = if lamps {
-                R::new(left, r.y, width, LAMP_HEIGHT)
+                Rect::new(left, rect.top, width, LAMP_HEIGHT)
             } else {
-                R::new(left, column.y, width, 2.)
+                Rect::new(left, column.top, width, 2.)
             };
             fill(window, lamp, zones.high);
         } else if lamps {
-            fill(window, R::new(left, r.y, width, LAMP_HEIGHT), t.bg_deep);
+            fill(
+                window,
+                Rect::new(left, rect.top, width, LAMP_HEIGHT),
+                theme.bg_deep,
+            );
         }
     }
 }

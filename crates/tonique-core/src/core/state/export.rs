@@ -2,10 +2,13 @@
 
 use super::ProjectState;
 use crate::{
-    core::export::{Export, ExportFile, ExportOptions, ExportRange, Render},
+    core::{
+        export::{Export, ExportFile, ExportOptions, ExportRange, Render},
+        track::TrackRow,
+    },
     utils::display_name,
 };
-use std::{path::Path, sync::Arc};
+use std::{collections::HashSet, path::Path, sync::Arc};
 use tonique_engine::{
     edit::{BusId, ClipContent, Edit, TrackId},
     param::AtomicParam,
@@ -20,6 +23,61 @@ pub enum ExportSource {
     /// A track or a group as heard when soloed (through its groups and the
     /// master, with what it sends to other groups), even if muted.
     Track(TrackId),
+}
+
+/// What's chosen to export: the mix, and tracks or groups on their own.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExportSelection {
+    pub mix: bool,
+    pub tracks: HashSet<TrackId>,
+}
+
+impl Default for ExportSelection {
+    /// The mix alone.
+    fn default() -> Self {
+        Self {
+            mix: true,
+            tracks: HashSet::new(),
+        }
+    }
+}
+
+impl ExportSelection {
+    /// The files to write, in the track list's order, the mix first.
+    pub fn sources(&self, state: &ProjectState) -> Vec<ExportSource> {
+        let tracks = state
+            .all_rows()
+            .into_iter()
+            .filter(|track| self.tracks.contains(&track.id))
+            .map(|track| ExportSource::Track(track.id));
+        self.mix
+            .then_some(ExportSource::Mix)
+            .into_iter()
+            .chain(tracks)
+            .collect()
+    }
+
+    /// Whether `track` is heard in what's exported: in the mix, or chosen
+    /// with or inside a chosen group.
+    pub fn includes(&self, state: &ProjectState, track: &TrackRow) -> bool {
+        if self.mix {
+            return !track.is_silenced();
+        }
+        let mut id = Some(track.id);
+        while let Some(current) = id {
+            if self.tracks.contains(&current) {
+                return true;
+            }
+            id = state.parent(current);
+        }
+        false
+    }
+
+    /// Forgets tracks that are gone.
+    pub fn retain(&mut self, rows: &[TrackRow]) {
+        self.tracks
+            .retain(|id| rows.iter().any(|row| row.id == *id));
+    }
 }
 
 impl ProjectState {

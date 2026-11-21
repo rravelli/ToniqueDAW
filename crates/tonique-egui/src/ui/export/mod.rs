@@ -2,7 +2,6 @@
 //! range, format and destination, with a preview of what's exported; then
 //! each file drawing itself while it renders, and the result.
 
-mod format;
 mod options;
 mod preview;
 mod progress;
@@ -15,13 +14,12 @@ use std::{
 
 use egui::{Align, Layout, Ui, vec2};
 use egui_phosphor::regular::WARNING;
-use tonique_engine::{edit::TrackId, time::BeatPos};
+use tonique_engine::time::BeatPos;
 
 use crate::{
     core::{
-        export::{Export, ExportFile, ExportOptions, ExportRange, Waveform},
-        state::{ExportSource, ProjectState},
-        track::TrackRow,
+        export::{Export, ExportFile, ExportOptions, ExportRange, Waveform, format},
+        state::{ExportSelection, ExportSource, ProjectState},
     },
     ui::{
         project::ProjectManager,
@@ -61,49 +59,11 @@ enum Step {
     },
 }
 
-/// What's chosen to export, kept between exports.
-struct Selection {
-    mix: bool,
-    tracks: HashSet<TrackId>,
-}
-
-impl Selection {
-    /// The files to write, in the track list's order, the mix first.
-    fn sources(&self, state: &ProjectState) -> Vec<ExportSource> {
-        let tracks = state
-            .all_rows()
-            .into_iter()
-            .filter(|track| self.tracks.contains(&track.id))
-            .map(|track| ExportSource::Track(track.id));
-        self.mix
-            .then_some(ExportSource::Mix)
-            .into_iter()
-            .chain(tracks)
-            .collect()
-    }
-
-    /// Whether `track` is heard in what's exported: in the mix, or chosen
-    /// with or inside a chosen group.
-    fn includes(&self, state: &ProjectState, track: &TrackRow) -> bool {
-        if self.mix {
-            return !track.is_silenced();
-        }
-        let mut id = Some(track.id);
-        while let Some(current) = id {
-            if self.tracks.contains(&current) {
-                return true;
-            }
-            id = state.parent(current);
-        }
-        false
-    }
-}
-
 pub struct ExportWindow {
     step: Step,
     /// Kept between exports.
     options: ExportOptions,
-    selection: Selection,
+    selection: ExportSelection,
     /// Where the files go: the project's folder unless another was chosen.
     dir: String,
     /// What the files are named after: the project, at first.
@@ -122,10 +82,7 @@ impl ExportWindow {
         Self {
             step: Step::Closed,
             options: ExportOptions::default(),
-            selection: Selection {
-                mix: true,
-                tracks: HashSet::new(),
-            },
+            selection: ExportSelection::default(),
             dir: String::new(),
             name: String::new(),
             custom: None,
@@ -172,9 +129,7 @@ impl ExportWindow {
         let theme = ui.app_theme();
         // Tracks deleted since are no longer chosen.
         let rows = state.all_rows();
-        self.selection
-            .tracks
-            .retain(|id| rows.iter().any(|row| row.id == *id));
+        self.selection.retain(&rows);
         // Seeded once only: an end typed before the start stays, with the
         // problem shown, until the start or end is corrected.
         let custom = self.custom.get_or_insert_with(|| {

@@ -19,3 +19,4 @@ tonique-core.workspace = true
 tonique-engine.workspace = true
 # Waveform tiles are drawn into images (`src/wave.rs`), gpui-fast's image type.
 image = { version = "0.25", default-features = false }
+toml = "1"

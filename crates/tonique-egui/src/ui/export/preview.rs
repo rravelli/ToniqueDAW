@@ -7,7 +7,7 @@ use tonique_engine::time::BeatPos;
 use crate::{
     core::{
         export::ExportRange,
-        state::ProjectState,
+        state::{ExportSelection, ProjectState},
         track::{TrackKind, TrackRow},
     },
     ui::{
@@ -16,7 +16,7 @@ use crate::{
     },
 };
 
-use super::{LANE_PADDING, Selection, format::duration, widgets::card};
+use super::{LANE_PADDING, format::duration, widgets::card};
 
 const PREVIEW_HEIGHT: f32 = 96.;
 const LANE_GAP: f32 = 2.;
@@ -32,7 +32,7 @@ pub(super) fn arrangement_preview(
     ui: &mut Ui,
     state: &ProjectState,
     rows: &[TrackRow],
-    selection: &Selection,
+    selection: &ExportSelection,
     range: ExportRange,
 ) -> Option<(BeatPos, BeatPos)> {
     let theme = ui.app_theme();

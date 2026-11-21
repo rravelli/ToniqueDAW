@@ -7377,6 +7377,7 @@ dependencies = [
  "gpui-fast",
  "gpui-fast-platform",
  "image",
+ "toml 1.1.6+spec-1.1.0",
  "tonique-core",
  "tonique-engine",
 ]

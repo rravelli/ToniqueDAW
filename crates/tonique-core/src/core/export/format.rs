@@ -1,4 +1,4 @@
-//! How durations, levels and sizes read.
+//! How an export's durations, levels and sizes read, in both apps.
 
 use std::path::Path;
 
@@ -7,7 +7,7 @@ use tonique_engine::sample::WavFormat;
 use crate::core::{project::project_name, state::ProjectState};
 
 /// `48 kHz  ·  stereo`: what the engine renders.
-pub(super) fn audio_format(state: &ProjectState) -> String {
+pub fn audio_format(state: &ProjectState) -> String {
     let config = state.engine_config();
     let channels = match config.output_channels {
         1 => "mono".to_string(),
@@ -17,14 +17,14 @@ pub(super) fn audio_format(state: &ProjectState) -> String {
     format!("{} kHz  ·  {channels}", trimmed(config.sample_rate / 1000.))
 }
 
-pub(super) fn peak(level: f32) -> String {
+pub fn peak(level: f32) -> String {
     match level {
         0. => "silent".to_string(),
         level => format!("peak {}", decibels(level)),
     }
 }
 
-pub(super) fn file_name(path: &Path) -> String {
+pub fn file_name(path: &Path) -> String {
     path.file_name().map_or_else(
         || project_name(path),
         |name| name.to_string_lossy().into_owned(),
@@ -32,7 +32,7 @@ pub(super) fn file_name(path: &Path) -> String {
 }
 
 /// `m:ss`, or `m:ss.s` under ten seconds.
-pub(super) fn duration(seconds: f64) -> String {
+pub fn duration(seconds: f64) -> String {
     let minutes = (seconds / 60.).floor();
     let rest = seconds - minutes * 60.;
     if seconds < 10. {
@@ -43,7 +43,7 @@ pub(super) fn duration(seconds: f64) -> String {
 }
 
 /// A level in dB relative to full scale.
-pub(super) fn decibels(level: f32) -> String {
+pub fn decibels(level: f32) -> String {
     let db = 20. * level.log10();
     if db > 0. {
         format!("+{db:.1} dBFS")
@@ -53,12 +53,12 @@ pub(super) fn decibels(level: f32) -> String {
 }
 
 /// `48`, `44.1`: without a trailing `.0`.
-pub(super) fn trimmed(value: f64) -> String {
+pub fn trimmed(value: f64) -> String {
     let text = format!("{value:.1}");
     text.strip_suffix(".0").map_or(text.clone(), str::to_string)
 }
 
-pub(super) fn sample_bytes(format: WavFormat) -> usize {
+pub fn sample_bytes(format: WavFormat) -> usize {
     match format {
         WavFormat::Int16 => 2,
         WavFormat::Int24 => 3,
@@ -66,7 +66,7 @@ pub(super) fn sample_bytes(format: WavFormat) -> usize {
     }
 }
 
-pub(super) fn file_size(bytes: f64) -> String {
+pub fn file_size(bytes: f64) -> String {
     match bytes {
         b if b >= 1e9 => format!("{:.1} GB", b / 1e9),
         b if b >= 1e6 => format!("{:.1} MB", b / 1e6),

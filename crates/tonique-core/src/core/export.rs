@@ -2,6 +2,8 @@
 //! on a background thread with its own engine, so playback and editing go
 //! on meanwhile.
 
+pub mod format;
+
 use std::{
     fs,
     path::{Path, PathBuf},

@@ -17,7 +17,7 @@ use tonique_engine::{sample::WavFormat, time::BeatPos};
 use crate::{
     core::{
         export::{ExportFile, ExportOptions, ExportRange},
-        state::ProjectState,
+        state::{ExportSelection, ProjectState},
         track::{TrackKind, TrackRow},
     },
     ui::{
@@ -28,7 +28,7 @@ use crate::{
     utils::{display_name, format_bars, parse_bars},
 };
 
-use super::{CHOICE_HEIGHT, Selection, format::*, widgets::choices};
+use super::{CHOICE_HEIGHT, format::*, widgets::choices};
 
 /// Room for a field's name before it.
 const FIELD_LABEL_WIDTH: f32 = 48.;
@@ -46,7 +46,7 @@ const MAX_BARS: f64 = 9999.;
 const TAILS: [u32; 4] = [0, 2, 5, 10];
 
 /// The mix, then every track and group, indented under their group.
-pub(super) fn sources_ui(ui: &mut Ui, rows: &[TrackRow], selection: &mut Selection) {
+pub(super) fn sources_ui(ui: &mut Ui, rows: &[TrackRow], selection: &mut ExportSelection) {
     let theme = ui.app_theme();
     ui.add(SectionHeader::new("Export"));
     let mix = source_row(

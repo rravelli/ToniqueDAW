@@ -8,67 +8,27 @@
 
 use std::{collections::HashMap, ops::Range, sync::Arc};
 
-use gpui::{Bounds, Corners, Hsla, RenderImage, Rgba, Window, point, px, size};
+use gpui::{Corners, Hsla, RenderImage, Rgba, Window};
 use tonique_engine::{
     nodes::balance,
     peaks::{BASE_BUCKET, WaveformPeaks},
     sample::SampleBuffer,
 };
 
-use crate::{analysis::AudioData, core::clip::AudioClip};
+use crate::{analysis::AudioData, core::clip::AudioClip, geometry::Rect};
 
 /// Columns per cached tile.
 const TILE: usize = 256;
 /// Below this many samples per column, read the samples themselves.
-const RAW_MAX_SPP: f64 = (4 * BASE_BUCKET) as f64;
+const RAW_MAX_SAMPLES_PER_COLUMN: f64 = (4 * BASE_BUCKET) as f64;
 const EMPTY: [f32; 2] = [f32::NAN; 2];
-
-/// A rectangle in window coordinates (logical pixels).
-#[derive(Clone, Copy, Debug)]
-pub struct R {
-    pub x: f32,
-    pub y: f32,
-    pub w: f32,
-    pub h: f32,
-}
-
-impl R {
-    pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h }
-    }
-    pub fn right(&self) -> f32 {
-        self.x + self.w
-    }
-    pub fn bottom(&self) -> f32 {
-        self.y + self.h
-    }
-    pub fn intersect(&self, o: R) -> R {
-        let x = self.x.max(o.x);
-        let y = self.y.max(o.y);
-        R::new(
-            x,
-            y,
-            (self.right().min(o.right()) - x).max(0.),
-            (self.bottom().min(o.bottom()) - y).max(0.),
-        )
-    }
-    pub fn is_empty(&self) -> bool {
-        self.w <= 0. || self.h <= 0.
-    }
-    pub fn contains(&self, x: f32, y: f32) -> bool {
-        x >= self.x && x < self.right() && y >= self.y && y < self.bottom()
-    }
-    pub fn bounds(&self) -> Bounds<gpui::Pixels> {
-        Bounds::new(point(px(self.x), px(self.y)), size(px(self.w), px(self.h)))
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct TileKey {
     peaks: usize,
     raw: bool,
     start: u64,
-    spp: u64,
+    samples_per_column: u64,
     lane: (usize, usize),
     tile: usize,
 }
@@ -121,24 +81,24 @@ struct Lane {
     gain: f32,
 }
 
-fn lanes(rect: R, stereo: bool, channels: usize, gain: f32, pan: f32) -> Vec<Lane> {
+fn lanes(rect: Rect, stereo: bool, channels: usize, gain: f32, pan: f32) -> Vec<Lane> {
     let (left, right) = balance(pan);
     if !stereo {
         return vec![Lane {
             channels: 0..channels,
-            top: rect.y,
-            height: rect.h,
+            top: rect.top,
+            height: rect.height,
             gain: gain * (left + right) / 2.,
         }];
     }
-    let height = rect.h / channels as f32;
+    let height = rect.height / channels as f32;
     (0..channels)
-        .map(|ch| Lane {
-            channels: ch..ch + 1,
-            top: rect.y + ch as f32 * height,
+        .map(|channel| Lane {
+            channels: channel..channel + 1,
+            top: rect.top + channel as f32 * height,
             height,
             gain: gain
-                * match ch {
+                * match channel {
                     0 => left,
                     1 => right,
                     _ => 1.,
@@ -153,8 +113,8 @@ fn lanes(rect: R, stereo: bool, channels: usize, gain: f32, pan: f32) -> Vec<Lan
 pub fn paint_waveform(
     window: &mut Window,
     cache: &mut WaveCache,
-    file: R,
-    visible: R,
+    file: Rect,
+    visible: Rect,
     data: &AudioData,
     samples: Range<f64>,
     stereo: bool,
@@ -164,37 +124,40 @@ pub fn paint_waveform(
 ) {
     let peaks = data.peaks();
     let channels = peaks.num_channels();
-    if channels == 0 || file.w <= 0. || samples.end <= samples.start || visible.is_empty() {
+    if channels == 0 || file.width <= 0. || samples.end <= samples.start || visible.is_empty() {
         return;
     }
-    let ppp = window.scale_factor() as f64;
-    let origin = (file.x as f64 * ppp).round();
-    let count = (file.w as f64 * ppp).ceil() as usize;
-    let column = |x: f32| (x as f64 * ppp - origin).clamp(0., count as f64);
-    let spp = (samples.end - samples.start) / (file.w as f64 * ppp);
-    let shown = column(visible.x).floor() as usize..column(visible.right()).ceil() as usize;
-    let to_x = |c: f64| ((origin + c) / ppp) as f32;
-    let raw = data.samples().map(|s| s.as_ref());
+    let pixels_per_point = window.scale_factor() as f64;
+    let origin = (file.left as f64 * pixels_per_point).round();
+    let count = (file.width as f64 * pixels_per_point).ceil() as usize;
+    let column =
+        |window_x: f32| (window_x as f64 * pixels_per_point - origin).clamp(0., count as f64);
+    let samples_per_column = (samples.end - samples.start) / (file.width as f64 * pixels_per_point);
+    let shown = column(visible.left).floor() as usize..column(visible.right()).ceil() as usize;
+    let column_left = |column_index: f64| ((origin + column_index) / pixels_per_point) as f32;
+    let raw = data.samples().map(|buffer| buffer.as_ref());
     let lanes = lanes(file, stereo, channels, gain, pan);
     let rgba = Rgba::from(color);
-    let color = [rgba.r, rgba.g, rgba.b, rgba.a].map(|v| (v.clamp(0., 1.) * 255.).round() as u8);
+    let color = [rgba.r, rgba.g, rgba.b, rgba.a]
+        .map(|channel| (channel.clamp(0., 1.) * 255.).round() as u8);
 
     let peaks_id = Arc::as_ptr(&peaks) as usize;
     let frame = cache.frame;
     cache.peaks.insert(peaks_id, (peaks.clone(), frame));
 
     for lane in &lanes {
-        let lane_rect = R::new(visible.x, lane.top, visible.w, lane.height).intersect(visible);
+        let lane_rect =
+            Rect::new(visible.left, lane.top, visible.width, lane.height).intersect(visible);
         if lane_rect.is_empty() {
             continue;
         }
-        let height = (lane.height as f64 * ppp).round().max(1.) as u32;
+        let height = (lane.height as f64 * pixels_per_point).round().max(1.) as u32;
         for tile in shown.start / TILE..shown.end.div_ceil(TILE) {
             let key = TileKey {
                 peaks: peaks_id,
                 raw: raw.is_some(),
                 start: samples.start.to_bits(),
-                spp: spp.to_bits(),
+                samples_per_column: samples_per_column.to_bits(),
                 lane: (lane.channels.start, lane.channels.end),
                 tile,
             };
@@ -218,14 +181,14 @@ pub fn paint_waveform(
                         None => {
                             let values: Arc<Vec<[f32; 2]>> = Arc::new(
                                 (tile * TILE..((tile + 1) * TILE).min(count))
-                                    .map(|c| {
+                                    .map(|column_index| {
                                         column_values(
                                             &peaks,
                                             raw,
                                             samples.start,
-                                            spp,
+                                            samples_per_column,
                                             &lane.channels,
-                                            c,
+                                            column_index,
                                         )
                                     })
                                     .collect(),
@@ -242,11 +205,11 @@ pub fn paint_waveform(
                 }
             };
             let columns = image.size(0).width.0 as f64;
-            let tile_rect = R::new(
-                to_x((tile * TILE) as f64),
+            let tile_rect = Rect::new(
+                column_left((tile * TILE) as f64),
                 lane.top,
-                (columns / ppp) as f32,
-                height as f32 / ppp as f32,
+                (columns / pixels_per_point) as f32,
+                height as f32 / pixels_per_point as f32,
             );
             let shown = tile_rect.intersect(lane_rect);
             if !shown.is_empty() {
@@ -272,32 +235,32 @@ fn rasterize(
     values: &[[f32; 2]],
     height: u32,
     gain: f32,
-    [r, g, b, a]: [u8; 4],
+    [red, green, blue, alpha]: [u8; 4],
 ) -> Option<Arc<RenderImage>> {
     let width = values.len() as u32;
     if width == 0 {
         return None;
     }
-    let h = height as f32;
-    let y = |v: f32| h / 2. * (1. - (v * gain).clamp(-1., 1.));
+    let image_height = height as f32;
+    let row_of = |value: f32| image_height / 2. * (1. - (value * gain).clamp(-1., 1.));
     let mut pixels = vec![0u8; (width * height * 4) as usize];
-    for (x, &[min, max]) in values.iter().enumerate() {
+    for (column_index, &[min, max]) in values.iter().enumerate() {
         if min.is_nan() {
             continue;
         }
-        let top = y(max);
-        let bottom = y(min).max(top + 1.).min(h);
+        let top = row_of(max);
+        let bottom = row_of(min).max(top + 1.).min(image_height);
         let first = top.floor().max(0.) as u32;
         let last = (bottom.ceil() as u32).min(height);
         for row in first..last {
             // How much of this pixel the column covers.
             let cover = ((row + 1) as f32).min(bottom) - (row as f32).max(top);
-            let i = ((row * width + x as u32) * 4) as usize;
-            pixels[i..i + 4].copy_from_slice(&[
-                b,
-                g,
-                r,
-                (a as f32 * cover.clamp(0., 1.)).round() as u8,
+            let offset = ((row * width + column_index as u32) * 4) as usize;
+            pixels[offset..offset + 4].copy_from_slice(&[
+                blue,
+                green,
+                red,
+                (alpha as f32 * cover.clamp(0., 1.)).round() as u8,
             ]);
         }
     }
@@ -305,30 +268,40 @@ fn rasterize(
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(buffer)])))
 }
 
-/// `[min, max]` of the lane's channels under column `c`: from the samples
+/// `[min, max]` of the lane's channels under column `column_index`: from the samples
 /// when zoomed in (the samples either side of a column, so they read as a
 /// line past a sample per pixel), from the peak pyramid otherwise.
 fn column_values(
     peaks: &WaveformPeaks,
     raw: Option<&SampleBuffer>,
     start: f64,
-    spp: f64,
+    samples_per_column: f64,
     channels: &Range<usize>,
-    c: usize,
+    column_index: usize,
 ) -> [f32; 2] {
-    let a = (start + c as f64 * spp).floor().max(0.) as usize;
-    let b = if spp < 1. {
-        (start + (c + 1) as f64 * spp).ceil() as usize + 1
+    let first_sample = (start + column_index as f64 * samples_per_column)
+        .floor()
+        .max(0.) as usize;
+    let end_sample = if samples_per_column < 1. {
+        (start + (column_index + 1) as f64 * samples_per_column).ceil() as usize + 1
     } else {
-        ((start + (c + 1) as f64 * spp).floor() as usize).max(a + 1)
+        ((start + (column_index + 1) as f64 * samples_per_column).floor() as usize)
+            .max(first_sample + 1)
     };
     channels
         .clone()
-        .filter_map(|ch| match raw {
-            Some(raw) if spp < RAW_MAX_SPP => peaks.range_exact(raw, ch, a, b),
-            _ => peaks.range_approx(ch, a, b, (spp / 4.) as usize),
+        .filter_map(|channel| match raw {
+            Some(raw) if samples_per_column < RAW_MAX_SAMPLES_PER_COLUMN => {
+                peaks.range_exact(raw, channel, first_sample, end_sample)
+            }
+            _ => peaks.range_approx(
+                channel,
+                first_sample,
+                end_sample,
+                (samples_per_column / 4.) as usize,
+            ),
         })
-        .reduce(|x, y| (x.0.min(y.0), x.1.max(y.1)))
+        .reduce(|first, second| (first.0.min(second.0), first.1.max(second.1)))
         .map_or(EMPTY, |(min, max)| [min, max])
 }
 
@@ -339,8 +312,8 @@ pub fn paint_clip_waveform(
     window: &mut Window,
     cache: &mut WaveCache,
     clip: &AudioClip,
-    rect: R,
-    viewport: R,
+    rect: Rect,
+    viewport: Rect,
     pixels_per_beat: f32,
     bpm: f32,
     color: Hsla,
@@ -352,18 +325,18 @@ pub fn paint_clip_waveform(
     if seconds <= 0. {
         return;
     }
-    let x = |beats: f64| rect.x + beats as f32 * pixels_per_beat;
+    let x_of_beat = |beats: f64| rect.left + beats as f32 * pixels_per_beat;
     let file_width = clip.source_beats(bpm) as f32 * pixels_per_beat;
-    let beats = |px: f32| ((px - rect.x) / pixels_per_beat) as f64;
-    let in_view = beats(viewport.x).max(0.)..beats(viewport.right());
+    let beats = |px: f32| ((px - rect.left) / pixels_per_beat) as f64;
+    let in_view = beats(viewport.left).max(0.)..beats(viewport.right());
     for segment in clip.segments(in_view, bpm) {
-        let (left, right) = (x(segment.start), x(segment.end));
-        if right < viewport.x || left > viewport.right() {
+        let (left, right) = (x_of_beat(segment.start), x_of_beat(segment.end));
+        if right < viewport.left || left > viewport.right() {
             continue;
         }
         let file_left = left - (segment.file_start / seconds) as f32 * file_width;
-        let file = R::new(file_left, rect.y, file_width, rect.h);
-        let shown = R::new(left, rect.y, right - left, rect.h)
+        let file = Rect::new(file_left, rect.top, file_width, rect.height);
+        let shown = Rect::new(left, rect.top, right - left, rect.height)
             .intersect(rect)
             .intersect(viewport);
         crate::profile::time("paint.waveforms", || {
@@ -380,9 +353,9 @@ pub fn paint_clip_waveform(
                 clip.pan,
             )
         });
-        if segment.start > 0. && left >= viewport.x && left <= viewport.right() {
+        if segment.start > 0. && left >= viewport.left && left <= viewport.right() {
             window.paint_quad(gpui::fill(
-                R::new(left, rect.y, 1., rect.h).bounds(),
+                Rect::new(left, rect.top, 1., rect.height).bounds(),
                 color.opacity(0.43),
             ));
         }
