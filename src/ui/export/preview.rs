@@ -95,9 +95,9 @@ pub(super) fn arrangement_preview(
     for (i, track) in lanes.iter().enumerate() {
         let top = inner.top() + i as f32 * (lane_height + LANE_GAP);
         let color = if !selection.includes(state, track) {
-            track.color.gamma_multiply(0.3)
+            egui::Color32::from(track.color).gamma_multiply(0.3)
         } else {
-            track.color
+            track.color.into()
         };
         let ink = with_alpha(theme.text_on(color), 170);
         for clip in &track.clips {

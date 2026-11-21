@@ -1,4 +1,5 @@
 pub mod keymap;
+pub mod keys;
 pub mod labels;
 pub mod recent;
 pub mod settings;

@@ -31,12 +31,13 @@ impl BottomPanel {
         tabs: Option<(BottomView, ClipId)>,
     ) -> Option<BottomView> {
         let theme = ui.app_theme();
-        let ink = theme.text_on(track.color);
+        let color = Color32::from(track.color);
+        let ink = theme.text_on(color);
         let mut picked = None;
         // Drawn once the header is: (where, name, selected, hovered).
         let mut drawn: Vec<(Rect, Arc<Galley>, bool, bool)> = Vec::new();
         let header = Frame::new()
-            .fill(track.color)
+            .fill(color)
             .stroke(Stroke::new(1.0, theme.border))
             .inner_margin(Margin {
                 bottom: 1,

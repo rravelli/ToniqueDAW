@@ -36,7 +36,7 @@ impl ThemeSource {
                     let palette = values
                         .iter()
                         .filter_map(|value| match value.as_str().and_then(parse_color) {
-                            Some(color) => Some(color),
+                            Some(color) => Some(color.into()),
                             None => {
                                 source.warnings.push(format!("palette: bad colour {value}"));
                                 None
@@ -47,7 +47,7 @@ impl ThemeSource {
                 }
                 (key, value) => match COLORS.iter().find(|role| role.key == key) {
                     Some(role) => match value.as_str().and_then(parse_color) {
-                        Some(color) => source.colors.push((role.key, color)),
+                        Some(color) => source.colors.push((role.key, color.into())),
                         None => source
                             .warnings
                             .push(format!("{key}: expected \"#rrggbb\", got {value}")),
@@ -92,12 +92,12 @@ pub fn to_toml(theme: &Theme, base: Option<(&str, &Theme)>) -> String {
             group = role.group;
             let _ = writeln!(out, "\n# {group}");
         }
-        let _ = writeln!(out, "{} = \"{}\"", role.key, format_color(color));
+        let _ = writeln!(out, "{} = \"{}\"", role.key, format_color(color.into()));
     }
     if base.is_none_or(|(_, base)| base.palette != theme.palette) {
         out.push_str("\npalette = [\n");
         for color in &theme.palette {
-            let _ = writeln!(out, "    \"{}\",", format_color(*color));
+            let _ = writeln!(out, "    \"{}\",", format_color((*color).into()));
         }
         out.push_str("]\n");
     }

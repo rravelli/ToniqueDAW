@@ -205,7 +205,7 @@ impl Timeline {
                     if let Some(t) = state.track_from_index(track_index) {
                         collapsed = t.collapsed;
                         silenced = t.is_silenced();
-                        color = t.color;
+                        color = t.color.into();
                         height = t.height;
                     }
                     let pos = pos2(x, y);

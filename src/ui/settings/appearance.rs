@@ -251,7 +251,7 @@ fn color_row(ui: &mut Ui, color: &mut Color32, base: Color32, issue: Option<&Str
         ui.spacing_mut().item_spacing.x = 6.;
         changed |= color_edit_button_srgba(ui, color, Alpha::OnlyBlend).changed();
         ui.label(
-            RichText::new(format_color(*color))
+            RichText::new(format_color((*color).into()))
                 .monospace()
                 .small()
                 .color(theme.text_muted),
@@ -268,7 +268,7 @@ fn color_row(ui: &mut Ui, color: &mut Color32, base: Color32, issue: Option<&Str
             && ui
                 .add(icon_button(ARROW_COUNTER_CLOCKWISE).tooltip(format!(
                     "Restore {} from the base theme",
-                    format_color(base)
+                    format_color(base.into())
                 )))
                 .clicked()
         {

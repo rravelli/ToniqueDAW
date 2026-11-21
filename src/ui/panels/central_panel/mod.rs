@@ -3,10 +3,14 @@ mod master_lane;
 mod tests;
 
 use crate::ui::font::semibold;
+use crate::ui::keymap::KeymapExt;
 
 use crate::{
     config::keymap::Action,
-    core::state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+    core::{
+        grid::Offset,
+        state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+    },
     ui::{
         arrangement::{
             row_layout::RowLayout,
@@ -233,7 +237,7 @@ impl CentralPanel {
         ui: &mut Ui,
         viewport: Rect,
         content_size: Vec2,
-        offset: &mut Vec2,
+        offset: &mut Offset,
     ) -> bool {
         let mut scrolled_x = false;
         if content_size.x > viewport.max.x {

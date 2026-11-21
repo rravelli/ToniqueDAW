@@ -40,6 +40,8 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde_json = { version = "1.0.141", features = ["float_roundtrip"] }
 rustfft = "6.4.0"
 toml = "1"
+# Thread CPU time and /proc, for the UI bench (`src/bench.rs`).
+libc = "0.2"
 egui_extras = { version = "0.36", features = ["svg"] }
 
 # Taskbar progress. Already in the build through rfd and accesskit; this only

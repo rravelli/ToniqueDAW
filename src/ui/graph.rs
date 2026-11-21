@@ -470,7 +470,7 @@ fn track_names(state: &ProjectState) -> HashMap<u64, (String, String, Color32)> 
                 (
                     t.name.clone(),
                     display_name(&t.name, t.first_track_index),
-                    t.color,
+                    t.color.into(),
                 ),
             )
         })
@@ -587,7 +587,9 @@ mod tests {
 
         let (engine, _p) = Engine::new(EngineConfig::default());
         let mut state = ProjectState::new(engine);
-        state.set_track_palette(&Theme::dark().palette);
+        let palette: Vec<crate::utils::color::Color> =
+            Theme::dark().palette.iter().map(|&c| c.into()).collect();
+        state.set_track_palette(&palette);
         state.add_track();
         state.add_track();
         state.set_monitor_graph(true);
@@ -632,7 +634,7 @@ mod tests {
                 .map(|n| title(n, &owners))
                 .collect();
             let expected = format!("{} Audio Track · fader", track.first_track_index + 1);
-            assert_eq!(faders, [(expected, Some(track.color))]);
+            assert_eq!(faders, [(expected, Some(track.color.into()))]);
         }
 
         // Leaving the view stops measuring.

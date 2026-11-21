@@ -24,8 +24,8 @@ use crate::{
         state::{clipboard::Clipboard, selection::ClipSelection, sources::SourceRegistry},
         track::{TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow, TrackSoloState, TrackView},
     },
+    utils::color::Color,
 };
-use egui::Color32;
 use std::{
     collections::{HashMap, HashSet},
     mem::take,
@@ -152,7 +152,7 @@ pub struct ProjectState {
     resized_clip: Option<AudioClip>,
     /// Colours given to new tracks: the UI sets its theme's palette (grey
     /// until then).
-    track_palette: Vec<Color32>,
+    track_palette: Vec<Color>,
 }
 
 impl ProjectState {

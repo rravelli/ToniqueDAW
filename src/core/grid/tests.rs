@@ -1,9 +1,22 @@
 use super::*;
 
+/// A view from `.0` to `.1` across the screen.
+#[derive(Clone, Copy)]
+struct Span(f32, f32);
+
+impl Viewport for Span {
+    fn left(&self) -> f32 {
+        self.0
+    }
+    fn right(&self) -> f32 {
+        self.1
+    }
+}
+
 #[test]
 fn fitting_shows_exactly_the_range() {
     let mut grid = GridService::new();
-    let viewport = Rect::from_min_size(egui::pos2(100., 0.), egui::vec2(400., 50.));
+    let viewport = Span(100., 500.);
     grid.fit(BeatPos(8.), BeatPos(16.), 400.);
     assert_eq!(grid.pixels_per_beat(), 50.);
     assert_eq!(grid.beats_to_x(BeatPos(8.), viewport), 100.);

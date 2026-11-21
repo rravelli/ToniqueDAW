@@ -1081,13 +1081,24 @@ fn a_new_edit_forgets_the_selections_to_redo() {
 
 #[test]
 fn new_track_colors_are_foretold() {
-    use egui::Color32;
+    use crate::utils::color::Color;
     let mut state = setup_state();
-    let palette = [Color32::RED, Color32::GREEN, Color32::BLUE];
+    let palette = [
+        Color::rgb(255, 0, 0),
+        Color::rgb(0, 255, 0),
+        Color::rgb(0, 0, 255),
+    ];
     state.set_track_palette(&palette);
     state.add_track(); // red
     let foretold = state.new_track_colors(3);
-    assert_eq!(foretold, [Color32::GREEN, Color32::BLUE, Color32::RED]);
+    assert_eq!(
+        foretold,
+        [
+            Color::rgb(0, 255, 0),
+            Color::rgb(0, 0, 255),
+            Color::rgb(255, 0, 0)
+        ]
+    );
     let added: Vec<_> = (0..3)
         .map(|_| {
             let id = state.add_track();
@@ -1177,20 +1188,28 @@ fn snapping_prefers_targets_in_reach_over_the_grid() {
 
 #[test]
 fn new_tracks_go_through_the_palette() {
-    use egui::Color32;
+    use crate::utils::color::Color;
     let mut state = setup_state();
-    state.set_track_palette(&[Color32::RED, Color32::BLUE]);
+    state.set_track_palette(&[Color::rgb(255, 0, 0), Color::rgb(0, 0, 255)]);
     let colors: Vec<_> = (0..3)
         .map(|_| {
             let id = state.add_track();
             state.track_view_mut(&id).color
         })
         .collect();
-    assert_eq!(colors, [Color32::RED, Color32::BLUE, Color32::RED]);
+    assert_eq!(
+        colors,
+        [
+            Color::rgb(255, 0, 0),
+            Color::rgb(0, 0, 255),
+            Color::rgb(255, 0, 0)
+        ]
+    );
 }
 
 mod projects {
     use super::*;
+    use crate::utils::color::Color;
     use crate::{
         cache::AUDIO_ANALYSIS_CACHE,
         core::{
@@ -1199,7 +1218,6 @@ mod projects {
             state::MASTER_TRACK_ID,
         },
     };
-    use egui::Color32;
     use std::{fs, path::Path};
     use tonique_engine::sample::WavWriter;
 
@@ -1298,7 +1316,7 @@ mod projects {
         view.name = "Drums".into();
         #[allow(clippy::disallowed_methods)]
         {
-            view.color = Color32::from_rgb(10, 20, 30);
+            view.color = Color::rgb(10, 20, 30);
         }
         view.height = 90.;
         view.collapsed = true;

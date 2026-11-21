@@ -347,6 +347,21 @@ pub fn contrast(a: Color32, b: Color32) -> f32 {
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
+/// The project's colours (tracks', files') drawn with egui.
+impl From<crate::utils::color::Color> for Color32 {
+    fn from(c: crate::utils::color::Color) -> Self {
+        Color32::from_rgba_unmultiplied(c.r, c.g, c.b, c.a)
+    }
+}
+
+/// egui's colours (the theme's palette) given to the project.
+impl From<Color32> for crate::utils::color::Color {
+    fn from(c: Color32) -> Self {
+        let [r, g, b, a] = c.to_srgba_unmultiplied();
+        Self::rgba(r, g, b, a)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

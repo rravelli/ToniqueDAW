@@ -1,3 +1,5 @@
+use crate::bench::Bench;
+use crate::ui::keymap::KeymapExt;
 use crate::{
     audio::host::AudioHost,
     config::{keymap::Action, settings::Settings},
@@ -23,6 +25,8 @@ use tonique_engine::engine::Engine;
 
 pub struct ToniqueApp {
     state: ProjectState,
+    /// `TONIQUE_BENCH`: steers the view and measures frames.
+    bench: Option<Bench>,
     workspace: Workspace,
     commands: Commands,
     menu_bar: AppMenuBar,
@@ -47,11 +51,16 @@ impl ToniqueApp {
         let palette = theme.palette.clone();
         theme.install(&cc.egui_ctx);
         let mut state = ProjectState::new(engine);
-        state.set_track_palette(&palette);
+        state.set_track_palette(&project_palette(&palette));
         state.attach_audio(audio, settings);
+        let mut bench = Bench::from_env("egui");
+        if let Some(bench) = &mut bench {
+            bench.setup(&mut state);
+        }
         Self {
             project: ProjectManager::new(&state),
             state,
+            bench,
             workspace: Workspace::default(),
             commands: Commands::default(),
             menu_bar: AppMenuBar::new(),
@@ -95,6 +104,9 @@ impl ToniqueApp {
     }
 
     fn update_state(&mut self, ctx: &egui::Context) {
+        if let Some(bench) = &mut self.bench {
+            bench.frame(&mut self.state);
+        }
         // Update state
         self.state
             .set_monitor_graph(self.workspace.main_view == MainView::Graph);
@@ -108,7 +120,8 @@ impl ToniqueApp {
 
     fn show(&mut self, ui: &mut egui::Ui) {
         self.shortcuts(ui);
-        self.state.set_track_palette(&ui.app_theme().palette);
+        self.state
+            .set_track_palette(&project_palette(&ui.app_theme().palette));
         let (state, workspace, commands) =
             (&mut self.state, &mut self.workspace, &mut self.commands);
         let recent = self
@@ -206,3 +219,8 @@ impl ToniqueApp {
 
 #[cfg(test)]
 mod tests;
+
+/// The theme's palette, as the project gives it to new tracks.
+fn project_palette(palette: &[egui::Color32]) -> Vec<crate::utils::color::Color> {
+    palette.iter().map(|&c| c.into()).collect()
+}

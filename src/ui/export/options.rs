@@ -118,7 +118,7 @@ pub(super) fn sources_ui(ui: &mut Ui, rows: &[TrackRow], selection: &mut Selecti
                     ui,
                     checked,
                     row.depth as f32 * INDENT,
-                    row.color,
+                    row.color.into(),
                     &display_name(&row.name, row.first_track_index),
                     detail,
                 );

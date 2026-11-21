@@ -227,7 +227,7 @@ impl Timeline {
                 ui.painter().rect_filled(
                     track_rect,
                     1.0,
-                    with_alpha(track.color, SELECTED_LANE_ALPHA),
+                    with_alpha(track.color.into(), SELECTED_LANE_ALPHA),
                 );
             }
 
@@ -326,7 +326,7 @@ impl Timeline {
         let color = if dragged {
             theme.hover_overlay
         } else {
-            track.color
+            track.color.into()
         };
         let response = ClipView {
             clip,
@@ -440,7 +440,7 @@ impl Timeline {
             // Past the last track: on the one dropping it will add, in the
             // colour it will get.
             let color = match &track {
-                Some(t) => t.color,
+                Some(t) => Color32::from(t.color),
                 None => self
                     .new_track_lanes(ui, state, layout, viewport, 1)
                     .first()
@@ -508,7 +508,7 @@ fn paint_group_overview(ui: &Ui, state: &ProjectState, group: &TrackRow, lane: R
         } else {
             PREVIEW_ALPHA
         };
-        let color = with_alpha(track.color, alpha);
+        let color = with_alpha(track.color.into(), alpha);
         for clip in &track.clips {
             let x = state.grid.beats_to_x(clip.position, lane)
                 ..=state.grid.beats_to_x(clip.end(bpm), lane);
@@ -573,7 +573,11 @@ fn paint_new_track_lanes(
     viewport: Rect,
     count: usize,
 ) -> Vec<Color32> {
-    let colors = state.new_track_colors(count);
+    let colors: Vec<Color32> = state
+        .new_track_colors(count)
+        .into_iter()
+        .map(Color32::from)
+        .collect();
     let painter = ui.painter_at(viewport);
     for (i, color) in colors.iter().enumerate() {
         let top = layout.track_top(state.track_count() + i);

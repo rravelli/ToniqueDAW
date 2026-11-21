@@ -9,6 +9,7 @@ use crate::{
 
 mod analysis;
 mod audio;
+mod bench;
 mod cache;
 mod config;
 mod core;

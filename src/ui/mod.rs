@@ -12,6 +12,7 @@ mod effects;
 mod export;
 mod font;
 mod graph;
+mod keymap;
 mod missing_files;
 mod panels;
 mod project;
@@ -22,6 +23,17 @@ mod waveform;
 mod widget;
 mod window;
 mod workspace;
+
+/// The grid maps beats onto egui's rectangles: what it needs of a view is
+/// its left and right edges.
+impl crate::core::grid::Viewport for egui::Rect {
+    fn left(&self) -> f32 {
+        self.min.x
+    }
+    fn right(&self) -> f32 {
+        self.max.x
+    }
+}
 
 /// Recording isn't implemented yet: hides the record and arm buttons.
 const RECORDING: bool = false;

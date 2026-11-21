@@ -136,10 +136,10 @@ impl ClipDetails {
         self.grid
             .paint_bar_labels(&ui.painter_at(labels), bars, &theme);
         self.paint_lane(ui, lane, &shown, track, state, &theme);
-        self.paint_markers(ui, ruler, lane, &shown, track.color, bpm, &theme);
+        self.paint_markers(ui, ruler, lane, &shown, track.color.into(), bpm, &theme);
 
         ui.scope_builder(UiBuilder::new().max_rect(inspector), |ui| {
-            inspector_ui(ui, clip, track.color, state)
+            inspector_ui(ui, clip, track.color.into(), state)
         });
         ui.allocate_rect(rect, Sense::hover());
     }
@@ -330,7 +330,7 @@ impl ClipDetails {
             painter.rect_filled(
                 Rect::from_x_y_ranges(left..=right, lane.y_range()),
                 0.,
-                with_alpha(track.color, 24),
+                with_alpha(track.color.into(), 24),
             );
         }
 
@@ -342,7 +342,7 @@ impl ClipDetails {
                 &clip.audio.data,
                 0.0..frames,
                 clip.audio.channels >= 2,
-                track.color,
+                track.color.into(),
                 clip.gain,
                 clip.pan,
             );
