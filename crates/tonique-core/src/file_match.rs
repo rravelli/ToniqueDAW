@@ -13,7 +13,7 @@ use crate::file_tree::is_audio_file;
 
 /// Extensions offered when picking a file on disk; any readable file is
 /// taken.
-pub const AUDIO_EXTENSIONS: &[&str] = &["wav", "mp3", "flac", "ogg", "aiff", "aif", "aac", "m4a"];
+pub use crate::waveform::DECODED_EXTENSIONS as AUDIO_EXTENSIONS;
 /// Most matches listed for a file.
 const MAX_MATCHES: usize = 40;
 /// Most files read from the browser's folders: enough for a sample

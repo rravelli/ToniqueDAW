@@ -15,6 +15,11 @@ use tonique_engine::sample::SampleBuffer;
 
 use crate::analysis::AudioData;
 
+/// Extensions of the formats [`load_audio`] decodes: those of the symphonia
+/// features built in (its defaults, and mp3 through creek). Update it with
+/// them.
+pub const DECODED_EXTENSIONS: &[&str] = &["wav", "wave", "flac", "ogg", "oga", "mp3"];
+
 /// Minimum number of frames decoded between two published peak snapshots.
 const CHUNK_SIZE: usize = 88200;
 

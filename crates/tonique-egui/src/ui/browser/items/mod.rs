@@ -20,11 +20,10 @@ use crate::{
     cache::AUDIO_ANALYSIS_CACHE,
     config::keymap::Action,
     core::state::ProjectState,
-    file_tree::{FileNode, FileTree, pinned},
+    file_tree::{FileNode, FileTree, is_audio_file, pinned},
     ui::{theme::ThemeExt, widget::flat_button::FlatButton},
 };
 
-const PLAYABLE_FORMAT: &[&str] = &["mp3", "wav", "ogg"];
 /// Width of a label's menu: its name's field and its colours'.
 const LABEL_MENU_WIDTH: f32 = 140.;
 /// Most rows pinned at the top while scrolled into folders.
@@ -452,13 +451,9 @@ impl FileList {
                 return;
             };
 
-            let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if updated {
-                let is_audio = PLAYABLE_FORMAT.contains(&extension);
-                if !file.is_dir && is_audio {
-                    self.selected_audio = AUDIO_ANALYSIS_CACHE.get_or_analyze(file.path.clone());
-                    self.preview(state, file.path.clone());
-                }
+            if updated && !file.is_dir && is_audio_file(&file.path) {
+                self.selected_audio = AUDIO_ANALYSIS_CACHE.get_or_analyze(file.path.clone());
+                self.preview(state, file.path.clone());
             }
         }
     }

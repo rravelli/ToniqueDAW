@@ -10,7 +10,7 @@ use crate::{
     app::{PopupKind, Tonique},
     browser::{DragGhost, DraggedAudio, ListKind},
     core::state::PlaybackState,
-    file_tree::{FileNode, is_audio_file},
+    file_tree::{FileKind, FileNode, file_kind},
     icons,
     theme::{Theme, hsla, icon, mix, size},
 };
@@ -241,15 +241,18 @@ impl Tonique {
             || item.path.display().to_string(),
             |file_name| file_name.to_string_lossy().into_owned(),
         );
-        let audio = !item.is_dir && is_audio_file(&item.path);
+        let kind = (!item.is_dir).then(|| file_kind(&item.path)).flatten();
+        let audio = kind == Some(FileKind::Audio);
         let previewing = self.state.previewing() == Some(item.path.as_path())
             && self.state.preview_playback_state() == PlaybackState::Playing;
-        let glyph = match (item.is_dir, open, audio) {
+        let glyph = match (item.is_dir, open, kind) {
             _ if previewing => icons::SPEAKER_HIGH,
             (true, true, _) => icons::FOLDER_OPEN,
             (true, false, _) => icons::FOLDER,
-            (false, _, true) => icons::FILE_AUDIO,
-            (false, _, false) => icons::FILE,
+            (false, _, Some(FileKind::Audio)) => icons::FILE_AUDIO,
+            (false, _, Some(FileKind::Midi)) => icons::PIANO_KEYS,
+            (false, _, Some(FileKind::UnsupportedAudio)) => icons::FILE_X,
+            (false, _, None) => icons::FILE,
         };
         let tint = if audio || previewing {
             theme.accent

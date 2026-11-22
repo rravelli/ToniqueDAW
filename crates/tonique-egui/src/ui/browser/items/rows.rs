@@ -4,7 +4,7 @@ use crate::ui::theme::font_size;
 use crate::{
     cache::AUDIO_ANALYSIS_CACHE,
     core::state::ProjectState,
-    file_tree::FileNode,
+    file_tree::{FileKind, FileNode, file_kind},
     ui::{
         dnd::DragPayload,
         font::PHOSPHOR_REGULAR,
@@ -20,7 +20,7 @@ use egui::{Align2, FontId, Key, Popup, Rect, RichText, Sense, Stroke, Ui, pos2, 
 use egui_phosphor::regular::{ARROW_SQUARE_OUT, DOTS_THREE, MAGNIFYING_GLASS, X};
 use std::ffi::OsStr;
 
-use super::{FileList, FolderAction, PLAYABLE_FORMAT, ROW_HEIGHT};
+use super::{FileList, FolderAction, ROW_HEIGHT};
 
 impl FileList {
     /// A section's header, a band across the list to set it apart from the
@@ -213,8 +213,8 @@ impl FileList {
     ) -> bool {
         let is_dir = file.is_dir;
         let selected = self.selected.is_some_and(|idx| idx == index);
-        let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let is_audio = PLAYABLE_FORMAT.contains(&extension);
+        let kind = (!is_dir).then(|| file_kind(&file.path)).flatten();
+        let is_audio = kind == Some(FileKind::Audio);
 
         let (caret, icon) = match (is_dir, open) {
             (true, true) => (
@@ -225,8 +225,15 @@ impl FileList {
                 Some(egui_phosphor::regular::CARET_RIGHT),
                 egui_phosphor::regular::FOLDER,
             ),
-            (false, _) if is_audio => (None, egui_phosphor::regular::FILE_AUDIO),
-            (false, _) => (None, egui_phosphor::regular::FILE),
+            (false, _) => (
+                None,
+                match kind {
+                    Some(FileKind::Audio) => egui_phosphor::regular::FILE_AUDIO,
+                    Some(FileKind::Midi) => egui_phosphor::regular::PIANO_KEYS,
+                    Some(FileKind::UnsupportedAudio) => egui_phosphor::regular::FILE_X,
+                    None => egui_phosphor::regular::FILE,
+                },
+            ),
         };
         // The file the preview plays: a speaker, in the accent.
         let playing = state.previewing() == Some(file.path.as_path());
