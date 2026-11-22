@@ -3,21 +3,18 @@
 
 use gpui::{Context, MouseButton, div, prelude::*, px};
 
-use crate::{
-    app::Tonique,
-    theme::{Theme, hsla, size},
-};
+use crate::theme::{Theme, hsla, size};
 
 const HEIGHT: f32 = 24.;
 const UNDERLINE: f32 = 2.;
 
 /// `tabs` sharing the width, `selected` lit; `select` takes a pressed one.
-pub fn tab_bar<Tab: Copy + PartialEq + 'static>(
+pub fn tab_bar<V: 'static, Tab: Copy + PartialEq + 'static>(
     tabs: &[(Tab, &'static str)],
     selected: Tab,
     theme: &Theme,
-    context: &mut Context<Tonique>,
-    select: fn(&mut Tonique, Tab),
+    context: &mut Context<V>,
+    select: fn(&mut V, Tab),
 ) -> gpui::Div {
     let tabs = tabs.iter().enumerate().map(|(index, &(tab, name))| {
         let is_selected = tab == selected;

@@ -5,10 +5,7 @@ use gpui::{
     Context, FocusHandle, KeyDownEvent, Keystroke, MouseButton, Window, div, prelude::*, px,
 };
 
-use crate::{
-    app::Tonique,
-    theme::{Theme, hsla},
-};
+use crate::theme::{Theme, hsla};
 
 /// What a key did to a field.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -48,7 +45,7 @@ pub struct TextField {
 }
 
 impl TextField {
-    pub fn new(context: &mut Context<Tonique>) -> Self {
+    pub fn new<V: 'static>(context: &mut Context<V>) -> Self {
         Self {
             text: String::new(),
             focus: context.focus_handle(),
@@ -56,7 +53,12 @@ impl TextField {
     }
 
     /// Typing `text` from now, the field taking the keyboard.
-    pub fn start(&mut self, text: String, window: &mut Window, context: &mut Context<Tonique>) {
+    pub fn start<V: 'static>(
+        &mut self,
+        text: String,
+        window: &mut Window,
+        context: &mut Context<V>,
+    ) {
         self.text = text;
         window.focus(&self.focus, context);
     }
@@ -95,13 +97,13 @@ impl TextField {
 
 /// A line being typed, with the keyboard: Enter or a click elsewhere
 /// `finish`es it keeping the text, Escape without. `get` finds its field.
-pub fn typing_view(
+pub fn typing_view<V: 'static>(
     id: &'static str,
     field: &TextField,
     theme: &Theme,
-    context: &mut Context<Tonique>,
-    get: fn(&mut Tonique) -> Option<&mut TextField>,
-    finish: fn(&mut Tonique, bool, &mut Window, &mut Context<Tonique>),
+    context: &mut Context<V>,
+    get: fn(&mut V) -> Option<&mut TextField>,
+    finish: fn(&mut V, bool, &mut Window, &mut Context<V>),
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)

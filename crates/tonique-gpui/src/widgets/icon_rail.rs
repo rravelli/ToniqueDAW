@@ -5,7 +5,6 @@
 use gpui::{Context, MouseButton, div, prelude::*, px};
 
 use crate::{
-    app::Tonique,
     theme::{Theme, hsla, icon, size},
     widgets::tooltip,
 };
@@ -15,13 +14,13 @@ const INDICATOR: f32 = 2.;
 
 /// `items` (value, icon, name) one under the other, `button` wide,
 /// `selected` marked; `select` takes another one pressed.
-pub fn icon_rail<Item: Copy + PartialEq + 'static>(
+pub fn icon_rail<V: 'static, Item: Copy + PartialEq + 'static>(
     items: &[(Item, &'static str, &'static str)],
     selected: Item,
     button: f32,
     theme: &Theme,
-    context: &mut Context<Tonique>,
-    select: fn(&mut Tonique, Item),
+    context: &mut Context<V>,
+    select: fn(&mut V, Item),
 ) -> gpui::Div {
     let buttons = items
         .iter()
