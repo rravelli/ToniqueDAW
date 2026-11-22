@@ -375,7 +375,7 @@ impl BottomPanel {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
-                    crate::app::arrows::hold_in(
+                    crate::app::arrows::hold(
                         holder.clone(),
                         crate::app::arrows::stepper(
                             context.weak_entity(),

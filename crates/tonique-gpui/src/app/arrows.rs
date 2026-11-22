@@ -63,24 +63,17 @@ impl ArrowHolder {
     }
 }
 
-/// The control holding the arrow keys, if any, app-wide: any view's
-/// control can take them. With a stepper, its view steps it; without, the
-/// window does.
+/// The control holding the arrow keys, if any, app-wide, and what steps
+/// it: any view's control can take them.
 #[derive(Default)]
-struct HeldArrows(Option<(ArrowHolder, Option<Stepper>)>);
+struct HeldArrows(Option<(ArrowHolder, Stepper)>);
 
 impl Global for HeldArrows {}
 
-/// `holder`, one of the window's controls, takes the arrow keys, from
-/// whichever had them.
-pub fn hold(holder: ArrowHolder, context: &mut App) {
-    context.set_global(HeldArrows(Some((holder, None))));
-}
-
 /// `holder`, a control of a view's stepped by `step`, takes the arrow
-/// keys.
-pub fn hold_in(holder: ArrowHolder, step: Stepper, context: &mut App) {
-    context.set_global(HeldArrows(Some((holder, Some(step)))));
+/// keys from whichever had them.
+pub fn hold(holder: ArrowHolder, step: Stepper, context: &mut App) {
+    context.set_global(HeldArrows(Some((holder, step))));
 }
 
 /// Whether `holder` has the arrow keys: outlined in the accent.
@@ -103,7 +96,7 @@ pub fn held(context: &App) -> Option<&ArrowHolder> {
     held_with_stepper(context).map(|(holder, _)| holder)
 }
 
-fn held_with_stepper(context: &App) -> Option<&(ArrowHolder, Option<Stepper>)> {
+fn held_with_stepper(context: &App) -> Option<&(ArrowHolder, Stepper)> {
     context
         .try_global::<HeldArrows>()
         .and_then(|held| held.0.as_ref())
@@ -118,7 +111,7 @@ impl Tonique {
         window: &Window,
         context: &mut Context<Self>,
     ) -> bool {
-        let (Some(presses), Some((holder, step))) =
+        let (Some(presses), Some((_, step))) =
             (arrow_press(keystroke), held_with_stepper(context).cloned())
         else {
             return false;
@@ -126,20 +119,9 @@ impl Tonique {
         if !self.has_keyboard(window, context) {
             return false;
         }
-        // A view's control: stepped by its view, after this (it may be
-        // this one, being updated).
-        if let Some(step) = step {
-            context.defer(move |context| step(presses, context));
-            return true;
-        }
-        match holder {
-            // Stepped by their views.
-            ArrowHolder::Header(..)
-            | ArrowHolder::Clip(_)
-            | ArrowHolder::Knob(_)
-            | ArrowHolder::Number(_) => {}
-            ArrowHolder::MetronomeLevel => self.step_metronome_level(presses, context),
-        }
+        // Stepped by its view, after this (it may be this one, being
+        // updated).
+        context.defer(move |context| step(presses, context));
         true
     }
 }

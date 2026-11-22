@@ -79,9 +79,9 @@ impl Tonique {
             | PopupKind::Effect(..)
             | PopupKind::ClipRuler(..)
             | PopupKind::ClipWarpMode(..)
-            | PopupKind::ClipWindow(..) => return None,
-            PopupKind::Setting(choice) => self.audio_choice_menu(choice, context),
-            PopupKind::Theme => self.theme_menu(context),
+            | PopupKind::ClipWindow(..)
+            | PopupKind::Setting(..)
+            | PopupKind::Theme => return None,
             PopupKind::Bar(menu) => self.bar_menu(menu, context),
             PopupKind::RecentProjects => self.recent_projects_menu(context),
             PopupKind::Memory => self.memory_popup(context),

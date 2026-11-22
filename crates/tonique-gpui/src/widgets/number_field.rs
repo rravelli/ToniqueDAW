@@ -242,7 +242,7 @@ impl NumberField {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, window, context| {
                     context.stop_propagation();
-                    crate::app::arrows::hold_in(ArrowHolder::Number(id), step.clone(), context);
+                    crate::app::arrows::hold(ArrowHolder::Number(id), step.clone(), context);
                     let field = get(this);
                     if event.click_count >= 2 {
                         field.drag = None;

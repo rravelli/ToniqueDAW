@@ -7,7 +7,7 @@ pub mod arrows;
 pub mod command;
 mod dialog;
 mod export;
-mod keys;
+pub mod keys;
 mod memory;
 pub mod menu_bar;
 mod menus;
@@ -30,7 +30,7 @@ use export::ExportUi;
 use menu_bar::MenuBarUi;
 pub use popup::PopupKind;
 use project::ProjectFiles;
-use settings::SettingsUi;
+use settings::{SettingsDialog, SettingsEvent, SettingsTab};
 use transport::{Shows, TransportBar, TransportEvent};
 
 use crate::{
@@ -74,7 +74,7 @@ pub struct Tonique {
     files: ProjectFiles,
     /// The dialog open, if any, over everything.
     dialog: Option<Dialog>,
-    settings: SettingsUi,
+    settings: Entity<SettingsDialog>,
     /// Exporting audio: what's chosen, and the export running.
     export: ExportUi,
     /// The menus' layer, over everything.
@@ -147,6 +147,9 @@ impl Tonique {
         let transport = context.new(|_| TransportBar::new(project.clone()));
         let transport_events = context.subscribe(&transport, Self::on_transport);
         let arrangement = context.new(|_| Arrangement::new(project.clone(), waves.clone()));
+        let settings = context
+            .new(|context| SettingsDialog::new(project.clone(), themes, theme_warnings, context));
+        let settings_events = context.subscribe_in(&settings, window, Self::on_settings);
         let arrangement_events = context.subscribe(&arrangement, Self::on_arrangement);
         Self {
             browser,
@@ -161,13 +164,13 @@ impl Tonique {
             transport,
             menu_bar: MenuBarUi::default(),
             dialog: None,
-            settings: SettingsUi::new(themes, theme_warnings),
+            settings,
             export: ExportUi::new(context),
             files,
             popups: crate::popup::init(context),
             bench,
             _ticker: ticker,
-            _subscriptions: vec![transport_events, arrangement_events],
+            _subscriptions: vec![transport_events, arrangement_events, settings_events],
         }
     }
 
@@ -189,7 +192,7 @@ impl Tonique {
             }
             TransportEvent::ShowMissingFiles => self.show_missing_files(None, context),
             TransportEvent::OpenAudioSettings => {
-                self.open_settings(settings::SettingsTab::Audio, context);
+                self.open_settings(SettingsTab::Audio, context);
             }
         }
         context.notify();
@@ -236,6 +239,33 @@ impl Tonique {
         context.notify();
     }
 
+    fn on_settings(
+        &mut self,
+        _: &Entity<SettingsDialog>,
+        SettingsEvent::Close: &SettingsEvent,
+        window: &mut Window,
+        context: &mut Context<Self>,
+    ) {
+        self.close_dialog(window, context);
+        context.notify();
+    }
+
+    /// Opens the settings on `tab`, from the settings in use.
+    pub fn open_settings(&mut self, tab: SettingsTab, context: &mut App) {
+        self.settings
+            .update(context, |settings, context| settings.open(tab, context));
+        self.dialog = Some(Dialog::Settings);
+    }
+
+    /// Opens or closes the settings, as their shortcut does.
+    pub fn toggle_settings(&mut self, context: &mut App) {
+        if self.dialog == Some(Dialog::Settings) {
+            self.dialog = None;
+        } else {
+            self.open_settings(SettingsTab::General, context);
+        }
+    }
+
     /// Between the timeline and the audio graph.
     fn toggle_graph(&mut self, context: &mut Context<Self>) {
         self.graph.update(context, GraphView::toggle);
@@ -254,7 +284,7 @@ impl Tonique {
             .browser_width
             .drag_to(f32::from(event.position.x), width / 2.)
             .is_some();
-        self.settings_drag_move(event, context) | self.export_drag_move(event, context) | browser
+        self.export_drag_move(event, context) | browser
     }
 
     /// Hears every pointer move, before the elements do: an element only
@@ -283,9 +313,8 @@ impl Tonique {
                 // them back after this.
                 window.on_mouse_event(move |_: &MouseDownEvent, phase, _, app| {
                     if phase == DispatchPhase::Capture {
-                        let _ = pressed.update(app, |this, context| {
+                        let _ = pressed.update(app, |_this, context| {
                             crate::app::arrows::release(context);
-                            this.settings.stop_recording();
                         });
                     }
                 });
@@ -297,13 +326,12 @@ impl Tonique {
 
     fn on_up(&mut self, _: &MouseUpEvent, _window: &mut Window, context: &mut Context<Self>) {
         self.browser_width.end();
-        self.settings_drag_end();
         self.export_drag_end();
         context.notify();
     }
 
     fn is_dragging(&self) -> bool {
-        self.browser_width.is_dragging() || self.settings.is_dragging() || self.export.is_dragging()
+        self.browser_width.is_dragging() || self.export.is_dragging()
     }
 
     /// The browser, resizable from its right edge.

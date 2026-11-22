@@ -6,12 +6,13 @@
 //! Unlike egui, gpui has no colour picker: a colour is edited by typing
 //! its hex value.
 
+use super::SettingsDialog;
 use crate::model::HoldsProject;
 use gpui::{App, Context, MouseButton, Window, div, prelude::*, px};
 
 use crate::{
     app::{
-        PopupKind, Tonique,
+        PopupKind, focus_main,
         settings::{CONTROL_HEIGHT, CONTROL_WIDTH, ROW_GAP, section_header, setting_row, status},
     },
     icons,
@@ -87,7 +88,7 @@ impl AppearanceForm {
     }
 }
 
-impl Tonique {
+impl SettingsDialog {
     /// Uses `theme` everywhere, new tracks taking their colours from its
     /// palette.
     pub fn install_theme(&mut self, theme: Theme, context: &mut App) {
@@ -97,36 +98,36 @@ impl Tonique {
 
     /// Uses theme `id` and saves it as the chosen one.
     fn select_theme(&mut self, id: &str, context: &mut App) {
-        let form = &mut self.settings.appearance;
+        let form = &mut self.appearance;
         let (theme, warnings) = form.themes.resolve(id);
         form.warnings = warnings;
         form.open(id);
         self.install_theme(theme, context);
         let mut settings = self.state(context).settings().clone();
         settings.theme = id.to_string();
-        self.settings.draft.theme = settings.theme.clone();
+        self.draft.theme = settings.theme.clone();
         self.state_mut(context).apply_settings(settings);
     }
 
     fn duplicate_theme(&mut self, context: &mut App) {
         let current = self.state(context).settings().theme.clone();
-        match self.settings.appearance.themes.duplicate(&current) {
+        match self.appearance.themes.duplicate(&current) {
             Ok(id) => self.select_theme(&id, context),
-            Err(error) => self.settings.appearance.error = Some(error),
+            Err(error) => self.appearance.error = Some(error),
         }
     }
 
     /// Reads the theme files again, picking up edits made to the current
     /// one's.
     fn reload_themes(&mut self, context: &mut App) {
-        self.settings.appearance.themes = ThemeLibrary::load();
+        self.appearance.themes = ThemeLibrary::load();
         let current = self.state(context).settings().theme.clone();
         self.select_theme(&current, context);
     }
 
     /// Changes the theme being edited, shows it and saves it.
     fn edit_theme(&mut self, change: impl FnOnce(&mut Draft), context: &mut App) {
-        let form = &mut self.settings.appearance;
+        let form = &mut self.appearance;
         let Some(draft) = form.draft.as_mut().filter(|draft| draft.editable) else {
             return;
         };
@@ -146,7 +147,7 @@ impl Tonique {
     ) {
         let mut field = TextField::new(context);
         field.start(text, window, context);
-        self.settings.appearance.typing = Some((typed, field));
+        self.appearance.typing = Some((typed, field));
     }
 
     fn finish_theme_typing(
@@ -155,10 +156,10 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        let Some((typed, field)) = self.settings.appearance.typing.take() else {
+        let Some((typed, field)) = self.appearance.typing.take() else {
             return;
         };
-        window.focus(&self.focus, context);
+        focus_main(window, context);
         if !keep {
             return;
         }
@@ -176,7 +177,7 @@ impl Tonique {
             format!("#{text}")
         };
         let Some(color) = parse_color(&hex) else {
-            self.settings.appearance.error = Some(format!("“{text}” isn't a #rrggbb colour"));
+            self.appearance.error = Some(format!("“{text}” isn't a #rrggbb colour"));
             return;
         };
         self.edit_theme(
@@ -202,7 +203,7 @@ impl Tonique {
     /// The themes to choose from, the one in use ticked.
     pub fn theme_menu(&self, context: &mut Context<Self>) -> gpui::Div {
         let current = &self.state(context).settings().theme.clone();
-        let themes = self.settings.appearance.themes.list();
+        let themes = self.appearance.themes.list();
         let missing = (!themes.iter().any(|theme| theme.id == *current))
             .then(|| (current.clone(), format!("{current} (not found)")));
         let options = themes
@@ -237,11 +238,11 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> gpui::Div {
         let current = self.state(context).settings().theme.clone();
-        let form = &mut self.settings.appearance;
+        let form = &mut self.appearance;
         if form.draft.as_ref().is_none_or(|draft| draft.id != current) {
             form.open(&current);
         }
-        let form = &self.settings.appearance;
+        let form = &self.appearance;
         let Some(draft) = form.draft.as_ref() else {
             return div();
         };
@@ -322,7 +323,7 @@ impl Tonique {
     /// The name, every colour by group, and the palette.
     fn theme_editor(&self, draft: &Draft, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
         let issues = draft.theme.contrast_issues();
-        let typing = self.settings.appearance.typing.as_ref();
+        let typing = self.appearance.typing.as_ref();
         let name = match typing {
             Some((Typed::Name, field)) => {
                 self.theme_typing(field, theme, context).into_any_element()
@@ -392,7 +393,6 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> gpui::Div {
         let typing = self
-            .settings
             .appearance
             .typing
             .as_ref()
@@ -470,7 +470,7 @@ impl Tonique {
     /// The palette's colours, each typed when clicked and removed when
     /// right-clicked; then adding one and restoring them.
     fn palette_row(&self, draft: &Draft, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
-        let typing = self.settings.appearance.typing.as_ref();
+        let typing = self.appearance.typing.as_ref();
         let mut row = div().flex().flex_wrap().items_center().gap(px(4.));
         for (index, &color) in draft.theme.palette.iter().enumerate() {
             if let Some((Typed::Palette(typed), field)) = typing
@@ -602,13 +602,7 @@ impl Tonique {
             field,
             theme,
             context,
-            |this| {
-                this.settings
-                    .appearance
-                    .typing
-                    .as_mut()
-                    .map(|(_, field)| field)
-            },
+            |this| this.appearance.typing.as_mut().map(|(_, field)| field),
             Self::finish_theme_typing,
         )
         .flex_none()

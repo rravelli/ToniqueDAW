@@ -160,7 +160,7 @@ impl Arrangement {
             crate::app::arrows::stepper(context.weak_entity(), move |this, presses, context| {
                 this.step_header(id, param, presses, context)
             });
-        crate::app::arrows::hold_in(ArrowHolder::Header(id, param), step, context);
+        crate::app::arrows::hold(ArrowHolder::Header(id, param), step, context);
         let value = self.param(id, param, context);
         let scale = param.scale();
         if event.click_count >= 2 {

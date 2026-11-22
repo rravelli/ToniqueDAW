@@ -74,7 +74,7 @@ impl Tonique {
         let theme = crate::theme::current(context);
         let content = match dialog {
             Dialog::About => about(&theme, context),
-            Dialog::Settings => self.settings_dialog(window, context),
+            Dialog::Settings => div().child(self.settings.clone()),
             Dialog::Export => self.export_dialog(window, context),
             Dialog::Unsaved => self.unsaved_dialog(context),
         };

@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// The keymap's key and modifiers for a keystroke.
-fn shortcut(keystroke: &Keystroke) -> Option<(Key, Mods)> {
+pub fn shortcut(keystroke: &Keystroke) -> Option<(Key, Mods)> {
     // gpui names keys in lower case: `space`, `left`, `a`.
     let mut name = keystroke.key.clone();
     if let Some(first) = name.get_mut(..1) {
@@ -53,17 +53,6 @@ impl Tonique {
         context: &mut Context<Self>,
     ) {
         let keystroke = &event.keystroke;
-        // A shortcut being recorded in settings takes every key, Esc
-        // included, so nothing else runs.
-        if self.records_shortcut() {
-            if !event.is_held
-                && let Some((key, modifiers)) = shortcut(keystroke)
-            {
-                self.record_shortcut(key, modifiers, context);
-            }
-            context.notify();
-            return;
-        }
         // A clicked value control takes the arrows.
         if self.arrow_key(keystroke, window, context) {
             context.notify();

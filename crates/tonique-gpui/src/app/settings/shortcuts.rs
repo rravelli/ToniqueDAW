@@ -4,14 +4,12 @@
 //! settings, so both apps share them. Shortcuts the app handles itself
 //! (copy, paste, zoom) are listed muted and can't be changed.
 
+use super::SettingsDialog;
 use crate::model::HoldsProject;
 use gpui::{App, Context, MouseButton, ScrollHandle, Window, div, prelude::*, px};
 
 use crate::{
-    app::{
-        Tonique,
-        settings::{ROW_GAP, button_row, section_header, status},
-    },
+    app::settings::{ROW_GAP, button_row, section_header, status},
     config::keymap::{
         Action, FIXED_SHORTCUTS, Key, Keymap, Mods, Shortcut, format_shortcut, reserved_by,
     },
@@ -98,19 +96,12 @@ impl ShortcutsForm {
     }
 }
 
-impl Tonique {
-    /// Whether a key press goes to the shortcut being recorded.
-    pub(in crate::app) fn records_shortcut(&self) -> bool {
-        self.dialog == Some(crate::app::dialog::Dialog::Settings)
-            && self.settings.shortcuts.is_recording()
-    }
-
+impl SettingsDialog {
     /// Binds the shortcut pressed, `key` with `modifiers`, to what's being
     /// recorded.
-    pub(in crate::app) fn record_shortcut(&mut self, key: Key, modifiers: Mods, context: &mut App) {
+    pub(super) fn record_shortcut(&mut self, key: Key, modifiers: Mods, context: &mut App) {
         let mut keymap = self.state(context).settings().keymap.clone();
-        self.settings
-            .shortcuts
+        self.shortcuts
             .record(&mut keymap, Shortcut::new(modifiers, key));
         self.set_keymap(keymap, context);
     }
@@ -122,7 +113,7 @@ impl Tonique {
         }
         let mut settings = self.state(context).settings().clone();
         settings.keymap = keymap.clone();
-        self.settings.draft.keymap = keymap;
+        self.draft.keymap = keymap;
         self.state_mut(context).apply_settings(settings);
     }
 
@@ -130,20 +121,20 @@ impl Tonique {
     fn edit_keymap(&mut self, change: impl FnOnce(&mut Keymap), context: &mut App) {
         let mut keymap = self.state(context).settings().keymap.clone();
         change(&mut keymap);
-        self.settings.shortcuts.cancel();
+        self.shortcuts.cancel();
         self.set_keymap(keymap, context);
     }
 
-    /// Records the next key press as `recording`. The app's own focus
-    /// takes the keyboard, so a field typed in doesn't get it.
+    /// Records the next key press as `recording`. The dialog takes the
+    /// keyboard, before a field typed in and the window's shortcuts.
     fn start_recording(
         &mut self,
         recording: Recording,
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        self.settings.shortcuts.start(recording);
-        window.focus(&self.focus, context);
+        self.shortcuts.start(recording);
+        window.focus(&self.recording_focus, context);
     }
 
     pub(super) fn shortcuts_tab(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
@@ -177,7 +168,7 @@ impl Tonique {
             .id("shortcut-list")
             .size_full()
             .overflow_y_scroll()
-            .track_scroll(&self.settings.shortcuts.scroll)
+            .track_scroll(&self.shortcuts.scroll)
             .pr(px(SCROLLBAR_ROOM))
             .flex()
             .flex_col()
@@ -189,14 +180,14 @@ impl Tonique {
             .min_h_0()
             .child(list)
             .child(handle_scrollbar(
-                &self.settings.shortcuts.scroll,
-                &self.settings.shortcuts.scrollbar,
+                &self.shortcuts.scroll,
+                &self.shortcuts.scrollbar,
                 0.,
                 theme,
                 context,
             ));
 
-        let form = &self.settings.shortcuts;
+        let form = &self.shortcuts;
         let hint = if form.is_recording() {
             "Press the new shortcut, or Esc to cancel."
         } else {
@@ -233,7 +224,7 @@ impl Tonique {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let recording = self.settings.shortcuts.recording;
+        let recording = self.shortcuts.recording;
         let id = action.id();
         let mut chips: Vec<gpui::AnyElement> = Vec::new();
         for (index, shortcut) in keymap.bindings(action).iter().enumerate() {

@@ -2,12 +2,13 @@
 //! engine's block size and threads. Changes wait in the draft until
 //! applied, which restarts the audio.
 
+use super::SettingsDialog;
 use crate::model::HoldsProject;
 use gpui::{App, Context, MouseButton, MouseMoveEvent, Window, div, prelude::*, px};
 
 use crate::{
     app::{
-        PopupKind, Tonique,
+        PopupKind,
         settings::{
             CONTROL_HEIGHT, CONTROL_WIDTH, button_row, section_header, setting_row, setting_rows,
             status,
@@ -115,12 +116,12 @@ impl AudioForm {
     }
 }
 
-impl Tonique {
+impl SettingsDialog {
     pub(super) fn audio_drag_move(&mut self, event: &MouseMoveEvent) -> bool {
         let pointer_x = f32::from(event.position.x);
         let fine = event.modifiers.shift;
-        let form = &mut self.settings.audio;
-        let draft = &mut self.settings.draft;
+        let form = &mut self.audio;
+        let draft = &mut self.draft;
         if let Some(workers) =
             form.worker_threads
                 .drag_to(pointer_x, fine, draft.worker_threads as f32)
@@ -138,19 +139,14 @@ impl Tonique {
     /// The sample rate buffer lengths are shown at.
     fn draft_rate(&self, context: &App) -> u32 {
         let running = self.state(context).audio().map(|audio| audio.sample_rate);
-        self.settings
-            .draft
-            .sample_rate
-            .or(running)
-            .unwrap_or(FALLBACK_RATE)
+        self.draft.sample_rate.or(running).unwrap_or(FALLBACK_RATE)
     }
 
     /// The label of the device selected in the draft.
     fn device_label(&self) -> String {
-        match &self.settings.draft.device_id {
+        match &self.draft.device_id {
             None => "System default".into(),
             Some(id) => self
-                .settings
                 .audio
                 .devices
                 .iter()
@@ -161,13 +157,12 @@ impl Tonique {
 
     /// The options of `choice`'s dropdown, the chosen one ticked.
     pub fn audio_choice_menu(&self, choice: AudioChoice, context: &mut Context<Self>) -> gpui::Div {
-        let draft = &self.settings.draft;
+        let draft = &self.draft;
         let menu = Menu::new(&crate::theme::current(context));
         match choice {
             AudioChoice::Device => {
                 let options = std::iter::once((None, "System default".to_string())).chain(
-                    self.settings
-                        .audio
+                    self.audio
                         .devices
                         .iter()
                         .map(|device| (Some(device.id.clone()), device.name.clone())),
@@ -178,14 +173,13 @@ impl Tonique {
                         MenuItem::new(name).checked(checked),
                         context,
                         move |this, _, _| {
-                            this.settings.draft.device_id = id.clone();
+                            this.draft.device_id = id.clone();
                         },
                     )
                 })
             }
             AudioChoice::SampleRate => {
                 let rates = self
-                    .settings
                     .audio
                     .capabilities
                     .as_ref()
@@ -202,14 +196,13 @@ impl Tonique {
                         MenuItem::new(name).checked(checked),
                         context,
                         move |this, _, _| {
-                            this.settings.draft.sample_rate = rate;
+                            this.draft.sample_rate = rate;
                         },
                     )
                 })
             }
             AudioChoice::BufferSize => {
                 let range = self
-                    .settings
                     .audio
                     .capabilities
                     .as_ref()
@@ -229,7 +222,7 @@ impl Tonique {
                         MenuItem::new(name).checked(checked),
                         context,
                         move |this, _, _| {
-                            this.settings.draft.buffer_frames = frames;
+                            this.draft.buffer_frames = frames;
                         },
                     )
                 })
@@ -238,7 +231,7 @@ impl Tonique {
                 let checked = draft.block_size == frames;
                 let item = MenuItem::new(format!("{frames} frames")).checked(checked);
                 menu.item(item, context, move |this, _, _| {
-                    this.settings.draft.block_size = frames;
+                    this.draft.block_size = frames;
                 })
             }),
         }
@@ -267,8 +260,8 @@ impl Tonique {
         window: &Window,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let draft = self.settings.draft.clone();
-        self.settings.audio.capabilities(&draft);
+        let draft = self.draft.clone();
+        self.audio.capabilities(&draft);
         div()
             .child(self.output_section(theme, context))
             .child(self.engine_section(theme, window, context))
@@ -276,13 +269,13 @@ impl Tonique {
     }
 
     fn output_section(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
-        let draft = &self.settings.draft;
+        let draft = &self.draft;
         let refresh = Flat::new("refresh-devices", REFRESH_SIZE)
             .element(glyph(icons::ARROWS_CLOCKWISE, 12., false), theme)
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(|this, _, _, context| {
-                    this.settings.audio.refresh_devices();
+                    this.audio.refresh_devices();
                     context.notify();
                 }),
             );
@@ -361,8 +354,8 @@ impl Tonique {
         window: &Window,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let draft = &self.settings.draft;
-        let form = &self.settings.audio;
+        let draft = &self.draft;
+        let form = &self.audio;
         let field = (FIELD_WIDTH, CONTROL_HEIGHT);
         let well = |element: gpui::AnyElement| {
             div().rounded(px(2.)).bg(hsla(theme.bg_deep)).child(element)
@@ -377,8 +370,8 @@ impl Tonique {
             theme,
             window,
             context,
-            |this| &mut this.settings.audio.worker_threads,
-            |this, workers, _| this.settings.draft.worker_threads = workers as usize,
+            |this| &mut this.audio.worker_threads,
+            |this, workers, _| this.draft.worker_threads = workers as usize,
         );
         let threshold = form.parallel_threshold.view(
             "threshold",
@@ -390,8 +383,8 @@ impl Tonique {
             theme,
             window,
             context,
-            |this| &mut this.settings.audio.parallel_threshold,
-            |this, threshold, _| this.settings.draft.parallel_threshold = threshold as usize,
+            |this| &mut this.audio.parallel_threshold,
+            |this, threshold, _| this.draft.parallel_threshold = threshold as usize,
         );
         let block = format!("{} frames", draft.block_size);
         let rows = setting_rows([
@@ -437,10 +430,7 @@ impl Tonique {
     /// Apply or revert the draft's audio changes, or fill it with the
     /// defaults; above, what went wrong last.
     fn audio_buttons(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
-        let pending = self
-            .state(context)
-            .settings()
-            .audio_differs(&self.settings.draft);
+        let pending = self.state(context).settings().audio_differs(&self.draft);
         let error = self.state(context).audio_error.as_ref().map(|error| {
             let text = if self.state(context).audio_lost() {
                 format!("No audio output ({error}), retrying…")
@@ -467,9 +457,9 @@ impl Tonique {
                 context.listener(|this, _, _, context| {
                     // Only the audio fields: the others are already applied.
                     let mut settings = this.state(context).settings().clone();
-                    settings.set_audio(&this.settings.draft);
+                    settings.set_audio(&this.draft);
                     this.state_mut(context).apply_settings(settings);
-                    this.settings.draft = this.state(context).settings().clone();
+                    this.draft = this.state(context).settings().clone();
                     context.notify();
                 }),
             )
@@ -481,7 +471,7 @@ impl Tonique {
             revert.on_mouse_down(
                 MouseButton::Left,
                 context.listener(|this, _, _, context| {
-                    this.settings.draft = this.state(context).settings().clone();
+                    this.draft = this.state(context).settings().clone();
                     context.notify();
                 }),
             )
@@ -493,7 +483,7 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(|this, _, _, context| {
-                    this.settings.draft.set_audio(&Settings::default());
+                    this.draft.set_audio(&Settings::default());
                     context.notify();
                 }),
             );

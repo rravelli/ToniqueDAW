@@ -194,7 +194,7 @@ impl BottomPanel {
                     let ArrowHolder::Knob(arrows) = holder.clone() else {
                         return;
                     };
-                    crate::app::arrows::hold_in(
+                    crate::app::arrows::hold(
                         holder.clone(),
                         crate::app::arrows::stepper(
                             context.weak_entity(),
