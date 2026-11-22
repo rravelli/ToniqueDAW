@@ -28,7 +28,7 @@ use gpui::{
 };
 
 pub use drop::DropTarget;
-pub use rows::{FOOTER_PADDING, Row, footer_height, rows};
+pub use rows::{FOOTER_PADDING, Row, footer_height, rows, rows_height};
 
 use tonique_engine::edit::TrackId;
 

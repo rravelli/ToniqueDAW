@@ -36,7 +36,7 @@ use crate::{
     meter::paint_meter,
     smooth_scroll::WheelDelta,
     theme::{Theme, hsla, size},
-    timeline::{FOOTER_PADDING, RULER_HEIGHT, Row, footer_height, rows},
+    timeline::{FOOTER_PADDING, RULER_HEIGHT, Row, footer_height, rows, rows_height},
     widgets::{Edge, Flat, SCROLLBAR_WIDTH, Splitter, TextField, glyph, splitter_handle},
 };
 use drag::{HeaderDrag, RowMarker};
@@ -341,19 +341,27 @@ impl Tonique {
         let width = self.headers.width.size - PANEL_MARGIN - ROWS_RIGHT;
         let rows = rows(&self.state);
         let scopes = group_scopes(&rows, theme);
-        let mut list = div()
-            .absolute()
-            .top(px(RULER_HEIGHT - self.state.grid.offset.y))
-            .left(px(PANEL_MARGIN))
-            .right(px(ROWS_RIGHT))
-            .flex()
-            .flex_col();
+        // Each header at its row's top, as the timeline places its lanes:
+        // stacked in a flex column, each height would round to device
+        // pixels on its own, and the rounding would add up down the list.
+        let mut placed = div()
+            .relative()
+            .flex_none()
+            .w_full()
+            .h(px(rows_height(&rows)));
         for row in rows {
-            list = list.child(self.header(row.track, width, theme, context));
+            placed = placed.child(
+                div()
+                    .absolute()
+                    .top(px(row.top))
+                    .left_0()
+                    .w_full()
+                    .child(self.header(row.track, width, theme, context)),
+            );
         }
         // Over the headers, the bars of the expanded groups down to their
         // last rows.
-        let list = list.child(
+        let placed = placed.child(
             canvas(
                 |_, _, _| {},
                 move |bounds, _, window, _| {
@@ -374,6 +382,14 @@ impl Tonique {
             .left_0()
             .size_full(),
         );
+        let list = div()
+            .absolute()
+            .top(px(RULER_HEIGHT - self.state.grid.offset.y))
+            .left(px(PANEL_MARGIN))
+            .right(px(ROWS_RIGHT))
+            .flex()
+            .flex_col()
+            .child(placed);
         let add = Flat::ghost("add-track", ADD_TRACK_HEIGHT)
             .full_width()
             .color(theme.text_muted)
@@ -407,16 +423,24 @@ impl Tonique {
 
     /// Collapsed: each row a bar of its colour and its meter; clicking one
     /// selects it.
+    /// Each row at its top, as in `header_list`.
     fn collapsed_list(&self, theme: &Theme, context: &mut Context<Self>) -> impl IntoElement {
+        let rows = rows(&self.state);
         let mut list = div()
             .absolute()
             .top(px(RULER_HEIGHT - self.state.grid.offset.y))
             .left_0()
             .right_0()
-            .flex()
-            .flex_col();
-        for row in rows(&self.state) {
-            list = list.child(self.collapsed_row(row.track, theme, context));
+            .h(px(rows_height(&rows)));
+        for row in rows {
+            list = list.child(
+                div()
+                    .absolute()
+                    .top(px(row.top))
+                    .left_0()
+                    .right_0()
+                    .child(self.collapsed_row(row.track, theme, context)),
+            );
         }
         list
     }
