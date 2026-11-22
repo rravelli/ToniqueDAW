@@ -55,6 +55,15 @@ impl WaveformPeaks {
         self.sample_rate
     }
 
+    /// The memory its levels take, in bytes.
+    pub fn byte_size(&self) -> usize {
+        self.channels
+            .iter()
+            .flatten()
+            .map(|level| (level.min.capacity() + level.max.capacity()) * size_of::<f32>())
+            .sum()
+    }
+
     /// `(min, max)` of channel `ch` over the samples `start..end`, or `None`
     /// when the range holds no data yet. Edges are rounded out to level-0
     /// buckets, so the result may include up to `BASE_BUCKET - 1` samples

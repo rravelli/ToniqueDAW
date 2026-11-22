@@ -48,6 +48,8 @@ pub enum PopupKind {
     /// One of the menu bar's.
     Bar(BarMenu),
     RecentProjects,
+    /// In debug builds, what memory the app takes.
+    Memory,
 }
 
 impl PopupKind {
@@ -122,6 +124,7 @@ impl Tonique {
             PopupKind::Theme => self.theme_menu(context),
             PopupKind::Bar(menu) => self.bar_menu(menu, context),
             PopupKind::RecentProjects => self.recent_projects_menu(context),
+            PopupKind::Memory => self.memory_popup(context),
         })
     }
 

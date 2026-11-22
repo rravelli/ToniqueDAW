@@ -1,17 +1,17 @@
 //! The window: the menu bar and the transport bar on top, the browser on
 //! the left, the timeline and the track list on its right, the bottom
-//! panel under them, a status bar below. One view
+//! panel under them. One view
 //! owns Tonique's `ProjectState`, as `ToniqueApp` does in the egui app.
 
 mod dialog;
 mod export;
 mod keys;
+mod memory;
 mod menu_bar;
 mod menus;
 mod popup;
 mod project;
 mod settings;
-mod status;
 mod transport;
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
@@ -288,6 +288,7 @@ impl Render for Tonique {
             window.request_animation_frame();
         }
         crate::profile::frame();
+        self.menu_bar.frame();
         crate::profile::time("state.update", || self.state.update());
         let scrolling = self.step_scrolling() | self.autoscroll();
         self.update_title(window);
@@ -348,7 +349,6 @@ impl Render for Tonique {
             .children(crate::profile::time("view.bottom", || {
                 self.bottom_panel_view(window, context)
             }))
-            .child(self.status_bar())
             .child(self.drag_listener(context))
             .children(self.popup_view(window, context))
             .children(self.dialog_view(window, context))

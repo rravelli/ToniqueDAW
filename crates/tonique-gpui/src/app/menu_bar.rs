@@ -1,15 +1,17 @@
 //! The menu bar at the top of the window, as the egui app's: File, Edit,
 //! View and Help. A title pressed opens its menu below it; while one is
-//! open, hovering another title opens that one instead.
+//! open, hovering another title opens that one instead. In debug builds,
+//! the interface's frame rate and memory on the right; clicked, they open
+//! the memory's details.
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Instant};
 
 use gpui::{
     Anchor, Bounds, Context, MouseButton, Pixels, Stateful, canvas, div, point, prelude::*, px,
 };
 
 use crate::{
-    app::{Popup, PopupKind, Tonique},
+    app::{Popup, PopupKind, Tonique, memory},
     theme::{Theme, hsla, size},
 };
 
@@ -17,6 +19,12 @@ pub const MENU_BAR_HEIGHT: f32 = 24.;
 const TITLE_HEIGHT: f32 = 20.;
 /// Between a title and its menu.
 const MENU_OFFSET: f32 = 2.;
+/// How much of a new frame's time goes into the shown average.
+const FRAME_SMOOTHING: f64 = 0.1;
+/// Longer between two frames: the window was idle, not slow.
+const IDLE_SECONDS: f64 = 0.5;
+/// How often the process's memory is read again, in seconds.
+const MEMORY_SECONDS: f64 = 1.;
 
 /// A menu of the bar.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -52,6 +60,53 @@ impl BarMenu {
 #[derive(Default)]
 pub struct MenuBarUi {
     titles: Rc<RefCell<HashMap<BarMenu, Bounds<Pixels>>>>,
+    last_frame: Option<Instant>,
+    /// Smoothed time between frames, in seconds.
+    frame_seconds: Option<f64>,
+    /// The process's memory, and when it was read.
+    resident: Option<(usize, Instant)>,
+    /// Where the frame rate and memory were laid out, to open the
+    /// memory's details below them.
+    debug_bounds: Rc<RefCell<Option<Bounds<Pixels>>>>,
+}
+
+impl MenuBarUi {
+    /// Call once per frame, to time it.
+    pub fn frame(&mut self) {
+        let now = Instant::now();
+        if let Some(last) = self.last_frame.replace(now) {
+            let elapsed = (now - last).as_secs_f64();
+            if elapsed < IDLE_SECONDS {
+                self.frame_seconds = Some(match self.frame_seconds {
+                    Some(average) => average + (elapsed - average) * FRAME_SMOOTHING,
+                    None => elapsed,
+                });
+            }
+        }
+        if cfg!(debug_assertions) {
+            let stale = self
+                .resident
+                .is_none_or(|(_, read)| (now - read).as_secs_f64() >= MEMORY_SECONDS);
+            if stale {
+                self.resident = memory::resident_bytes().map(|bytes| (bytes, now));
+            }
+        }
+    }
+
+    /// The process's memory, as last read.
+    pub fn resident_bytes(&self) -> Option<usize> {
+        self.resident.map(|(bytes, _)| bytes)
+    }
+
+    fn debug_text(&self) -> Option<String> {
+        let seconds = self.frame_seconds?.max(1e-5);
+        let mut text = format!("{:.0} fps · {:.1} ms", 1. / seconds, seconds * 1000.);
+        if let Some(bytes) = self.resident_bytes() {
+            text.push_str(" · ");
+            text.push_str(&memory::format_bytes(bytes));
+        }
+        Some(text)
+    }
 }
 
 impl Tonique {
@@ -105,6 +160,60 @@ impl Tonique {
                 }),
             )
             .children(titles)
+            .child(div().flex_1())
+            .when(cfg!(debug_assertions), |element| {
+                element.children(self.debug_info(context))
+            })
+    }
+
+    /// The frame rate and memory; clicked, the memory's details.
+    fn debug_info(&self, context: &mut Context<Self>) -> Option<Stateful<gpui::Div>> {
+        let theme = &self.theme;
+        let text = self.menu_bar.debug_text()?;
+        let open = self
+            .popup
+            .as_ref()
+            .is_some_and(|popup| popup.kind == PopupKind::Memory);
+        let slot = self.menu_bar.debug_bounds.clone();
+        Some(
+            div()
+                .id("debug-info")
+                .relative()
+                .flex_none()
+                .flex()
+                .items_center()
+                .h(px(TITLE_HEIGHT))
+                .px_2()
+                .rounded(px(2.))
+                .text_size(px(size::SMALL))
+                .text_color(hsla(theme.text_muted))
+                .when(open, |element| element.bg(hsla(theme.bg_control)))
+                .hover(|style| style.bg(hsla(theme.hover_overlay)))
+                .cursor_pointer()
+                .child(text)
+                .child(
+                    canvas(
+                        move |bounds, _, _| {
+                            *slot.borrow_mut() = Some(bounds);
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .size_full(),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    context.listener(|this, _, _, context| {
+                        context.stop_propagation();
+                        let Some(bounds) = *this.menu_bar.debug_bounds.borrow() else {
+                            return;
+                        };
+                        let at = point(bounds.right(), bounds.bottom() + px(MENU_OFFSET));
+                        this.toggle_popup(PopupKind::Memory, at, Anchor::TopRight);
+                        context.notify();
+                    }),
+                ),
+        )
     }
 
     fn bar_title(

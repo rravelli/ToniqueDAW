@@ -58,7 +58,38 @@ pub struct WaveCache {
     peaks: HashMap<usize, (Arc<WaveformPeaks>, u64)>,
 }
 
+/// What a [`WaveCache`] holds.
+#[derive(Clone, Copy, Default)]
+pub struct WaveMemory {
+    pub tiles: usize,
+    pub tile_bytes: usize,
+    /// On the GPU.
+    pub images: usize,
+    pub image_bytes: usize,
+}
+
 impl WaveCache {
+    pub fn memory(&self) -> WaveMemory {
+        let image_bytes = |image: &RenderImage| {
+            let size = image.size(0);
+            size.width.0 as usize * size.height.0 as usize * 4
+        };
+        WaveMemory {
+            tiles: self.tiles.len(),
+            tile_bytes: self
+                .tiles
+                .values()
+                .map(|(values, _)| values.capacity() * size_of::<[f32; 2]>())
+                .sum(),
+            images: self.images.len(),
+            image_bytes: self
+                .images
+                .values()
+                .map(|(image, _)| image_bytes(image))
+                .sum(),
+        }
+    }
+
     pub fn start_frame(&mut self, window: &mut Window) {
         self.frame += 1;
         let frame = self.frame;
