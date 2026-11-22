@@ -2,38 +2,16 @@
 //! `IconRail`: the current one bright and marked by an accent bar on its
 //! left edge, the others muted. Each shows its name on hover.
 
-use gpui::{AnyView, App, Context, MouseButton, Render, SharedString, Window, div, prelude::*, px};
+use gpui::{Context, MouseButton, div, prelude::*, px};
 
 use crate::{
     app::Tonique,
-    theme::{FONT_UI, Theme, hsla, icon, size},
+    theme::{Theme, hsla, icon, size},
+    widgets::tooltip,
 };
 
 /// Thickness of the bar beside the current item.
 const INDICATOR: f32 = 2.;
-
-/// A short name shown under the pointer.
-struct Tooltip {
-    text: SharedString,
-    theme: Theme,
-}
-
-impl Render for Tooltip {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.theme;
-        div()
-            .px(px(6.))
-            .py(px(2.))
-            .rounded(px(3.))
-            .bg(hsla(theme.bg_raised))
-            .border_1()
-            .border_color(hsla(theme.border))
-            .font_family(FONT_UI)
-            .text_size(px(size::SMALL))
-            .text_color(hsla(theme.text))
-            .child(self.text.clone())
-    }
-}
 
 /// `items` (value, icon, name) one under the other, `button` wide,
 /// `selected` marked; `select` takes another one pressed.
@@ -50,7 +28,6 @@ pub fn icon_rail<Item: Copy + PartialEq + 'static>(
         .enumerate()
         .map(|(index, &(item, glyph, name))| {
             let is_selected = item == selected;
-            let tooltip_theme = theme.clone();
             div()
                 .id(("rail", index))
                 .relative()
@@ -81,13 +58,7 @@ pub fn icon_rail<Item: Copy + PartialEq + 'static>(
                     )
                 })
                 .child(icon(glyph))
-                .tooltip(move |_: &mut Window, app: &mut App| -> AnyView {
-                    app.new(|_| Tooltip {
-                        text: name.into(),
-                        theme: tooltip_theme.clone(),
-                    })
-                    .into()
-                })
+                .tooltip(tooltip(name, theme))
                 .on_mouse_down(
                     MouseButton::Left,
                     context.listener(move |this, _, _, context| {

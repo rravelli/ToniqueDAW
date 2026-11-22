@@ -47,6 +47,17 @@ impl Tonique {
         context: &mut Context<Self>,
     ) {
         let keystroke = &event.keystroke;
+        // A shortcut being recorded in settings takes every key, Esc
+        // included, so nothing else runs.
+        if self.records_shortcut() {
+            if !event.is_held
+                && let Some((key, modifiers)) = shortcut(keystroke)
+            {
+                self.record_shortcut(key, modifiers);
+            }
+            context.notify();
+            return;
+        }
         // The browser's list takes the arrows and Enter while focused.
         if self.browser.list_focus.is_focused(window) && self.browser_key(event, context) {
             return;
