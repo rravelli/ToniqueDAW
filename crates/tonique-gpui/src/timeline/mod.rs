@@ -24,7 +24,7 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     Bounds, ContentMask, Context, CursorStyle, Modifiers, MouseButton, Pixels, Point, Window,
-    canvas, div, prelude::*,
+    canvas, div, prelude::*, px,
 };
 
 pub use drop::DropTarget;
@@ -32,7 +32,10 @@ pub use rows::{FOOTER_PADDING, Row, footer_height, rows};
 
 use tonique_engine::edit::TrackId;
 
-use crate::app::Tonique;
+use crate::{
+    app::Tonique,
+    widgets::{Axis, SCROLLBAR_WIDTH, scrollbar},
+};
 use input::TimelineDrag;
 use rows::ClipPart;
 use ruler::LoopGrab;
@@ -128,9 +131,30 @@ impl Tonique {
         let scene = self.scene();
         let waves = self.waves.clone();
         let slot = self.timeline.bounds.clone();
+        let span = self.across_span();
+        let this = context.weak_entity();
+        // Along the bottom of the lanes, over the last of them.
+        let across_bar = scrollbar(
+            Axis::Horizontal,
+            &self.timeline.scroll.across_bar,
+            &self.theme,
+            move |_| Some(span),
+            move |offset, _, app| {
+                let _ = this.update(app, |this, context| {
+                    this.set_across(offset);
+                    context.notify();
+                });
+            },
+        )
+        .absolute()
+        .left_0()
+        .right_0()
+        .top(px(self.lanes_bottom() - SCROLLBAR_WIDTH))
+        .h(px(SCROLLBAR_WIDTH));
 
         let view = div()
             .id("timeline")
+            .relative()
             .flex_1()
             .min_w_0()
             .h_full()
@@ -138,18 +162,50 @@ impl Tonique {
             .on_mouse_down(MouseButton::Left, context.listener(Self::on_timeline_down))
             .on_mouse_down(MouseButton::Right, context.listener(Self::on_timeline_menu))
             .on_scroll(context.listener(Self::on_timeline_scroll));
-        self.take_drops(view, context).child(
-            canvas(
-                move |bounds, _, _| slot.set(bounds),
-                move |bounds, _, window, context| {
-                    window.with_content_mask(Some(ContentMask { bounds }), |window| {
-                        crate::profile::time("paint.timeline", || {
-                            paint::paint(&scene, bounds, window, context, &mut waves.borrow_mut())
+        self.take_drops(view, context)
+            .child(
+                canvas(
+                    move |bounds, _, _| slot.set(bounds),
+                    move |bounds, _, window, context| {
+                        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                            crate::profile::time("paint.timeline", || {
+                                paint::paint(
+                                    &scene,
+                                    bounds,
+                                    window,
+                                    context,
+                                    &mut waves.borrow_mut(),
+                                )
+                            })
                         })
-                    })
-                },
+                    },
+                )
+                .size_full(),
             )
-            .size_full(),
+            .child(across_bar)
+    }
+
+    /// Down the track list's far side, along the lanes: the rows scroll
+    /// with them.
+    pub fn rows_scrollbar(&self, context: &mut Context<Self>) -> impl IntoElement {
+        let span = self.rows_span();
+        let this = context.weak_entity();
+        scrollbar(
+            Axis::Vertical,
+            &self.timeline.scroll.rows_bar,
+            &self.theme,
+            move |_| Some(span),
+            move |offset, _, app| {
+                let _ = this.update(app, |this, context| {
+                    this.set_rows(offset);
+                    context.notify();
+                });
+            },
         )
+        .absolute()
+        .right_0()
+        .top(px(RULER_HEIGHT))
+        .h(px(span.view.max(0.)))
+        .w(px(SCROLLBAR_WIDTH))
     }
 }

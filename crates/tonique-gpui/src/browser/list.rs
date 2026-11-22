@@ -1,7 +1,7 @@
 //! A list of the browser's: the folders' tree or the labels' sections,
 //! searched in the background, browsed with the mouse or the keys. While
 //! scrolled into folders, the way down to the first row shown stays
-//! pinned at the top.
+//! pinned at the top; a scrollbar runs down the right.
 
 use std::{
     collections::HashMap,
@@ -18,7 +18,7 @@ use crate::{
     cache::AUDIO_ANALYSIS_CACHE,
     file_tree::{FileTree, is_audio_file, pinned},
     theme::hsla,
-    widgets::{FieldKey, TextField},
+    widgets::{FieldKey, HANDLE_WIDTH, ScrollbarGrab, TextField, handle_scrollbar},
 };
 
 use super::rows::ROW_HEIGHT;
@@ -39,6 +39,7 @@ pub struct FileList {
     pub(super) tree: FileTree,
     pub(super) selected: Option<usize>,
     pub(super) scroll: UniformListScrollHandle,
+    scrollbar: ScrollbarGrab,
     pub(super) search: TextField,
     /// The search running in the background; the latest wins.
     search_task: Option<Task<()>>,
@@ -55,6 +56,7 @@ impl FileList {
             tree: FileTree::new(),
             selected: None,
             scroll: UniformListScrollHandle::new(),
+            scrollbar: ScrollbarGrab::default(),
             search: TextField::new(context),
             search_task: None,
             scope: None,
@@ -488,11 +490,20 @@ impl Tonique {
         )
         .track_scroll(&list.scroll)
         .size_full();
+        let handle = list.scroll.0.borrow().base_handle.clone();
         div()
             .relative()
             .size_full()
             .child(rows)
             .children(self.pinned_rows(kind, context))
+            .child(handle_scrollbar(
+                &handle,
+                &list.scrollbar,
+                // Clear of the browser's resize grip, down the same edge.
+                HANDLE_WIDTH,
+                &self.theme,
+                context,
+            ))
             .into_any_element()
     }
 

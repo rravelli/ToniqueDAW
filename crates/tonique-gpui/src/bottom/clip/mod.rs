@@ -32,7 +32,9 @@ use crate::{
     smooth_scroll::WheelDelta,
     theme::{Color, Theme, hsla, mono, size, with_alpha},
     wave::paint_waveform,
-    widgets::{Menu, MenuItem, SliderDrag},
+    widgets::{
+        Axis, Menu, MenuItem, SCROLLBAR_WIDTH, ScrollSpan, ScrollbarGrab, SliderDrag, scrollbar,
+    },
 };
 use inspector::{Field, Panels, RAIL_WIDTH};
 use markers::{Area, Handle, TrimEdge};
@@ -44,7 +46,6 @@ const MIN_VIEW_WIDTH: f32 = 240.;
 /// flags along its bottom.
 const RULER_HEIGHT: f32 = 24.;
 const LOOP_BAR_HEIGHT: f32 = 6.;
-const SCROLLBAR_HEIGHT: f32 = 5.;
 /// Between the lane and its scrollbar.
 const SCROLLBAR_GAP: f32 = 3.;
 /// Room left around the clip when fitting it, as a share of its length.
@@ -57,9 +58,6 @@ const LOOP_TINT_ALPHA: u8 = 24;
 enum ClipDrag {
     /// The lane, scrolling the view.
     Pan {
-        last_x: f32,
-    },
-    Scrollbar {
         last_x: f32,
     },
     Handle(markers::HandleDrag),
@@ -91,6 +89,7 @@ pub struct ClipDetails {
     /// The view (ruler, lane, scrollbar), as last laid out.
     view: Rc<Cell<Bounds<Pixels>>>,
     drag: Option<ClipDrag>,
+    scrollbar: ScrollbarGrab,
     panels: Panels,
     /// A value being typed, and its text so far.
     typing: Option<(inspector::Typed, crate::widgets::TextField)>,
@@ -102,17 +101,15 @@ struct Layout {
     width: f32,
     /// The lane's top and bottom; the ruler is above it.
     lane: (f32, f32),
-    /// The scrollbar's top.
-    scrollbar: f32,
 }
 
 impl Layout {
     fn of(height: f32, width: f32) -> Self {
-        let scrollbar = (height - SCROLLBAR_HEIGHT).max(RULER_HEIGHT);
+        // The scrollbar along the bottom.
+        let scrollbar = (height - SCROLLBAR_WIDTH).max(RULER_HEIGHT);
         Self {
             width,
             lane: (RULER_HEIGHT, (scrollbar - SCROLLBAR_GAP).max(RULER_HEIGHT)),
-            scrollbar,
         }
     }
 
@@ -135,6 +132,7 @@ impl ClipDetails {
             speed: 1.,
             view: Rc::default(),
             drag: None,
+            scrollbar: ScrollbarGrab::default(),
             panels: Panels::default(),
             typing: None,
         }
@@ -224,17 +222,14 @@ impl ClipDetails {
         self.grid.offset.x = self.grid.offset.x.clamp(min, max);
     }
 
-    /// The scrollbar's thumb, as a share of its track: where it starts and
-    /// how long it is. `None` when nothing scrolls.
-    fn thumb(&self, clip: &AudioClip, bpm: f32, width: f32) -> Option<(f32, f32)> {
+    /// The scroll for the scrollbar, counted from the range's start.
+    fn scroll_span(&self, clip: &AudioClip, bpm: f32, width: f32) -> ScrollSpan {
         let (min, max) = self.scroll_range(clip, bpm, width);
-        let range = max - min;
-        if range <= 0. {
-            return None;
+        ScrollSpan {
+            offset: self.grid.offset.x - min,
+            max: max - min,
+            view: width,
         }
-        let length = width / (range + width);
-        let at = (self.grid.offset.x - min) / range * (1. - length);
-        Some((at, length))
     }
 
     /// The grid lines and the bar labels in view, inside the file.
@@ -311,7 +306,6 @@ struct ClipScene {
     markers: Vec<(TrimEdge, f32)>,
     /// The handle under the pointer, or dragged.
     lit: Option<Area>,
-    thumb: Option<(f32, f32)>,
 }
 
 impl Tonique {
@@ -375,13 +369,35 @@ impl Tonique {
         )
         .size_full();
         let id = clip.id;
+        let span = self.bottom.clip.scroll_span(clip, bpm, layout.width);
+        let (min, _) = self.bottom.clip.scroll_range(clip, bpm, layout.width);
+        let this = context.weak_entity();
+        let across_bar = scrollbar(
+            Axis::Horizontal,
+            &self.bottom.clip.scrollbar,
+            &self.theme,
+            move |_| Some(span),
+            move |offset, _, app| {
+                let _ = this.update(app, |this, context| {
+                    this.bottom.clip.grid.offset.x = min + offset;
+                    context.notify();
+                });
+            },
+        )
+        .absolute()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .h(px(SCROLLBAR_WIDTH));
         let view = div()
             .id("clip-view")
+            .relative()
             .flex_1()
             .min_w_0()
             .h_full()
             .cursor(cursor)
             .child(painting)
+            .child(across_bar)
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
@@ -469,7 +485,6 @@ impl Tonique {
             playhead,
             markers,
             lit,
-            thumb: details.thumb(shown, bpm, layout.width),
         }
     }
 
@@ -500,8 +515,8 @@ impl Tonique {
 
     /// A press in the view: a marker or the loop grabbed, the lane
     /// panned (or, double-clicked, the playhead sent where that part of the
-    /// file plays first), the ruler double-clicked to fit the clip again,
-    /// or the scrollbar grabbed.
+    /// file plays first), or the ruler double-clicked to fit the clip
+    /// again.
     fn clip_view_press(&mut self, id: ClipId, event: &MouseDownEvent) {
         let Some((_, clip)) = self.state.clip_with_track(id) else {
             return;
@@ -531,8 +546,6 @@ impl Tonique {
             } else {
                 details.drag = Some(ClipDrag::Pan { last_x: pointer_x });
             }
-        } else if details.thumb(&clip, bpm, layout.width).is_some() {
-            details.drag = Some(ClipDrag::Scrollbar { last_x: pointer_x });
         }
     }
 
@@ -630,16 +643,6 @@ impl Tonique {
                 *last_x = pointer_x;
                 details.clamp_scroll(&clip, bpm, layout.width);
             }
-            Some(ClipDrag::Scrollbar { last_x }) => {
-                let moved = pointer_x - *last_x;
-                *last_x = pointer_x;
-                let (min, max) = details.scroll_range(&clip, bpm, layout.width);
-                if let Some((_, length)) = details.thumb(&clip, bpm, layout.width) {
-                    let travel = (layout.width * (1. - length)).max(1.);
-                    details.grid.offset.x += moved * (max - min) / travel;
-                    details.clamp_scroll(&clip, bpm, layout.width);
-                }
-            }
             Some(ClipDrag::Handle(_)) => self.follow_handle(&clip, pointer_x, event.modifiers.alt),
             Some(ClipDrag::Field { .. }) => {
                 self.follow_field(&clip, f32::from(event.position.x), event.modifiers.alt)
@@ -673,14 +676,15 @@ impl Tonique {
                 }
             }
             ClipDrag::Slider { slider, drag, .. } => self.end_slider(&clip, slider, drag),
-            ClipDrag::Pan { .. } | ClipDrag::Scrollbar { .. } => {}
+            ClipDrag::Pan { .. } => {}
         }
     }
 }
 
 /// The ruler, the lane with the file's waveform on the grid (dimmed
 /// outside what the clip plays, the loop tinted), the playhead where the
-/// file plays at that moment, the markers, and the scrollbar.
+/// file plays at that moment, and the markers. The scrollbar is a widget
+/// over its bottom.
 fn paint_view(
     scene: &ClipScene,
     bounds: Rect,
@@ -786,23 +790,6 @@ fn paint_view(
         );
     }
     markers::paint_markers(window, scene, bounds);
-
-    if let Some((at, length)) = scene.thumb {
-        let track = Rect::new(
-            left,
-            bounds.top + layout.scrollbar,
-            bounds.width,
-            SCROLLBAR_HEIGHT,
-        );
-        fill_rounded(window, track, 2., theme.bg_raised);
-        let thumb = Rect::new(
-            left + at * bounds.width,
-            track.top,
-            (length * bounds.width).max(8.),
-            SCROLLBAR_HEIGHT,
-        );
-        fill_rounded(window, thumb, 2., theme.bg_control_hover);
-    }
 }
 
 #[cfg(test)]
@@ -813,6 +800,5 @@ mod tests {
     fn the_view_is_laid_out_top_to_bottom() {
         let layout = Layout::of(200., 500.);
         assert_eq!(layout.lane, (RULER_HEIGHT, 192.));
-        assert_eq!(layout.scrollbar, 195.);
     }
 }

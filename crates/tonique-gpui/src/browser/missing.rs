@@ -9,7 +9,8 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, Context, KeyDownEvent, MouseButton, PathPromptOptions, Window, div, prelude::*, px,
+    AnyElement, Context, KeyDownEvent, MouseButton, PathPromptOptions, ScrollHandle, Window, div,
+    prelude::*, px,
 };
 use tonique_engine::edit::SourceId;
 
@@ -19,7 +20,7 @@ use crate::{
     file_match::{FileIndex, exact_matches, file_name, folder_name, query_for, rank},
     icons,
     theme::{Theme, hsla, icon, mix, size},
-    widgets::{FieldKey, Flat, TextField},
+    widgets::{FieldKey, Flat, HANDLE_WIDTH, ScrollbarGrab, TextField, handle_scrollbar},
 };
 
 const ROW_HEIGHT: f32 = 22.;
@@ -34,6 +35,8 @@ enum Status {
 
 pub struct MissingView {
     selected: Option<SourceId>,
+    scroll: ScrollHandle,
+    scrollbar: ScrollbarGrab,
     search: TextField,
     index: FileIndex,
     status: Option<Status>,
@@ -43,6 +46,8 @@ impl MissingView {
     pub fn new(context: &mut Context<Tonique>) -> Self {
         Self {
             selected: None,
+            scroll: ScrollHandle::new(),
+            scrollbar: ScrollbarGrab::default(),
             search: TextField::new(context),
             index: FileIndex::default(),
             status: None,
@@ -141,7 +146,9 @@ impl Tonique {
             .id("missing-files")
             .flex_1()
             .min_h_0()
+            .size_full()
             .overflow_y_scroll()
+            .track_scroll(&self.browser.missing.scroll)
             .flex()
             .flex_col()
             .px_2();
@@ -183,7 +190,21 @@ impl Tonique {
             .flex()
             .flex_col()
             .child(search_bar)
-            .child(body)
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(body)
+                    .child(handle_scrollbar(
+                        &self.browser.missing.scroll,
+                        &self.browser.missing.scrollbar,
+                        // Clear of the browser's resize grip, down the same edge.
+                        HANDLE_WIDTH,
+                        &theme,
+                        context,
+                    )),
+            )
             .into_any_element()
     }
 

@@ -3,7 +3,8 @@
 //! sideways swipe) scrolls across, otherwise the rows scroll, from the
 //! timeline or the track list alike. Also keeping edits in view: scrolling
 //! while a drag holds the pointer near an edge, and revealing what an
-//! edit put off screen; and following the playhead during playback.
+//! edit put off screen; following the playhead during playback; and how
+//! far the scrollbars go.
 
 use std::time::{Duration, Instant};
 
@@ -19,6 +20,7 @@ use crate::{
         RULER_HEIGHT,
         rows::{rows, rows_height},
     },
+    widgets::{ScrollSpan, ScrollbarGrab},
 };
 
 /// How close to the left and right edges a drag starts scrolling, in
@@ -35,6 +37,9 @@ const EDGE_SPEED: f32 = 600.;
 const REVEAL_MARGIN: f32 = 40.;
 /// The longest step an autoscroll frame takes, in case frames stalled.
 const MAX_FRAME: Duration = Duration::from_millis(100);
+/// Bars past the arrangement's end the horizontal scrollbar reaches, as
+/// room to add more.
+const SLACK_BARS: f64 = 16.;
 
 /// What the wheel has left to scroll and zoom.
 #[derive(Default)]
@@ -50,6 +55,9 @@ pub struct TimelineScroll {
     was_playing: bool,
     /// Scrolled across by hand since play started: the view stays put.
     follow_paused: bool,
+    /// The scrollbars along the lanes' bottom and down the track list.
+    pub across_bar: ScrollbarGrab,
+    pub rows_bar: ScrollbarGrab,
 }
 
 impl Tonique {
@@ -121,6 +129,44 @@ impl Tonique {
             self.timeline.scroll.rows.stop();
         }
         *offset = to;
+    }
+
+    /// The rows' scroll, as far as [`Self::scroll_rows`] goes.
+    pub fn rows_span(&self) -> ScrollSpan {
+        let view = self.lanes_bottom() - RULER_HEIGHT;
+        let content = rows_height(&rows(&self.state)) + DEFAULT_TRACK_HEIGHT;
+        ScrollSpan {
+            offset: self.state.grid.offset.y,
+            max: (content - view).max(0.),
+            view,
+        }
+    }
+
+    /// The scroll across: the arrangement and some room to add more, never
+    /// short of what's in view.
+    pub fn across_span(&self) -> ScrollSpan {
+        let grid = &self.state.grid;
+        let end = self.state.arrangement_end().0 + SLACK_BARS * grid.beats_per_bar();
+        let view = self.viewport().right;
+        let offset = grid.offset.x;
+        ScrollSpan {
+            offset,
+            max: (grid.beats_to_width(end) - view).max(offset).max(0.),
+            view,
+        }
+    }
+
+    /// Scrolled across from the scrollbar: following the playhead pauses,
+    /// as with the wheel.
+    pub fn set_across(&mut self, offset: f32) {
+        self.state.grid.offset.x = offset.max(0.);
+        self.timeline.scroll.across.stop();
+        self.timeline.scroll.follow_paused = true;
+    }
+
+    pub fn set_rows(&mut self, offset: f32) {
+        self.state.grid.offset.y = offset.max(0.);
+        self.timeline.scroll.rows.stop();
     }
 
     /// Scrolls across by `delta_x`, not before the start.

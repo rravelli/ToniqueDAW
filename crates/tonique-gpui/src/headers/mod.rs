@@ -35,7 +35,7 @@ use crate::{
     smooth_scroll::WheelDelta,
     theme::{Theme, hsla, size},
     timeline::{FOOTER_PADDING, RULER_HEIGHT, Row, footer_height, rows},
-    widgets::{Edge, Flat, Splitter, TextField, glyph, splitter_handle},
+    widgets::{Edge, Flat, SCROLLBAR_WIDTH, Splitter, TextField, glyph, splitter_handle},
 };
 use drag::{HeaderDrag, Param, RowMarker};
 use layout::{COLOR_BAR_WIDTH, HEADER_INSET, color_bar_left};
@@ -52,6 +52,8 @@ const COLLAPSED_BAR_WIDTH: f32 = 4.;
 const COLLAPSED_METER_WIDTH: f32 = 10.;
 /// Between the panel's edges and the headers.
 const PANEL_MARGIN: f32 = 3.;
+/// Right of the rows' headers: clear of the scrollbar down that edge.
+const ROWS_RIGHT: f32 = SCROLLBAR_WIDTH + 1.;
 const HEAD_BUTTON: f32 = 22.;
 const ADD_TRACK_HEIGHT: f32 = 24.;
 /// The line, or the outline, marking where a moved row would land.
@@ -172,6 +174,7 @@ impl Tonique {
                     .size_full(),
             )
             .child(list)
+            .child(self.rows_scrollbar(context))
             .when(open, |element| element.child(self.row_marker(&theme)))
             // Over the rows, in line with the timeline's footer.
             .child(self.list_footer(open, &theme, context))
@@ -201,7 +204,10 @@ impl Tonique {
                     return;
                 };
                 let area = Rect::of(bounds);
-                let (left, width) = (area.left + PANEL_MARGIN, area.width - 2. * PANEL_MARGIN);
+                let (left, width) = (
+                    area.left + PANEL_MARGIN,
+                    area.width - PANEL_MARGIN - ROWS_RIGHT,
+                );
                 let quad = match marker {
                     RowMarker::Line { y } => {
                         // Between the head and the footer, which hide what's
@@ -330,14 +336,14 @@ impl Tonique {
     /// A header per row, then the button adding a track; below, a click
     /// clears the selection.
     fn header_list(&self, theme: &Theme, context: &mut Context<Self>) -> impl IntoElement {
-        let width = self.headers.width.size - 2. * PANEL_MARGIN;
+        let width = self.headers.width.size - PANEL_MARGIN - ROWS_RIGHT;
         let rows = rows(&self.state);
         let scopes = group_scopes(&rows, theme);
         let mut list = div()
             .absolute()
             .top(px(RULER_HEIGHT - self.state.grid.offset.y))
             .left(px(PANEL_MARGIN))
-            .right(px(PANEL_MARGIN))
+            .right(px(ROWS_RIGHT))
             .flex()
             .flex_col();
         for row in rows {

@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// The grip's width, inside the panel's edge.
-const HANDLE_WIDTH: f32 = 5.;
+pub const HANDLE_WIDTH: f32 = 5.;
 
 /// The side of its panel the grip is on.
 #[derive(Clone, Copy, PartialEq)]
