@@ -277,11 +277,8 @@ impl CompressorEditor {
     /// sight.
     fn record(&mut self, cx: &EditorContext) {
         let tap = &cx.effect.plugin.tap;
-        let (input, output, reduction) = (
-            tap.input.take_levels(),
-            tap.output.take_levels(),
-            tap.reduction.take(),
-        );
+        // The output's levels were taken for the effect's meter.
+        let (input, output, reduction) = (tap.input.take_levels(), cx.output, tap.reduction.take());
         if !cx.enabled() {
             return;
         }

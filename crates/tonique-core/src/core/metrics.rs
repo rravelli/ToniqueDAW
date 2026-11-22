@@ -4,7 +4,7 @@ use std::{
 };
 use tonique_engine::{
     edit::TrackId,
-    meter::{ChannelMeter, SCOPE_LEN},
+    meter::{ChannelMeter, Level, SCOPE_LEN},
 };
 
 /// How fast a meter's peak falls back, in dB per second.
@@ -77,12 +77,21 @@ impl AudioMetrics {
     /// samples into the scope's history if `scope`: only the master's is
     /// shown, and reading every channel's each frame adds up.
     pub fn update(&mut self, meter: &ChannelMeter, scope: bool) {
+        let levels = meter.take_levels();
+        if scope && let Some([level, _]) = levels {
+            self.read_scope(meter, level.frames as usize);
+        }
+        self.update_levels(levels);
+    }
+
+    /// Take in `levels`, already taken from a meter (`None` when it had
+    /// none since): for a meter whose levels something else reads too.
+    pub fn update_levels(&mut self, levels: Option<[Level; 2]>) {
         let now = Instant::now();
         let dt = self
             .last_update
             .map_or(0., |last| now.duration_since(last).as_secs_f32().min(0.25));
         self.last_update = Some(now);
-        let levels = meter.take_levels();
         if levels.is_some() {
             self.idle = 0.;
         } else {
@@ -90,9 +99,6 @@ impl AudioMetrics {
         }
         // The UI can redraw faster than audio is processed: keep the last
         // levels a moment, then fall as if silent.
-        if scope && let Some([level, _]) = levels {
-            self.read_scope(meter, level.frames as usize);
-        }
         if levels.is_some() || self.idle > IDLE {
             let levels = levels.unwrap_or_default();
             self.apply(levels.map(|l| (l.peak, l.rms)), dt);

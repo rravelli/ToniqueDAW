@@ -44,6 +44,7 @@ use std::f32::consts::FRAC_PI_2;
 use std::{collections::HashMap, ops::RangeInclusive};
 use tonique_engine::{
     edit::{Parameter, PluginId},
+    meter::Level,
     param::ParamId,
 };
 
@@ -91,6 +92,9 @@ pub struct EditorContext<'a> {
     pub edits: Vec<EffectEdit>,
     /// Shown in a full window, with room for more than in the rack.
     pub expanded: bool,
+    /// The levels out of the effect since the last frame, taken from its
+    /// tap once for its meter and its editor: taking them empties it.
+    pub output: Option<[Level; 2]>,
 }
 
 impl EditorContext<'_> {
@@ -354,17 +358,30 @@ impl EffectRack {
         if effect.collapsed {
             let mut response = self.strip_ui(ui, effect, height, selected, expandable);
             if full {
-                self.full_window(ui.ctx(), effect, sample_rate, &mut response);
+                let output = effect.enabled().then(|| {
+                    let tap = &effect.plugin.tap;
+                    tap.watch_output_for((sample_rate / 2.) as u32);
+                    tap.output.take_levels()
+                });
+                self.full_window(
+                    ui.ctx(),
+                    effect,
+                    sample_rate,
+                    output.flatten(),
+                    &mut response,
+                );
             }
             return response;
         }
         let width = slot.editor.width();
         // Its output, while shown: a bypassed effect isn't heard, so it has
         // none.
+        let mut output = None;
         if effect.enabled() {
-            let output = &effect.plugin.tap;
-            output.watch_output_for((sample_rate / 2.) as u32);
-            slot.levels.update(&output.output, false);
+            let tap = &effect.plugin.tap;
+            tap.watch_output_for((sample_rate / 2.) as u32);
+            output = tap.output.take_levels();
+            slot.levels.update_levels(output);
         }
         let levels = slot.levels.clone();
         let theme = ui.app_theme();
@@ -414,6 +431,7 @@ impl EffectRack {
             sample_rate,
             edits: Vec::new(),
             expanded: false,
+            output,
         };
         if full {
             // Drawn in its window instead: one editor can't be in two places.
@@ -437,7 +455,7 @@ impl EffectRack {
         paint_outline(ui, rect, selected);
         response.rect = whole;
         if full {
-            self.full_window(ui.ctx(), effect, sample_rate, &mut response);
+            self.full_window(ui.ctx(), effect, sample_rate, output, &mut response);
         }
         response
     }
@@ -456,6 +474,7 @@ impl EffectRack {
         ctx: &egui::Context,
         effect: &Effect,
         sample_rate: f32,
+        output: Option<[Level; 2]>,
         response: &mut EffectResponse,
     ) {
         let Some(slot) = self.editors.get_mut(&effect.plugin.id) else {
@@ -521,6 +540,7 @@ impl EffectRack {
                     sample_rate,
                     edits: Vec::new(),
                     expanded: true,
+                    output,
                 };
                 slot.editor.ui(&mut body_ui, &mut cx);
                 (toggled, back, cx.edits)
