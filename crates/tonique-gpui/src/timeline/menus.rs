@@ -2,17 +2,17 @@
 //! and a clip's.
 
 use crate::model::HoldsProject;
+use crate::timeline::{Arrangement, ArrangementEvent};
 use gpui::Context;
 use tonique_engine::edit::ClipId;
 
 use crate::{
-    app::Tonique,
     core::grid::{GridDensity, GridStep},
     icons,
     widgets::{Menu, MenuItem},
 };
 
-impl Tonique {
+impl Arrangement {
     /// Adaptive densities, fixed steps, triplets and snapping; the chosen
     /// ones ticked, as `grid_menu` in the egui app.
     pub fn grid_menu(&self, context: &mut Context<Self>) -> gpui::Div {
@@ -71,7 +71,9 @@ impl Tonique {
             menu = menu.item(
                 MenuItem::new("Locate file…").icon(icons::MAGNIFYING_GLASS),
                 context,
-                move |this, _, context| this.show_missing_files(Some(path.clone()), context),
+                move |_, _, context| {
+                    context.emit(ArrangementEvent::ShowMissingFiles(Some(path.clone())));
+                },
             );
         }
         Some(

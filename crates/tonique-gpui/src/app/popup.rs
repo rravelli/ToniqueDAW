@@ -70,11 +70,11 @@ impl Tonique {
 
     fn popup_menu(&mut self, kind: PopupKind, context: &mut Context<Self>) -> Option<gpui::Div> {
         Some(match kind {
-            PopupKind::Grid => self.grid_menu(context),
-            PopupKind::Clip(id) => self.clip_menu(id, context)?,
-            PopupKind::Track(id) => self.track_menu(id, context)?,
-            // The browser's and the bottom panel's own.
-            PopupKind::BrowserRow(..)
+            // The arrangement's, the browser's and the bottom panel's own.
+            PopupKind::Grid
+            | PopupKind::Clip(..)
+            | PopupKind::Track(..)
+            | PopupKind::BrowserRow(..)
             | PopupKind::BrowserRowLabel(..)
             | PopupKind::Effect(..)
             | PopupKind::ClipRuler(..)

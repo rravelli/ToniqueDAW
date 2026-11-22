@@ -4,15 +4,13 @@
 //! open, to show where things landed.
 
 use crate::model::HoldsProject;
+use crate::timeline::Arrangement;
 use gpui::App;
 use tonique_engine::edit::TrackId;
 
-use crate::{
-    app::Tonique,
-    timeline::{ROW_GAP, RULER_HEIGHT, rows::rows},
-};
+use crate::timeline::{ROW_GAP, RULER_HEIGHT, rows::rows};
 
-impl Tonique {
+impl Arrangement {
     /// Follows a drag with the pointer at `local_y` over the lanes (`None`
     /// when off them); `dragging` is false once it's dropped or let go.
     pub(super) fn expand_on_hover(

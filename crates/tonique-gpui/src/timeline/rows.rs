@@ -2,11 +2,11 @@
 //! beats under the pointer.
 
 use crate::model::HoldsProject;
+use crate::timeline::Arrangement;
 use gpui::{App, Pixels, Point, Window};
 use tonique_engine::time::BeatPos;
 
 use crate::{
-    app::Tonique,
     core::{
         clip::AudioClip,
         grid::Viewport,
@@ -142,7 +142,7 @@ pub fn handle_rect(clip: Rect, start_edge: bool) -> Rect {
     Rect::new(left, clip.top, width, clip.height)
 }
 
-impl Tonique {
+impl Arrangement {
     /// The timeline across the screen, in its own coordinates.
     pub(super) fn viewport(&self) -> Span {
         Span {

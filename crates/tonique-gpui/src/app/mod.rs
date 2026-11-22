@@ -36,16 +36,15 @@ use transport::{Shows, TransportBar, TransportEvent};
 use crate::{
     audio::host::AudioHost,
     bench::Bench,
-    bottom::BottomPanel,
+    bottom::{BottomPanel, BottomView},
     browser::BrowserPanel,
     config::settings::Settings,
     core::state::{PlaybackState, ProjectState},
     graph::GraphView,
-    headers::HeadersUi,
     model::{HoldsProject, Project, toggle_play},
     popup::PopupLayer,
     theme::{FONT_UI, Theme, ThemeLibrary, hsla, size},
-    timeline::TimelineUi,
+    timeline::{Arrangement, ArrangementEvent},
     wave::WaveCache,
     widgets::{Edge, Splitter, splitter_handle},
 };
@@ -58,8 +57,8 @@ const BROWSER_MAX: f32 = 400.;
 pub struct Tonique {
     pub project: Entity<Project>,
     pub focus: FocusHandle,
-    pub timeline: TimelineUi,
-    pub headers: HeadersUi,
+    /// The timeline and the track list.
+    pub arrangement: Entity<Arrangement>,
     /// The audio graph, shown instead of the timeline when open.
     pub graph: Entity<GraphView>,
     pub browser: Entity<BrowserPanel>,
@@ -147,14 +146,15 @@ impl Tonique {
             .new(|context| BrowserPanel::new(project.clone(), waves.clone(), window, context));
         let transport = context.new(|_| TransportBar::new(project.clone()));
         let transport_events = context.subscribe(&transport, Self::on_transport);
+        let arrangement = context.new(|_| Arrangement::new(project.clone(), waves.clone()));
+        let arrangement_events = context.subscribe(&arrangement, Self::on_arrangement);
         Self {
             browser,
-            headers: HeadersUi::new(),
             graph: context.new(|_| GraphView::new(project.clone())),
             bottom: context.new(|_| BottomPanel::new(project.clone(), waves.clone())),
+            arrangement,
             project,
             focus,
-            timeline: TimelineUi::default(),
             waves,
             browser_open: true,
             browser_width: Splitter::new(Edge::Right, BROWSER_WIDTH, BROWSER_MIN, BROWSER_MAX),
@@ -167,7 +167,7 @@ impl Tonique {
             popups: crate::popup::init(context),
             bench,
             _ticker: ticker,
-            _subscriptions: vec![transport_events],
+            _subscriptions: vec![transport_events, arrangement_events],
         }
     }
 
@@ -181,7 +181,11 @@ impl Tonique {
             TransportEvent::ToggleBrowser => self.browser_open = !self.browser_open,
             TransportEvent::ToggleGraph => self.toggle_graph(context),
             TransportEvent::ToggleGridMenu(at) => {
-                self.toggle_popup(PopupKind::Grid, *at, Anchor::TopRight, context);
+                let build = self
+                    .arrangement
+                    .read(context)
+                    .grid_menu_builder(&self.arrangement);
+                crate::popup::toggle(PopupKind::Grid, *at, Anchor::TopRight, build, context);
             }
             TransportEvent::ShowMissingFiles => self.show_missing_files(None, context),
             TransportEvent::OpenAudioSettings => {
@@ -199,6 +203,37 @@ impl Tonique {
             browser.show_missing_files(path, context);
             context.notify();
         });
+    }
+
+    fn on_arrangement(
+        &mut self,
+        _: Entity<Arrangement>,
+        event: &ArrangementEvent,
+        context: &mut Context<Self>,
+    ) {
+        match event {
+            ArrangementEvent::ShowEffects => self.bottom.update(context, |bottom, context| {
+                bottom.shown.open = true;
+                bottom.shown.view = BottomView::Effects;
+                context.notify();
+            }),
+            ArrangementEvent::ShowClipDetails(id) => {
+                self.bottom.update(context, |bottom, context| {
+                    bottom.show_clip_details(*id, context);
+                    context.notify();
+                });
+            }
+            ArrangementEvent::ToggleEffectsOfSelected(was_selected) => {
+                self.bottom.update(context, |bottom, context| {
+                    bottom.toggle_effects_of_selected(*was_selected);
+                    context.notify();
+                });
+            }
+            ArrangementEvent::ShowMissingFiles(path) => {
+                self.show_missing_files(path.clone(), context);
+            }
+        }
+        context.notify();
     }
 
     /// Between the timeline and the audio graph.
@@ -219,18 +254,7 @@ impl Tonique {
             .browser_width
             .drag_to(f32::from(event.position.x), width / 2.)
             .is_some();
-        self.timeline_drag_move(event, context)
-            | self.header_drag_move(event, width, context)
-            | self.settings_drag_move(event, context)
-            | self.export_drag_move(event, context)
-            | browser
-    }
-
-    /// The pointer over the window, not under a dialog or a menu.
-    fn on_hover(&mut self, event: &MouseMoveEvent, _: &mut Window, context: &mut Context<Self>) {
-        if self.timeline_hover(event) {
-            context.notify();
-        }
+        self.settings_drag_move(event, context) | self.export_drag_move(event, context) | browser
     }
 
     /// Hears every pointer move, before the elements do: an element only
@@ -271,9 +295,7 @@ impl Tonique {
         .size_0()
     }
 
-    fn on_up(&mut self, event: &MouseUpEvent, _window: &mut Window, context: &mut Context<Self>) {
-        self.timeline_drag_end(event, context);
-        self.header_drag_end(context);
+    fn on_up(&mut self, _: &MouseUpEvent, _window: &mut Window, context: &mut Context<Self>) {
         self.browser_width.end();
         self.settings_drag_end();
         self.export_drag_end();
@@ -281,11 +303,7 @@ impl Tonique {
     }
 
     fn is_dragging(&self) -> bool {
-        self.timeline.is_dragging()
-            || self.headers.is_dragging()
-            || self.browser_width.is_dragging()
-            || self.settings.is_dragging()
-            || self.export.is_dragging()
+        self.browser_width.is_dragging() || self.settings.is_dragging() || self.export.is_dragging()
     }
 
     /// The browser, resizable from its right edge.
@@ -338,27 +356,18 @@ impl Render for Tonique {
         crate::profile::frame();
         self.menu_bar.frame();
         crate::profile::time("state.update", || self.state_mut(context).update());
-        let scrolling = self.step_scrolling(context) | self.autoscroll(context);
-        let dragging = context.has_active_drag() || self.is_dragging();
-        self.follow_playhead(dragging, context);
         self.update_title(window, context);
         self.waves.borrow_mut().start_frame(window);
         let animating = self.state(context).playback_state() == PlaybackState::Playing
             || self.state(context).preview_playback_state() == PlaybackState::Playing
             || context.has_active_drag()
             || self.is_dragging()
-            || scrolling
             || self.export.is_running()
             // Meters falling back after playback.
             || self.state(context).metrics.tracks.values().any(crate::meter::is_live);
         if animating {
             window.request_animation_frame();
         }
-        if !context.has_active_drag() {
-            self.timeline.drop_target = None;
-            self.timeline.effect_target = None;
-        }
-
         let shows = Shows {
             browser: self.browser_open,
             graph: self.graph.read(context).is_open(),
@@ -367,9 +376,6 @@ impl Render for Tonique {
         self.transport
             .update(context, |transport, context| transport.show(shows, context));
 
-        // The rows as this frame shows them, for both views: building them
-        // clones every track's clips.
-        let rows = crate::timeline::rows(self.state(context));
         let theme = crate::theme::current(context);
         let bottom_open = self.bottom.read(context).shown.open;
         let body = div()
@@ -384,21 +390,13 @@ impl Render for Tonique {
         let body = if self.graph.read(context).is_open() {
             body.child(self.graph.clone())
         } else {
-            // As in the egui app: the track list on the timeline's right.
-            body.child(crate::profile::time("view.timeline", || {
-                self.timeline_view(&rows, window, context)
-            }))
-            .child(divider(&theme))
-            .child(crate::profile::time("view.headers", || {
-                self.headers_view(&rows, window, context)
-            }))
+            body.child(self.arrangement.clone())
         };
 
         div()
             .track_focus(&self.focus)
             .on_key_down(context.listener(Self::on_key))
             .on_action(context.listener(Self::on_command))
-            .on_mouse_move(context.listener(Self::on_hover))
             .on_mouse_up(MouseButton::Left, context.listener(Self::on_up))
             .on_mouse_up_out(MouseButton::Left, context.listener(Self::on_up))
             .size_full()

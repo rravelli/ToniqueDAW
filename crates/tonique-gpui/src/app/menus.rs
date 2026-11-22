@@ -188,7 +188,7 @@ impl Tonique {
         )
         .command(
             self.action_item("Track list", Action::ToggleTrackList, context)
-                .checked(self.headers.is_open())
+                .checked(self.arrangement.read(context).headers.is_open())
                 .keep_open(),
             Action::ToggleTrackList,
             context,

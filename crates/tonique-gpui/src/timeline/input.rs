@@ -4,6 +4,7 @@
 //! is [`super::scroll`]'s, moving clips [`super::moving`]'s.
 
 use crate::model::HoldsProject;
+use crate::timeline::{Arrangement, ArrangementEvent};
 use gpui::{
     Anchor, App, Context, Modifiers, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
     Window,
@@ -11,7 +12,7 @@ use gpui::{
 use tonique_engine::time::BeatPos;
 
 use crate::{
-    app::{PopupKind, Tonique},
+    app::{PopupKind, focus_main},
     core::{clip::AudioClip, state::SelectionBounds},
     timeline::{
         LOOP_HEIGHT, RULER_HEIGHT,
@@ -64,14 +65,14 @@ impl TimelineDrag {
     }
 }
 
-impl Tonique {
+impl Arrangement {
     pub(super) fn on_timeline_down(
         &mut self,
         event: &MouseDownEvent,
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        window.focus(&self.focus, context);
+        focus_main(window, context);
         let (local_x, local_y) = self.local(event.position);
         let alt = event.modifiers.alt;
         self.timeline.drag = if self.on_playhead_head(local_x, local_y, context) {
@@ -104,7 +105,7 @@ impl Tonique {
         event: &MouseDownEvent,
         local_x: f32,
         local_y: f32,
-        context: &mut App,
+        context: &mut Context<Self>,
     ) -> TimelineDrag {
         let rows = rows(self.state(context));
         let hit = self.clip_at(&rows, local_x, local_y, context);
@@ -113,10 +114,7 @@ impl Tonique {
             && let Some((_, clip, _)) = &hit
         {
             self.state_mut(context).select_clips(vec![clip.id]);
-            self.bottom.update(context, |bottom, context| {
-                bottom.show_clip_details(clip.id, context);
-                context.notify();
-            });
+            context.emit(ArrangementEvent::ShowClipDetails(clip.id));
             return TimelineDrag::None;
         }
         match hit {

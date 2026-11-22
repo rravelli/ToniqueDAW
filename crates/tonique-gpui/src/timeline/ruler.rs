@@ -4,11 +4,11 @@
 //! looping), and the playhead's head, dragged to scrub.
 
 use crate::model::HoldsProject;
+use crate::timeline::Arrangement;
 use gpui::{App, Corners, PathBuilder, Window, point, px};
 use tonique_engine::time::BeatPos;
 
 use crate::{
-    app::Tonique,
     geometry::Rect,
     theme::{hsla, with_alpha},
     timeline::{LOOP_HEIGHT, RULER_HEIGHT, input::TimelineDrag, paint::Canvas, scene::Scene},
@@ -46,7 +46,7 @@ pub enum LoopGrab {
     },
 }
 
-impl Tonique {
+impl Arrangement {
     /// Whether the pointer at (`local_x`, `local_y`) grabs the playhead's
     /// head: around it, a little wider and taller than it.
     pub(super) fn on_playhead_head(&self, local_x: f32, local_y: f32, context: &App) -> bool {

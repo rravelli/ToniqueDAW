@@ -12,7 +12,7 @@ use gpui::{
 pub fn follow_drag<V: 'static>(
     view: WeakEntity<V>,
     on_move: fn(&mut V, &MouseMoveEvent, &mut Context<V>),
-    on_up: fn(&mut V, &mut Context<V>),
+    on_up: fn(&mut V, &MouseUpEvent, &mut Context<V>),
 ) -> impl IntoElement {
     canvas(
         |_, _, _| {},
@@ -26,10 +26,10 @@ pub fn follow_drag<V: 'static>(
                     });
                 }
             });
-            window.on_mouse_event(move |_: &MouseUpEvent, phase, _, context| {
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, context| {
                 if phase == DispatchPhase::Capture {
                     let _ = released.update(context, |view, context| {
-                        on_up(view, context);
+                        on_up(view, event, context);
                         context.notify();
                     });
                 }

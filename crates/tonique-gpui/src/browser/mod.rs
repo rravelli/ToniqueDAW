@@ -307,7 +307,7 @@ impl Render for BrowserPanel {
                     |this, event, context| {
                         this.browser_drag_move(event, context);
                     },
-                    |this, _| this.browser_drag_end(),
+                    |this, _, _| this.browser_drag_end(),
                 ))
             })
     }

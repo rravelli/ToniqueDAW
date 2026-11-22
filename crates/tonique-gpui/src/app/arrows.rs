@@ -133,9 +133,11 @@ impl Tonique {
             return true;
         }
         match holder {
-            ArrowHolder::Header(track, param) => self.step_header(track, param, presses, context),
             // Stepped by their views.
-            ArrowHolder::Clip(_) | ArrowHolder::Knob(_) | ArrowHolder::Number(_) => {}
+            ArrowHolder::Header(..)
+            | ArrowHolder::Clip(_)
+            | ArrowHolder::Knob(_)
+            | ArrowHolder::Number(_) => {}
             ArrowHolder::MetronomeLevel => self.step_metronome_level(presses, context),
         }
         true

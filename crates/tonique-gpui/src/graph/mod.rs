@@ -344,7 +344,7 @@ impl Render for GraphView {
                 element.child(follow_drag(
                     context.weak_entity(),
                     Self::drag_to,
-                    |this, _| this.drag = None,
+                    |this, _, _| this.drag = None,
                 ))
             })
     }

@@ -2,13 +2,13 @@
 //! canvas can paint it after the view is built.
 
 use crate::model::HoldsProject;
+use crate::timeline::Arrangement;
 use gpui::App;
 use std::collections::HashSet;
 
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 use crate::{
-    app::Tonique,
     core::{
         clip::AudioClip,
         grid::GridLine,
@@ -129,7 +129,7 @@ fn label(line: GridLine) -> String {
     }
 }
 
-impl Tonique {
+impl Arrangement {
     /// What the timeline paints: the clips of the rows overlapping
     /// `in_view`, a span of the scrolled content.
     pub(super) fn scene(

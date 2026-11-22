@@ -5,13 +5,14 @@
 //! added on drop.
 
 use crate::model::HoldsProject;
+use crate::timeline::Arrangement;
 use gpui::{App, Modifiers, Pixels, Point};
 use tonique_engine::{
     edit::{ClipId, TrackId},
     time::BeatPos,
 };
 
-use crate::{app::Tonique, core::clip::AudioClip, timeline::rows::rows};
+use crate::{core::clip::AudioClip, timeline::rows::rows};
 
 /// Pixels the pointer moves before a press on a clip becomes a move.
 const MOVE_THRESHOLD: f64 = 3.;
@@ -71,7 +72,7 @@ impl DraggedClips {
     }
 }
 
-impl Tonique {
+impl Arrangement {
     /// Follows the pointer with a press on a clip's header. Returns `None`
     /// when a copying drag lost its Ctrl: it's dropped without copying.
     pub(super) fn follow_clip_move(

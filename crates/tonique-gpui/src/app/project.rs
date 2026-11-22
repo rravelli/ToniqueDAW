@@ -399,8 +399,8 @@ impl Tonique {
     /// does.
     fn forget_old_project(&mut self, context: &mut App) {
         crate::popup::close(context);
-        self.headers.forget_project();
-        self.timeline.forget_project();
+        self.arrangement
+            .update(context, |arrangement, _| arrangement.forget_project());
         self.bottom
             .update(context, |bottom, _| bottom.forget_project());
     }

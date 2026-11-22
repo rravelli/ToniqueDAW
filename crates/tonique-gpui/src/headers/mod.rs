@@ -13,6 +13,7 @@ mod menu;
 pub use drag::Param;
 
 use crate::model::HoldsProject;
+use crate::timeline::Arrangement;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -26,7 +27,6 @@ use gpui::{
 use tonique_engine::edit::TrackId;
 
 use crate::{
-    app::Tonique,
     bottom::DraggedEffect,
     core::{
         state::MASTER_TRACK_ID,
@@ -114,7 +114,7 @@ impl HeadersUi {
     }
 }
 
-impl Tonique {
+impl Arrangement {
     /// The row of track or group `id`, the master's included.
     pub fn track_row(&self, id: TrackId, context: &App) -> Option<TrackRow> {
         if id == MASTER_TRACK_ID {

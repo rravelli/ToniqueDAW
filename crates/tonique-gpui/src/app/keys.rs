@@ -115,7 +115,10 @@ impl Tonique {
             _ => {
                 state.paste();
                 drop(state);
-                self.reveal_selection(context);
+                self.arrangement.update(context, |arrangement, context| {
+                    arrangement.reveal_selection(context);
+                    context.notify();
+                });
             }
         }
     }
@@ -144,7 +147,10 @@ impl Tonique {
         match action {
             Action::PlayStop => self.toggle_play(context),
             Action::ToggleBrowser => self.browser_open = !self.browser_open,
-            Action::ToggleTrackList => self.headers.toggle_list(),
+            Action::ToggleTrackList => self.arrangement.update(context, |arrangement, context| {
+                arrangement.headers.toggle_list();
+                context.notify();
+            }),
             // Nudge the selected clips by a grid step, or move the edit
             // cursor when nothing is selected.
             Action::NudgeLeft | Action::NudgeRight => {
@@ -155,11 +161,17 @@ impl Tonique {
                     let cursor = state.grid.snap_to_step(state.edit_cursor() + step);
                     state.set_edit_cursor(cursor);
                     drop(state);
-                    self.reveal((cursor, cursor), context);
+                    self.arrangement.update(context, |arrangement, context| {
+                        arrangement.reveal((cursor, cursor), context);
+                        context.notify();
+                    });
                 } else {
                     state.nudge_selection(step);
                     drop(state);
-                    self.reveal_selection(context);
+                    self.arrangement.update(context, |arrangement, context| {
+                        arrangement.reveal_selection(context);
+                        context.notify();
+                    });
                 }
             }
             Action::Duplicate => {
@@ -167,14 +179,19 @@ impl Tonique {
                 if !state.selected_clips().is_empty() {
                     state.duplicate_selected_clips();
                     drop(state);
-                    self.reveal_selection(context);
+                    self.arrangement.update(context, |arrangement, context| {
+                        arrangement.reveal_selection(context);
+                        context.notify();
+                    });
                 } else if let Some(selected) = state.selected_track() {
                     state.duplicate_track(&selected.id);
                 }
             }
             Action::Rename => {
                 if let Some(track) = self.state(context).selected_track() {
-                    self.rename_track(track.id, window, context);
+                    self.arrangement.update(context, |arrangement, context| {
+                        arrangement.rename_track(track.id, window, context);
+                    });
                 }
             }
             Action::NewProject => self.project_action(ProjectAction::New, window, context),

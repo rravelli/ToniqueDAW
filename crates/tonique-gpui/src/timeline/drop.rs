@@ -4,6 +4,7 @@
 //! would go on is lit while it's dragged over.
 
 use crate::model::HoldsProject;
+use crate::timeline::{Arrangement, ArrangementEvent};
 use std::path::PathBuf;
 
 use gpui::{App, Context, DragMoveEvent, ExternalPaths, Pixels, Point, Stateful, prelude::*};
@@ -11,8 +12,7 @@ use tonique_engine::{edit::TrackId, time::BeatPos};
 
 use crate::{
     analysis::AudioInfo,
-    app::Tonique,
-    bottom::{BottomView, DraggedEffect},
+    bottom::DraggedEffect,
     browser::DraggedAudio,
     cache::AUDIO_ANALYSIS_CACHE,
     core::{clip::AudioClip, state::MASTER_TRACK_ID},
@@ -29,7 +29,7 @@ pub struct DropTarget {
     pub position: BeatPos,
 }
 
-impl Tonique {
+impl Arrangement {
     fn drop_target_at(
         &self,
         position: Point<Pixels>,
@@ -136,7 +136,7 @@ impl Tonique {
         &mut self,
         dragged: &DraggedEffect,
         position: Point<Pixels>,
-        context: &mut App,
+        context: &mut Context<Self>,
     ) {
         self.timeline.effect_target = None;
         let Some(track) = self.effect_target_at(position, context) else {
@@ -145,11 +145,7 @@ impl Tonique {
         self.state_mut(context)
             .add_effect(&track, dragged.kind, usize::MAX);
         self.state_mut(context).select_track(&track);
-        self.bottom.update(context, |bottom, context| {
-            bottom.shown.open = true;
-            bottom.shown.view = BottomView::Effects;
-            context.notify();
-        });
+        context.emit(ArrangementEvent::ShowEffects);
     }
 
     /// `view` taking files dragged from the browser and the system, and

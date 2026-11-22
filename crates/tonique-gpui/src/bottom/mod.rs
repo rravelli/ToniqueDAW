@@ -17,8 +17,8 @@ use std::{
 };
 
 use gpui::{
-    Anchor, App, Bounds, Context, DispatchPhase, Entity, MouseDownEvent, MouseMoveEvent, Pixels,
-    Point, Window, canvas, div, prelude::*, px,
+    Anchor, App, Bounds, Context, DispatchPhase, Entity, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, Window, canvas, div, prelude::*, px,
 };
 use tonique_engine::edit::ClipId;
 
@@ -241,7 +241,7 @@ impl BottomPanel {
         self.clip_drag_move(event, context);
     }
 
-    fn bottom_drag_end(&mut self, context: &mut Context<Self>) {
+    fn bottom_drag_end(&mut self, _: &MouseUpEvent, context: &mut Context<Self>) {
         self.height.end();
         self.rack_drag_end(context);
         self.clip_drag_end(context);

@@ -4,11 +4,12 @@
 //! narrowest).
 
 use crate::model::HoldsProject;
-use gpui::{App, MouseDownEvent, MouseMoveEvent};
+use crate::timeline::Arrangement;
+use gpui::{App, Context, MouseDownEvent, MouseMoveEvent};
 use tonique_engine::edit::TrackId;
 
 use crate::{
-    app::{ArrowHolder, Tonique},
+    app::ArrowHolder,
     core::{
         state::{MIN_EXPANDED_HEIGHT, RowTarget},
         track::{TrackKind, TrackRow},
@@ -125,7 +126,7 @@ pub enum HeaderDrag {
     },
 }
 
-impl Tonique {
+impl Arrangement {
     pub(super) fn param(&self, id: TrackId, param: Param, context: &App) -> f32 {
         self.track_row(id, context)
             .map_or(param.scale().default_value(), |track| param.of(&track))
@@ -153,9 +154,13 @@ impl Tonique {
         id: TrackId,
         param: Param,
         event: &MouseDownEvent,
-        context: &mut App,
+        context: &mut Context<Arrangement>,
     ) {
-        crate::app::arrows::hold(ArrowHolder::Header(id, param), context);
+        let step =
+            crate::app::arrows::stepper(context.weak_entity(), move |this, presses, context| {
+                this.step_header(id, param, presses, context)
+            });
+        crate::app::arrows::hold_in(ArrowHolder::Header(id, param), step, context);
         let value = self.param(id, param, context);
         let scale = param.scale();
         if event.click_count >= 2 {

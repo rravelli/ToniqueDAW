@@ -2,11 +2,12 @@
 //! renaming one in place.
 
 use crate::model::HoldsProject;
+use crate::timeline::Arrangement;
 use gpui::{Context, KeyDownEvent, Window, div, prelude::*, px};
 use tonique_engine::edit::TrackId;
 
 use crate::{
-    app::Tonique,
+    app::focus_main,
     core::{state::MASTER_TRACK_ID, track::TrackKind},
     icons,
     theme::{Color, Theme, hsla},
@@ -18,7 +19,7 @@ use crate::{
 const DEFAULT_NAME: &str = "Audio Track";
 const SWATCH: f32 = 14.;
 
-impl Tonique {
+impl Arrangement {
     pub fn track_menu(&self, id: TrackId, context: &mut Context<Self>) -> Option<gpui::Div> {
         let track = self.track_row(id, context)?;
         let theme = &*crate::theme::current(context);
@@ -154,7 +155,7 @@ impl Tonique {
             self.state_mut(context).track_view_mut(&id).name = name.to_string();
             self.state_mut(context).commit_track_view(&id);
         }
-        window.focus(&self.focus, context);
+        focus_main(window, context);
     }
 
     pub(super) fn rename_view(

@@ -5,6 +5,7 @@
 //! from its bottom edge.
 
 use crate::model::HoldsProject;
+use crate::timeline::{Arrangement, ArrangementEvent};
 use gpui::{
     Anchor, AnyElement, Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, canvas, div,
     prelude::*, px,
@@ -12,7 +13,7 @@ use gpui::{
 use tonique_engine::edit::TrackId;
 
 use crate::{
-    app::{ArrowHolder, PopupKind, Tonique},
+    app::{ArrowHolder, PopupKind},
     core::{
         state::MASTER_TRACK_ID,
         track::{TrackRow, TrackSoloState},
@@ -83,7 +84,7 @@ fn drop_highlight(theme: &Theme) -> gpui::Div {
         .border_color(hsla(theme.accent))
 }
 
-impl Tonique {
+impl Arrangement {
     /// The header of `track`, `width` wide, and below it the edge that
     /// resizes it.
     pub(super) fn header(
@@ -122,10 +123,7 @@ impl Tonique {
                     if event.click_count == 2 {
                         let was_selected = this.state(context).selected_tracks().contains(&id);
                         this.state_mut(context).select_track(&id);
-                        this.bottom.update(context, |bottom, context| {
-                            bottom.toggle_effects_of_selected(was_selected);
-                            context.notify();
-                        });
+                        context.emit(ArrangementEvent::ToggleEffectsOfSelected(was_selected));
                         context.notify();
                         return;
                     }

@@ -3,8 +3,8 @@
 //! signature, warnings and the audio load on the right.
 
 use gpui::{
-    Context, Entity, EventEmitter, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point,
-    Window, div, point, prelude::*, px,
+    Context, Entity, EventEmitter, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    Pixels, Point, Window, div, point, prelude::*, px,
 };
 use tonique_engine::time::TimeSignature;
 
@@ -106,7 +106,7 @@ impl TransportBar {
         self.bpm.is_dragging() || self.numerator.is_dragging() || self.denominator.is_dragging()
     }
 
-    fn end_drags(&mut self, _: &mut Context<Self>) {
+    fn end_drags(&mut self, _: &MouseUpEvent, _: &mut Context<Self>) {
         self.bpm.end_drag();
         self.numerator.end_drag();
         self.denominator.end_drag();

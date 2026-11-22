@@ -2,10 +2,15 @@
 //! its clips, the grid, the playhead and the edit cursor. Edits go through
 //! Tonique's `ProjectState` and `GridService`, as in the egui app.
 //!
+//! The [`Arrangement`] is a view of its own: the timeline and, on its
+//! right, the track list (`crate::headers`), one per row and scrolled
+//! together, so one view: they share the rows, the scroll, the hover and
+//! drags going from one to the other.
+//!
 //! Each frame, `timeline_view` takes what's shown out of the state into a
 //! [`scene::Scene`]; the canvas paints it ([`paint`]). Pointer handling is
-//! on the wrapping div ([`input`], [`drop`]); drags are then followed by
-//! the root view, so they work outside it.
+//! on the wrapping div ([`input`], [`drop`]); drags are then followed over
+//! the whole window ([`follow_drag`]).
 
 mod clip;
 mod drop;
@@ -20,21 +25,30 @@ mod ruler;
 mod scene;
 mod scroll;
 
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    path::PathBuf,
+    rc::Rc,
+};
 
 use gpui::{
-    App, Bounds, ContentMask, Context, CursorStyle, Modifiers, MouseButton, Pixels, Point, Window,
-    canvas, div, prelude::*, px,
+    Anchor, App, Bounds, ContentMask, Context, CursorStyle, Entity, EventEmitter, Modifiers,
+    MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, Window, canvas, div, prelude::*, px,
 };
 
 pub use drop::DropTarget;
 pub use rows::{FOOTER_PADDING, Row, footer_height, rows, rows_height};
 
-use tonique_engine::edit::TrackId;
+use tonique_engine::edit::{ClipId, TrackId};
 
 use crate::{
-    app::Tonique,
-    widgets::{Axis, SCROLLBAR_WIDTH, scrollbar},
+    app::PopupKind,
+    headers::HeadersUi,
+    model::{HoldsProject, Project},
+    popup::{self, MenuBuilder},
+    theme::hsla,
+    wave::WaveCache,
+    widgets::{Axis, SCROLLBAR_WIDTH, follow_drag, scrollbar},
 };
 use input::TimelineDrag;
 use rows::ClipPart;
@@ -86,7 +100,102 @@ impl TimelineUi {
     }
 }
 
-impl Tonique {
+/// The timeline and the track list beside it.
+pub struct Arrangement {
+    project: Entity<Project>,
+    /// The waveforms drawn, shared with the other views.
+    waves: Rc<RefCell<WaveCache>>,
+    pub timeline: TimelineUi,
+    pub headers: HeadersUi,
+    /// The window's width, as last drawn: the list leaves the timeline half
+    /// of it.
+    window_width: f32,
+}
+
+/// What the arrangement asks of the window.
+pub enum ArrangementEvent {
+    /// The bottom panel on the selected track's effects.
+    ShowEffects,
+    /// The bottom panel on clip `id`'s details.
+    ShowClipDetails(ClipId),
+    /// As a double-click on a track header: the bottom panel on its
+    /// effects, or closed when it showed them; whether it was selected.
+    ToggleEffectsOfSelected(bool),
+    /// The browser's missing files, a clip's file selected.
+    ShowMissingFiles(Option<PathBuf>),
+}
+
+impl EventEmitter<ArrangementEvent> for Arrangement {}
+
+impl HoldsProject for Arrangement {
+    fn project(&self) -> &Entity<Project> {
+        &self.project
+    }
+}
+
+impl Arrangement {
+    pub fn new(project: Entity<Project>, waves: Rc<RefCell<WaveCache>>) -> Self {
+        Self {
+            project,
+            waves,
+            timeline: TimelineUi::default(),
+            headers: HeadersUi::new(),
+            window_width: 0.,
+        }
+    }
+
+    /// What referred to a replaced project's tracks and clips.
+    pub fn forget_project(&mut self) {
+        self.headers.forget_project();
+        self.timeline.forget_project();
+    }
+
+    fn is_dragging(&self) -> bool {
+        self.timeline.is_dragging() || self.headers.is_dragging()
+    }
+
+    /// Follows a drag in the timeline or the track list.
+    fn drag_move(&mut self, event: &MouseMoveEvent, context: &mut Context<Self>) {
+        let width = self.window_width;
+        self.timeline_drag_move(event, context);
+        self.header_drag_move(event, width, context);
+    }
+
+    fn drag_end(&mut self, event: &MouseUpEvent, context: &mut Context<Self>) {
+        self.timeline_drag_end(event, context);
+        self.header_drag_end(context);
+    }
+
+    /// Builds one of the arrangement's menus each frame.
+    pub fn menu_builder(&self, kind: PopupKind, context: &Context<Self>) -> MenuBuilder {
+        popup::builder(context.weak_entity(), move |this, _, context| match kind {
+            PopupKind::Grid => Some(this.grid_menu(context)),
+            PopupKind::Clip(id) => this.clip_menu(id, context),
+            PopupKind::Track(id) => this.track_menu(id, context),
+            _ => None,
+        })
+    }
+
+    /// Builds the grid's menu each frame, for the transport bar's button.
+    pub fn grid_menu_builder(&self, this: &Entity<Self>) -> MenuBuilder {
+        popup::builder(this.downgrade(), |this, _, context| {
+            Some(this.grid_menu(context))
+        })
+    }
+
+    /// Opens one of the arrangement's menus with its `anchor` corner at
+    /// `at`; or, when it's open, closes it.
+    pub(crate) fn toggle_popup(
+        &mut self,
+        kind: PopupKind,
+        at: Point<Pixels>,
+        anchor: Anchor,
+        context: &mut Context<Self>,
+    ) {
+        let build = self.menu_builder(kind, context);
+        popup::toggle(kind, at, anchor, build, context);
+    }
+
     fn cursor(&self, rows: &[Row], context: &App) -> CursorStyle {
         match &self.timeline.drag {
             TimelineDrag::Move(press) if press.dragged.is_some() => return CursorStyle::ClosedHand,
@@ -210,5 +319,61 @@ impl Tonique {
         .top(px(RULER_HEIGHT))
         .h(px(span.view.max(0.)))
         .w(px(SCROLLBAR_WIDTH))
+    }
+}
+
+impl Render for Arrangement {
+    fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
+        self.window_width = f32::from(window.viewport_size().width);
+        let scrolling = self.step_scrolling(context) | self.autoscroll(context);
+        let dragging = context.has_active_drag() || self.is_dragging();
+        self.follow_playhead(dragging, context);
+        if scrolling || dragging {
+            window.request_animation_frame();
+        }
+        if !context.has_active_drag() {
+            self.timeline.drop_target = None;
+            self.timeline.effect_target = None;
+        }
+        // The rows as this frame shows them, for both: building them clones
+        // every track's clips.
+        let rows = rows(self.state(context));
+        let theme = crate::theme::current(context);
+        let following = self.is_dragging();
+        div()
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            // Redraws as the pointer moves: the cursor and the lit parts
+            // follow it.
+            .on_mouse_move(
+                context.listener(|this, event: &MouseMoveEvent, _, context| {
+                    if this.timeline_hover(event) {
+                        context.notify();
+                    }
+                }),
+            )
+            .child(crate::profile::time("view.timeline", || {
+                self.timeline_view(&rows, window, context)
+            }))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(1.))
+                    .h_full()
+                    .bg(hsla(theme.separator)),
+            )
+            .child(crate::profile::time("view.headers", || {
+                self.headers_view(&rows, window, context)
+            }))
+            // A drag follows the pointer anywhere in the window.
+            .when(following, |element| {
+                element.child(follow_drag(
+                    context.weak_entity(),
+                    Self::drag_move,
+                    Self::drag_end,
+                ))
+            })
     }
 }

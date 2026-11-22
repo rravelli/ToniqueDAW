@@ -7,6 +7,7 @@
 //! far the scrollbars go.
 
 use crate::model::HoldsProject;
+use crate::timeline::Arrangement;
 use std::time::{Duration, Instant};
 
 use tonique_engine::time::BeatPos;
@@ -14,7 +15,6 @@ use tonique_engine::time::BeatPos;
 use gpui::{App, Context, ScrollEvent, Window};
 
 use crate::{
-    app::Tonique,
     core::{state::PlaybackState, track::DEFAULT_TRACK_HEIGHT},
     smooth_scroll::{SmoothScroll, WheelDelta},
     timeline::{
@@ -61,7 +61,7 @@ pub struct TimelineScroll {
     pub rows_bar: ScrollbarGrab,
 }
 
-impl Tonique {
+impl Arrangement {
     pub(super) fn on_timeline_scroll(
         &mut self,
         event: &ScrollEvent,
