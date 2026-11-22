@@ -16,7 +16,7 @@ mod project;
 mod settings;
 mod transport;
 
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{cell::RefCell, path::PathBuf, rc::Rc, time::Duration};
 
 use gpui::{
     Anchor, App, Context, DispatchPhase, Entity, FocusHandle, Global, MouseButton, MouseDownEvent,
@@ -37,7 +37,7 @@ use crate::{
     audio::host::AudioHost,
     bench::Bench,
     bottom::BottomPanel,
-    browser::Browser,
+    browser::BrowserPanel,
     config::settings::Settings,
     core::state::{PlaybackState, ProjectState},
     graph::GraphView,
@@ -62,7 +62,7 @@ pub struct Tonique {
     pub headers: HeadersUi,
     /// The audio graph, shown instead of the timeline when open.
     pub graph: Entity<GraphView>,
-    pub browser: Browser,
+    pub browser: Entity<BrowserPanel>,
     pub waves: Rc<RefCell<WaveCache>>,
     /// Whether the browser shows, as Tonique's left panel, and how wide.
     pub browser_open: bool,
@@ -83,8 +83,7 @@ pub struct Tonique {
     /// `TONIQUE_BENCH`: steers the view and measures frames.
     bench: Option<Bench>,
     _ticker: Task<()>,
-    /// The browser reading its folders again when the window gets the
-    /// focus back, and what the panels ask of the window.
+    /// What the panels ask of the window.
     _subscriptions: Vec<Subscription>,
 }
 
@@ -142,14 +141,10 @@ impl Tonique {
                 .unwrap_or(true)
         });
         let files = ProjectFiles::new(&state);
-        let activation = context.observe_window_activation(window, |this, window, context| {
-            if window.is_window_active() {
-                this.refresh_browser(context);
-                context.notify();
-            }
-        });
-        let browser = Browser::new(&mut state, context);
         let project = context.new(|_| Project::new(state));
+        let waves: Rc<RefCell<WaveCache>> = Rc::default();
+        let browser = context
+            .new(|context| BrowserPanel::new(project.clone(), waves.clone(), window, context));
         let transport = context.new(|_| TransportBar::new(project.clone()));
         let transport_events = context.subscribe(&transport, Self::on_transport);
         Self {
@@ -159,7 +154,7 @@ impl Tonique {
             project,
             focus,
             timeline: TimelineUi::default(),
-            waves: Rc::default(),
+            waves,
             browser_open: true,
             browser_width: Splitter::new(Edge::Right, BROWSER_WIDTH, BROWSER_MIN, BROWSER_MAX),
             bottom: BottomPanel::new(),
@@ -172,7 +167,7 @@ impl Tonique {
             popups: crate::popup::init(context),
             bench,
             _ticker: ticker,
-            _subscriptions: vec![activation, transport_events],
+            _subscriptions: vec![transport_events],
         }
     }
 
@@ -196,6 +191,16 @@ impl Tonique {
         context.notify();
     }
 
+    /// Shows the browser's missing files' tab, `path`'s selected if given (a
+    /// missing clip's).
+    pub fn show_missing_files(&mut self, path: Option<PathBuf>, context: &mut App) {
+        self.browser_open = true;
+        self.browser.update(context, |browser, context| {
+            browser.show_missing_files(path, context);
+            context.notify();
+        });
+    }
+
     /// Between the timeline and the audio graph.
     fn toggle_graph(&mut self, context: &mut Context<Self>) {
         self.graph.update(context, GraphView::toggle);
@@ -217,7 +222,6 @@ impl Tonique {
             .is_some();
         self.timeline_drag_move(event, context)
             | self.header_drag_move(event, width, context)
-            | self.browser_drag_move(event, context)
             | self.settings_drag_move(event, context)
             | self.export_drag_move(event, context)
             | self.bottom_drag_move(event, height, context)
@@ -273,7 +277,6 @@ impl Tonique {
     fn on_up(&mut self, event: &MouseUpEvent, _window: &mut Window, context: &mut Context<Self>) {
         self.timeline_drag_end(event, context);
         self.header_drag_end(context);
-        self.browser_drag_end();
         self.browser_width.end();
         self.settings_drag_end();
         self.export_drag_end();
@@ -291,20 +294,14 @@ impl Tonique {
     }
 
     /// The browser, resizable from its right edge.
-    fn browser_panel(
-        &mut self,
-        window: &mut Window,
-        context: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn browser_panel(&mut self, context: &mut Context<Self>) -> impl IntoElement {
         let theme = crate::theme::current(context);
         div()
             .relative()
             .flex_none()
             .h_full()
             .w(px(self.browser_width.size))
-            .child(crate::profile::time("view.browser", || {
-                self.browser_view(window, context)
-            }))
+            .child(self.browser.clone())
             .child(splitter_handle(
                 "browser-edge",
                 &self.browser_width,
@@ -366,7 +363,6 @@ impl Render for Tonique {
         if !context.has_active_drag() {
             self.timeline.drop_target = None;
             self.timeline.effect_target = None;
-            self.browser.folders_over = false;
         }
 
         let shows = Shows {
@@ -387,7 +383,7 @@ impl Render for Tonique {
             .min_h_0()
             .when(self.browser_open, |element| {
                 element
-                    .child(self.browser_panel(window, context))
+                    .child(self.browser_panel(context))
                     .child(divider(&theme))
             });
         let body = if self.graph.read(context).is_open() {

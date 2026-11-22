@@ -3,6 +3,7 @@
 //! one of the closest matches, or picked on disk. Their clips are kept,
 //! silent, until then.
 
+use super::BrowserPanel;
 use crate::model::HoldsProject;
 use std::{
     collections::HashMap,
@@ -16,7 +17,7 @@ use gpui::{
 use tonique_engine::edit::SourceId;
 
 use crate::{
-    app::Tonique,
+    app::focus_main,
     core::state::ProjectState,
     file_match::{FileIndex, exact_matches, file_name, folder_name, query_for, rank},
     icons,
@@ -44,7 +45,7 @@ pub struct MissingView {
 }
 
 impl MissingView {
-    pub fn new(context: &mut Context<Tonique>) -> Self {
+    pub fn new(context: &mut Context<BrowserPanel>) -> Self {
         Self {
             selected: None,
             scroll: ScrollHandle::new(),
@@ -116,26 +117,26 @@ fn list_row(
         .child(div().flex_1().min_w_0().overflow_hidden().child(text))
 }
 
-impl Tonique {
+impl BrowserPanel {
     pub(super) fn missing_view(
         &mut self,
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> AnyElement {
         let theme = crate::theme::current(context);
-        let folders = self.browser.folders();
-        let view = &mut self.browser.missing;
+        let folders = self.folders();
+        let view = &mut self.missing;
         view.index.update(&folders);
         let search_bar = self.search_bar(
             "missing-search",
-            &self.browser.missing.search,
+            &self.missing.search,
             "Search your folders",
-            self.browser.missing.index.is_scanning(),
+            self.missing.index.is_scanning(),
             &theme,
             window,
             context,
             Self::missing_search_key,
-            |this, _| this.browser.missing.search.text.clear(),
+            |this, _| this.missing.search.text.clear(),
         );
         let missing: Vec<(SourceId, String, PathBuf)> = self
             .state(context)
@@ -149,12 +150,12 @@ impl Tonique {
             .min_h_0()
             .size_full()
             .overflow_y_scroll()
-            .track_scroll(&self.browser.missing.scroll)
+            .track_scroll(&self.missing.scroll)
             .flex()
             .flex_col()
             .px_2();
         if missing.is_empty() {
-            self.browser.missing.selected = None;
+            self.missing.selected = None;
             return div()
                 .flex_1()
                 .flex()
@@ -174,7 +175,7 @@ impl Tonique {
                 .into_any_element();
         }
         // The first one, unless one still missing is selected.
-        let view = &mut self.browser.missing;
+        let view = &mut self.missing;
         if !missing.iter().any(|(id, ..)| Some(*id) == view.selected) {
             let (id, _, path) = &missing[0];
             view.select(*id, path);
@@ -198,8 +199,8 @@ impl Tonique {
                     .min_h_0()
                     .child(body)
                     .child(handle_scrollbar(
-                        &self.browser.missing.scroll,
-                        &self.browser.missing.scrollbar,
+                        &self.missing.scroll,
+                        &self.missing.scrollbar,
                         // Clear of the browser's resize grip, down the same edge.
                         HANDLE_WIDTH,
                         &theme,
@@ -215,13 +216,13 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        let search = &mut self.browser.missing.search;
+        let search = &mut self.missing.search;
         match search.key(event) {
             FieldKey::Edited => {}
-            FieldKey::Submit => window.focus(&self.focus, context),
+            FieldKey::Submit => focus_main(window, context),
             FieldKey::Cancel => {
                 search.text.clear();
-                window.focus(&self.focus, context);
+                focus_main(window, context);
             }
             FieldKey::Ignored => return,
         }
@@ -239,7 +240,7 @@ impl Tonique {
             .iter()
             .map(|(id, name, path)| {
                 let (id, path) = (*id, path.clone());
-                let selected = Some(id) == self.browser.missing.selected;
+                let selected = Some(id) == self.missing.selected;
                 list_row(
                     ("missing", id.0 as usize),
                     icons::WARNING,
@@ -251,7 +252,7 @@ impl Tonique {
                 .on_mouse_down(
                     MouseButton::Left,
                     context.listener(move |this, _, _, context| {
-                        let view = &mut this.browser.missing;
+                        let view = &mut this.missing;
                         view.select(id, &path);
                         view.status = None;
                         context.notify();
@@ -269,7 +270,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = &*crate::theme::current(context);
-        let exact = exact_matches(missing, self.browser.missing.index.files());
+        let exact = exact_matches(missing, self.missing.index.files());
         let found_some = !exact.is_empty();
         div()
             .pt(px(6.))
@@ -300,7 +301,7 @@ impl Tonique {
                                             .unwrap_or(0);
                                     }
                                 }
-                                this.browser.missing.status = Some(Status::Located(located));
+                                this.missing.status = Some(Status::Located(located));
                                 context.notify();
                             }),
                         )
@@ -321,7 +322,7 @@ impl Tonique {
 
     /// Lets the user pick the selected missing file on disk.
     fn locate_on_disk(&mut self, window: &mut Window, context: &mut Context<Self>) {
-        let Some(id) = self.browser.missing.selected else {
+        let Some(id) = self.missing.selected else {
             return;
         };
         let picked = context.prompt_for_paths(PathPromptOptions {
@@ -348,7 +349,7 @@ impl Tonique {
     }
 
     fn locate_missing(&mut self, id: SourceId, path: &Path, context: &mut App) {
-        self.browser.missing.status = Some(match self.state_mut(context).locate_file(id, path) {
+        self.missing.status = Some(match self.state_mut(context).locate_file(id, path) {
             Ok(located) => Status::Located(located),
             Err(error) => Status::Failed(error),
         });
@@ -356,7 +357,7 @@ impl Tonique {
 
     fn missing_status(&self, context: &App) -> Option<impl IntoElement> {
         let theme = &*crate::theme::current(context);
-        let (text, color) = match self.browser.missing.status.as_ref()? {
+        let (text, color) = match self.missing.status.as_ref()? {
             Status::Located(0) => ("No file found.".to_string(), theme.warning),
             Status::Located(1) => ("Found 1 file.".to_string(), theme.text_muted),
             Status::Located(count) => (format!("Found {count} files."), theme.text_muted),
@@ -374,7 +375,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let theme = &*crate::theme::current(context);
-        let view = &self.browser.missing;
+        let view = &self.missing;
         let Some((selected, name, path)) = missing
             .iter()
             .find(|(id, ..)| Some(*id) == view.selected)

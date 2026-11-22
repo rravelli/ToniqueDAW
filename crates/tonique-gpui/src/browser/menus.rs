@@ -3,13 +3,14 @@
 
 use std::path::{Path, PathBuf};
 
-use gpui::{Context, MouseButton, Window, div, prelude::*, px};
+use gpui::{Anchor, Context, MouseButton, Pixels, Point, Window, div, prelude::*, px};
 
 use crate::{
-    app::{PopupKind, Tonique},
-    browser::{ListKind, rows::dot},
+    app::PopupKind,
+    browser::{BrowserPanel, ListKind, rows::dot},
     config::labels as label_colors,
     icons,
+    popup::{self, MenuBuilder},
     theme::hsla,
     utils::color::parse_color,
     widgets::{FieldKey, Menu, MenuItem},
@@ -19,7 +20,31 @@ use crate::{
 const SWATCH: f32 = 12.;
 const SWATCH_RING: f32 = 16.;
 
-impl Tonique {
+impl BrowserPanel {
+    /// Builds a row's menu, or its labels beside it, each frame.
+    pub(super) fn menu_builder(&self, kind: PopupKind, context: &Context<Self>) -> MenuBuilder {
+        popup::builder(context.weak_entity(), move |this, _, context| match kind {
+            PopupKind::BrowserRow(list, index) => this.browser_row_menu(list, index, context),
+            PopupKind::BrowserRowLabel(list, index) => {
+                this.browser_label_menu(list, index, context)
+            }
+            _ => None,
+        })
+    }
+
+    /// Opens a row's menu with its `anchor` corner at `at`; or, when it's
+    /// open, closes it.
+    pub(super) fn toggle_popup(
+        &mut self,
+        kind: PopupKind,
+        at: Point<Pixels>,
+        anchor: Anchor,
+        context: &mut Context<Self>,
+    ) {
+        let build = self.menu_builder(kind, context);
+        popup::toggle(kind, at, anchor, build, context);
+    }
+
     /// Row `index` of `kind`'s menu: a folder's, a label's or an item's.
     pub(crate) fn browser_row_menu(
         &self,
@@ -27,7 +52,7 @@ impl Tonique {
         index: usize,
         context: &mut Context<Self>,
     ) -> Option<gpui::Div> {
-        let item = self.browser.list(kind).tree.items.get(index)?;
+        let item = self.list(kind).tree.items.get(index)?;
         Some(if let Some((label, _)) = self.row_section(kind, index) {
             self.section_menu(label, context)
         } else if item.depth == 0 {
@@ -51,7 +76,7 @@ impl Tonique {
         path: &Path,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let scoped = self.browser.files.scope.as_deref() == Some(path);
+        let scoped = self.files.scope.as_deref() == Some(path);
         let owned = path.to_path_buf();
         let search = if scoped {
             MenuItem::new("Search all folders")
@@ -80,7 +105,7 @@ impl Tonique {
                 {
                     let path = owned.clone();
                     move |this, _, _| {
-                        let files = &mut this.browser.files;
+                        let files = &mut this.files;
                         files.tree.collapse_all(&path);
                         files.selected = None;
                     }
@@ -119,7 +144,7 @@ impl Tonique {
         index: usize,
         context: &mut Context<Self>,
     ) -> Option<gpui::Div> {
-        let item = self.browser.list(kind).tree.items.get(index)?.clone();
+        let item = self.list(kind).tree.items.get(index)?.clone();
         let label = PopupKind::BrowserRowLabel(kind, index);
         // Top level of a label's section: added from its own folder.
         let addable = item.is_dir && kind == ListKind::Files;
@@ -160,10 +185,10 @@ impl Tonique {
         index: usize,
         context: &mut Context<Self>,
     ) -> Option<gpui::Div> {
-        let path = self.browser.list(kind).tree.items.get(index)?.path.clone();
-        let current = self.browser.item_labels.get(&path).copied();
+        let path = self.list(kind).tree.items.get(index)?.path.clone();
+        let current = self.item_labels.get(&path).copied();
         let mut menu = Menu::new_submenu(&crate::theme::current(context));
-        for (label, view) in self.browser.labels.iter().enumerate() {
+        for (label, view) in self.labels.iter().enumerate() {
             let chosen = current == Some(label);
             let item = MenuItem::new(view.name.clone())
                 .swatch(view.color)
@@ -191,8 +216,8 @@ impl Tonique {
     /// colour, and taking it off everything.
     fn section_menu(&self, index: usize, context: &mut Context<Self>) -> gpui::Div {
         let theme = &*crate::theme::current(context);
-        let current = self.browser.labels.get(index).map(|label| label.color);
-        let field = &self.browser.label_name;
+        let current = self.labels.get(index).map(|label| label.color);
+        let field = &self.label_name;
         let name = div()
             .id("label-name")
             .track_focus(&field.focus)
@@ -275,9 +300,9 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        match self.browser.label_name.key(event) {
+        match self.label_name.key(event) {
             FieldKey::Submit => {
-                let name = self.browser.label_name.text.trim().to_string();
+                let name = self.label_name.text.trim().to_string();
                 if !name.is_empty() {
                     self.rename_label(index, name, context);
                 }
@@ -293,6 +318,6 @@ impl Tonique {
 
     fn close_browser_menu(&mut self, window: &mut Window, context: &mut Context<Self>) {
         crate::popup::close(context);
-        window.focus(&self.browser.list_focus, context);
+        window.focus(&self.list_focus, context);
     }
 }

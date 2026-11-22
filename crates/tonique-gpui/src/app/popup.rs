@@ -77,10 +77,8 @@ impl Tonique {
             PopupKind::ClipRuler(id, at) => self.clip_ruler_popup(id, at, context)?,
             PopupKind::ClipWarpMode(id) => self.clip_warp_menu(id, context)?,
             PopupKind::ClipWindow(id) => self.clip_window_menu(id, context)?,
-            PopupKind::BrowserRow(list, index) => self.browser_row_menu(list, index, context)?,
-            PopupKind::BrowserRowLabel(list, index) => {
-                self.browser_label_menu(list, index, context)?
-            }
+            // The browser's own.
+            PopupKind::BrowserRow(..) | PopupKind::BrowserRowLabel(..) => return None,
             PopupKind::Setting(choice) => self.audio_choice_menu(choice, context),
             PopupKind::Theme => self.theme_menu(context),
             PopupKind::Bar(menu) => self.bar_menu(menu, context),

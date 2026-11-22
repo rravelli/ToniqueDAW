@@ -1,10 +1,11 @@
 //! The browser's effects, searched by name or purpose: one row each,
 //! dragged onto the bottom panel's effects or onto a track.
 
+use super::BrowserPanel;
 use gpui::{AnyElement, App, Context, KeyDownEvent, Window, div, prelude::*, px};
 
 use crate::{
-    app::Tonique,
+    app::focus_main,
     bottom::DraggedEffect,
     browser::DragGhost,
     core::effect::EffectKind,
@@ -17,7 +18,7 @@ const ROW_HEIGHT: f32 = 22.;
 /// How much a row lightens when hovered.
 const HOVER_TINT: f32 = 0.05;
 
-impl Tonique {
+impl BrowserPanel {
     pub(super) fn effect_search_bar(
         &self,
         theme: &Theme,
@@ -26,14 +27,14 @@ impl Tonique {
     ) -> gpui::Stateful<gpui::Div> {
         self.search_bar(
             "effect-search",
-            &self.browser.effect_search,
+            &self.effect_search,
             "Search effects",
             false,
             theme,
             window,
             context,
             Self::effect_search_key,
-            |this, _| this.browser.effect_search.text.clear(),
+            |this, _| this.effect_search.text.clear(),
         )
     }
 
@@ -43,13 +44,13 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        let search = &mut self.browser.effect_search;
+        let search = &mut self.effect_search;
         match search.key(event) {
             FieldKey::Edited => {}
-            FieldKey::Submit => window.focus(&self.focus, context),
+            FieldKey::Submit => focus_main(window, context),
             FieldKey::Cancel => {
                 search.text.clear();
-                window.focus(&self.focus, context);
+                focus_main(window, context);
             }
             FieldKey::Ignored => return,
         }
@@ -59,7 +60,7 @@ impl Tonique {
 
     pub(super) fn effects_list(&self, context: &App) -> AnyElement {
         let theme = &*crate::theme::current(context);
-        let query = self.browser.effect_search.text.trim();
+        let query = self.effect_search.text.trim();
         let found: Vec<EffectKind> = EffectKind::ALL
             .into_iter()
             .filter(|kind| kind.matches(query))

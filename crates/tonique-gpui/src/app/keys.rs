@@ -64,10 +64,6 @@ impl Tonique {
             context.notify();
             return;
         }
-        // The browser's list takes the arrows and Enter while focused.
-        if self.browser.list_focus.is_focused(window) && self.browser_key(event, context) {
-            return;
-        }
         // A clicked value control takes the arrows.
         if self.arrow_key(keystroke, window, context) {
             context.notify();

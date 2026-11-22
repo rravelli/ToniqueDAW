@@ -3,6 +3,7 @@
 //! and read from disk again on F5 or when the window gets the focus back
 //! (files are often added from elsewhere meanwhile).
 
+use super::BrowserPanel;
 use std::path::PathBuf;
 
 use gpui::{
@@ -11,7 +12,6 @@ use gpui::{
 };
 
 use crate::{
-    app::Tonique,
     browser::ListKind,
     theme::{hsla, size, with_alpha},
     widgets::Flat,
@@ -21,24 +21,24 @@ use crate::{
 /// over it.
 const DROP_ALPHA: u8 = 25;
 
-impl Tonique {
+impl BrowserPanel {
     /// Show the folders as configured, searching them again if a search
     /// is on.
     fn reload_folders(&mut self, context: &mut Context<Self>) {
-        let config = &self.browser.config;
+        let config = &self.config;
         let (roots, collapsed) = (config.list_dirs(), config.collapsed_dirs().to_vec());
-        self.browser.files.set_roots(roots, &collapsed);
+        self.files.set_roots(roots, &collapsed);
         self.search_again(ListKind::Files, context);
     }
 
     /// Add `dir` last, open.
     pub(super) fn add_folder(&mut self, dir: PathBuf, context: &mut Context<Self>) {
-        self.browser.config.add_dir(dir);
+        self.config.add_dir(dir);
         self.reload_folders(context);
     }
 
     pub(super) fn remove_folder(&mut self, dir: &std::path::Path, context: &mut Context<Self>) {
-        self.browser.config.remove_dir(dir);
+        self.config.remove_dir(dir);
         self.reload_folders(context);
     }
 
@@ -69,13 +69,13 @@ impl Tonique {
     /// Read both lists' folders from disk again, keeping the row selected
     /// and the searches; labelled files gone are left out.
     pub fn refresh_browser(&mut self, context: &mut Context<Self>) {
-        let files = &mut self.browser.files;
+        let files = &mut self.files;
         let selected = files.selected_path().map(|path| path.to_path_buf());
         files.tree.refresh();
         files.selected =
             selected.and_then(|path| files.tree.items.iter().position(|item| item.path == path));
-        self.browser.refresh_labels();
-        self.browser.labelled.tree.refresh();
+        self.refresh_labels();
+        self.labelled.tree.refresh();
         self.search_again(ListKind::Files, context);
         self.search_again(ListKind::Labels, context);
     }
@@ -93,20 +93,20 @@ impl Tonique {
             .relative()
             .on_drag_move(
                 context.listener(|this, _: &DragMoveEvent<ExternalPaths>, _, context| {
-                    if !this.browser.folders_over {
-                        this.browser.folders_over = true;
+                    if !this.folders_over {
+                        this.folders_over = true;
                         context.notify();
                     }
                 }),
             )
             .on_drop(context.listener(|this, paths: &ExternalPaths, _, context| {
-                this.browser.folders_over = false;
+                this.folders_over = false;
                 for path in paths.paths().iter().filter(|path| path.is_dir()) {
                     this.add_folder(path.clone(), context);
                 }
                 context.notify();
             }))
-            .when(self.browser.folders_over, |panel| {
+            .when(self.folders_over, |panel| {
                 panel.child(
                     div()
                         .absolute()

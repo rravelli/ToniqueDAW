@@ -2,13 +2,14 @@
 //! label's), a folder, an audio file to drag onto the timeline, or another
 //! file, dimmed; and the row ending the folders, adding one.
 
+use super::BrowserPanel;
 use crate::model::HoldsProject;
 use gpui::{
     Anchor, AnyElement, App, Context, MouseButton, MouseDownEvent, Stateful, div, prelude::*, px,
 };
 
 use crate::{
-    app::{PopupKind, Tonique},
+    app::PopupKind,
     browser::{DragGhost, DraggedAudio, ListKind},
     core::state::PlaybackState,
     file_tree::{FileKind, FileNode, file_kind},
@@ -36,7 +37,7 @@ pub(super) fn dot(color: crate::theme::Color, diameter: f32) -> gpui::Div {
         .bg(hsla(color))
 }
 
-impl Tonique {
+impl BrowserPanel {
     /// Row `index` of `kind`; `pinned` over the list, at its top.
     pub(super) fn browser_row(
         &self,
@@ -45,7 +46,7 @@ impl Tonique {
         pinned: bool,
         context: &mut Context<Self>,
     ) -> AnyElement {
-        let list = self.browser.list(kind);
+        let list = self.list(kind);
         let item = list.tree.items[index].clone();
         let selected = list.selected == Some(index);
         let open = list.is_open(index);
@@ -80,7 +81,7 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(move |this, _: &MouseDownEvent, window, context| {
-                    window.focus(&this.browser.list_focus, context);
+                    window.focus(&this.list_focus, context);
                     this.browser_select(kind, index, true, context);
                     context.notify();
                 }),
@@ -88,8 +89,8 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Right,
                 context.listener(move |this, event: &MouseDownEvent, window, context| {
-                    window.focus(&this.browser.list_focus, context);
-                    this.browser.list_mut(kind).selected = Some(index);
+                    window.focus(&this.list_focus, context);
+                    this.list_mut(kind).selected = Some(index);
                     this.open_row_menu(kind, index, event, window, context);
                     context.notify();
                 }),
@@ -116,8 +117,8 @@ impl Tonique {
         self.toggle_popup(menu, event.position, Anchor::TopLeft, context);
         let opened = crate::popup::shown(context) == Some(menu);
         if opened && let Some((label, _)) = self.row_section(kind, index) {
-            let name = self.browser.labels[label].name.clone();
-            self.browser.label_name.start(name, window, context);
+            let name = self.labels[label].name.clone();
+            self.label_name.start(name, window, context);
         }
     }
 
@@ -133,26 +134,22 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> AnyElement {
         let theme = &*crate::theme::current(context);
-        let list = self.browser.list(kind);
-        let section = self.browser.sections.get(&item.path).copied();
+        let list = self.list(kind);
+        let section = self.sections.get(&item.path).copied();
         let scoped = kind == ListKind::Files && list.scope.as_ref() == Some(&item.path);
         let name = match section {
-            Some((label, _)) => self
-                .browser
-                .labels
-                .get(label)
-                .map(|label| label.name.clone()),
+            Some((label, _)) => self.labels.get(label).map(|label| label.name.clone()),
             None => list.names.get(&item.path).cloned(),
         }
         .unwrap_or_default()
         .to_uppercase();
         let empty = section.is_some_and(|(_, count)| count == 0);
         let section_color = section
-            .and_then(|(label, _)| self.browser.labels.get(label))
+            .and_then(|(label, _)| self.labels.get(label))
             .map(|label| label.color);
         let folder_label = section
             .is_none()
-            .then(|| self.browser.label_of(&item.path))
+            .then(|| self.label_of(&item.path))
             .flatten();
         let menu_button = div()
             .id("header-menu")
@@ -271,7 +268,7 @@ impl Tonique {
         } else {
             theme.text_disabled
         };
-        let label = self.browser.label_of(&item.path);
+        let label = self.label_of(&item.path);
         let row = row
             .pl(px(8. + item.depth as f32 * INDENT))
             .text_color(hsla(color))

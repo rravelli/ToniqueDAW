@@ -2,6 +2,7 @@
 //! format, its waveform to seek in, play, auto-preview, and the preview's
 //! volume.
 
+use super::BrowserPanel;
 use crate::model::HoldsProject;
 use gpui::{
     AnyElement, App, Context, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, canvas, div,
@@ -10,7 +11,6 @@ use gpui::{
 
 use crate::{
     analysis::AudioInfo,
-    app::Tonique,
     browser::BrowserDrag,
     core::state::PlaybackState,
     geometry::Rect,
@@ -59,15 +59,15 @@ fn short_time(seconds: f64) -> String {
     text
 }
 
-impl Tonique {
+impl BrowserPanel {
     fn seek_preview_at(&mut self, pointer_x: Pixels, context: &mut App) {
-        let Some(audio) = self.browser.audio.clone() else {
+        let Some(audio) = self.audio.clone() else {
             return;
         };
         let Some(frames) = audio.total_frames() else {
             return;
         };
-        let bounds = self.browser.wave_bounds.get();
+        let bounds = self.wave_bounds.get();
         let fraction = (f32::from(pointer_x - bounds.origin.x)
             / f32::from(bounds.size.width).max(1.))
         .clamp(0., 1.);
@@ -79,25 +79,25 @@ impl Tonique {
     }
 
     fn set_preview_volume_at(&mut self, pointer_x: Pixels, context: &mut App) {
-        let bounds = self.browser.volume_bounds.get();
-        self.browser.volume = (f32::from(pointer_x - bounds.origin.x)
+        let bounds = self.volume_bounds.get();
+        self.volume = (f32::from(pointer_x - bounds.origin.x)
             / f32::from(bounds.size.width).max(1.))
         .clamp(0., 1.);
-        self.browser.muted = false;
+        self.muted = false;
         self.apply_preview_gain(context);
     }
 
     fn apply_preview_gain(&mut self, context: &mut App) {
-        let gain = if self.browser.muted {
+        let gain = if self.muted {
             0.
         } else {
-            preview_gain(self.browser.volume)
+            preview_gain(self.volume)
         };
         self.state_mut(context).set_preview_gain(gain);
     }
 
     pub fn browser_drag_move(&mut self, event: &MouseMoveEvent, context: &mut App) -> bool {
-        match self.browser.drag {
+        match self.drag {
             BrowserDrag::None => return false,
             BrowserDrag::Seek => self.seek_preview_at(event.position.x, context),
             BrowserDrag::Volume => self.set_preview_volume_at(event.position.x, context),
@@ -108,7 +108,7 @@ impl Tonique {
     /// The preview's drag let go: the volume is saved once, not on every
     /// step of it.
     pub fn browser_drag_end(&mut self) {
-        let browser = &mut self.browser;
+        let browser = &mut *self;
         if browser.drag == BrowserDrag::Volume && browser.config.preview_volume() != browser.volume
         {
             browser.config.set_preview_volume(browser.volume);
@@ -118,7 +118,7 @@ impl Tonique {
 
     /// Nothing when no audio file is selected.
     pub(super) fn preview_view(&mut self, context: &mut Context<Self>) -> Option<AnyElement> {
-        let audio = self.browser.audio.clone()?;
+        let audio = self.audio.clone()?;
         let theme = crate::theme::current(context);
         let panel = div()
             .h(px(PREVIEW_HEIGHT))
@@ -186,7 +186,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> impl IntoElement {
         let waves = self.waves.clone();
-        let slot = self.browser.wave_bounds.clone();
+        let slot = self.wave_bounds.clone();
         let canvas_theme = theme.clone();
         let data = audio.data.clone();
         let stereo = audio.channels >= 2;
@@ -200,7 +200,7 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(|this, event: &MouseDownEvent, _, context| {
-                    this.browser.drag = BrowserDrag::Seek;
+                    this.drag = BrowserDrag::Seek;
                     this.seek_preview_at(event.position.x, context);
                     context.notify();
                 }),
@@ -288,12 +288,12 @@ impl Tonique {
                 }
             },
         );
-        let silent = self.browser.muted || self.browser.volume <= 0.;
+        let silent = self.muted || self.volume <= 0.;
         let mute = on_press(
             div()
                 .id("preview-mute")
                 .text_size(px(size::HEADING))
-                .text_color(hsla(if self.browser.muted {
+                .text_color(hsla(if self.muted {
                     theme.warning
                 } else {
                     theme.text_muted
@@ -307,7 +307,7 @@ impl Tonique {
                 })),
             context,
             |this, context| {
-                this.browser.muted = !this.browser.muted;
+                this.muted = !this.muted;
                 this.apply_preview_gain(context);
             },
         );
@@ -320,11 +320,11 @@ impl Tonique {
             .child(toggle_button(
                 "auto-preview",
                 icon(icons::HEADPHONES),
-                self.browser.auto_preview,
+                self.auto_preview,
                 theme,
                 context,
                 |this, _| {
-                    let browser = &mut this.browser;
+                    let browser = &mut *this;
                     browser.auto_preview = !browser.auto_preview;
                     browser.config.set_auto_preview(browser.auto_preview);
                 },
@@ -335,8 +335,8 @@ impl Tonique {
     }
 
     fn preview_volume(&self, theme: &Theme, context: &mut Context<Self>) -> impl IntoElement {
-        let slot = self.browser.volume_bounds.clone();
-        let volume = self.browser.volume;
+        let slot = self.volume_bounds.clone();
+        let volume = self.volume;
         let canvas_theme = theme.clone();
         div()
             .w(px(VOLUME_WIDTH))
@@ -345,7 +345,7 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(|this, event: &MouseDownEvent, _, context| {
-                    this.browser.drag = BrowserDrag::Volume;
+                    this.drag = BrowserDrag::Volume;
                     this.set_preview_volume_at(event.position.x, context);
                     context.notify();
                 }),

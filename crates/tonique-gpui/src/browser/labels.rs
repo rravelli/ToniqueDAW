@@ -2,13 +2,13 @@
 //! dots in both lists, and as a section each in the labels' list. Given
 //! from a row's menu, or with 1 to 7 (0 takes one off).
 
+use super::BrowserPanel;
 use std::path::{Path, PathBuf};
 
 use gpui::Context;
 
 use crate::{
-    app::Tonique,
-    browser::{Browser, LabelView, ListKind},
+    browser::{LabelView, ListKind},
     theme::Color,
     utils::color::parse_color,
 };
@@ -21,7 +21,7 @@ fn section_path(index: usize) -> PathBuf {
     PathBuf::from(format!("\u{0}label-{index}"))
 }
 
-impl Browser {
+impl BrowserPanel {
     /// `path`'s label, if it has one.
     pub(super) fn label_of(&self, path: &Path) -> Option<&LabelView> {
         self.labels.get(*self.item_labels.get(path)?)
@@ -57,12 +57,12 @@ impl Browser {
     }
 }
 
-impl Tonique {
+impl BrowserPanel {
     /// The label of the section row `index` of `kind` heads, and how many
     /// items it has: none for other rows.
     pub(super) fn row_section(&self, kind: ListKind, index: usize) -> Option<(usize, usize)> {
-        let item = self.browser.list(kind).tree.items.get(index)?;
-        self.browser.sections.get(&item.path).copied()
+        let item = self.list(kind).tree.items.get(index)?;
+        self.sections.get(&item.path).copied()
     }
 
     /// Change the labels in the config, and show them.
@@ -71,8 +71,8 @@ impl Tonique {
         edit: impl FnOnce(&mut crate::config::labels::Labels),
         context: &mut Context<Self>,
     ) {
-        self.browser.config.edit_labels(edit);
-        self.browser.refresh_labels();
+        self.config.edit_labels(edit);
+        self.refresh_labels();
         self.search_again(ListKind::Labels, context);
     }
 
@@ -110,7 +110,7 @@ impl Tonique {
         digit: usize,
         context: &mut Context<Self>,
     ) -> bool {
-        let browser = &self.browser;
+        let browser = &*self;
         let Some(path) = browser.list(kind).selected_path().map(Path::to_path_buf) else {
             return false;
         };
