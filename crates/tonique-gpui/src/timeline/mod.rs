@@ -28,7 +28,7 @@ use gpui::{
 };
 
 pub use drop::DropTarget;
-pub use rows::{FOOTER_PADDING, Row, footer_height, rows};
+pub use rows::{FOOTER_PADDING, Row, footer_height, rows, rows_height};
 
 use tonique_engine::edit::TrackId;
 
@@ -87,7 +87,7 @@ impl TimelineUi {
 }
 
 impl Tonique {
-    fn cursor(&self) -> CursorStyle {
+    fn cursor(&self, rows: &[Row]) -> CursorStyle {
         match &self.timeline.drag {
             TimelineDrag::Move(press) if press.dragged.is_some() => return CursorStyle::ClosedHand,
             TimelineDrag::Zone { moved: true, .. } => return CursorStyle::IBeam,
@@ -116,19 +116,21 @@ impl Tonique {
         if self.in_footer(local_y) {
             return CursorStyle::Arrow;
         }
-        match self.clip_at(&rows(&self.state), local_x, local_y) {
+        match self.clip_at(rows, local_x, local_y) {
             Some((_, _, ClipPart::TrimStart | ClipPart::TrimEnd)) => CursorStyle::ResizeLeftRight,
             Some((_, _, ClipPart::Header)) => CursorStyle::OpenHand,
             _ => CursorStyle::IBeam,
         }
     }
 
+    /// The ruler and the lanes of `rows`, the rows this frame shows.
     pub fn timeline_view(
         &mut self,
-        _window: &mut Window,
+        rows: &[Row],
+        window: &mut Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let scene = self.scene();
+        let scene = self.scene(rows, self.rows_in_view(window));
         let waves = self.waves.clone();
         let slot = self.timeline.bounds.clone();
         let span = self.across_span();
@@ -158,7 +160,7 @@ impl Tonique {
             .flex_1()
             .min_w_0()
             .h_full()
-            .cursor(self.cursor())
+            .cursor(self.cursor(rows))
             .on_mouse_down(MouseButton::Left, context.listener(Self::on_timeline_down))
             .on_mouse_down(MouseButton::Right, context.listener(Self::on_timeline_menu))
             .on_scroll(context.listener(Self::on_timeline_scroll));
@@ -187,8 +189,8 @@ impl Tonique {
 
     /// Down the track list's far side, along the lanes: the rows scroll
     /// with them.
-    pub fn rows_scrollbar(&self, context: &mut Context<Self>) -> impl IntoElement {
-        let span = self.rows_span();
+    pub fn rows_scrollbar(&self, rows: &[Row], context: &mut Context<Self>) -> impl IntoElement {
+        let span = self.rows_span(rows);
         let this = context.weak_entity();
         scrollbar(
             Axis::Vertical,

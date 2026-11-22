@@ -19,7 +19,7 @@ use crate::{
         FOOTER_PADDING, RULER_HEIGHT, footer_height,
         input::TimelineDrag,
         moving::{ClipMove, DraggedClips},
-        rows::{ClipPart, HEADER_HEIGHT, Row, Span, handle_rect, rows, rows_height},
+        rows::{ClipPart, HEADER_HEIGHT, Row, Span, handle_rect, rows_height},
         ruler::LoopGrab,
     },
     utils::format_time,
@@ -128,18 +128,19 @@ fn label(line: GridLine) -> String {
 }
 
 impl Tonique {
-    pub(super) fn scene(&self) -> Scene {
+    /// What the timeline paints: the clips of the rows overlapping
+    /// `in_view`, a span of the scrolled content.
+    pub(super) fn scene(&self, rows: &[Row], in_view: (f32, f32)) -> Scene {
         let state = &self.state;
         let screen_x = |beat: BeatPos| state.grid.beats_to_x(beat, self.viewport());
-        let rows = rows(state);
         let (loop_start, loop_end) = state.loop_range();
-        let (scene_rows, mut clips) = self.scene_clips(&rows);
+        let (scene_rows, mut clips) = self.scene_clips(rows, in_view);
         let overviews = rows
             .iter()
-            .filter(|row| row.is_group())
+            .filter(|row| row.is_group() && row.overlaps(in_view))
             .flat_map(|row| self.group_overview(row))
             .collect();
-        clips.extend(self.scene_dragged(&rows));
+        clips.extend(self.scene_dragged(rows));
         let dragged = self.dragged_clips();
         Scene {
             theme: self.theme.clone(),
@@ -148,13 +149,13 @@ impl Tonique {
             rows: scene_rows,
             overviews,
             clips,
-            drop: self.scene_drop(&rows),
-            new_lanes: self.scene_new_lanes(&rows),
-            zone: self.scene_zone(&rows),
+            drop: self.scene_drop(rows),
+            new_lanes: self.scene_new_lanes(rows),
+            zone: self.scene_zone(rows),
             snap_line: dragged.and_then(|dragged| dragged.snapped_to).map(screen_x),
-            cursor_hint: self.cursor_hint(&rows),
-            lit_handle: self.lit_handle(&rows),
-            effect_drop: self.scene_effect_drop(&rows),
+            cursor_hint: self.cursor_hint(rows),
+            lit_handle: self.lit_handle(rows),
+            effect_drop: self.scene_effect_drop(rows),
             marks: self.marks(),
             playhead: screen_x(state.playhead()),
             edit_cursor: screen_x(state.edit_cursor()),
@@ -229,7 +230,7 @@ impl Tonique {
     }
 
     /// The rows, and their clips: one being trimmed over its neighbours.
-    fn scene_clips(&self, rows: &[Row]) -> (Vec<SceneRow>, Vec<SceneClip>) {
+    fn scene_clips(&self, rows: &[Row], in_view: (f32, f32)) -> (Vec<SceneRow>, Vec<SceneClip>) {
         let state = &self.state;
         let left_behind: HashSet<ClipId> = self
             .dragged_clips()
@@ -248,7 +249,7 @@ impl Tonique {
                 selected: track.selected,
             });
             // A group's clips are its tracks': shown in its overview.
-            if row.is_group() {
+            if row.is_group() || !row.overlaps(in_view) {
                 continue;
             }
             let mut shown: Vec<AudioClip> = track

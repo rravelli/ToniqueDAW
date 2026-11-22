@@ -325,6 +325,9 @@ impl Render for Tonique {
             self.browser.folders_over = false;
         }
 
+        // The rows as this frame shows them, for both views: building them
+        // clones every track's clips.
+        let rows = crate::timeline::rows(&self.state);
         let theme = self.theme.clone();
         let body = div()
             .flex()
@@ -337,11 +340,11 @@ impl Render for Tonique {
             })
             // As in the egui app: the track list on the timeline's right.
             .child(crate::profile::time("view.timeline", || {
-                self.timeline_view(window, context)
+                self.timeline_view(&rows, window, context)
             }))
             .child(divider(&theme))
             .child(crate::profile::time("view.headers", || {
-                self.headers_view(context)
+                self.headers_view(&rows, window, context)
             }));
 
         div()

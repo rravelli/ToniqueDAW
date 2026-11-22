@@ -10,7 +10,7 @@ use crate::{
     app::{ArrowHolder, Tonique},
     core::{
         state::{MIN_EXPANDED_HEIGHT, RowTarget},
-        track::TrackKind,
+        track::{TrackKind, TrackRow},
     },
     headers::{COLLAPSE_PAST, MAX_ROW_HEIGHT},
     timeline::{ROW_GAP, RULER_HEIGHT, rows},
@@ -92,6 +92,14 @@ impl Param {
             Self::Pan => Scale::Pan,
         }
     }
+
+    /// Its value on `track`.
+    pub fn of(self, track: &TrackRow) -> f32 {
+        match self {
+            Self::Volume => track.volume,
+            Self::Pan => track.pan,
+        }
+    }
 }
 
 pub enum HeaderDrag {
@@ -118,11 +126,8 @@ pub enum HeaderDrag {
 
 impl Tonique {
     pub(super) fn param(&self, id: TrackId, param: Param) -> f32 {
-        let track = self.track_row(id);
-        match param {
-            Param::Volume => track.map_or(1., |track| track.volume),
-            Param::Pan => track.map_or(0., |track| track.pan),
-        }
+        self.track_row(id)
+            .map_or(param.scale().default_value(), |track| param.of(&track))
     }
 
     fn set_param(&mut self, id: TrackId, param: Param, value: f32) {

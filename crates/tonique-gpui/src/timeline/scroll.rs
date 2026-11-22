@@ -18,7 +18,7 @@ use crate::{
     smooth_scroll::{SmoothScroll, WheelDelta},
     timeline::{
         RULER_HEIGHT,
-        rows::{rows, rows_height},
+        rows::{Row, rows, rows_height},
     },
     widgets::{ScrollSpan, ScrollbarGrab},
 };
@@ -132,9 +132,9 @@ impl Tonique {
     }
 
     /// The rows' scroll, as far as [`Self::scroll_rows`] goes.
-    pub fn rows_span(&self) -> ScrollSpan {
+    pub fn rows_span(&self, rows: &[Row]) -> ScrollSpan {
         let view = self.lanes_bottom() - RULER_HEIGHT;
-        let content = rows_height(&rows(&self.state)) + DEFAULT_TRACK_HEIGHT;
+        let content = rows_height(rows) + DEFAULT_TRACK_HEIGHT;
         ScrollSpan {
             offset: self.state.grid.offset.y,
             max: (content - view).max(0.),

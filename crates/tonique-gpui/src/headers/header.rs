@@ -87,7 +87,7 @@ impl Tonique {
     /// resizes it.
     pub(super) fn header(
         &self,
-        track: TrackRow,
+        track: &TrackRow,
         width: f32,
         theme: &Theme,
         context: &mut Context<Self>,
@@ -149,9 +149,9 @@ impl Tonique {
                 }),
             )
             .child(place(layout.bar).rounded(px(1.)).bg(hsla(bar)))
-            .child(self.caret(&track, layout.caret, theme, context))
-            .child(self.name(&track, layout.name, theme, context))
-            .children(self.toggles(&track, &layout, theme, context))
+            .child(self.caret(track, layout.caret, theme, context))
+            .child(self.name(track, layout.name, theme, context))
+            .children(self.toggles(track, &layout, theme, context))
             .child(self.meter(id, silenced, layout.meter, theme, context))
             // An effect dragged over it would go on it.
             .when(self.timeline.effect_target == Some(id), |element| {
@@ -169,8 +169,8 @@ impl Tonique {
             });
         if let Some((volume, pan)) = layout.sliders {
             header = header
-                .child(self.slider(&track, Param::Volume, volume, theme, context))
-                .child(self.slider(&track, Param::Pan, pan, theme, context));
+                .child(self.slider(track, Param::Volume, volume, theme, context))
+                .child(self.slider(track, Param::Pan, pan, theme, context));
         }
         // The master's height isn't dragged: it sits in a footer.
         div()
@@ -178,7 +178,7 @@ impl Tonique {
             .w_full()
             .child(header)
             .when(!master, |element| {
-                element.child(self.row_edge(&track, context))
+                element.child(self.row_edge(track, context))
             })
             .into_any_element()
     }
@@ -333,7 +333,7 @@ impl Tonique {
         let id = track.id;
         let slot = self.headers.sliders.clone();
         let canvas_theme = theme.clone();
-        let (value, color) = (self.param(id, param), track.color);
+        let (value, color) = (param.of(track), track.color);
         let unit = param == Param::Volume && rect.width >= VOLUME_UNIT_WIDTH;
         let focused = self.holds_arrows(&ArrowHolder::Header(id, param));
         place(rect)

@@ -1,7 +1,7 @@
 //! Where things are on the timeline: its rows, the clips on them, and the
 //! beats under the pointer.
 
-use gpui::{Pixels, Point};
+use gpui::{Pixels, Point, Window};
 use tonique_engine::time::BeatPos;
 
 use crate::{
@@ -50,6 +50,12 @@ pub struct Row {
 impl Row {
     pub fn is_group(&self) -> bool {
         self.track.kind == TrackKind::Group
+    }
+
+    /// Whether the row, its gap below included, overlaps `span`: a top and
+    /// a bottom in the scrolled content.
+    pub fn overlaps(&self, (top, bottom): (f32, f32)) -> bool {
+        self.top < bottom && self.top + self.track.height + ROW_GAP > top
     }
 }
 
@@ -163,6 +169,14 @@ impl Tonique {
     pub(super) fn local(&self, point: Point<Pixels>) -> (f32, f32) {
         let origin = self.timeline.bounds.get().origin;
         (f32::from(point.x - origin.x), f32::from(point.y - origin.y))
+    }
+
+    /// The span of the rows in view, in the scrolled content: from the
+    /// lanes' top down by the window's height, more than the lanes ever
+    /// show, so it holds before the panels are laid out at a new size.
+    pub fn rows_in_view(&self, window: &Window) -> (f32, f32) {
+        let top = self.state.grid.offset.y;
+        (top, top + f32::from(window.viewport_size().height))
     }
 
     /// A row's top, local to the timeline.
@@ -304,6 +318,19 @@ mod tests {
         assert_eq!(rows[2].track.depth, 1);
         assert_eq!(rows[1].scope_bottom, rows[3].top + rows[3].track.height);
         assert_eq!(rows[0].scope_bottom, rows[0].top + rows[0].track.height);
+    }
+
+    #[test]
+    fn rows_overlap_a_span_with_their_gap_below() {
+        let rows = rows(&state_with_group(false));
+        let second = &rows[1];
+        let bottom = second.top + second.track.height + ROW_GAP;
+        assert!(second.overlaps((second.top, second.top + 1.)));
+        assert!(second.overlaps((bottom - 1., bottom + 100.)));
+        assert!(!second.overlaps((bottom, bottom + 100.)));
+        assert!(!second.overlaps((0., second.top)));
+        let in_view: Vec<_> = rows.iter().filter(|row| row.overlaps((0., 1.))).collect();
+        assert_eq!(in_view.len(), 1, "only the first");
     }
 
     #[test]

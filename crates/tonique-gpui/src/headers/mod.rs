@@ -36,7 +36,7 @@ use crate::{
     meter::paint_meter,
     smooth_scroll::WheelDelta,
     theme::{Theme, hsla, size},
-    timeline::{FOOTER_PADDING, RULER_HEIGHT, Row, footer_height, rows},
+    timeline::{FOOTER_PADDING, RULER_HEIGHT, Row, footer_height, rows_height},
     widgets::{Edge, Flat, SCROLLBAR_WIDTH, Splitter, TextField, glyph, splitter_handle},
 };
 use drag::{HeaderDrag, RowMarker};
@@ -130,7 +130,13 @@ impl Tonique {
         self.headers.bounds.get()
     }
 
-    pub fn headers_view(&mut self, context: &mut Context<Self>) -> impl IntoElement {
+    /// The headers of `rows`, the rows this frame shows.
+    pub fn headers_view(
+        &mut self,
+        rows: &[Row],
+        window: &Window,
+        context: &mut Context<Self>,
+    ) -> impl IntoElement {
         let theme = self.theme.clone();
         let open = self.headers.open;
         let width = if open {
@@ -138,10 +144,13 @@ impl Tonique {
         } else {
             COLLAPSED_WIDTH
         };
+        let in_view = self.rows_in_view(window);
         let list = if open {
-            self.header_list(&theme, context).into_any_element()
+            self.header_list(rows, in_view, &theme, context)
+                .into_any_element()
         } else {
-            self.collapsed_list(&theme, context).into_any_element()
+            self.collapsed_list(rows, in_view, &theme, context)
+                .into_any_element()
         };
         let slot = self.headers.bounds.clone();
         div()
@@ -176,7 +185,7 @@ impl Tonique {
                     .size_full(),
             )
             .child(list)
-            .child(self.rows_scrollbar(context))
+            .child(self.rows_scrollbar(rows, context))
             .when(open, |element| element.child(self.row_marker(&theme)))
             // Over the rows, in line with the timeline's footer.
             .child(self.list_footer(open, &theme, context))
@@ -329,31 +338,49 @@ impl Tonique {
             let width = self.headers.width.size - 2. * PANEL_MARGIN;
             footer
                 .px(px(PANEL_MARGIN))
-                .child(self.header(master, width, theme, context))
+                .child(self.header(&master, width, theme, context))
         } else {
-            footer.child(self.collapsed_row(master, theme, context))
+            footer.child(self.collapsed_row(&master, theme, context))
         }
     }
 
     /// A header per row, then the button adding a track; below, a click
-    /// clears the selection.
-    fn header_list(&self, theme: &Theme, context: &mut Context<Self>) -> impl IntoElement {
+    /// clears the selection. Only the rows overlapping `in_view` are built
+    /// (and the one being renamed, keeping its field), the others leaving
+    /// their space.
+    fn header_list(
+        &self,
+        rows: &[Row],
+        in_view: (f32, f32),
+        theme: &Theme,
+        context: &mut Context<Self>,
+    ) -> impl IntoElement {
         let width = self.headers.width.size - PANEL_MARGIN - ROWS_RIGHT;
-        let rows = rows(&self.state);
-        let scopes = group_scopes(&rows, theme);
-        let mut list = div()
-            .absolute()
-            .top(px(RULER_HEIGHT - self.state.grid.offset.y))
-            .left(px(PANEL_MARGIN))
-            .right(px(ROWS_RIGHT))
-            .flex()
-            .flex_col();
+        let scopes = group_scopes(rows, theme);
+        // Each header at its row's top, as the timeline places its lanes:
+        // stacked in a flex column, each height would round to device
+        // pixels on its own, and the rounding would add up down the list.
+        let mut placed = div()
+            .relative()
+            .flex_none()
+            .w_full()
+            .h(px(rows_height(rows)));
         for row in rows {
-            list = list.child(self.header(row.track, width, theme, context));
+            if !row.overlaps(in_view) && self.rename_field(row.track.id).is_none() {
+                continue;
+            }
+            placed = placed.child(
+                div()
+                    .absolute()
+                    .top(px(row.top))
+                    .left_0()
+                    .w_full()
+                    .child(self.header(&row.track, width, theme, context)),
+            );
         }
         // Over the headers, the bars of the expanded groups down to their
         // last rows.
-        let list = list.child(
+        let placed = placed.child(
             canvas(
                 |_, _, _| {},
                 move |bounds, _, window, _| {
@@ -374,6 +401,14 @@ impl Tonique {
             .left_0()
             .size_full(),
         );
+        let list = div()
+            .absolute()
+            .top(px(RULER_HEIGHT - self.state.grid.offset.y))
+            .left(px(PANEL_MARGIN))
+            .right(px(ROWS_RIGHT))
+            .flex()
+            .flex_col()
+            .child(placed);
         let add = Flat::ghost("add-track", ADD_TRACK_HEIGHT)
             .full_width()
             .color(theme.text_muted)
@@ -407,23 +442,37 @@ impl Tonique {
 
     /// Collapsed: each row a bar of its colour and its meter; clicking one
     /// selects it.
-    fn collapsed_list(&self, theme: &Theme, context: &mut Context<Self>) -> impl IntoElement {
+    /// Each row at its top, as in `header_list`: only those overlapping
+    /// `in_view`.
+    fn collapsed_list(
+        &self,
+        rows: &[Row],
+        in_view: (f32, f32),
+        theme: &Theme,
+        context: &mut Context<Self>,
+    ) -> impl IntoElement {
         let mut list = div()
             .absolute()
             .top(px(RULER_HEIGHT - self.state.grid.offset.y))
             .left_0()
             .right_0()
-            .flex()
-            .flex_col();
-        for row in rows(&self.state) {
-            list = list.child(self.collapsed_row(row.track, theme, context));
+            .h(px(rows_height(rows)));
+        for row in rows.iter().filter(|row| row.overlaps(in_view)) {
+            list = list.child(
+                div()
+                    .absolute()
+                    .top(px(row.top))
+                    .left_0()
+                    .right_0()
+                    .child(self.collapsed_row(&row.track, theme, context)),
+            );
         }
         list
     }
 
     fn collapsed_row(
         &self,
-        track: TrackRow,
+        track: &TrackRow,
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
