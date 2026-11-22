@@ -1,6 +1,8 @@
 //! A knob, as the egui app's `Knob`: its name above, an arc filled to its
 //! value, its value below. Dragged up or down (ten times finer with
-//! Shift), on a linear or log scale; a double-click resets it.
+//! Shift), on a linear or log scale; a double-click resets it. Clicked,
+//! the arrow keys step it 1% of its travel (10% with Shift), each press an
+//! undo step.
 
 use std::f32::consts::{FRAC_PI_4, PI};
 
@@ -10,13 +12,15 @@ use gpui::{
 use tonique_engine::edit::{Parameter, PluginId, TrackId};
 
 use crate::{
-    app::Tonique,
+    app::{ArrowHolder, Tonique},
     bottom::{
         paint::{Align, circle, polyline, text},
         rack::RackDrag,
     },
+    core::effect::Setting,
     geometry::Rect,
     theme::{Theme, size},
+    utils::steps::{Presses, step_ratio},
 };
 
 pub const KNOB_WIDTH: f32 = 46.;
@@ -70,6 +74,19 @@ pub enum KnobTarget {
     /// An effect's echo time: shown while dragged, applied once released,
     /// as it replaces the plugin.
     Time { track: TrackId, plugin: PluginId },
+}
+
+/// A knob holding the arrow keys.
+#[derive(Clone)]
+pub struct KnobArrows {
+    target: KnobTarget,
+    scale: KnobScale,
+}
+
+impl KnobArrows {
+    pub fn is(&self, other: &Self) -> bool {
+        same_target(&self.target, &other.target)
+    }
 }
 
 /// A knob being dragged.
@@ -136,6 +153,11 @@ impl Tonique {
         } = knob;
         let theme = theme.clone();
         let ratio = scale.ratio(value);
+        let holder = ArrowHolder::Knob(KnobArrows {
+            target: target.clone(),
+            scale,
+        });
+        let focused = self.holds_arrows(&holder);
         div()
             .id(id.into())
             .flex_none()
@@ -156,7 +178,7 @@ impl Tonique {
                             (name, &shown),
                             ratio,
                             active,
-                            hovered,
+                            (hovered, focused),
                             &theme,
                         );
                     },
@@ -167,6 +189,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
+                    this.hold_arrows(holder.clone());
                     if event.click_count >= 2 {
                         this.bottom.rack.drag = None;
                         if let Some(default) = default {
@@ -185,6 +208,34 @@ impl Tonique {
                     context.notify();
                 }),
             )
+    }
+
+    /// The knob of `arrows` stepped by `presses`, evenly along its travel
+    /// (log knobs too), as one undo step.
+    pub(crate) fn step_knob(&mut self, arrows: &KnobArrows, presses: Presses) {
+        if self.bottom.rack.drag.is_some() {
+            return;
+        }
+        let value = match &arrows.target {
+            KnobTarget::Param(param) => param.get(),
+            KnobTarget::Time { track, plugin } => {
+                let effect = self
+                    .state
+                    .effects(track)
+                    .into_iter()
+                    .find(|effect| effect.plugin.id == *plugin);
+                match effect.and_then(|effect| Setting::of(&effect.plugin.kind)) {
+                    Some(Setting::Time(time_s)) => time_s,
+                    _ => return,
+                }
+            }
+        };
+        let ratio = arrows.scale.ratio(value);
+        let stepped = step_ratio(ratio, presses);
+        if stepped != ratio {
+            let to = arrows.scale.value(stepped);
+            self.set_knob(&arrows.target, value, to, true);
+        }
     }
 
     /// Sets what `target` sets from `before` to `value`: as an undo step
@@ -233,7 +284,7 @@ fn paint_knob(
     (name, value): (&str, &str),
     ratio: f32,
     active: bool,
-    hovered: bool,
+    (hovered, focused): (bool, bool),
     theme: &Theme,
 ) {
     let centre_x = rect.left + rect.width / 2.;
@@ -274,7 +325,9 @@ fn paint_knob(
     } else {
         theme.bg_control
     };
-    circle(window, centre, RADIUS - 3., fill, Some((1., theme.border)));
+    // Holding the arrow keys: outlined in the accent.
+    let border = if focused { theme.accent } else { theme.border };
+    circle(window, centre, RADIUS - 3., fill, Some((1., border)));
     let angle = START_ANGLE + ratio * SWEEP;
     let (along_x, along_y) = (angle.cos(), angle.sin());
     polyline(

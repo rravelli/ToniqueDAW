@@ -19,7 +19,8 @@ use gpui::{
 };
 use tonique_engine::edit::ClipId;
 
-pub use rack::DraggedEffect;
+pub use clip::ClipArrows;
+pub use rack::{DraggedEffect, KnobArrows};
 
 use crate::{
     app::Tonique,
@@ -179,10 +180,10 @@ impl Tonique {
         self.rack_drag_move(event) | self.clip_drag_move(event)
     }
 
-    pub fn bottom_drag_end(&mut self, window: &mut Window, context: &mut Context<Self>) {
+    pub fn bottom_drag_end(&mut self) {
         self.bottom.height.end();
         self.rack_drag_end();
-        self.clip_drag_end(window, context);
+        self.clip_drag_end();
     }
 
     /// Whether the pointer is over the panel, which then redraws as it

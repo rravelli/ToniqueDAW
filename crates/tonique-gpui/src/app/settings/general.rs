@@ -1,4 +1,5 @@
-//! The General tab: the metronome's level, applied as it's dragged.
+//! The General tab: the metronome's level, applied as it's dragged or
+//! stepped by the arrow keys once clicked (1%, 10% with Shift).
 
 use std::{cell::Cell, rc::Rc};
 
@@ -9,7 +10,7 @@ use gpui::{
 
 use crate::{
     app::{
-        Tonique,
+        ArrowHolder, Tonique,
         settings::{
             CONTROL_HEIGHT, CONTROL_WIDTH, button_row, section_header, setting_row, setting_rows,
         },
@@ -17,6 +18,7 @@ use crate::{
     config::settings::Settings,
     geometry::Rect,
     theme::Theme,
+    utils::steps::Presses,
     widgets::{Scale, SliderDrag, dialog_button, paint_param_slider},
 };
 
@@ -48,7 +50,17 @@ impl Tonique {
         self.state.apply_settings(settings);
     }
 
+    /// The level stepped by the arrow keys.
+    pub(crate) fn step_metronome_level(&mut self, presses: Presses) {
+        let level = self.state.settings().metronome_level;
+        let stepped = level_scale().stepped(level, presses);
+        if stepped != level && self.settings.general.level_drag.is_none() {
+            self.set_metronome_level(stepped);
+        }
+    }
+
     fn level_down(&mut self, event: &MouseDownEvent) {
+        self.hold_arrows(ArrowHolder::MetronomeLevel);
         let level = self.state.settings().metronome_level;
         if event.click_count >= 2 {
             self.settings.general.level_drag = None;
@@ -82,6 +94,7 @@ impl Tonique {
         let slot = self.settings.general.level_bounds.clone();
         let canvas_theme = theme.clone();
         let accent = theme.accent;
+        let focused = self.holds_arrows(&ArrowHolder::MetronomeLevel);
         let slider = div()
             .w(px(CONTROL_WIDTH))
             .h(px(CONTROL_HEIGHT))
@@ -107,7 +120,7 @@ impl Tonique {
                             scale,
                             level,
                             accent,
-                            false,
+                            (false, focused),
                             &canvas_theme,
                         )
                     },

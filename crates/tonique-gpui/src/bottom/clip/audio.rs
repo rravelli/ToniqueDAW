@@ -11,19 +11,20 @@ use gpui::{
 use tonique_engine::edit::{ClipId, MAX_TRANSPOSE, StretchWindow, WarpMode};
 
 use crate::{
-    app::{PopupKind, Tonique},
+    app::{ArrowHolder, PopupKind, Tonique},
     bottom::clip::{
-        ClipDrag,
+        ClipArrows, ClipDrag,
         inspector::{
             CELL_GAP, FIELD_HEIGHT, Typed, cell, cells, section, toggle_section, value_box,
         },
     },
     core::{
-        clip::{AudioClip, MAX_DETUNE, MIN_DETUNE},
+        clip::{AudioClip, MAX_DETUNE, MIN_DETUNE, carried},
         state::ClipParam,
     },
     geometry::Rect,
     theme::{Color, Theme, hsla, size},
+    utils::steps::Presses,
     widgets::{Flat, Menu, MenuItem, Scale, SliderDrag, paint_param_slider, select, typing_view},
 };
 
@@ -33,6 +34,10 @@ const CLIP_GAIN: Scale = Scale::Gain {
     min: -40.,
     max: 12.,
 };
+/// The transposition's big step, with Shift and an arrow key.
+const OCTAVE: f32 = 12.;
+/// The detune's big step, in cents.
+const DETUNE_BIG_STEP: f32 = 10.;
 /// The warp mode's picker, on its section's title row.
 const WARP_MODE_WIDTH: f32 = 80.;
 /// The file's tempo halved or doubled, beside it.
@@ -42,7 +47,7 @@ const TEMPO_FIELD_WIDTH: f32 = 72.;
 
 /// A slider of the panel's.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum ClipSlider {
+pub enum ClipSlider {
     Gain,
     Pan,
     Transpose,
@@ -57,11 +62,13 @@ impl ClipSlider {
             Self::Transpose => Scale::Steps {
                 min: -MAX_TRANSPOSE,
                 max: MAX_TRANSPOSE,
+                big: OCTAVE,
                 unit: "st",
             },
             Self::Detune => Scale::Steps {
                 min: MIN_DETUNE,
                 max: MAX_DETUNE,
+                big: DETUNE_BIG_STEP,
                 unit: "ct",
             },
         }
@@ -317,7 +324,7 @@ impl Tonique {
 
     /// The slider of `slider`, in the clip's colour: dragged, heard as it
     /// moves and one undo step once released; double-clicked, back to its
-    /// default.
+    /// default; clicked, stepped by the arrow keys.
     fn clip_slider(
         &self,
         slider: ClipSlider,
@@ -332,6 +339,8 @@ impl Tonique {
         let slot = bounds.clone();
         let paint_theme = theme.clone();
         let id = shown.id;
+        let holder = ArrowHolder::Clip(ClipArrows::Slider(slider));
+        let focused = self.holds_arrows(&holder);
         div()
             .id(("clip-slider", slider as usize))
             .w_full()
@@ -348,7 +357,7 @@ impl Tonique {
                             scale,
                             value,
                             color,
-                            true,
+                            (true, focused),
                             &paint_theme,
                         )
                     },
@@ -359,6 +368,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
+                    this.hold_arrows(holder.clone());
                     if event.click_count >= 2 {
                         this.bottom.clip.drag = None;
                         if let Some((_, clip)) = this.state.clip_with_track(id) {
@@ -395,6 +405,31 @@ impl Tonique {
         let mut edited = clip.clone();
         edited.set_warp(clip.warp, clip.bpm, transpose, detune, bpm);
         self.state.edit_clip_live(edited, done.is_some());
+    }
+
+    /// `slider` stepped by `presses` of the arrow keys, as one undo step;
+    /// the detune carries over into the transposition.
+    pub(super) fn step_clip_slider(
+        &mut self,
+        clip: &AudioClip,
+        slider: ClipSlider,
+        presses: Presses,
+    ) {
+        let value = slider.value(clip);
+        let scale = slider.scale();
+        if slider == ClipSlider::Detune {
+            let (transpose, detune) = carried(clip.transpose, scale.carried(value, presses));
+            if (transpose, detune) != (clip.transpose, clip.detune) {
+                let mut edited = clip.clone();
+                edited.set_warp(clip.warp, clip.bpm, transpose, detune, self.state.bpm());
+                self.state.edit_clip_live(edited, true);
+            }
+            return;
+        }
+        let stepped = scale.stepped(value, presses);
+        if stepped != value {
+            self.set_slider(clip, slider, stepped, Some(value));
+        }
     }
 
     pub(super) fn follow_slider(&mut self, clip: &AudioClip, pointer_x: f32, fine: bool) {

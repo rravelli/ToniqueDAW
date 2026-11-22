@@ -1,14 +1,21 @@
 //! Tonique's `ParamSlider` as track headers show it: a well filled in the
 //! track's colour (from the left for a gain, from the centre for a pan),
-//! the value on top, dragged relative to where it was grabbed.
+//! the value on top, dragged relative to where it was grabbed. Clicked,
+//! the arrow keys step it ([`Scale::stepped`]).
 
 use gpui::{ContentMask, Window, px};
 
 use crate::{
     geometry::Rect,
     theme::{Color, FONT_UI, Theme, hsla, size},
-    utils::{format_pan, snap_to_centre},
-    widgets::text::{paint_line, shape},
+    utils::{
+        format_pan, snap_to_centre,
+        steps::{KeyStep, Presses, step_gain, step_pan},
+    },
+    widgets::{
+        arrow_keys::paint_outline,
+        text::{paint_line, shape},
+    },
 };
 
 /// Shift-dragging moves this much slower.
@@ -24,10 +31,12 @@ pub enum Scale {
     /// 0 to 1, shown as a percentage, back to `default` on a double-click.
     Level { default: f32 },
     /// Whole steps from `min` to `max` (semitones, cents) in `unit`,
-    /// filled from 0, back to 0 on a double-click.
+    /// filled from 0, back to 0 on a double-click; `big` of them at once
+    /// with Shift and an arrow key.
     Steps {
         min: f32,
         max: f32,
+        big: f32,
         unit: &'static str,
     },
 }
@@ -51,6 +60,30 @@ impl Scale {
             Self::Gain { .. } => 1.,
             Self::Pan | Self::Steps { .. } => 0.,
             Self::Level { default } => default,
+        }
+    }
+
+    /// `value` stepped by `presses` of the arrow keys: 0.5 dB (6 with
+    /// Shift), a fiftieth of a side (ten), a percent (ten), a step (a big
+    /// one); in range.
+    pub fn stepped(self, value: f32, presses: Presses) -> f32 {
+        match self {
+            Self::Gain { min, max } => step_gain(value, presses, min, max),
+            Self::Pan => step_pan(value, presses),
+            Self::Level { .. } => {
+                let level = presses.apply(value as f64, KeyStep::new(0.01, 0.1), 0., 1.);
+                ((level * 100.).round() / 100.) as f32
+            }
+            Self::Steps { min, max, .. } => self.carried(value, presses).clamp(min, max),
+        }
+    }
+
+    /// Steps' `value` stepped by `presses`, past the range too: for the
+    /// detune, carried over into the transposition.
+    pub fn carried(self, value: f32, presses: Presses) -> f32 {
+        match self {
+            Self::Steps { big, .. } => value + presses.amount(KeyStep::new(1., big as f64)) as f32,
+            _ => self.stepped(value, presses),
         }
     }
 
@@ -163,8 +196,9 @@ impl SliderDrag {
 }
 
 /// The slider over `rect` at `value`, filled in `color`; a gain with its unit
-/// when `unit`. The value reads on the fill where it's over it and on the
-/// well elsewhere.
+/// when `unit`; outlined in the accent when `focused` (holding the arrow
+/// keys). The value reads on the fill where it's over it and on the well
+/// elsewhere.
 #[allow(clippy::too_many_arguments)]
 pub fn paint_param_slider(
     window: &mut Window,
@@ -173,7 +207,7 @@ pub fn paint_param_slider(
     scale: Scale,
     value: f32,
     color: Color,
-    unit: bool,
+    (unit, focused): (bool, bool),
     theme: &Theme,
 ) {
     let filled = scale.fill(rect, value);
@@ -224,6 +258,9 @@ pub fn paint_param_slider(
             paint_line(window, context, &line, text_left, text_top, size::SMALL)
         });
     }
+    if focused {
+        paint_outline(window, rect, 1., theme.accent);
+    }
 }
 
 #[cfg(test)]
@@ -262,11 +299,35 @@ mod tests {
         let steps = Scale::Steps {
             min: -48.,
             max: 48.,
+            big: 12.,
             unit: "st",
         };
         assert_eq!(steps.value(2.4), 2.);
         assert_eq!(steps.text(3., false), "+3 st");
         assert_eq!(steps.text(-0., false), "+0 st");
+    }
+
+    #[test]
+    fn the_arrow_keys_step_each_scale() {
+        let up = Presses::one(true, false);
+        let big_down = Presses::one(false, true);
+        let db = |gain: f32| (20. * gain.log10() * 10.).round() / 10.;
+        assert_eq!(db(Scale::VOLUME.stepped(1., up)), 0.5);
+        assert_eq!(db(Scale::VOLUME.stepped(1., big_down)), -6.);
+        assert_eq!(Scale::VOLUME.stepped(0., up), 10f32.powf(-39.5 / 20.));
+        assert_eq!(Scale::Pan.stepped(0., up), 0.02);
+        assert_eq!(Scale::Pan.stepped(-0.9, big_down), -1.);
+        let level = Scale::Level { default: 0.5 };
+        assert_eq!(level.stepped(0.5, up), 0.51);
+        assert_eq!(level.stepped(0.05, big_down), 0.);
+        let cents = Scale::Steps {
+            min: -50.,
+            max: 49.,
+            big: 10.,
+            unit: "ct",
+        };
+        assert_eq!(cents.stepped(45., Presses::one(true, true)), 49., "clamped");
+        assert_eq!(cents.carried(45., Presses::one(true, true)), 55., "carried");
     }
 
     #[test]

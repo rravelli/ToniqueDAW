@@ -7,13 +7,14 @@ use gpui::{MouseDownEvent, MouseMoveEvent};
 use tonique_engine::edit::TrackId;
 
 use crate::{
-    app::Tonique,
+    app::{ArrowHolder, Tonique},
     core::{
         state::{MIN_EXPANDED_HEIGHT, RowTarget},
         track::TrackKind,
     },
     headers::{COLLAPSE_PAST, MAX_ROW_HEIGHT},
     timeline::{ROW_GAP, RULER_HEIGHT, rows},
+    utils::steps::Presses,
     widgets::{Scale, SliderDrag},
 };
 
@@ -140,8 +141,9 @@ impl Tonique {
     }
 
     /// A press on a slider: a drag from there, or a double-click back to
-    /// its default.
+    /// its default; it takes the arrow keys either way.
     pub(super) fn slider_down(&mut self, id: TrackId, param: Param, event: &MouseDownEvent) {
+        self.hold_arrows(ArrowHolder::Header(id, param));
         let value = self.param(id, param);
         let scale = param.scale();
         if event.click_count >= 2 {
@@ -159,6 +161,19 @@ impl Tonique {
             param,
             drag: SliderDrag::new(scale, value, pointer_x, event.modifiers.shift),
         });
+    }
+
+    /// A slider stepped by the arrow keys, as one undo step.
+    pub(crate) fn step_header(&mut self, id: TrackId, param: Param, presses: Presses) {
+        if self.headers.drag.is_some() {
+            return;
+        }
+        let value = self.param(id, param);
+        let stepped = param.scale().stepped(value, presses);
+        if stepped != value {
+            self.set_param(id, param, stepped);
+            self.commit_param(id, param, value, stepped);
+        }
     }
 
     pub(super) fn row_edge_down(&mut self, id: TrackId, height: f32, event: &MouseDownEvent) {

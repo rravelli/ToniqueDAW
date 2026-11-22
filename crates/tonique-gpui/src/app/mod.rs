@@ -3,6 +3,7 @@
 //! panel under them. One view
 //! owns Tonique's `ProjectState`, as `ToniqueApp` does in the egui app.
 
+mod arrows;
 mod dialog;
 mod export;
 mod keys;
@@ -22,6 +23,7 @@ use gpui::{
 };
 use tonique_engine::{engine::Engine, time::BeatPos};
 
+pub use arrows::ArrowHolder;
 use dialog::Dialog;
 use export::ExportUi;
 use menu_bar::MenuBarUi;
@@ -73,6 +75,8 @@ pub struct Tonique {
     export: ExportUi,
     /// The menu open, if any.
     pub popup: Option<Popup>,
+    /// The value control holding the arrow keys, if any.
+    pub arrows: Option<ArrowHolder>,
     /// `TONIQUE_BENCH`: steers the view and measures frames.
     bench: Option<Bench>,
     _ticker: Task<()>,
@@ -151,6 +155,7 @@ impl Tonique {
             export: ExportUi::new(context),
             project,
             popup: None,
+            arrows: None,
             bench,
             _ticker: ticker,
             _activation: activation,
@@ -212,10 +217,15 @@ impl Tonique {
                         }
                     });
                 });
-                // Where the last press was decides where editing keys go.
+                // Where the last press was decides where editing keys go;
+                // a press lets go of the arrow keys, unless on the control
+                // holding them, which takes them back after this.
                 window.on_mouse_event(move |event: &MouseDownEvent, phase, _, app| {
                     if phase == DispatchPhase::Capture {
-                        let _ = pressed.update(app, |this, _| this.bottom_press(event));
+                        let _ = pressed.update(app, |this, _| {
+                            this.release_arrows();
+                            this.bottom_press(event);
+                        });
                     }
                 });
             },
@@ -224,7 +234,7 @@ impl Tonique {
         .size_0()
     }
 
-    fn on_up(&mut self, event: &MouseUpEvent, window: &mut Window, context: &mut Context<Self>) {
+    fn on_up(&mut self, event: &MouseUpEvent, _window: &mut Window, context: &mut Context<Self>) {
         self.timeline_drag_end(event);
         self.header_drag_end();
         self.browser_drag_end();
@@ -232,7 +242,7 @@ impl Tonique {
         self.transport.end_drags();
         self.settings_drag_end();
         self.export_drag_end();
-        self.bottom_drag_end(window, context);
+        self.bottom_drag_end();
         context.notify();
     }
 

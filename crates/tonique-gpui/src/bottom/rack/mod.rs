@@ -28,6 +28,7 @@ use crate::{
 };
 use editors::{Editor, EditorInput};
 use filter::GraphDrag;
+pub use knob::KnobArrows;
 use knob::KnobDrag;
 
 /// Between effects, and around them.

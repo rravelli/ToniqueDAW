@@ -1,7 +1,8 @@
 //! The clip's properties, left of its view: panels side by side, each
 //! shown or hidden from the rail on their left. Positions are dragged
-//! sideways, or clicked and typed; edits show while dragged and apply as one
-//! undo step once released (or typed).
+//! sideways, clicked and stepped by the arrow keys, or double-clicked and
+//! typed; edits show while dragged and apply as one undo step once released
+//! (or stepped, or typed).
 
 use gpui::{
     AnyElement, Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, Window, div,
@@ -10,15 +11,18 @@ use gpui::{
 use tonique_engine::time::{BeatPos, TimeSignature};
 
 use crate::{
-    app::Tonique,
+    app::{ArrowHolder, Tonique},
     bottom::clip::{
-        ClipDrag,
+        ClipArrows, ClipDrag,
         markers::{default_loop, trimmed_end, with_loop},
     },
     core::clip::{AudioClip, MIN_LENGTH},
     icons,
     theme::{Color, Theme, hsla, size},
-    utils::{format_bars, format_time, parse_bars, parse_parts},
+    utils::{
+        format_bars, format_time, parse_bars, parse_parts,
+        steps::{self, KeyStep, Presses},
+    },
     widgets::{Flat, TextField, glyph, typing_view},
 };
 
@@ -67,7 +71,7 @@ impl Panels {
 
 /// A position of the clip panel's.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum Field {
+pub enum Field {
     Start,
     End,
     Length,
@@ -98,6 +102,15 @@ impl Field {
             Self::Offset => clip.offset,
             Self::LoopPosition => looped.start_s,
             Self::LoopLength => clip.file_beats(looped.end_s - looped.start_s, bpm),
+        }
+    }
+
+    /// How far the arrow keys step it: a sixteenth (a bar with Shift), or
+    /// 10 ms (a second).
+    fn key_step(self, signature: TimeSignature) -> KeyStep {
+        match self {
+            Self::Offset | Self::LoopPosition => steps::SECONDS,
+            _ => steps::beats(signature),
         }
     }
 
@@ -309,8 +322,8 @@ impl Tonique {
             .into_any_element()
     }
 
-    /// A position's label above its value: dragged sideways, or clicked
-    /// and typed.
+    /// A position's label above its value: dragged sideways, clicked to
+    /// take the arrow keys, or double-clicked and typed.
     #[allow(clippy::too_many_arguments)]
     fn field_cell(
         &self,
@@ -340,26 +353,43 @@ impl Tonique {
             .h(px(FIELD_HEIGHT))
             .into_any_element(),
             None => {
+                let holder = ArrowHolder::Clip(ClipArrows::Field(field));
+                let accent = hsla(theme.accent);
                 let element = value_box(
                     ("field", field as usize),
                     field.format(value, signature),
                     enabled,
                     theme,
-                );
+                )
+                .when(self.holds_arrows(&holder), |element| {
+                    element.border_1().border_color(accent)
+                });
+                let id = shown.id;
                 if enabled {
                     element
                         .on_mouse_down(
                             MouseButton::Left,
-                            context.listener(move |this, event: &MouseDownEvent, _, context| {
-                                context.stop_propagation();
-                                this.bottom.clip.drag = Some(ClipDrag::Field {
-                                    field,
-                                    start_x: f32::from(event.position.x),
-                                    start: value,
-                                    moved: false,
-                                });
-                                context.notify();
-                            }),
+                            context.listener(
+                                move |this, event: &MouseDownEvent, window, context| {
+                                    context.stop_propagation();
+                                    this.hold_arrows(holder.clone());
+                                    if event.click_count >= 2 {
+                                        this.bottom.clip.drag = None;
+                                        if let Some((_, clip)) = this.state.clip_with_track(id) {
+                                            this.type_field(field, &clip, window, context);
+                                        }
+                                        context.notify();
+                                        return;
+                                    }
+                                    this.bottom.clip.drag = Some(ClipDrag::Field {
+                                        field,
+                                        start_x: f32::from(event.position.x),
+                                        start: value,
+                                        moved: false,
+                                    });
+                                    context.notify();
+                                },
+                            ),
                         )
                         .into_any_element()
                 } else {
@@ -391,6 +421,18 @@ impl Tonique {
         let bpm = self.state.bpm();
         let shown = self.state.shown_clip(clip);
         self.state.resize_clip(field.apply(&shown, value, bpm, alt));
+    }
+
+    /// `field` stepped by `presses` of the arrow keys, as one undo step;
+    /// positions and lengths stay on sixteenths.
+    pub(super) fn step_field(&mut self, clip: &AudioClip, field: Field, presses: Presses) {
+        let bpm = self.state.bpm();
+        let value = field.value(clip, bpm);
+        let step = field.key_step(self.state.time_signature());
+        let edited = field.apply(clip, value + presses.amount(step), bpm, false);
+        if field.value(&edited, bpm) != value {
+            self.state.commit_resize_clip(edited);
+        }
     }
 
     /// Starts typing `field`'s value.
