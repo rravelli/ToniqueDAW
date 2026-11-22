@@ -108,6 +108,19 @@ impl AudioClip {
         clip
     }
 
+    /// The whole file, at `position`, as a clip placed by the user: at its
+    /// file's tempo when it's known (see [`AudioInfo::tempo`]), else as
+    /// [`Self::new`], at the project's `bpm`.
+    pub fn placed(id: ClipId, audio: AudioInfo, position: BeatPos, bpm: f32) -> Self {
+        let file_bpm = audio.tempo();
+        let mut clip = Self::new(id, audio, position, bpm);
+        if let Some(file_bpm) = file_bpm {
+            clip.bpm = file_bpm;
+            clip.length = clip.source_beats(bpm);
+        }
+        clip
+    }
+
     pub fn with_id(&self, id: ClipId) -> Self {
         let mut clone = self.clone();
         clone.id = id;
@@ -443,6 +456,25 @@ mod tests {
         let clip = AudioClip::new(ClipId(1), AudioInfo::silent(4.), BeatPos(2.), BPM);
         assert_eq!((clip.offset, clip.length), (0., 8.));
         assert_eq!(clip.end(BPM), BeatPos(10.));
+    }
+
+    /// Placed, a clip plays its file at the file's tempo, warped to the
+    /// project's: a 2-bar loop at 128 BPM takes 8 beats.
+    #[test]
+    fn a_placed_clip_gets_its_files_tempo() {
+        let seconds = 8. * 60. / 128.;
+        let mut audio = AudioInfo::silent(seconds);
+        audio.name = "loop_128bpm.wav".into();
+        let clip = AudioClip::placed(ClipId(1), audio, BeatPos(2.), BPM);
+        assert_eq!(clip.bpm, 128.);
+        assert_eq!(clip.warp, WarpMode::Spectral);
+        assert!((clip.length - 8.).abs() < 1e-6, "{}", clip.length);
+
+        // Without a tempo, at the project's.
+        let audio = AudioInfo::silent(seconds);
+        let clip = AudioClip::placed(ClipId(1), audio.clone(), BeatPos(2.), BPM);
+        let new = AudioClip::new(ClipId(1), audio, BeatPos(2.), BPM);
+        assert_eq!((clip.bpm, clip.length), (new.bpm, new.length));
     }
 
     #[test]

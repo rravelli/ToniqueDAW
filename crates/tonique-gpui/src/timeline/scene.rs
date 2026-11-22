@@ -504,7 +504,7 @@ impl Tonique {
                     .unwrap_or(self.theme.text_muted),
             ),
         };
-        let clip = AudioClip::new(
+        let clip = AudioClip::placed(
             ClipId(0),
             target.audio.clone(),
             target.position,

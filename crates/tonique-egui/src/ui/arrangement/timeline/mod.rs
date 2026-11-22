@@ -47,6 +47,10 @@ pub struct Timeline {
     /// The colours of the tracks a drop would add, this frame: shown as
     /// lanes here, and as headers by the track headers.
     new_tracks: Vec<Color32>,
+    /// Files dragged in from outside the app, analysed while they're
+    /// hovered (held, so the analysis isn't dropped): dropped, they get
+    /// their tempo if it's found by then.
+    hovered_audio: Vec<AudioInfo>,
 }
 
 impl Timeline {
@@ -56,6 +60,7 @@ impl Timeline {
             rubber_band: None,
             hover_expanded: Vec::new(),
             new_tracks: Vec::new(),
+            hovered_audio: Vec::new(),
         }
     }
 
@@ -104,6 +109,7 @@ impl Timeline {
         if !hovered_files.is_empty() {
             painter.rect_filled(viewport, 1.0, with_alpha(ui.app_theme().accent, 20));
         }
+        self.analyse_hovered_files(&hovered_files);
 
         // A drop added tracks: the headers, drawn next, show them this
         // frame, in place of their ghosts.
@@ -377,6 +383,20 @@ impl Timeline {
         );
     }
 
+    /// Start analysing the files dragged in, as soon as they're over the
+    /// window (when the platform tells their paths before the drop).
+    fn analyse_hovered_files(&mut self, hovered_files: &[egui::HoveredFile]) {
+        if hovered_files.is_empty() {
+            self.hovered_audio.clear();
+        } else if self.hovered_audio.is_empty() {
+            self.hovered_audio = hovered_files
+                .iter()
+                .filter_map(|file| AUDIO_ANALYSIS_CACHE.get_or_analyze(file.path.clone()?))
+                .collect();
+            self.hovered_audio.iter().for_each(AudioInfo::load_peaks);
+        }
+    }
+
     fn handle_dropped_audio(&mut self, ui: &mut Ui, viewport: Rect, state: &mut ProjectState) {
         let dropped_files = ui.input(|i| i.raw.dropped_files.clone());
         state.begin_batch();
@@ -395,7 +415,7 @@ impl Timeline {
                     let snapped_position = state.grid.snap(position, alt);
 
                     let track = state.add_track();
-                    let clip = AudioClip::new(
+                    let clip = AudioClip::placed(
                         state.new_clip_id(),
                         audio_info,
                         snapped_position,
@@ -418,8 +438,14 @@ impl Timeline {
     ) {
         let dropped = matches!(drag, AudioDrag::Dropped(_));
         let (AudioDrag::Over(audio_info) | AudioDrag::Dropped(audio_info)) = drag;
+        audio_info.load_peaks();
+        if audio_info.data.analysis_pending() {
+            // Its length changes once its tempo is found.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(50));
+        }
         // Render preview clip
-        if let Some(duration) = audio_info.duration
+        if audio_info.duration.is_some()
             && let Some(mouse_pos) = ui.ctx().input(|i| i.pointer.hover_pos())
             && viewport.contains(mouse_pos)
         {
@@ -449,12 +475,13 @@ impl Timeline {
                     .copied()
                     .unwrap_or(ui.app_theme().text_muted),
             };
-            let width = state.grid.duration_to_width(duration, state.bpm());
+            // Placeholder ID: the clip only gets a real one when dropped.
+            // At the length it will get: its file's tempo, once known.
+            let clip = AudioClip::placed(ClipId(0), audio_info, snapped_position, state.bpm());
+            let width = state.grid.beats_to_width(clip.length);
 
             let pos = pos2(x, y);
             let size = Vec2::new(width, height);
-            // Placeholder ID: the clip only gets a real one when dropped
-            let clip = AudioClip::new(ClipId(0), audio_info, snapped_position, state.bpm());
             // render clip
             ClipView {
                 clip: &clip,

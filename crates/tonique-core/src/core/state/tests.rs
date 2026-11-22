@@ -1372,6 +1372,30 @@ mod projects {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// A clip keeps the tempo it was saved with, whatever its file's own.
+    #[test]
+    fn saved_clip_tempos_win_over_their_files() {
+        let dir = temp_dir("saved-tempo");
+        let path = dir.join("loop_128bpm.wav");
+        write_wav(&path);
+        let mut state = setup_state();
+        let track = state.add_track();
+        let audio = AUDIO_ANALYSIS_CACHE.get_or_analyze(path).unwrap();
+        let mut clip = AudioClip::placed(state.new_clip_id(), audio, BeatPos(0.), 120.);
+        assert_eq!(clip.bpm, 128., "placed at its file's tempo");
+        clip.bpm = 90.;
+        state.add_clips(&track, vec![clip]);
+        let saved = dir.join("song.tonique");
+        state.project(Some(&dir)).write(&saved).unwrap();
+
+        let mut loaded = setup_state();
+        let problems = loaded.load_project(&ProjectFile::read(&saved).unwrap(), &dir);
+        assert!(problems.is_empty(), "{problems:?}");
+        let file = loaded.project(Some(&dir));
+        assert_eq!(file.tracks[0].clips[0].bpm, Some(90.));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     fn clip_file(path: &str, position: f64, offset: f64, length: Option<f64>) -> ClipFile {
         ClipFile {
             path: path.into(),

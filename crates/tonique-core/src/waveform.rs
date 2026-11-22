@@ -10,6 +10,7 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use tonique_engine::onset::{OnsetBuilder, OnsetCurve};
 use tonique_engine::peaks::{PeakBuilder, WaveformPeaks};
 use tonique_engine::sample::SampleBuffer;
 
@@ -93,8 +94,8 @@ fn normalize_buffer(audio_buf: &AudioBufferRef, sample_buffer: &mut Vec<f32>, ch
 }
 
 /// Decode `path` into `data`: peaks are published progressively (unless
-/// they're already complete), samples once the whole file is decoded if
-/// `keep_samples`. Stops early once `data` is dropped, or for a peaks-only
+/// they're already complete), the rhythm once the whole file is decoded
+/// (unless it's known), and the samples then too if `keep_samples`. Stops early once `data` is dropped, or for a peaks-only
 /// decode, once a decode keeping the samples takes over.
 pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Result<(), String> {
     // Open the audio file
@@ -130,12 +131,16 @@ pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Re
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| format!("Failed to create decoder: {}", e))?;
 
-    let Some(peaks_complete) = data.upgrade().map(|d| d.peaks_complete()) else {
+    let Some((peaks_complete, rhythm_complete)) = data
+        .upgrade()
+        .map(|d| (d.peaks_complete(), d.rhythm_complete()))
+    else {
         return Ok(());
     };
     let mut channels: Vec<Vec<f32>> = Vec::new();
     let mut scratch: Vec<Vec<f32>> = Vec::new();
     let mut builder: Option<PeakBuilder> = None;
+    let mut onsets: Option<OnsetBuilder> = None;
     let mut next_publish = CHUNK_SIZE;
     // Packets that couldn't be decoded, or changed channel count: told
     // once, at the end, however many.
@@ -172,6 +177,7 @@ pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Re
             }
             scratch = vec![Vec::new(); num_channels];
             builder = (!peaks_complete).then(|| PeakBuilder::new(num_channels, sample_rate));
+            onsets = (!rhythm_complete).then(|| OnsetBuilder::new(num_channels, sample_rate));
         }
         if num_channels != scratch.len() {
             skipped += 1;
@@ -184,8 +190,11 @@ pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Re
         for (all, block) in channels.iter_mut().zip(&scratch) {
             all.extend_from_slice(block);
         }
+        let block: Vec<&[f32]> = scratch.iter().map(Vec::as_slice).collect();
+        if let Some(onsets) = &mut onsets {
+            onsets.push(&block);
+        }
         if let Some(builder) = &mut builder {
-            let block: Vec<&[f32]> = scratch.iter().map(Vec::as_slice).collect();
             builder.push(&block);
             // Geometric spacing keeps the total snapshot copying linear.
             if builder.frames() >= next_publish {
@@ -213,6 +222,11 @@ pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Re
         store_cached_peaks(path, &peaks);
         data.complete_peaks(peaks);
     }
+    if let Some(onsets) = onsets {
+        let onsets = onsets.finish();
+        store_cached(path, ONSET_CACHE, &onsets.to_bytes());
+        data.complete_rhythm(onsets);
+    }
     if keep_samples {
         // Drop the slack left by an estimated length or by growing.
         channels.iter_mut().for_each(Vec::shrink_to_fit);
@@ -221,36 +235,143 @@ pub fn load_audio(path: &Path, data: &Weak<AudioData>, keep_samples: bool) -> Re
     Ok(())
 }
 
+/// What is cached of a file: in a folder of its own, under an extension.
+struct CacheKind {
+    folder: &'static str,
+    extension: &'static str,
+    what: &'static str,
+}
+
+const PEAK_CACHE: CacheKind = CacheKind {
+    folder: "peaks",
+    extension: "peaks",
+    what: "peaks",
+};
+
+const ONSET_CACHE: CacheKind = CacheKind {
+    folder: "onsets",
+    extension: "onsets",
+    what: "onsets",
+};
+
 /// Peaks of `path` saved by a previous run, if the file hasn't changed.
 pub fn load_cached_peaks(path: &Path) -> Option<WaveformPeaks> {
-    let bytes = std::fs::read(peak_cache_path(path)?).ok()?;
-    WaveformPeaks::from_bytes(&bytes)
+    WaveformPeaks::from_bytes(&load_cached(path, PEAK_CACHE)?)
+}
+
+/// Onsets of `path` saved by a previous run, if the file hasn't changed.
+pub fn load_cached_onsets(path: &Path) -> Option<OnsetCurve> {
+    OnsetCurve::from_bytes(&load_cached(path, ONSET_CACHE)?)
 }
 
 fn store_cached_peaks(path: &Path, peaks: &WaveformPeaks) {
-    let Some(cache_path) = peak_cache_path(path) else {
+    store_cached(path, PEAK_CACHE, &peaks.to_bytes());
+}
+
+fn load_cached(path: &Path, kind: CacheKind) -> Option<Vec<u8>> {
+    std::fs::read(cache_path(path, &kind)?).ok()
+}
+
+fn store_cached(path: &Path, kind: CacheKind, bytes: &[u8]) {
+    let Some(cache_path) = cache_path(path, &kind) else {
         return;
     };
     let result = cache_path
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|_| std::fs::write(&cache_path, peaks.to_bytes()));
+        .and_then(|_| std::fs::write(&cache_path, bytes));
     if let Err(e) = result {
-        eprintln!("Failed to cache peaks of {}: {e}", path.display());
+        eprintln!("Failed to cache {} of {}: {e}", kind.what, path.display());
     }
 }
 
 /// Cache file keyed by the file's path, size and modification time.
-fn peak_cache_path(path: &Path) -> Option<PathBuf> {
+fn cache_path(path: &Path, kind: &CacheKind) -> Option<PathBuf> {
     let meta = std::fs::metadata(path).ok()?;
     let mut hasher = DefaultHasher::new();
     path.canonicalize().ok()?.hash(&mut hasher);
     meta.len().hash(&mut hasher);
     meta.modified().ok()?.hash(&mut hasher);
     let dirs = ProjectDirs::from("com", "Bytenosis", "Tonique")?;
-    Some(
-        dirs.cache_dir()
-            .join("peaks")
-            .join(format!("{:016x}.peaks", hasher.finish())),
-    )
+    Some(dirs.cache_dir().join(kind.folder).join(format!(
+        "{:016x}.{}",
+        hasher.finish(),
+        kind.extension
+    )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::read_audio_info;
+    use std::time::{Duration, Instant};
+    use tonique_engine::sample::WavWriter;
+
+    /// A fresh stereo WAV of `bars` of 4/4 at `bpm`, a click on each beat
+    /// (fresh so nothing is cached for it).
+    fn write_clicks(name: &str, bpm: f64, bars: f64) -> PathBuf {
+        const RATE: f64 = 44100.;
+        let dir = std::env::temp_dir().join(format!("tonique-rhythm-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}.wav"));
+        let beat = 60. / bpm * RATE;
+        let frames = (bars * 4. * beat).round() as usize;
+        let mut wav = WavWriter::create(&path, 2, RATE).unwrap();
+        let samples: Vec<f32> = (0..frames)
+            .flat_map(|frame| {
+                let since = frame as f64 % beat;
+                let click = (since * 0.3).sin() * (-since / 300.).exp();
+                [click as f32 * 0.8; 2]
+            })
+            .collect();
+        wav.write_interleaved(&samples).unwrap();
+        wav.finalize().unwrap();
+        path
+    }
+
+    fn wait_for(what: &str, done: impl Fn() -> bool) {
+        let start = Instant::now();
+        while !done() {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "timed out: {what}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Browsing a loop finds its tempo, and caches it with the peaks.
+    #[test]
+    fn browsing_finds_the_tempo() {
+        let path = write_clicks("clicks", 128., 2.);
+        let info = read_audio_info(&path).unwrap();
+        assert_eq!(info.tempo(), None, "not analysed yet");
+        info.load_peaks();
+        wait_for("rhythm", || info.data.analysed());
+        let tempo = info.tempo().expect("a tempo");
+        assert!((tempo - 128.).abs() < 0.05, "found {tempo}");
+        assert!(info.data.samples().is_none(), "browsing keeps no samples");
+
+        let again = read_audio_info(&path).unwrap();
+        assert!(again.data.analysed(), "from the cache");
+        assert_eq!(again.tempo(), Some(tempo));
+    }
+
+    /// Peaks cached by a build that found no onsets: browsing decodes the
+    /// file again, for its onsets only.
+    #[test]
+    fn cached_peaks_alone_are_completed() {
+        let path = write_clicks("peaks-only", 100., 4.);
+        let first = read_audio_info(&path).unwrap();
+        first.load_peaks();
+        wait_for("first analysis", || first.data.analysed());
+        std::fs::remove_file(cache_path(&path, &ONSET_CACHE).unwrap()).unwrap();
+
+        let info = read_audio_info(&path).unwrap();
+        assert!(info.data.peaks_complete() && !info.data.rhythm_complete());
+        info.load_peaks();
+        wait_for("onsets", || info.data.rhythm_complete());
+        let tempo = info.tempo().expect("a tempo");
+        assert!((tempo - 100.).abs() < 0.05, "found {tempo}");
+    }
 }

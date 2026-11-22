@@ -9,10 +9,30 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
+use tonique_engine::onset::OnsetCurve;
 use tonique_engine::peaks::WaveformPeaks;
 use tonique_engine::sample::SampleBuffer;
+use tonique_engine::tempo::{self, TempoEstimate};
 
-use crate::waveform::{load_audio, load_cached_peaks};
+use crate::file_tempo::tempo_in_name;
+use crate::waveform::{load_audio, load_cached_onsets, load_cached_peaks};
+
+/// What a file's rhythm is: when its sounds start, and its tempo if it has
+/// a steady beat.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rhythm {
+    pub onsets: OnsetCurve,
+    pub tempo: Option<TempoEstimate>,
+}
+
+impl Rhythm {
+    pub fn new(onsets: OnsetCurve) -> Self {
+        Self {
+            tempo: tempo::estimate(&onsets),
+            onsets,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum AudioInfoError {
@@ -39,14 +59,17 @@ impl From<symphonia::core::errors::Error> for AudioInfoError {
 /// by every clip (and the engine source) using that file.
 ///
 /// Nothing is decoded up front: [`AudioInfo::load_peaks`] decodes only to
-/// draw the waveform (browsing), [`AudioInfo::load_samples`] keeps the
-/// samples too (the file is used by a clip).
+/// draw the waveform and find the rhythm (browsing),
+/// [`AudioInfo::load_samples`] keeps the samples too (the file is used by
+/// a clip).
 #[derive(Default)]
 pub struct AudioData {
     /// Grows while the file decodes.
     peaks: RwLock<Arc<WaveformPeaks>>,
     /// Set once `peaks` covers the whole file.
     peaks_complete: AtomicBool,
+    /// Set once the whole file is analysed.
+    rhythm: OnceLock<Arc<Rhythm>>,
     /// Set once the whole file is decoded.
     samples: OnceLock<Arc<SampleBuffer>>,
     peaks_requested: AtomicBool,
@@ -61,12 +84,39 @@ impl AudioData {
     pub fn from_samples(buffer: SampleBuffer) -> Self {
         let data = Self::default();
         data.complete_peaks(WaveformPeaks::from_buffer(&buffer));
+        data.complete_rhythm(OnsetCurve::from_buffer(&buffer));
         data.finish(buffer);
         data
     }
 
     pub fn peaks(&self) -> Arc<WaveformPeaks> {
         self.peaks.read().map(|p| p.clone()).unwrap_or_default()
+    }
+
+    /// The file's rhythm, once the whole file is analysed.
+    pub fn rhythm(&self) -> Option<&Arc<Rhythm>> {
+        self.rhythm.get()
+    }
+
+    pub fn rhythm_complete(&self) -> bool {
+        self.rhythm.get().is_some()
+    }
+
+    /// Whether the waveform and the rhythm are both known: browsing has
+    /// nothing left to decode.
+    pub fn analysed(&self) -> bool {
+        self.peaks_complete() && self.rhythm_complete()
+    }
+
+    /// Whether the waveform or the rhythm is still to come: not both
+    /// known, and no decode failed.
+    pub fn analysis_pending(&self) -> bool {
+        !self.analysed() && !self.failed.load(Ordering::Acquire)
+    }
+
+    /// The first of concurrent decodes to finish sets it.
+    pub fn complete_rhythm(&self, onsets: OnsetCurve) {
+        let _ = self.rhythm.set(Arc::new(Rhythm::new(onsets)));
     }
 
     /// Decoded samples at the file's rate, once decoding has finished.
@@ -117,6 +167,7 @@ impl std::fmt::Debug for AudioData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AudioData")
             .field("peak_frames", &self.peaks().frames())
+            .field("tempo", &self.rhythm().and_then(|rhythm| rhythm.tempo))
             .field("ready", &self.is_ready())
             .finish()
     }
@@ -179,11 +230,12 @@ impl AudioInfo {
         }
     }
 
-    /// Decode the file in the background to draw its waveform, without
-    /// keeping its samples. Stops early once nothing uses the file anymore.
+    /// Decode the file in the background to draw its waveform and find its
+    /// rhythm, without keeping its samples. Stops early once nothing uses
+    /// the file anymore.
     pub fn load_peaks(&self) {
         let data = &self.data;
-        if data.peaks_complete()
+        if data.analysed()
             || data.samples_requested()
             || data.peaks_requested.swap(true, Ordering::AcqRel)
         {
@@ -213,6 +265,17 @@ impl AudioInfo {
                 }
             }
         });
+    }
+
+    /// The file's tempo, in BPM: the one in its name, or else the one
+    /// detected (once the file is analysed, if it has a steady beat).
+    pub fn tempo(&self) -> Option<f64> {
+        tempo_in_name(&self.name).or_else(|| {
+            self.data
+                .rhythm()
+                .and_then(|rhythm| rhythm.tempo)
+                .map(|tempo| tempo.bpm)
+        })
     }
 
     /// Length of the file in frames, at its own sample rate.
@@ -268,6 +331,9 @@ pub fn read_audio_info<P: AsRef<Path>>(path: P) -> Result<AudioInfo, AudioInfoEr
     let data = Arc::new(AudioData::default());
     if let Some(peaks) = load_cached_peaks(path.as_ref()) {
         data.complete_peaks(peaks);
+    }
+    if let Some(onsets) = load_cached_onsets(path.as_ref()) {
+        data.complete_rhythm(onsets);
     }
 
     Ok(AudioInfo {

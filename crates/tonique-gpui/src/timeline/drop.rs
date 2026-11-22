@@ -87,7 +87,7 @@ impl Tonique {
                 Some(track) => *track,
                 None => self.state.add_track(),
             };
-            let clip = AudioClip::new(
+            let clip = AudioClip::placed(
                 self.state.new_clip_id(),
                 audio,
                 target.position,

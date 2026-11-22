@@ -18,6 +18,7 @@ pub mod graph;
 pub mod meter;
 pub mod midi;
 pub mod nodes;
+pub mod onset;
 pub mod param;
 pub mod peaks;
 pub mod preview;
@@ -26,6 +27,7 @@ pub mod rt;
 pub mod sample;
 pub mod spectrum;
 pub mod stretch;
+pub mod tempo;
 pub mod time;
 
 #[cfg(feature = "device")]
