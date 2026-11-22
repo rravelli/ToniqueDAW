@@ -3,7 +3,7 @@
 //! graph in their place), the bottom panel under them. One view
 //! owns Tonique's `ProjectState`, as `ToniqueApp` does in the egui app.
 
-mod arrows;
+pub mod arrows;
 mod dialog;
 mod export;
 mod keys;
@@ -18,8 +18,8 @@ mod transport;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use gpui::{
-    App, Context, DispatchPhase, Entity, FocusHandle, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Render, Subscription, Task, Window, canvas, div, prelude::*, px,
+    Anchor, App, Context, DispatchPhase, Entity, FocusHandle, Global, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Render, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
 use tonique_engine::{engine::Engine, time::BeatPos};
 
@@ -30,7 +30,7 @@ use menu_bar::MenuBarUi;
 pub use popup::{Popup, PopupKind};
 use project::ProjectFiles;
 use settings::SettingsUi;
-use transport::Transport;
+use transport::{Shows, TransportBar, TransportEvent};
 
 use crate::{
     audio::host::AudioHost,
@@ -41,7 +41,7 @@ use crate::{
     core::state::{PlaybackState, ProjectState},
     graph::GraphView,
     headers::HeadersUi,
-    model::{HoldsProject, Project},
+    model::{HoldsProject, Project, toggle_play},
     theme::{FONT_UI, Theme, ThemeLibrary, hsla, size},
     timeline::TimelineUi,
     wave::WaveCache,
@@ -67,7 +67,7 @@ pub struct Tonique {
     pub browser_width: Splitter,
     /// The selected track's effects, or a clip's details, at the bottom.
     pub bottom: BottomPanel,
-    transport: Transport,
+    transport: Entity<TransportBar>,
     menu_bar: MenuBarUi,
     /// The project's file, and the recent ones.
     files: ProjectFiles,
@@ -78,14 +78,12 @@ pub struct Tonique {
     export: ExportUi,
     /// The menu open, if any.
     pub popup: Option<Popup>,
-    /// The value control holding the arrow keys, if any.
-    pub arrows: Option<ArrowHolder>,
     /// `TONIQUE_BENCH`: steers the view and measures frames.
     bench: Option<Bench>,
     _ticker: Task<()>,
-    /// The browser reads its folders again when the window gets the focus
-    /// back.
-    _activation: Subscription,
+    /// The browser reading its folders again when the window gets the
+    /// focus back, and what the panels ask of the window.
+    _subscriptions: Vec<Subscription>,
 }
 
 impl HoldsProject for Tonique {
@@ -134,6 +132,7 @@ impl Tonique {
 
         let focus = context.focus_handle();
         window.focus(&focus, context);
+        context.set_global(MainFocus(focus.clone()));
         // Unsaved changes are asked about before the window closes.
         let this = context.weak_entity();
         window.on_window_should_close(context, move |window, context| {
@@ -149,6 +148,8 @@ impl Tonique {
         });
         let browser = Browser::new(&mut state, context);
         let project = context.new(|_| Project::new(state));
+        let transport = context.new(|_| TransportBar::new(project.clone()));
+        let transport_events = context.subscribe(&transport, Self::on_transport);
         Self {
             browser,
             headers: HeadersUi::new(),
@@ -160,18 +161,37 @@ impl Tonique {
             browser_open: true,
             browser_width: Splitter::new(Edge::Right, BROWSER_WIDTH, BROWSER_MIN, BROWSER_MAX),
             bottom: BottomPanel::new(),
-            transport: Transport::new(),
+            transport,
             menu_bar: MenuBarUi::default(),
             dialog: None,
             settings: SettingsUi::new(themes, theme_warnings),
             export: ExportUi::new(context),
             files,
             popup: None,
-            arrows: None,
             bench,
             _ticker: ticker,
-            _activation: activation,
+            _subscriptions: vec![activation, transport_events],
         }
+    }
+
+    fn on_transport(
+        &mut self,
+        _: Entity<TransportBar>,
+        event: &TransportEvent,
+        context: &mut Context<Self>,
+    ) {
+        match event {
+            TransportEvent::ToggleBrowser => self.browser_open = !self.browser_open,
+            TransportEvent::ToggleGraph => self.toggle_graph(context),
+            TransportEvent::ToggleGridMenu(at) => {
+                self.toggle_popup(PopupKind::Grid, *at, Anchor::TopRight);
+            }
+            TransportEvent::ShowMissingFiles => self.show_missing_files(None, context),
+            TransportEvent::OpenAudioSettings => {
+                self.open_settings(settings::SettingsTab::Audio, context);
+            }
+        }
+        context.notify();
     }
 
     /// Between the timeline and the audio graph.
@@ -180,11 +200,7 @@ impl Tonique {
     }
 
     fn toggle_play(&mut self, context: &mut App) {
-        if self.state(context).playback_state() == PlaybackState::Playing {
-            self.state_mut(context).stop();
-        } else {
-            self.state_mut(context).play();
-        }
+        toggle_play(&mut self.state_mut(context));
     }
 
     /// Drags follow the pointer anywhere in the window, over a dialog too:
@@ -200,7 +216,6 @@ impl Tonique {
         self.timeline_drag_move(event, context)
             | self.header_drag_move(event, width, context)
             | self.browser_drag_move(event, context)
-            | self.transport_drag_move(event, context)
             | self.settings_drag_move(event, context)
             | self.export_drag_move(event, context)
             | self.bottom_drag_move(event, height, context)
@@ -240,8 +255,8 @@ impl Tonique {
                 // them back after this.
                 window.on_mouse_event(move |event: &MouseDownEvent, phase, _, app| {
                     if phase == DispatchPhase::Capture {
-                        let _ = pressed.update(app, |this, _| {
-                            this.release_arrows();
+                        let _ = pressed.update(app, |this, context| {
+                            crate::app::arrows::release(context);
                             this.settings.stop_recording();
                             this.bottom_press(event);
                         });
@@ -258,7 +273,6 @@ impl Tonique {
         self.header_drag_end(context);
         self.browser_drag_end();
         self.browser_width.end();
-        self.transport.end_drags();
         self.settings_drag_end();
         self.export_drag_end();
         self.bottom_drag_end(context);
@@ -269,7 +283,6 @@ impl Tonique {
         self.timeline.is_dragging()
             || self.headers.is_dragging()
             || self.browser_width.is_dragging()
-            || self.transport.is_dragging()
             || self.settings.is_dragging()
             || self.export.is_dragging()
             || self.bottom.is_dragging()
@@ -298,6 +311,18 @@ impl Tonique {
                 |this| &mut this.browser_width,
             ))
     }
+}
+
+/// The app's keyboard focus: where the shortcuts are heard. Fields give
+/// it back when they're done.
+struct MainFocus(FocusHandle);
+
+impl Global for MainFocus {}
+
+/// Gives the keyboard back to the app, from a field.
+pub fn focus_main(window: &mut Window, context: &mut App) {
+    let focus = context.global::<MainFocus>().0.clone();
+    window.focus(&focus, context);
 }
 
 /// A one pixel line between panels.
@@ -342,6 +367,17 @@ impl Render for Tonique {
             self.browser.folders_over = false;
         }
 
+        let shows = Shows {
+            browser: self.browser_open,
+            graph: self.graph.read(context).is_open(),
+            grid_menu: self
+                .popup
+                .as_ref()
+                .is_some_and(|popup| popup.kind == PopupKind::Grid),
+        };
+        self.transport
+            .update(context, |transport, context| transport.show(shows, context));
+
         // The rows as this frame shows them, for both views: building them
         // clones every track's clips.
         let rows = crate::timeline::rows(self.state(context));
@@ -382,7 +418,7 @@ impl Render for Tonique {
             .font_family(FONT_UI)
             .text_size(px(size::BODY))
             .child(self.menu_bar(context))
-            .child(self.transport(window, context))
+            .child(self.transport.clone())
             .child(body)
             .children(crate::profile::time("view.bottom", || {
                 self.bottom_panel_view(window, context)

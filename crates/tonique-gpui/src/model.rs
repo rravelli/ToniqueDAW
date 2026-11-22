@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 
 use gpui::{App, Entity, GpuiBorrow};
 
-use crate::core::state::ProjectState;
+use crate::core::state::{PlaybackState, ProjectState};
 
 pub struct Project {
     pub state: ProjectState,
@@ -14,6 +14,15 @@ pub struct Project {
 impl Project {
     pub fn new(state: ProjectState) -> Self {
         Self { state }
+    }
+}
+
+/// Plays from the playhead, or stops.
+pub fn toggle_play(state: &mut ProjectState) {
+    if state.playback_state() == PlaybackState::Playing {
+        state.stop();
+    } else {
+        state.play();
     }
 }
 

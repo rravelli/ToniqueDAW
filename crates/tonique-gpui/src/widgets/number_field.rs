@@ -3,7 +3,7 @@
 //! units with Shift), or double-clicked to type a value. Its value isn't
 //! kept here: the caller passes it in and is told new ones.
 
-use std::cell::Cell;
+use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     AnyElement, App, Context, CursorStyle, KeyDownEvent, MouseButton, MouseDownEvent, Window, div,
@@ -11,7 +11,7 @@ use gpui::{
 };
 
 use crate::{
-    app::{ArrowHolder, Tonique},
+    app::{ArrowHolder, arrows::Stepper, focus_main},
     theme::{Theme, hsla},
     utils::steps::{self, Presses},
     widgets::text_field::{FieldKey, TextField},
@@ -159,19 +159,19 @@ impl NumberField {
     }
 
     /// The field, `width` by `height`, showing `value`, outlined when `held`
-    /// (holding the arrow keys). `get` finds it in the app, `set` takes a
+    /// (holding the arrow keys). `get` finds it in its view, `set` takes a
     /// new value.
     #[allow(clippy::too_many_arguments)]
-    pub fn view(
+    pub fn view<V: 'static>(
         &self,
         id: &'static str,
         (value, held): (f32, bool),
         (width, height): (f32, f32),
         theme: &Theme,
         window: &Window,
-        context: &mut Context<Tonique>,
-        get: fn(&mut Tonique) -> &mut NumberField,
-        set: fn(&mut Tonique, f32, &mut App),
+        context: &mut Context<V>,
+        get: fn(&mut V) -> &mut NumberField,
+        set: fn(&mut V, f32, &mut Context<V>),
     ) -> AnyElement {
         let field = div()
             .id(id)
@@ -186,7 +186,7 @@ impl NumberField {
             .whitespace_nowrap();
         if let Some(edit) = &self.edit {
             // Leaving it, by Enter or a click elsewhere, takes the value.
-            let finish = move |this: &mut Tonique, keep: bool, context: &mut App| {
+            let finish = move |this: &mut V, keep: bool, context: &mut Context<V>| {
                 let field = get(this);
                 let value = field.typed().filter(|_| keep);
                 field.edit = None;
@@ -211,7 +211,7 @@ impl NumberField {
                             FieldKey::Ignored => return,
                         }
                         if get(this).edit.is_none() {
-                            window.focus(&this.focus, context);
+                            focus_main(window, context);
                         }
                         context.stop_propagation();
                         context.notify();
@@ -226,7 +226,16 @@ impl NumberField {
         self.shown.set(value);
         let text = format!("{}{}", self.spec.format(value), self.spec.suffix);
         let dragging = self.is_dragging();
-        let holder = ArrowHolder::Number { id, get, set };
+        let view = context.weak_entity();
+        let step: Stepper = Rc::new(move |presses, context: &mut App| {
+            let _ = view.update(context, |this, context| {
+                if let Some(value) = get(this).stepped(presses) {
+                    set(this, value, context);
+                }
+                context.notify();
+            });
+        });
+        let holder = ArrowHolder::Number { id, step };
         let accent = hsla(theme.accent);
         field
             .when(held, |element| element.border_1().border_color(accent))
@@ -238,7 +247,7 @@ impl NumberField {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, window, context| {
                     context.stop_propagation();
-                    this.hold_arrows(holder.clone());
+                    crate::app::arrows::hold(holder.clone(), context);
                     let field = get(this);
                     if event.click_count >= 2 {
                         field.drag = None;

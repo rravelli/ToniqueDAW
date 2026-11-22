@@ -158,7 +158,7 @@ impl Tonique {
             target: target.clone(),
             scale,
         });
-        let focused = self.holds_arrows(&holder);
+        let focused = crate::app::arrows::holds(&holder, context);
         div()
             .id(id.into())
             .flex_none()
@@ -190,7 +190,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
-                    this.hold_arrows(holder.clone());
+                    crate::app::arrows::hold(holder.clone(), context);
                     if event.click_count >= 2 {
                         this.bottom.rack.drag = None;
                         if let Some(default) = default {

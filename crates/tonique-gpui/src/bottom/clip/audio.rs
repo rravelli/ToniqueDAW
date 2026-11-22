@@ -345,7 +345,7 @@ impl Tonique {
         let paint_theme = theme.clone();
         let id = shown.id;
         let holder = ArrowHolder::Clip(ClipArrows::Slider(slider));
-        let focused = self.holds_arrows(&holder);
+        let focused = crate::app::arrows::holds(&holder, context);
         div()
             .id(("clip-slider", slider as usize))
             .w_full()
@@ -373,7 +373,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
-                    this.hold_arrows(holder.clone());
+                    crate::app::arrows::hold(holder.clone(), context);
                     if event.click_count >= 2 {
                         this.bottom.clip.drag = None;
                         if let Some((_, clip)) = this.state(context).clip_with_track(id) {

@@ -61,7 +61,7 @@ impl Tonique {
     }
 
     fn level_down(&mut self, event: &MouseDownEvent, context: &mut App) {
-        self.hold_arrows(ArrowHolder::MetronomeLevel);
+        crate::app::arrows::hold(ArrowHolder::MetronomeLevel, context);
         let level = self.state(context).settings().metronome_level;
         if event.click_count >= 2 {
             self.settings.general.level_drag = None;
@@ -95,7 +95,7 @@ impl Tonique {
         let slot = self.settings.general.level_bounds.clone();
         let canvas_theme = theme.clone();
         let accent = theme.accent;
-        let focused = self.holds_arrows(&ArrowHolder::MetronomeLevel);
+        let focused = crate::app::arrows::holds(&ArrowHolder::MetronomeLevel, context);
         let slider = div()
             .w(px(CONTROL_WIDTH))
             .h(px(CONTROL_HEIGHT))

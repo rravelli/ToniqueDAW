@@ -74,7 +74,9 @@ impl Tonique {
                 self.answer_unsaved(true, window, context);
             }
             "escape" if self.popup.is_some() => self.popup = None,
-            "escape" if self.arrows.is_some() => self.release_arrows(),
+            "escape" if crate::app::arrows::held(context).is_some() => {
+                crate::app::arrows::release(context)
+            }
             "escape" => self.state_mut(context).clear_clip_selection(),
             "home" => self.state_mut(context).seek(BeatPos::ZERO),
             "c" | "x" | "v" if is_clipboard(keystroke) && self.has_keyboard(window, context) => {

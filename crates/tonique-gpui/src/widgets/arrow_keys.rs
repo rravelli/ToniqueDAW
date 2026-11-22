@@ -1,5 +1,5 @@
 //! The arrow keys for a value control, as the egui app's `arrow_keys`: a
-//! clicked control holds them (`Tonique::arrows`), each press steps it,
+//! clicked control holds them (`app::arrows::hold`), each press steps it,
 //! and it's outlined in the accent while it does.
 
 use gpui::{Keystroke, Window, px};

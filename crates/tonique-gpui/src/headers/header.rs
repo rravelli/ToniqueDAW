@@ -337,7 +337,7 @@ impl Tonique {
         let canvas_theme = theme.clone();
         let (value, color) = (param.of(track), track.color);
         let unit = param == Param::Volume && rect.width >= VOLUME_UNIT_WIDTH;
-        let focused = self.holds_arrows(&ArrowHolder::Header(id, param));
+        let focused = crate::app::arrows::holds(&ArrowHolder::Header(id, param), context);
         place(rect)
             .cursor(CursorStyle::ResizeLeftRight)
             .on_mouse_down(

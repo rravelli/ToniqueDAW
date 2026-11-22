@@ -368,7 +368,10 @@ impl Tonique {
         };
         let workers = form.worker_threads.view(
             "workers",
-            (draft.worker_threads as f32, self.holds_number("workers")),
+            (
+                draft.worker_threads as f32,
+                crate::app::arrows::holds_number("workers", context),
+            ),
             field,
             theme,
             window,
@@ -380,7 +383,7 @@ impl Tonique {
             "threshold",
             (
                 draft.parallel_threshold as f32,
-                self.holds_number("threshold"),
+                crate::app::arrows::holds_number("threshold", context),
             ),
             field,
             theme,

@@ -362,7 +362,7 @@ impl Tonique {
                     enabled,
                     theme,
                 )
-                .when(self.holds_arrows(&holder), |element| {
+                .when(crate::app::arrows::holds(&holder, context), |element| {
                     element.border_1().border_color(accent)
                 });
                 let id = shown.id;
@@ -373,7 +373,7 @@ impl Tonique {
                             context.listener(
                                 move |this, event: &MouseDownEvent, window, context| {
                                     context.stop_propagation();
-                                    this.hold_arrows(holder.clone());
+                                    crate::app::arrows::hold(holder.clone(), context);
                                     if event.click_count >= 2 {
                                         this.bottom.clip.drag = None;
                                         if let Some((_, clip)) =

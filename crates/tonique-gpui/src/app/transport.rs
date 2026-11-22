@@ -2,21 +2,21 @@
 //! transport centred, the grid's step, the song's tempo and time
 //! signature, warnings and the audio load on the right.
 
-use crate::model::HoldsProject;
 use gpui::{
-    Anchor, App, Context, MouseButton, MouseDownEvent, MouseMoveEvent, Window, div, point,
-    prelude::*, px,
+    Context, Entity, EventEmitter, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point,
+    Window, div, point, prelude::*, px,
 };
 use tonique_engine::time::TimeSignature;
 
 use crate::{
-    app::{PopupKind, Tonique, menu_bar::MENU_BAR_HEIGHT, settings::SettingsTab},
+    app::menu_bar::MENU_BAR_HEIGHT,
     config::keymap::Action,
     core::state::PlaybackState,
     icons,
+    model::{HoldsProject, Project, toggle_play},
     theme::{Theme, hsla, icon, size, with_alpha},
     utils::{format_bars, format_time},
-    widgets::{Flat, NumberField, NumberSpec, glyph},
+    widgets::{Flat, NumberField, NumberSpec, follow_drag, glyph},
 };
 
 const BUTTON: f32 = 22.;
@@ -40,16 +40,48 @@ const SONG_WIDTH: f32 =
     TEMPO_WIDTH + TEMPO_DIVIDER_WIDTH + 2. * SIGNATURE_FIELD_WIDTH + SIGNATURE_SLASH_WIDTH;
 const GRID_STEP_WIDTH: f32 = 48.;
 
-/// The song's fields: tempo, and the time signature's two numbers.
-pub struct Transport {
+/// The bar, a view of its own.
+pub struct TransportBar {
+    project: Entity<Project>,
+    /// The song's fields: tempo, and the time signature's two numbers.
     bpm: NumberField,
     numerator: NumberField,
     denominator: NumberField,
+    /// What the window shows, as its buttons light up.
+    shows: Shows,
 }
 
-impl Transport {
-    pub fn new() -> Self {
+/// What the window around the bar shows, told by it.
+#[derive(Clone, Copy, PartialEq, Default)]
+pub struct Shows {
+    pub browser: bool,
+    pub graph: bool,
+    pub grid_menu: bool,
+}
+
+/// What the bar asks of the window.
+pub enum TransportEvent {
+    ToggleBrowser,
+    ToggleGraph,
+    /// The grid's menu, its top right corner at this point.
+    ToggleGridMenu(Point<Pixels>),
+    ShowMissingFiles,
+    OpenAudioSettings,
+}
+
+impl EventEmitter<TransportEvent> for TransportBar {}
+
+impl HoldsProject for TransportBar {
+    fn project(&self) -> &Entity<Project> {
+        &self.project
+    }
+}
+
+impl TransportBar {
+    pub fn new(project: Entity<Project>) -> Self {
         Self {
+            project,
+            shows: Shows::default(),
             bpm: NumberField::new(NumberSpec::range(10., 1000., 1).suffix(" BPM")),
             numerator: NumberField::new(NumberSpec::range(
                 1.,
@@ -62,29 +94,37 @@ impl Transport {
         }
     }
 
-    pub fn is_dragging(&self) -> bool {
+    /// Tells the bar what the window shows.
+    pub fn show(&mut self, shows: Shows, context: &mut Context<Self>) {
+        if self.shows != shows {
+            self.shows = shows;
+            context.notify();
+        }
+    }
+
+    fn is_dragging(&self) -> bool {
         self.bpm.is_dragging() || self.numerator.is_dragging() || self.denominator.is_dragging()
     }
 
-    pub fn end_drags(&mut self) {
+    fn end_drags(&mut self, _: &mut Context<Self>) {
         self.bpm.end_drag();
         self.numerator.end_drag();
         self.denominator.end_drag();
     }
 }
 
-fn set_bpm(this: &mut Tonique, bpm: f32, context: &mut App) {
+fn set_bpm(this: &mut TransportBar, bpm: f32, context: &mut Context<TransportBar>) {
     this.state_mut(context).set_bpm(bpm);
 }
 
-fn set_numerator(this: &mut Tonique, numerator: f32, context: &mut App) {
+fn set_numerator(this: &mut TransportBar, numerator: f32, context: &mut Context<TransportBar>) {
     let current = this.state(context).time_signature();
     if let Some(signature) = TimeSignature::new(numerator.round() as u32, current.denominator) {
         this.state_mut(context).set_time_signature(signature);
     }
 }
 
-fn set_denominator(this: &mut Tonique, denominator: f32, context: &mut App) {
+fn set_denominator(this: &mut TransportBar, denominator: f32, context: &mut Context<TransportBar>) {
     let current = this.state(context).time_signature();
     if let Some(signature) = TimeSignature::new(current.numerator, denominator as u32) {
         this.state_mut(context).set_time_signature(signature);
@@ -108,51 +148,29 @@ fn gap(width: f32) -> gpui::Div {
     div().flex_none().w(px(width - BUTTON_GAP))
 }
 
-/// Opens `kind`'s menu under the button pressed by `event`.
-fn open_below(this: &mut Tonique, kind: PopupKind, event: &MouseDownEvent) {
-    let below = px(MENU_BAR_HEIGHT + BAR_HEIGHT);
-    this.toggle_popup(kind, point(event.position.x, below), Anchor::TopRight);
-}
-
-impl Tonique {
-    /// Follows a drag of the song's fields. Returns whether it's one.
-    pub(super) fn transport_drag_move(
-        &mut self,
-        event: &MouseMoveEvent,
-        context: &mut App,
-    ) -> bool {
+impl TransportBar {
+    /// Follows a drag of the song's fields.
+    fn drag_to(&mut self, event: &MouseMoveEvent, context: &mut Context<Self>) {
         let pointer_x = f32::from(event.position.x);
         let fine = event.modifiers.shift;
         let signature = self.state(context).time_signature();
         let (numerator, denominator) = (signature.numerator as f32, signature.denominator as f32);
-        if let Some(bpm) = self
-            .transport
-            .bpm
-            .drag_to(pointer_x, fine, self.state(context).bpm())
-        {
+        let bpm = self.state(context).bpm();
+        if let Some(bpm) = self.bpm.drag_to(pointer_x, fine, bpm) {
             set_bpm(self, bpm, context);
-        } else if let Some(new_numerator) =
-            self.transport.numerator.drag_to(pointer_x, fine, numerator)
-        {
+        } else if let Some(new_numerator) = self.numerator.drag_to(pointer_x, fine, numerator) {
             set_numerator(self, new_numerator, context);
-        } else if let Some(new_denominator) =
-            self.transport
-                .denominator
-                .drag_to(pointer_x, fine, denominator)
+        } else if let Some(new_denominator) = self.denominator.drag_to(pointer_x, fine, denominator)
         {
             set_denominator(self, new_denominator, context);
-        } else {
-            return self.transport.is_dragging();
         }
-        true
     }
+}
 
-    pub(super) fn transport(
-        &mut self,
-        window: &Window,
-        context: &mut Context<Self>,
-    ) -> impl IntoElement {
+impl Render for TransportBar {
+    fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
         let theme = crate::theme::current(context);
+        let dragging = self.is_dragging();
         div()
             .flex()
             .flex_none()
@@ -167,13 +185,26 @@ impl Tonique {
             .child(self.transport_center(&theme, context))
             .child(div().flex_none().w(px(GROUP_GAP)))
             .child(self.transport_right(&theme, window, context))
+            // A field's drag follows the pointer anywhere in the window.
+            .when(dragging, |element| {
+                element.child(follow_drag(
+                    context.weak_entity(),
+                    Self::drag_to,
+                    Self::end_drags,
+                ))
+            })
     }
+}
 
+impl TransportBar {
     fn transport_left(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
         let state = self.state(context);
         let (can_undo, can_redo) = (state.can_undo(), state.can_redo());
-        let open = self.browser_open;
-        let graph = self.graph.read(context).is_open();
+        let Shows {
+            browser: open,
+            graph,
+            ..
+        } = self.shows;
         div()
             .flex_1()
             .min_w_0()
@@ -184,7 +215,7 @@ impl Tonique {
                 glyph(icons::SIDEBAR_SIMPLE, 15., open),
                 theme,
                 context,
-                |this, _| this.browser_open = !this.browser_open,
+                |_, context| context.emit(TransportEvent::ToggleBrowser),
             ))
             // The audio graph is a development tool.
             .when(Action::ToggleGraphView.is_available(), |element| {
@@ -192,7 +223,7 @@ impl Tonique {
                     glyph(icons::GRAPH, 15., graph),
                     theme,
                     context,
-                    |this, context| this.toggle_graph(context),
+                    |_, context| context.emit(TransportEvent::ToggleGraph),
                 ))
             })
             .child(gap(GROUP_GAP))
@@ -246,7 +277,7 @@ impl Tonique {
                 glyph(if playing { icons::STOP } else { icons::PLAY }, 12., true),
                 theme,
                 context,
-                |this, context| this.toggle_play(context),
+                |this, context| toggle_play(&mut this.state_mut(context)),
             ))
             .child(Flat::new("loop", BUTTON).selected(looping).show(
                 glyph(icons::REPEAT, 14., looping),
@@ -311,9 +342,8 @@ impl Tonique {
                         .element(glyph(icons::WARNING, 14., false), theme)
                         .on_mouse_down(
                             MouseButton::Left,
-                            context.listener(|this, _, _, context| {
-                                this.show_missing_files(None, context);
-                                context.notify();
+                            context.listener(|_, _, _, context| {
+                                context.emit(TransportEvent::ShowMissingFiles);
                             }),
                         ),
                 )
@@ -325,9 +355,8 @@ impl Tonique {
                         .element(glyph(icons::SPEAKER_SLASH, 14., false), theme)
                         .on_mouse_down(
                             MouseButton::Left,
-                            context.listener(|this, _, _, context| {
-                                this.open_settings(SettingsTab::Audio, context);
-                                context.notify();
+                            context.listener(|_, _, _, context| {
+                                context.emit(TransportEvent::OpenAudioSettings);
                             }),
                         ),
                 )
@@ -362,10 +391,7 @@ impl Tonique {
         } else {
             theme.text_disabled
         };
-        let open = self
-            .popup
-            .as_ref()
-            .is_some_and(|popup| popup.kind == PopupKind::Grid);
+        let open = self.shows.grid_menu;
         Flat::new("grid-step", BUTTON)
             .width(GRID_STEP_WIDTH)
             .color(color)
@@ -374,10 +400,13 @@ impl Tonique {
             .when(open, |element| element.bg(hsla(theme.bg_control_hover)))
             .on_mouse_down(
                 MouseButton::Left,
-                context.listener(|this, event: &MouseDownEvent, _, context| {
+                context.listener(|_, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
-                    open_below(this, PopupKind::Grid, event);
-                    context.notify();
+                    let below = px(MENU_BAR_HEIGHT + BAR_HEIGHT);
+                    context.emit(TransportEvent::ToggleGridMenu(point(
+                        event.position.x,
+                        below,
+                    )));
                 }),
             )
     }
@@ -391,18 +420,17 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> impl IntoElement {
         let state = self.state(context);
-        let transport = &self.transport;
-        let signature = state.time_signature();
+        let (bpm, signature) = (state.bpm(), state.time_signature());
         let field = (SIGNATURE_FIELD_WIDTH, BUTTON);
         well(SONG_WIDTH, theme)
-            .child(transport.bpm.view(
+            .child(self.bpm.view(
                 "bpm",
-                (state.bpm(), self.holds_number("bpm")),
+                (bpm, crate::app::arrows::holds_number("bpm", context)),
                 (TEMPO_WIDTH, BUTTON),
                 theme,
                 window,
                 context,
-                |this| &mut this.transport.bpm,
+                |this| &mut this.bpm,
                 set_bpm,
             ))
             .child(
@@ -413,14 +441,17 @@ impl Tonique {
                     .w(px(TEMPO_DIVIDER_WIDTH))
                     .child(div().w(px(1.)).h(px(BUTTON - 8.)).bg(hsla(theme.separator))),
             )
-            .child(transport.numerator.view(
+            .child(self.numerator.view(
                 "numerator",
-                (signature.numerator as f32, self.holds_number("numerator")),
+                (
+                    signature.numerator as f32,
+                    crate::app::arrows::holds_number("numerator", context),
+                ),
                 field,
                 theme,
                 window,
                 context,
-                |this| &mut this.transport.numerator,
+                |this| &mut this.numerator,
                 set_numerator,
             ))
             .child(
@@ -432,17 +463,17 @@ impl Tonique {
                     .text_color(hsla(theme.text_muted))
                     .child("/"),
             )
-            .child(transport.denominator.view(
+            .child(self.denominator.view(
                 "denominator",
                 (
                     signature.denominator as f32,
-                    self.holds_number("denominator"),
+                    crate::app::arrows::holds_number("denominator", context),
                 ),
                 field,
                 theme,
                 window,
                 context,
-                |this| &mut this.transport.denominator,
+                |this| &mut this.denominator,
                 set_denominator,
             ))
     }

@@ -5,6 +5,7 @@
 mod arrow_keys;
 mod button;
 mod dialog;
+mod follow_drag;
 mod icon_rail;
 mod menu;
 mod number_field;
@@ -21,6 +22,7 @@ mod tooltip;
 pub use arrow_keys::arrow_press;
 pub use button::{Flat, glyph, on_press, toggle_button};
 pub use dialog::{dialog_body, dialog_button, dialog_frame, dialog_title};
+pub use follow_drag::follow_drag;
 pub use icon_rail::icon_rail;
 pub use menu::{Menu, MenuItem};
 pub use number_field::{NumberField, NumberSpec};

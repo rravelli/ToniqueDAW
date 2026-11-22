@@ -12,9 +12,8 @@ mod paint;
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
-    App, Bounds, ContentMask, Context, CursorStyle, DispatchPhase, Entity, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollEvent, Task, WeakEntity, Window,
-    canvas, div, prelude::*,
+    App, Bounds, ContentMask, Context, CursorStyle, Entity, MouseButton, MouseDownEvent,
+    MouseMoveEvent, Pixels, ScrollEvent, Task, Window, canvas, div, prelude::*,
 };
 use tonique_engine::graph::GraphTopology;
 
@@ -26,6 +25,7 @@ use crate::{
     geometry::Rect,
     model::{HoldsProject, Project},
     smooth_scroll::WheelDelta,
+    widgets::follow_drag,
 };
 use paint::GraphScene;
 
@@ -290,7 +290,7 @@ impl GraphView {
     }
 
     /// Follows a pan by dragging.
-    fn drag_to(&mut self, event: &MouseMoveEvent) {
+    fn drag_to(&mut self, event: &MouseMoveEvent, _: &mut Context<Self>) {
         let Some((last_x, last_y)) = self.drag else {
             return;
         };
@@ -313,7 +313,6 @@ impl Render for GraphView {
         } else {
             CursorStyle::Arrow
         };
-        let this = context.weak_entity();
         div()
             .id("graph")
             .relative()
@@ -331,10 +330,6 @@ impl Render for GraphView {
                 canvas(
                     move |bounds, _, _| slot.set(bounds),
                     move |bounds, _, window, context| {
-                        // A pan follows the pointer anywhere in the window.
-                        if dragging {
-                            follow_drag(this, window);
-                        }
                         window.with_content_mask(Some(ContentMask { bounds }), |window| {
                             crate::profile::time("paint.graph", || {
                                 paint::paint(&scene, Rect::of(bounds), window, context)
@@ -344,29 +339,15 @@ impl Render for GraphView {
                 )
                 .size_full(),
             )
+            // A pan follows the pointer anywhere in the window.
+            .when(dragging, |element| {
+                element.child(follow_drag(
+                    context.weak_entity(),
+                    Self::drag_to,
+                    |this, _| this.drag = None,
+                ))
+            })
     }
-}
-
-/// Hears the pointer before any element, wherever it is, until the button
-/// is let go: the view's pan.
-fn follow_drag(this: WeakEntity<GraphView>, window: &mut Window) {
-    let released = this.clone();
-    window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, context| {
-        if phase == DispatchPhase::Capture {
-            let _ = this.update(context, |this, context| {
-                this.drag_to(event);
-                context.notify();
-            });
-        }
-    });
-    window.on_mouse_event(move |_: &MouseUpEvent, phase, _, context| {
-        if phase == DispatchPhase::Capture {
-            let _ = released.update(context, |this, context| {
-                this.drag = None;
-                context.notify();
-            });
-        }
-    });
 }
 
 #[cfg(test)]

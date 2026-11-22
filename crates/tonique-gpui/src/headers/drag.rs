@@ -155,7 +155,7 @@ impl Tonique {
         event: &MouseDownEvent,
         context: &mut App,
     ) {
-        self.hold_arrows(ArrowHolder::Header(id, param));
+        crate::app::arrows::hold(ArrowHolder::Header(id, param), context);
         let value = self.param(id, param, context);
         let scale = param.scale();
         if event.click_count >= 2 {
