@@ -17,13 +17,14 @@ use crate::{
     theme::{Color, FONT_UI, Theme, hsla, icon, size},
 };
 
-const WIDTH: f32 = 180.;
-const ITEM_HEIGHT: f32 = 22.;
-const ICON_WIDTH: f32 = 18.;
+const WIDTH: f32 = 120.;
+const ITEM_HEIGHT: f32 = 16.;
+/// The icon's column, from the item's left edge to its text.
+const ICON_WIDTH: f32 = 15.;
 /// Between an item's text and its shortcut.
-const SHORTCUT_GAP: f32 = 16.;
+const SHORTCUT_GAP: f32 = 12.;
 /// Between the menu's edges and its items.
-const MENU_PADDING: f32 = 3.;
+const MENU_PADDING: f32 = 4.;
 
 /// An entry of a [`Menu`].
 pub struct MenuItem {
@@ -111,13 +112,12 @@ impl Menu {
             .flex_col()
             .min_w(px(WIDTH))
             .p(px(MENU_PADDING))
-            .rounded(px(4.))
+            .rounded(px(2.))
             .bg(hsla(theme.bg_raised))
             .border_1()
             .border_color(hsla(theme.border))
-            .shadow_md()
             .font_family(FONT_UI)
-            .text_size(px(size::BODY))
+            .text_size(px(size::LABEL))
             .text_color(hsla(theme.text));
         Self {
             element,
@@ -139,11 +139,8 @@ impl Menu {
     pub fn label(self, text: impl Into<SharedString>) -> Self {
         let theme = &self.theme;
         let label = div()
-            .px(px(6.))
-            .pt(px(4.))
-            .pb(px(2.))
-            .text_size(px(size::SMALL))
-            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .px(px(3.))
+            .pb(px(3.))
             .text_color(hsla(theme.text_muted))
             .whitespace_nowrap()
             .child(text.into());
@@ -154,7 +151,7 @@ impl Menu {
     }
 
     pub fn separator(self) -> Self {
-        let line = div().my(px(3.)).h(px(1.)).bg(hsla(self.theme.separator));
+        let line = div().my(px(2.)).h(px(1.)).bg(hsla(self.theme.separator));
         Self {
             element: self.element.child(line),
             ..self
@@ -285,6 +282,7 @@ impl Menu {
         let muted = |element: gpui::Div| {
             element
                 .flex_none()
+                .ml(px(SHORTCUT_GAP))
                 .whitespace_nowrap()
                 .text_size(px(size::SMALL))
                 .text_color(hsla(theme.text_disabled))
@@ -293,9 +291,9 @@ impl Menu {
             .id(item.id)
             .flex()
             .items_center()
-            .gap(px(SHORTCUT_GAP))
             .h(px(ITEM_HEIGHT))
-            .px(px(4.))
+            .pl(px(3.))
+            .pr(px(4.))
             .rounded(px(2.))
             .text_color(hsla(text_color))
             .child(
