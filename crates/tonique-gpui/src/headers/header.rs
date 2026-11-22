@@ -333,7 +333,7 @@ impl Tonique {
         let id = track.id;
         let slot = self.headers.sliders.clone();
         let canvas_theme = theme.clone();
-        let (value, color) = (self.param(id, param), track.color);
+        let (value, color) = (param.of(track), track.color);
         let unit = param == Param::Volume && rect.width >= VOLUME_UNIT_WIDTH;
         let focused = self.holds_arrows(&ArrowHolder::Header(id, param));
         place(rect)
