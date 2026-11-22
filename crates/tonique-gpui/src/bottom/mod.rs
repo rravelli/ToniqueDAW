@@ -8,7 +8,7 @@
 
 mod clip;
 mod header;
-mod paint;
+pub mod paint;
 mod rack;
 
 use std::{cell::Cell, rc::Rc};

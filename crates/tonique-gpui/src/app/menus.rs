@@ -1,6 +1,6 @@
 //! What the menu bar's menus hold, as the egui app's; its Settings button
-//! is in the File menu here. Left out, as this app hasn't them: the audio
-//! graph and the interface's zoom.
+//! is in the File menu here. Left out, as this app hasn't it: the
+//! interface's zoom.
 
 use gpui::Context;
 
@@ -157,28 +157,55 @@ impl Tonique {
     }
 
     fn view_menu(&self, context: &mut Context<Self>) -> Menu {
-        Menu::new(&self.theme)
-            .item(
-                self.action_item("Browser", Action::ToggleBrowser)
-                    .checked(self.browser_open)
-                    .keep_open(),
+        let graph = self.graph.is_open();
+        let menu = Menu::new(&self.theme);
+        // The audio graph is a development tool.
+        let menu = if !Action::ToggleGraphView.is_available() {
+            menu
+        } else {
+            menu.item(
+                MenuItem::new("Timeline").checked(!graph).keep_open(),
                 context,
-                |this, _, _| this.browser_open = !this.browser_open,
+                |this, _, context| {
+                    if this.graph.is_open() {
+                        this.toggle_graph(context);
+                    }
+                },
             )
             .item(
-                self.action_item("Track list", Action::ToggleTrackList)
-                    .checked(self.headers.is_open())
+                self.action_item("Audio graph", Action::ToggleGraphView)
+                    .checked(graph)
                     .keep_open(),
                 context,
-                |this, _, _| this.headers.toggle_list(),
+                |this, _, context| {
+                    if !this.graph.is_open() {
+                        this.toggle_graph(context);
+                    }
+                },
             )
-            .item(
-                self.action_item("Effects panel", Action::ToggleEffectsPanel)
-                    .checked(self.bottom.open)
-                    .keep_open(),
-                context,
-                |this, _, _| this.bottom.toggle(),
-            )
+            .separator()
+        };
+        menu.item(
+            self.action_item("Browser", Action::ToggleBrowser)
+                .checked(self.browser_open)
+                .keep_open(),
+            context,
+            |this, _, _| this.browser_open = !this.browser_open,
+        )
+        .item(
+            self.action_item("Track list", Action::ToggleTrackList)
+                .checked(self.headers.is_open())
+                .keep_open(),
+            context,
+            |this, _, _| this.headers.toggle_list(),
+        )
+        .item(
+            self.action_item("Effects panel", Action::ToggleEffectsPanel)
+                .checked(self.bottom.open)
+                .keep_open(),
+            context,
+            |this, _, _| this.bottom.toggle(),
+        )
     }
 
     fn help_menu(&self, context: &mut Context<Self>) -> Menu {

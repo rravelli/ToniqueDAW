@@ -8,6 +8,7 @@ mod app;
 mod bottom;
 mod browser;
 mod geometry;
+mod graph;
 mod headers;
 mod icons;
 mod meter;

@@ -1,21 +1,25 @@
 use crate::ui::theme::ToEgui;
 use crate::ui::theme::font_size;
 use crate::{
-    core::{graph_monitor::GraphMonitor, state::ProjectState},
+    core::{
+        graph_layout::{
+            self, NODE_HEIGHT, NODE_WIDTH, elide, meter_unit, node_details, node_palette_slot,
+            node_title, stats_line, track_names,
+        },
+        graph_monitor::GraphMonitor,
+        state::ProjectState,
+    },
     ui::theme::{Theme, ThemeExt},
-    utils::display_name,
 };
 use egui::{
     Align2, Color32, CornerRadius, FontId, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind,
     Ui, Vec2, epaint::CubicBezierShape, pos2, vec2,
 };
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tonique_engine::graph::{GraphTopology, TopologyNode};
 
 // Sizes in graph units (scaled by the zoom).
-const NODE_SIZE: Vec2 = vec2(176., 52.);
-const COLUMN_WIDTH: f32 = 240.;
-const ROW_HEIGHT: f32 = 72.;
+const NODE_SIZE: Vec2 = vec2(NODE_WIDTH, NODE_HEIGHT);
 const FIT_MARGIN: f32 = 40.;
 const MIN_ZOOM: f32 = 0.2;
 /// Fitting never zooms out further than this: labels stay readable and the
@@ -24,8 +28,6 @@ const MIN_FIT_ZOOM: f32 = 0.55;
 const MAX_ZOOM: f32 = 3.;
 /// Below this zoom, node text is unreadable: skip it.
 const TEXT_ZOOM: f32 = 0.45;
-/// Level meters show -60..0 dBFS.
-const METER_RANGE_DB: f32 = 60.;
 
 /// Live view of the engine's processing graph: every scheduled node, its
 /// connections, output level and processing time.
@@ -103,7 +105,10 @@ impl GraphView {
         let titles: Vec<(String, Option<Color32>)> = topology
             .nodes
             .iter()
-            .map(|node| title(node, &owners))
+            .map(|node| {
+                let (title, color) = node_title(node, &owners);
+                (title, color.map(|color| color.to_egui()))
+            })
             .collect();
         let hovered = response.hover_pos().and_then(|p| {
             (0..positions.len()).find(|&i| self.node_rect(positions[i], &to_screen).contains(p))
@@ -298,83 +303,6 @@ impl GraphView {
     }
 }
 
-/// Columns by longest path from the sources (so every edge points right),
-/// then each node moved as far right as its consumers allow, so sources and
-/// automation sit next to what they feed. Rows are ordered to keep connected
-/// nodes close.
-fn layout(topology: &GraphTopology) -> Vec<Pos2> {
-    let n = topology.nodes.len();
-    let preds = |i: usize| {
-        topology.nodes[i]
-            .inputs
-            .iter()
-            .chain(&topology.nodes[i].after)
-            .copied()
-    };
-    let mut succs = vec![Vec::new(); n];
-    for i in 0..n {
-        for p in preds(i) {
-            succs[p].push(i);
-        }
-    }
-    // Nodes are in schedule order, so predecessors come first.
-    let mut depth = vec![0usize; n];
-    for i in 0..n {
-        depth[i] = preds(i).map(|p| depth[p] + 1).max().unwrap_or(0);
-    }
-    let columns = depth.iter().max().map_or(0, |d| d + 1);
-    for i in (0..n).rev() {
-        if let Some(latest) = succs[i].iter().map(|&s| depth[s]).min() {
-            depth[i] = latest - 1;
-        }
-    }
-    let mut rows: Vec<Vec<usize>> = vec![Vec::new(); columns];
-    for i in 0..n {
-        rows[depth[i]].push(i);
-    }
-
-    // Barycenter sweeps: order each column by the mean row of its neighbours.
-    let mut row_of = vec![0f32; n];
-    let refresh = |rows: &Vec<Vec<usize>>, row_of: &mut Vec<f32>| {
-        for column in rows {
-            for (r, &i) in column.iter().enumerate() {
-                row_of[i] = r as f32 - (column.len() as f32 - 1.) / 2.;
-            }
-        }
-    };
-    refresh(&rows, &mut row_of);
-    for sweep in 0..6 {
-        let forward = sweep % 2 == 0;
-        let order: Vec<usize> = if forward {
-            (1..columns).collect()
-        } else {
-            (0..columns.saturating_sub(1)).rev().collect()
-        };
-        for c in order {
-            let key = |i: usize| {
-                let neighbours: Vec<f32> = if forward {
-                    preds(i).map(|p| row_of[p]).collect()
-                } else {
-                    succs[i].iter().map(|&s| row_of[s]).collect()
-                };
-                if neighbours.is_empty() {
-                    row_of[i]
-                } else {
-                    neighbours.iter().sum::<f32>() / neighbours.len() as f32
-                }
-            };
-            let mut keyed: Vec<(f32, usize)> = rows[c].iter().map(|&i| (key(i), i)).collect();
-            keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
-            rows[c] = keyed.into_iter().map(|(_, i)| i).collect();
-            refresh(&rows, &mut row_of);
-        }
-    }
-
-    (0..n)
-        .map(|i| pos2(depth[i] as f32 * COLUMN_WIDTH, row_of[i] * ROW_HEIGHT))
-        .collect()
-}
-
 fn edge(from: Pos2, to: Pos2, stroke: Stroke) -> CubicBezierShape {
     let bend = ((to.x - from.x).abs() / 2.).max(30.);
     CubicBezierShape::from_points_stroke(
@@ -393,19 +321,8 @@ fn paint_header(
     engine_load: f32,
     monitor: &GraphMonitor,
 ) {
-    let s = topology.stats;
     let nodes_cpu: f32 = monitor.cpu.iter().sum();
-    let text = format!(
-        "{} nodes · {} merged · {} pruned · {} latency delays · {} buffers · output latency {} smp · callback load {:.0}% · nodes {:.1}%",
-        s.scheduled,
-        s.deduplicated,
-        s.pruned,
-        s.delays_inserted,
-        s.buffer_slots,
-        s.output_latency,
-        engine_load * 100.,
-        nodes_cpu * 100.,
-    );
+    let text = stats_line(topology, engine_load, nodes_cpu);
     let pos = viewport.left_top() + vec2(10., 8.);
     let galley = painter.layout_no_wrap(
         text,
@@ -434,86 +351,25 @@ fn node_tooltip(
     monitor: &GraphMonitor,
     index: usize,
 ) {
-    if node.label.is_some() {
-        ui.strong(title);
-    }
-    ui.label(format!("Type: {}", node.name));
-    ui.label(format!(
-        "Channels: {}{}",
-        node.channels,
-        if node.has_midi { " + MIDI" } else { "" }
-    ));
-    ui.label(format!(
-        "Latency: {} smp (total {} smp)",
-        node.latency_samples, node.total_latency
-    ));
     let level = monitor.levels.get(index).copied().unwrap_or(0.);
-    let db = if level > 0. {
-        20. * level.log10()
-    } else {
-        f32::NEG_INFINITY
-    };
-    ui.label(format!("Peak: {db:.1} dBFS"));
-    ui.label(format!(
-        "CPU: {:.2}% of a core",
-        monitor.cpu.get(index).copied().unwrap_or(0.) * 100.
-    ));
-}
-
-/// Engine name, displayed name and color of each track, by owner ID.
-fn track_names(state: &ProjectState) -> HashMap<u64, (String, String, Color32)> {
-    state
-        .tracks()
-        .chain(state.groups())
-        .map(|t| {
-            (
-                t.id.0,
-                (
-                    t.name.clone(),
-                    display_name(&t.name, t.first_track_index),
-                    t.color.to_egui(),
-                ),
-            )
-        })
-        .collect()
-}
-
-/// A node's title with its track's displayed name (the engine only knows
-/// the raw name, e.g. `# Audio Track`), and the track's color.
-fn title(
-    node: &TopologyNode,
-    owners: &HashMap<u64, (String, String, Color32)>,
-) -> (String, Option<Color32>) {
-    let label = node.label.as_deref().unwrap_or(node.name);
-    let Some((raw, shown, color)) = node.owner.and_then(|o| owners.get(&o)) else {
-        return (label.to_string(), None);
-    };
-    let title = match label.strip_prefix(raw.as_str()) {
-        Some(rest) => format!("{shown}{rest}"),
-        None => label.to_string(),
-    };
-    (title, Some(*color))
-}
-
-/// 0..=1 on a dB scale.
-fn meter_unit(peak: f32) -> f32 {
-    if peak <= 0. {
-        return 0.;
+    let cpu = monitor.cpu.get(index).copied().unwrap_or(0.);
+    for (line, text) in node_details(node, title, level, cpu)
+        .into_iter()
+        .enumerate()
+    {
+        if line == 0 && node.label.is_some() {
+            ui.strong(text);
+        } else {
+            ui.label(text);
+        }
     }
-    ((20. * peak.log10() + METER_RANGE_DB) / METER_RANGE_DB).clamp(0., 1.)
 }
 
 /// Tint by what the node does: a palette colour mixed into the surface, so
 /// the text stays readable.
 fn node_color(name: &str, theme: &Theme) -> Color32 {
-    let slot = match name {
-        "AudioClipNode" | "MidiClipNode" => 6,
-        "VolumePanNode" => 4,
-        "SumNode" => return theme.bg_control,
-        "DelayNode" => 1,
-        "AutomationNode" => 2,
-        "MetronomeNode" => 5,
-        _ => 7, // plugins
+    let Some(slot) = node_palette_slot(name) else {
+        return theme.bg_control;
     };
     match theme.palette.len() {
         0 => theme.bg_control,
@@ -523,65 +379,19 @@ fn node_color(name: &str, theme: &Theme) -> Color32 {
     }
 }
 
-fn elide(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        text.to_string()
-    } else {
-        format!("{}…", text.chars().take(max - 1).collect::<String>())
-    }
+/// Positions in egui's points.
+fn layout(topology: &GraphTopology) -> Vec<Pos2> {
+    graph_layout::layout(topology)
+        .into_iter()
+        .map(|(x, y)| pos2(x, y))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ui::theme::ToColor;
-    use tonique_engine::{
-        edit::{Clip, Edit, EditSession, Plugin, PluginKind, Track},
-        engine::{Engine, EngineConfig},
-        nodes::FilterMode,
-        sample::SampleBuffer,
-        time::BeatPos,
-    };
-
-    #[test]
-    fn layout_puts_every_edge_left_to_right_without_overlaps() {
-        let mut edit = Edit::new(120.);
-        let src = edit.add_source(Arc::new(SampleBuffer::new(vec![vec![0.; 100]], 48000.)));
-        for name in ["a", "b", "c"] {
-            let mut t = Track::new(&mut edit, name);
-            let clip = Clip::audio(&mut edit, BeatPos(0.), 1., src);
-            t.clips.push(clip);
-            let filter = Plugin::new(&mut edit, PluginKind::Filter(FilterMode::LowPass));
-            t.channel.plugins.push(filter);
-            edit.tracks.push(t);
-        }
-        let (engine, _p) = Engine::new(EngineConfig::default());
-        let session = EditSession::new(edit, engine).unwrap();
-        let topology = session.engine().graph_topology().unwrap();
-        let positions = layout(&topology);
-
-        for (i, node) in topology.nodes.iter().enumerate() {
-            for &p in node.inputs.iter().chain(&node.after) {
-                assert!(
-                    positions[p].x < positions[i].x,
-                    "edge {p} -> {i} goes backwards"
-                );
-            }
-        }
-        let output = positions[topology.output];
-        assert!(
-            positions.iter().all(|p| p.x <= output.x),
-            "output is rightmost"
-        );
-        for (i, a) in positions.iter().enumerate() {
-            for b in &positions[i + 1..] {
-                assert!(
-                    !Rect::from_min_size(*a, NODE_SIZE)
-                        .intersects(Rect::from_min_size(*b, NODE_SIZE))
-                );
-            }
-        }
-    }
+    use tonique_engine::engine::{Engine, EngineConfig};
 
     #[test]
     fn draws_the_live_graph_headless() {
@@ -627,32 +437,9 @@ mod tests {
             );
         }
 
-        // Titles use the displayed track names and colors.
-        let owners = track_names(&state);
-        let tracks: Vec<_> = state.tracks().collect();
-        assert_ne!(tracks[0].color, tracks[1].color);
-        for track in &tracks {
-            let faders: Vec<_> = topology
-                .nodes
-                .iter()
-                .filter(|n| n.owner == Some(track.id.0) && n.name == "VolumePanNode")
-                .map(|n| title(n, &owners))
-                .collect();
-            let expected = format!("{} Audio Track · fader", track.first_track_index + 1);
-            assert_eq!(faders, [(expected, Some(track.color.to_egui()))]);
-        }
-
         // Leaving the view stops measuring.
         state.set_monitor_graph(false);
         state.update();
         assert!(!topology.meters().is_enabled());
-    }
-
-    #[test]
-    fn meter_scale() {
-        assert_eq!(meter_unit(0.), 0.);
-        assert_eq!(meter_unit(1.), 1.);
-        assert!((meter_unit(0.001) - 0.).abs() < 1e-6); // -60 dB
-        assert!((meter_unit(10f32.powf(-30. / 20.)) - 0.5).abs() < 1e-3);
     }
 }

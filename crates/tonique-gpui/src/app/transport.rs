@@ -10,6 +10,7 @@ use tonique_engine::time::TimeSignature;
 
 use crate::{
     app::{PopupKind, Tonique, menu_bar::MENU_BAR_HEIGHT, settings::SettingsTab},
+    config::keymap::Action,
     core::state::PlaybackState,
     icons,
     theme::{Theme, hsla, icon, size, with_alpha},
@@ -166,6 +167,7 @@ impl Tonique {
     fn transport_left(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
         let state = &self.state;
         let open = self.browser_open;
+        let graph = self.graph.is_open();
         div()
             .flex_1()
             .min_w_0()
@@ -178,6 +180,15 @@ impl Tonique {
                 context,
                 |this, _| this.browser_open = !this.browser_open,
             ))
+            // The audio graph is a development tool.
+            .when(Action::ToggleGraphView.is_available(), |element| {
+                element.child(Flat::ghost("graph", BUTTON).selected(graph).show(
+                    glyph(icons::GRAPH, 15., graph),
+                    theme,
+                    context,
+                    |this, context| this.toggle_graph(context),
+                ))
+            })
             .child(gap(GROUP_GAP))
             .child(Flat::ghost("undo", BUTTON).enabled(state.can_undo()).show(
                 glyph(icons::ARROW_U_UP_LEFT, 15., false),

@@ -163,6 +163,13 @@ impl Action {
         }
     }
 
+    /// Whether this build offers the action: the audio graph is a
+    /// development tool, only in debug builds. Unavailable actions have no
+    /// shortcut and aren't listed in the shortcut settings.
+    pub fn is_available(self) -> bool {
+        self != Action::ToggleGraphView || cfg!(debug_assertions)
+    }
+
     pub fn group(self) -> &'static str {
         match self {
             Action::NewProject
@@ -397,9 +404,11 @@ impl Keymap {
     /// The action bound to `key` pressed with exactly `mods`.
     pub fn action_for(&self, key: Key, mods: Mods) -> Option<Action> {
         Action::ALL.into_iter().find(|action| {
-            self.bindings(*action)
-                .iter()
-                .any(|shortcut| shortcut.key == key && shortcut.mods == mods)
+            action.is_available()
+                && self
+                    .bindings(*action)
+                    .iter()
+                    .any(|shortcut| shortcut.key == key && shortcut.mods == mods)
         })
     }
 }
@@ -538,6 +547,23 @@ mod tests {
         assert_eq!(parse_shortcut("Cmd+Plus"), Some(plus));
         assert_eq!(parse_shortcut("Hyper+A"), None);
         assert_eq!(parse_shortcut("Ctrl+NotAKey"), None);
+    }
+
+    /// The audio graph's shortcut works in debug builds only.
+    #[test]
+    fn graph_view_only_in_debug_builds() {
+        let keymap = Keymap::default();
+        let found = keymap.action_for(Key::G, Mods::COMMAND.with(Mods::SHIFT));
+        if cfg!(debug_assertions) {
+            assert_eq!(found, Some(Action::ToggleGraphView));
+        } else {
+            assert_eq!(found, None);
+        }
+        assert!(
+            Action::ALL
+                .into_iter()
+                .all(|action| { action.is_available() || action == Action::ToggleGraphView })
+        );
     }
 
     /// As egui wrote them, so saved bindings read the same.
