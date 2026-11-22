@@ -164,7 +164,9 @@ impl EditorContext<'_> {
             if response.dragged() {
                 ui.data_mut(|d| d.insert_temp(pending, value));
             }
-            if response.drag_stopped() || response.double_clicked() {
+            // Reset, or stepped by a key, it applies at once.
+            let stepped = response.changed() && !response.dragged();
+            if response.drag_stopped() || response.double_clicked() || stepped {
                 ui.data_mut(|d| d.remove::<f32>(pending));
                 return (value != current).then_some(value);
             }
@@ -175,7 +177,7 @@ impl EditorContext<'_> {
 }
 
 /// The value before a drag of `response` started, once it ends (or on a
-/// reset by double-click): time to record an undo step.
+/// reset by double-click, or a step by a key): time to record an undo step.
 pub fn track_drag(ui: &Ui, response: &Response, before: f32) -> Option<f32> {
     let start = response.id.with("drag-start");
     if response.drag_started() {
@@ -184,7 +186,8 @@ pub fn track_drag(ui: &Ui, response: &Response, before: f32) -> Option<f32> {
     if response.drag_stopped() {
         return Some(ui.data_mut(|d| d.remove_temp(start)).unwrap_or(before));
     }
-    response.double_clicked().then_some(before)
+    let stepped = response.changed() && !response.dragged();
+    (response.double_clicked() || stepped).then_some(before)
 }
 
 /// The controls of one kind of effect. The plugin's parameters are the

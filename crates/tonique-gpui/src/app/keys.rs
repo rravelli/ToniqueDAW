@@ -51,12 +51,18 @@ impl Tonique {
         if self.browser.list_focus.is_focused(window) && self.browser_key(event, context) {
             return;
         }
+        // A clicked value control takes the arrows.
+        if self.arrow_key(keystroke, window, context) {
+            context.notify();
+            return;
+        }
         match keystroke.key.as_str() {
             "escape" if self.dialog.is_some() => self.close_dialog(window, context),
             "enter" if self.dialog == Some(Dialog::Unsaved) => {
                 self.answer_unsaved(true, window, context);
             }
             "escape" if self.popup.is_some() => self.popup = None,
+            "escape" if self.arrows.is_some() => self.release_arrows(),
             "escape" => self.state.clear_clip_selection(),
             "home" => self.state.seek(BeatPos::ZERO),
             "c" | "x" | "v" if is_clipboard(keystroke) && self.has_keyboard(window, context) => {
@@ -78,7 +84,7 @@ impl Tonique {
     }
 
     /// Whether the keyboard is the app's, not a field's or a list's.
-    fn has_keyboard(&self, window: &Window, context: &Context<Self>) -> bool {
+    pub(super) fn has_keyboard(&self, window: &Window, context: &Context<Self>) -> bool {
         window
             .focused(context)
             .is_none_or(|focused| focused == self.focus)

@@ -379,7 +379,7 @@ impl Tonique {
         well(SONG_WIDTH, theme)
             .child(transport.bpm.view(
                 "bpm",
-                state.bpm(),
+                (state.bpm(), self.holds_number("bpm")),
                 (TEMPO_WIDTH, BUTTON),
                 theme,
                 window,
@@ -397,7 +397,7 @@ impl Tonique {
             )
             .child(transport.numerator.view(
                 "numerator",
-                signature.numerator as f32,
+                (signature.numerator as f32, self.holds_number("numerator")),
                 field,
                 theme,
                 window,
@@ -416,7 +416,10 @@ impl Tonique {
             )
             .child(transport.denominator.view(
                 "denominator",
-                signature.denominator as f32,
+                (
+                    signature.denominator as f32,
+                    self.holds_number("denominator"),
+                ),
                 field,
                 theme,
                 window,

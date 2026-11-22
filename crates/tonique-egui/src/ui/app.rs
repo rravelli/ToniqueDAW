@@ -1,6 +1,7 @@
 use crate::bench::Bench;
 use crate::ui::keymap::KeymapExt;
 use crate::ui::theme::ToColor;
+use crate::ui::widget::arrow_keys::holds_arrows;
 use crate::{
     audio::host::AudioHost,
     config::{keymap::Action, settings::Settings},
@@ -149,11 +150,14 @@ impl ToniqueApp {
 
     /// Queue this frame's shortcuts.
     fn shortcuts(&mut self, ui: &egui::Ui) {
-        // Keys typed into a widget (or recorded as a shortcut) aren't commands.
-        if ui.memory(|m| m.focused().is_some()) || !ui.input(|i| i.focused) {
+        // Keys typed into a widget (or recorded as a shortcut) aren't
+        // commands; a value control takes only the arrows.
+        let arrows_held = holds_arrows(ui.ctx());
+        if (ui.memory(|m| m.focused().is_some()) && !arrows_held) || !ui.input(|i| i.focused) {
             return;
         }
-        for action in ui.input(|i| self.state.settings().keymap.triggered(i)) {
+        let keymap = &self.state.settings().keymap;
+        for action in ui.input(|i| keymap.triggered(i, !arrows_held)) {
             self.commands.push(action);
         }
     }

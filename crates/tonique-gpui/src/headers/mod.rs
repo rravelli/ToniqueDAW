@@ -10,6 +10,8 @@ mod header;
 mod layout;
 mod menu;
 
+pub use drag::Param;
+
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -37,7 +39,7 @@ use crate::{
     timeline::{FOOTER_PADDING, RULER_HEIGHT, Row, footer_height, rows},
     widgets::{Edge, Flat, SCROLLBAR_WIDTH, Splitter, TextField, glyph, splitter_handle},
 };
-use drag::{HeaderDrag, Param, RowMarker};
+use drag::{HeaderDrag, RowMarker};
 use layout::{COLOR_BAR_WIDTH, HEADER_INSET, color_bar_left};
 
 const DEFAULT_WIDTH: f32 = 190.;

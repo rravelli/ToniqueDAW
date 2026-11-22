@@ -2,8 +2,8 @@
 
 use crate::ui::font::semibold;
 use egui::{
-    Align2, Color32, DragValue, FontId, Label, Rect, RichText, ScrollArea, Sense, Stroke, Ui,
-    UiBuilder, pos2, vec2,
+    Align2, Color32, FontId, Label, Rect, RichText, ScrollArea, Sense, Stroke, Ui, UiBuilder, pos2,
+    vec2,
 };
 use egui_phosphor::regular as icons;
 use tonique_engine::{
@@ -18,9 +18,9 @@ use crate::{
     },
     ui::{
         theme::{ThemeExt, font_size},
-        widget::{flat_button::FlatButton, param_slider::SliderEdit},
+        widget::{flat_button::FlatButton, param_slider::SliderEdit, step_field::StepField},
     },
-    utils::{format_bars, format_time, parse_bars, parse_parts},
+    utils::{format_bars, format_time, parse_bars, parse_parts, steps},
 };
 
 use super::{
@@ -90,7 +90,9 @@ enum Panel {
 }
 
 /// The clip's properties in panels side by side, each shown or hidden from
-/// the rail on their left. Positions can be dragged, or clicked and typed;
+/// the rail on their left. Positions can be dragged, clicked and stepped
+/// by the arrow keys (a sixteenth or 10 ms, a bar or a second with Shift),
+/// or double-clicked and typed;
 /// edits show while dragged and apply as one undo step once released (or
 /// typed). Gain, pan and the transposition are heard as they're dragged.
 pub(super) fn inspector_ui(
@@ -221,11 +223,11 @@ fn clip_panel(
         let response = cell(
             &mut cells[0],
             "Start",
-            DragValue::new(&mut beats)
+            StepField::new(&mut beats, steps::beats(bpb))
                 .speed(1. / 16.)
                 .range(0.0..=f64::MAX)
-                .custom_formatter(|v, _| format_bars(v, bpb))
-                .custom_parser(|text| parse_bars(text, bpb)),
+                .format(|value| format_bars(value, bpb))
+                .parse(|text| parse_bars(text, bpb)),
         );
         keep_raw(&cells[0], raw, &response, beats);
         if let Some(done) = gesture(&response) {
@@ -239,11 +241,11 @@ fn clip_panel(
         let response = cell(
             &mut cells[1],
             "End",
-            DragValue::new(&mut beats)
+            StepField::new(&mut beats, steps::beats(bpb))
                 .speed(1. / 16.)
                 .range(start + MIN_LENGTH..=f64::MAX)
-                .custom_formatter(|v, _| format_bars(v, bpb))
-                .custom_parser(|text| parse_bars(text, bpb)),
+                .format(|value| format_bars(value, bpb))
+                .parse(|text| parse_bars(text, bpb)),
         );
         keep_raw(&cells[1], raw, &response, beats);
         if let Some(done) = gesture(&response) {
@@ -258,11 +260,11 @@ fn clip_panel(
         let response = cell(
             &mut cells[0],
             "Length",
-            DragValue::new(&mut beats)
+            StepField::new(&mut beats, steps::beats(bpb))
                 .speed(1. / 16.)
                 .range(MIN_LENGTH..=f64::MAX)
-                .custom_formatter(|v, _| format_length(v, bpb))
-                .custom_parser(|text| parse_length(text, bpb)),
+                .format(|value| format_length(value, bpb))
+                .parse(|text| parse_length(text, bpb)),
         );
         keep_raw(&cells[0], raw, &response, beats);
         if let Some(done) = gesture(&response) {
@@ -274,11 +276,11 @@ fn clip_panel(
         let response = cell(
             &mut cells[1],
             "Offset",
-            DragValue::new(&mut seconds)
+            StepField::new(&mut seconds, steps::SECONDS)
                 .speed(0.005)
                 .range(0.0..=f64::MAX)
-                .custom_formatter(|v, _| format_time(v))
-                .custom_parser(parse_time),
+                .format(format_time)
+                .parse(parse_time),
         );
         if let Some(done) = gesture(&response) {
             let mut slipped = shown.clone();
@@ -304,11 +306,11 @@ fn clip_panel(
             let response = cell(
                 &mut cells[0],
                 "Position",
-                DragValue::new(&mut start)
+                StepField::new(&mut start, steps::SECONDS)
                     .speed(0.005)
                     .range(0.0..=source)
-                    .custom_formatter(|v, _| format_time(v))
-                    .custom_parser(parse_time),
+                    .format(format_time)
+                    .parse(parse_time),
             );
             if let Some(done) = gesture(&response) {
                 *change = Some((with_loop(shown, start, l.end_s, bpm), done));
@@ -320,11 +322,11 @@ fn clip_panel(
             let response = cell(
                 &mut cells[1],
                 "Length",
-                DragValue::new(&mut beats)
+                StepField::new(&mut beats, steps::beats(bpb))
                     .speed(1. / 16.)
                     .range(MIN_LENGTH..=f64::MAX)
-                    .custom_formatter(|v, _| format_length(v, bpb))
-                    .custom_parser(|text| parse_length(text, bpb)),
+                    .format(|value| format_length(value, bpb))
+                    .parse(|text| parse_length(text, bpb)),
             );
             keep_raw(&cells[1], raw, &response, beats);
             if let Some(done) = gesture(&response) {
@@ -415,7 +417,7 @@ pub(super) fn cell_label(ui: &mut Ui, text: &str) {
 }
 
 /// A cell: its label above a value field filling its width.
-pub(super) fn cell(ui: &mut Ui, label: &str, value: DragValue) -> egui::Response {
+pub(super) fn cell(ui: &mut Ui, label: &str, value: StepField) -> egui::Response {
     cell_label(ui, label);
     let width = ui.available_width();
     ui.add_sized(vec2(width, FIELD_HEIGHT), value)

@@ -8,9 +8,12 @@
 //! Positions across the view are local to it, from its left edge: the
 //! canvas adds where it's laid out.
 
+mod arrows;
 mod audio;
 mod inspector;
 mod markers;
+
+pub use arrows::ClipArrows;
 
 use std::{cell::Cell, rc::Rc};
 
@@ -655,7 +658,7 @@ impl Tonique {
         true
     }
 
-    pub(super) fn clip_drag_end(&mut self, window: &mut Window, context: &mut Context<Self>) {
+    pub(super) fn clip_drag_end(&mut self) {
         let Some(drag) = self.bottom.clip.drag.take() else {
             return;
         };
@@ -667,12 +670,10 @@ impl Tonique {
         };
         match drag {
             ClipDrag::Handle(_) => self.state.commit_resize_clip(self.state.shown_clip(&clip)),
-            ClipDrag::Field { field, moved, .. } => {
+            // Clicked, it took the arrow keys; a double-click types it.
+            ClipDrag::Field { moved, .. } => {
                 if moved {
                     self.state.commit_resize_clip(self.state.shown_clip(&clip));
-                } else {
-                    // Clicked: typed instead.
-                    self.type_field(field, &clip, window, context);
                 }
             }
             ClipDrag::Slider { slider, drag, .. } => self.end_slider(&clip, slider, drag),

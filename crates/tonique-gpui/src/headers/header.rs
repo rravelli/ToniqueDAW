@@ -11,7 +11,7 @@ use gpui::{
 use tonique_engine::edit::TrackId;
 
 use crate::{
-    app::{PopupKind, Tonique},
+    app::{ArrowHolder, PopupKind, Tonique},
     core::{
         state::MASTER_TRACK_ID,
         track::{TrackRow, TrackSoloState},
@@ -335,6 +335,7 @@ impl Tonique {
         let canvas_theme = theme.clone();
         let (value, color) = (self.param(id, param), track.color);
         let unit = param == Param::Volume && rect.width >= VOLUME_UNIT_WIDTH;
+        let focused = self.holds_arrows(&ArrowHolder::Header(id, param));
         place(rect)
             .cursor(CursorStyle::ResizeLeftRight)
             .on_mouse_down(
@@ -359,7 +360,7 @@ impl Tonique {
                             scale,
                             value,
                             color,
-                            unit,
+                            (unit, focused),
                             &canvas_theme,
                         )
                     },

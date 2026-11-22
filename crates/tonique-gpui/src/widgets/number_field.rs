@@ -1,6 +1,9 @@
 //! Tonique's draggable `NumberInput`: dragged sideways a unit every few
-//! pixels (a tenth with Shift), or double-clicked to type a value. Its
-//! value isn't kept here: the caller passes it in and is told new ones.
+//! pixels (a tenth with Shift), clicked and stepped by the arrow keys (ten
+//! units with Shift), or double-clicked to type a value. Its value isn't
+//! kept here: the caller passes it in and is told new ones.
+
+use std::cell::Cell;
 
 use gpui::{
     AnyElement, Context, CursorStyle, KeyDownEvent, MouseButton, MouseDownEvent, Window, div,
@@ -8,8 +11,9 @@ use gpui::{
 };
 
 use crate::{
-    app::Tonique,
+    app::{ArrowHolder, Tonique},
     theme::{Theme, hsla},
+    utils::steps::{self, Presses},
     widgets::text_field::{FieldKey, TextField},
 };
 
@@ -93,6 +97,8 @@ pub struct NumberField {
     /// While dragged: the pointer's last x coordinate, and the part of a step not
     /// taken yet.
     drag: Option<(f32, f32)>,
+    /// The value as last shown, for the arrow keys.
+    shown: Cell<f32>,
 }
 
 impl NumberField {
@@ -101,7 +107,21 @@ impl NumberField {
             spec,
             edit: None,
             drag: None,
+            shown: Cell::new(0.),
         }
+    }
+
+    /// The value as last shown stepped by `presses` of the arrow keys
+    /// (through the list, when it has one): the new one, if it changed.
+    pub fn stepped(&self, presses: Presses) -> Option<f32> {
+        if self.drag.is_some() || self.edit.is_some() {
+            return None;
+        }
+        let value = self.shown.get();
+        let to = self
+            .spec
+            .stepped(value, presses.amount(steps::NUMBER) as f32, 1.);
+        (to != value).then_some(to)
     }
 
     pub fn is_dragging(&self) -> bool {
@@ -138,13 +158,14 @@ impl NumberField {
             .map(|typed| self.spec.fit(typed))
     }
 
-    /// The field, `width` by `height`, showing `value`. `get` finds it in the app,
-    /// `set` takes a new value.
+    /// The field, `width` by `height`, showing `value`, outlined when `held`
+    /// (holding the arrow keys). `get` finds it in the app, `set` takes a
+    /// new value.
     #[allow(clippy::too_many_arguments)]
     pub fn view(
         &self,
         id: &'static str,
-        value: f32,
+        (value, held): (f32, bool),
         (width, height): (f32, f32),
         theme: &Theme,
         window: &Window,
@@ -202,9 +223,13 @@ impl NumberField {
                 }))
                 .into_any_element();
         }
+        self.shown.set(value);
         let text = format!("{}{}", self.spec.format(value), self.spec.suffix);
         let dragging = self.is_dragging();
+        let holder = ArrowHolder::Number { id, get, set };
+        let accent = hsla(theme.accent);
         field
+            .when(held, |element| element.border_1().border_color(accent))
             .cursor(CursorStyle::ResizeLeftRight)
             .when(dragging, |element| element.bg(hsla(theme.hover_overlay)))
             .hover(|style| style.bg(hsla(theme.hover_overlay)))
@@ -213,6 +238,7 @@ impl NumberField {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, window, context| {
                     context.stop_propagation();
+                    this.hold_arrows(holder.clone());
                     let field = get(this);
                     if event.click_count >= 2 {
                         field.drag = None;
@@ -250,5 +276,15 @@ mod tests {
         assert_eq!(field.drag_to(6., false, 4.), Some(16.));
         assert_eq!(field.drag_to(-30., false, 16.), Some(2.));
         assert_eq!(field.spec.fit(5.), 4.);
+    }
+
+    #[test]
+    fn the_arrow_keys_step_by_units_or_tens() {
+        let field = NumberField::new(NumberSpec::range(10., 1000., 1));
+        field.shown.set(120.);
+        assert_eq!(field.stepped(Presses::one(true, false)), Some(121.));
+        assert_eq!(field.stepped(Presses::one(false, true)), Some(110.));
+        field.shown.set(1000.);
+        assert_eq!(field.stepped(Presses::one(true, true)), None, "at its end");
     }
 }
