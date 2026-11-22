@@ -68,7 +68,10 @@ impl ShortcutsTab {
                         .min_col_width(LABEL_WIDTH)
                         .spacing([12., 4.])
                         .show(ui, |ui| {
-                            for action in Action::ALL.into_iter().filter(|a| a.group() == group) {
+                            for action in Action::ALL
+                                .into_iter()
+                                .filter(|a| a.is_available() && a.group() == group)
+                            {
                                 ui.label(RichText::new(action.label()).color(ui.app_theme().text));
                                 self.bindings(ui, &mut keymap, action);
                                 ui.end_row();

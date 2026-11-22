@@ -118,7 +118,6 @@ impl Tonique {
     }
 
     /// Runs `action`, as the egui app's `dispatch` and its timeline do.
-    /// Those of parts this app doesn't have (the graph) do nothing.
     fn run(&mut self, action: Action, window: &mut Window, context: &mut Context<Self>) {
         let state = &mut self.state;
         match action {
@@ -196,7 +195,7 @@ impl Tonique {
                 state.group(&selected);
             }
             Action::ExportAudio => self.open_export(window, context),
-            Action::ToggleGraphView => {}
+            Action::ToggleGraphView => self.toggle_graph(context),
         }
     }
 }

@@ -1,6 +1,6 @@
 //! The window: the menu bar and the transport bar on top, the browser on
-//! the left, the timeline and the track list on its right, the bottom
-//! panel under them. One view
+//! the left, the timeline and the track list on its right (or the audio
+//! graph in their place), the bottom panel under them. One view
 //! owns Tonique's `ProjectState`, as `ToniqueApp` does in the egui app.
 
 mod arrows;
@@ -39,6 +39,7 @@ use crate::{
     browser::Browser,
     config::settings::Settings,
     core::state::{PlaybackState, ProjectState},
+    graph::GraphUi,
     headers::HeadersUi,
     theme::{FONT_UI, Theme, ThemeLibrary, hsla, size},
     timeline::TimelineUi,
@@ -57,6 +58,8 @@ pub struct Tonique {
     pub focus: FocusHandle,
     pub timeline: TimelineUi,
     pub headers: HeadersUi,
+    /// The audio graph, shown instead of the timeline when open.
+    pub graph: GraphUi,
     pub browser: Browser,
     pub waves: Rc<RefCell<WaveCache>>,
     /// Whether the browser shows, as Tonique's left panel, and how wide.
@@ -140,6 +143,7 @@ impl Tonique {
         Self {
             browser: Browser::new(&mut state, context),
             headers: HeadersUi::new(),
+            graph: GraphUi::new(),
             state,
             theme,
             focus,
@@ -187,6 +191,7 @@ impl Tonique {
             | self.settings_drag_move(event)
             | self.export_drag_move(event)
             | self.bottom_drag_move(event, height)
+            | self.graph_drag_move(event)
             | browser
     }
 
@@ -245,6 +250,7 @@ impl Tonique {
         self.settings_drag_end();
         self.export_drag_end();
         self.bottom_drag_end();
+        self.graph_drag_end();
         context.notify();
     }
 
@@ -256,6 +262,7 @@ impl Tonique {
             || self.settings.is_dragging()
             || self.export.is_dragging()
             || self.bottom.is_dragging()
+            || self.graph.is_dragging()
     }
 
     /// The browser, resizable from its right edge.
@@ -301,6 +308,7 @@ impl Render for Tonique {
         }
         crate::profile::frame();
         self.menu_bar.frame();
+        self.state.set_monitor_graph(self.graph.is_open());
         crate::profile::time("state.update", || self.state.update());
         let scrolling = self.step_scrolling() | self.autoscroll();
         let dragging = context.has_active_drag() || self.is_dragging();
@@ -337,15 +345,21 @@ impl Render for Tonique {
                 element
                     .child(self.browser_panel(window, context))
                     .child(divider(&theme))
-            })
+            });
+        let body = if self.graph.is_open() {
+            body.child(crate::profile::time("view.graph", || {
+                self.graph_view(window, context)
+            }))
+        } else {
             // As in the egui app: the track list on the timeline's right.
-            .child(crate::profile::time("view.timeline", || {
+            body.child(crate::profile::time("view.timeline", || {
                 self.timeline_view(&rows, window, context)
             }))
             .child(divider(&theme))
             .child(crate::profile::time("view.headers", || {
                 self.headers_view(&rows, window, context)
-            }));
+            }))
+        };
 
         div()
             .track_focus(&self.focus)

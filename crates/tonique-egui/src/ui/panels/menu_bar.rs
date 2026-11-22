@@ -181,9 +181,12 @@ impl AppMenuBar {
             let browser = label("Browser", Action::ToggleBrowser);
             let effects = label("Effects panel", Action::ToggleEffectsPanel);
             let track_list = label("Track list", Action::ToggleTrackList);
-            ui.radio_value(&mut workspace.main_view, MainView::Timeline, "Timeline");
-            ui.radio_value(&mut workspace.main_view, MainView::Graph, graph);
-            ui.separator();
+            // The audio graph is a development tool.
+            if Action::ToggleGraphView.is_available() {
+                ui.radio_value(&mut workspace.main_view, MainView::Timeline, "Timeline");
+                ui.radio_value(&mut workspace.main_view, MainView::Graph, graph);
+                ui.separator();
+            }
             ui.checkbox(&mut workspace.left_panel_open, browser);
             ui.checkbox(&mut workspace.bottom_panel_open, effects);
             ui.checkbox(&mut workspace.track_list_open, track_list);

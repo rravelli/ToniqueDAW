@@ -150,7 +150,7 @@ impl Tonique {
         let groups = GROUPS.into_iter().map(|group| {
             let actions = Action::ALL
                 .into_iter()
-                .filter(|action| action.group() == group)
+                .filter(|action| action.is_available() && action.group() == group)
                 .map(|action| self.action_row(action, keymap, theme, context));
             let fixed = FIXED_SHORTCUTS
                 .iter()

@@ -1,6 +1,7 @@
 pub mod clip;
 pub mod effect;
 pub mod export;
+pub mod graph_layout;
 pub mod graph_monitor;
 pub mod grid;
 pub mod metrics;

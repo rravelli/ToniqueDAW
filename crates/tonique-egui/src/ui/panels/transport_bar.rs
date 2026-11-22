@@ -128,7 +128,9 @@ impl TransportBar {
             if self.sidebar_ui(ui, state, workspace).clicked() {
                 commands.push(Action::ToggleBrowser);
             }
-            if self.graph_view_ui(ui, state, workspace).clicked() {
+            if Action::ToggleGraphView.is_available()
+                && self.graph_view_ui(ui, state, workspace).clicked()
+            {
                 commands.push(Action::ToggleGraphView);
             }
             ui.add_space(GROUP_GAP - BUTTON_GAP);

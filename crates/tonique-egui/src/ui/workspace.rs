@@ -3,7 +3,7 @@
 
 use tonique_engine::edit::ClipId;
 
-use crate::core::state::ProjectState;
+use crate::{config::keymap::Action, core::state::ProjectState};
 
 /// What the main area shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,8 +48,12 @@ impl Default for Workspace {
 }
 
 impl Workspace {
-    /// Between the timeline and the graph.
+    /// Between the timeline and the graph, in builds that have it.
     pub fn toggle_graph(&mut self) {
+        if !Action::ToggleGraphView.is_available() {
+            self.main_view = MainView::Timeline;
+            return;
+        }
         self.main_view = match self.main_view {
             MainView::Graph => MainView::Timeline,
             MainView::Timeline => MainView::Graph,
