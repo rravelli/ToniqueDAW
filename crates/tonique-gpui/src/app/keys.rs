@@ -5,7 +5,7 @@ use gpui::{Context, KeyDownEvent, Keystroke, Window};
 use tonique_engine::time::BeatPos;
 
 use crate::{
-    app::{Tonique, project::ProjectAction},
+    app::{Tonique, dialog::Dialog, project::ProjectAction},
     config::keymap::{Action, Key, Mods, format_shortcut},
 };
 
@@ -53,6 +53,9 @@ impl Tonique {
         }
         match keystroke.key.as_str() {
             "escape" if self.dialog.is_some() => self.close_dialog(window, context),
+            "enter" if self.dialog == Some(Dialog::Unsaved) => {
+                self.answer_unsaved(true, window, context);
+            }
             "escape" if self.popup.is_some() => self.popup = None,
             "escape" => self.state.clear_clip_selection(),
             "home" => self.state.seek(BeatPos::ZERO),

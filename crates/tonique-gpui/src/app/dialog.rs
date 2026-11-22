@@ -23,6 +23,8 @@ pub enum Dialog {
     Settings,
     /// Exporting audio, from the File menu.
     Export,
+    /// Save, let go or keep the unsaved changes, before what waits for them.
+    Unsaved,
 }
 
 impl Dialog {
@@ -33,6 +35,7 @@ impl Dialog {
             Self::About => true,
             Self::Settings => false,
             Self::Export => true,
+            Self::Unsaved => true,
         }
     }
 }
@@ -73,6 +76,7 @@ impl Tonique {
             Dialog::About => about(&theme, context),
             Dialog::Settings => self.settings_dialog(window, context),
             Dialog::Export => self.export_dialog(window, context),
+            Dialog::Unsaved => self.unsaved_dialog(context),
         };
         let size = window.viewport_size();
         let backdrop = div()

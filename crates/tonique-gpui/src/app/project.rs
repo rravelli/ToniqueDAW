@@ -4,15 +4,19 @@
 
 use std::path::{Path, PathBuf};
 
-use gpui::{Context, PathPromptOptions, PromptLevel, Task, Window};
+use gpui::{
+    Context, MouseButton, PathPromptOptions, PromptLevel, Stateful, Task, Window, div, prelude::*,
+    px,
+};
 
 use crate::{
-    app::Tonique,
+    app::{Tonique, dialog::Dialog},
     config::recent::RecentProjects,
     core::{
         project::{EXTENSION, ProjectFile, project_name},
         state::ProjectState,
     },
+    widgets::{dialog_body, dialog_button, dialog_frame, dialog_title},
 };
 
 /// What the user asked for.
@@ -43,6 +47,8 @@ pub struct ProjectFiles {
     /// The project as last saved or opened: anything different is unsaved.
     saved: ProjectFile,
     recent: RecentProjects,
+    /// What waits for the user's answer about unsaved changes.
+    pending: Option<AfterPrompt>,
     /// The user agreed to close: let the window go.
     closing: bool,
     /// The window's title, as last set.
@@ -55,6 +61,7 @@ impl ProjectFiles {
             path: None,
             saved: state.project(None),
             recent: RecentProjects::load(),
+            pending: None,
             closing: false,
             title: String::new(),
         }
@@ -88,6 +95,9 @@ impl ProjectFiles {
         self.recent.save();
     }
 }
+
+/// The egui dialog's 340 wide content, with the frame's margins and border.
+const UNSAVED_WIDTH: f32 = 340. + 2. * 18. + 2.;
 
 /// Where file pickers start: the project's folder, else the home folder.
 fn start_dir(files: &ProjectFiles) -> PathBuf {
@@ -132,39 +142,90 @@ impl Tonique {
             self.run_after_prompt(then, window, context);
             return;
         }
-        let message = format!("Save changes to “{}”?", self.project.name());
-        let answer = window.prompt(
-            PromptLevel::Warning,
-            &message,
-            Some("Your changes will be lost if you don't save them."),
-            &["Save", "Don't save", "Cancel"],
-            context,
-        );
+        self.project.pending = Some(then);
+        self.dialog = Some(Dialog::Unsaved);
+        // Enter answers it, not a focused list or field.
+        window.focus(&self.focus, context);
+    }
+
+    /// The answer about unsaved changes: save them first (`true`) or let
+    /// them go, then run what waited.
+    pub(super) fn answer_unsaved(
+        &mut self,
+        save: bool,
+        window: &mut Window,
+        context: &mut Context<Self>,
+    ) {
+        self.dialog = None;
+        let Some(then) = self.project.pending.take() else {
+            return;
+        };
+        if !save {
+            self.run_after_prompt(then, window, context);
+            return;
+        }
+        let saved = self.save_project(window, context);
         context
             .spawn_in(window, async move |this, context| {
-                let Ok(answer) = answer.await else { return };
-                let go_on = match answer {
-                    0 => {
-                        let Ok(save) = this.update_in(context, |this, window, context| {
-                            this.save_project(window, context)
-                        }) else {
-                            return;
-                        };
-                        // Not saved (no file chosen, or it failed): stay.
-                        save.await
-                    }
-                    1 => true,
-                    _ => false,
-                };
-                if go_on {
-                    this.update_in(context, |this, window, context| {
-                        this.run_after_prompt(then, window, context);
-                        context.notify();
-                    })
-                    .ok();
+                // Not saved (no file chosen, or it failed): stay.
+                if !saved.await {
+                    return;
                 }
+                this.update_in(context, |this, window, context| {
+                    this.run_after_prompt(then, window, context);
+                    context.notify();
+                })
+                .ok();
             })
             .detach();
+    }
+
+    /// The question about unsaved changes, as the egui app's: saving on
+    /// the right, where the eye ends; losing the changes apart on the
+    /// left, so it isn't clicked by mistake.
+    pub(super) fn unsaved_dialog(&self, context: &mut Context<Self>) -> gpui::Div {
+        let theme = &self.theme;
+        let answer = |button: Stateful<gpui::Div>, save: Option<bool>| {
+            button.on_mouse_down(
+                MouseButton::Left,
+                context.listener(move |this, _, window, context| {
+                    match save {
+                        Some(save) => this.answer_unsaved(save, window, context),
+                        None => this.close_dialog(window, context),
+                    }
+                    context.notify();
+                }),
+            )
+        };
+        let dont_save = answer(
+            dialog_button("dont-save", "Don't save", false, theme),
+            Some(false),
+        );
+        let cancel = answer(dialog_button("cancel", "Cancel", false, theme), None);
+        let save = answer(dialog_button("save", "Save", true, theme), Some(true));
+        dialog_frame(UNSAVED_WIDTH, theme)
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(dialog_title(format!(
+                "Save changes to “{}”?",
+                self.project.name()
+            )))
+            .child(dialog_body(
+                "Your changes will be lost if you don't save them.",
+                theme,
+            ))
+            .child(
+                div()
+                    .mt(px(12.))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(dont_save)
+                    .child(div().flex_1())
+                    .child(cancel)
+                    .child(save),
+            )
     }
 
     fn run_after_prompt(
