@@ -4,12 +4,14 @@
 //! draft and applied together, since they restart the audio. Settings are
 //! Tonique's own, saved where the egui app reads them.
 //!
-//! Left out, as this app hasn't them: the interface's scale and editing
-//! shortcuts.
+//! The Shortcuts tab's changes apply at once too.
+//!
+//! Left out, as this app hasn't it: the interface's scale.
 
 mod appearance;
 mod audio;
 mod general;
+mod shortcuts;
 
 use gpui::{Context, MouseButton, MouseMoveEvent, SharedString, Window, div, prelude::*, px};
 
@@ -24,6 +26,7 @@ use appearance::AppearanceForm;
 pub use audio::AudioChoice;
 use audio::AudioForm;
 use general::GeneralForm;
+use shortcuts::ShortcutsForm;
 
 const WIDTH: f32 = 440.;
 /// Fits the tallest tab, so switching tabs doesn't resize the dialog.
@@ -42,6 +45,7 @@ pub enum SettingsTab {
     General,
     Appearance,
     Audio,
+    Shortcuts,
 }
 
 pub struct SettingsUi {
@@ -51,6 +55,7 @@ pub struct SettingsUi {
     general: GeneralForm,
     appearance: AppearanceForm,
     audio: AudioForm,
+    shortcuts: ShortcutsForm,
 }
 
 impl SettingsUi {
@@ -63,6 +68,7 @@ impl SettingsUi {
             general: GeneralForm::default(),
             appearance: AppearanceForm::new(themes, theme_warnings),
             audio: AudioForm::new(),
+            shortcuts: ShortcutsForm::default(),
         }
     }
 
@@ -73,6 +79,11 @@ impl SettingsUi {
     pub fn end_drags(&mut self) {
         self.audio.end_drags();
     }
+
+    /// Stops recording a shortcut: a press anywhere does.
+    pub fn stop_recording(&mut self) {
+        self.shortcuts.stop_recording();
+    }
 }
 
 impl Tonique {
@@ -82,6 +93,7 @@ impl Tonique {
         settings.tab = tab;
         settings.draft = self.state.settings().clone();
         settings.appearance.open(&settings.draft.theme);
+        settings.shortcuts.cancel();
         // Probing the hardware is slow: once, on opening.
         settings.audio.refresh_devices();
         self.dialog = Some(Dialog::Settings);
@@ -132,16 +144,21 @@ impl Tonique {
                 (SettingsTab::General, "General"),
                 (SettingsTab::Appearance, "Appearance"),
                 (SettingsTab::Audio, "Audio"),
+                (SettingsTab::Shortcuts, "Shortcuts"),
             ],
             self.settings.tab,
             &theme,
             context,
-            |this, tab| this.settings.tab = tab,
+            |this, tab| {
+                this.settings.tab = tab;
+                this.settings.shortcuts.cancel();
+            },
         );
         let content = match self.settings.tab {
             SettingsTab::General => self.general_tab(&theme, context),
             SettingsTab::Appearance => self.appearance_tab(&theme, context),
             SettingsTab::Audio => self.audio_tab(&theme, window, context),
+            SettingsTab::Shortcuts => self.shortcuts_tab(&theme, context),
         };
         // In a window too short for it, the dialog fits in and its tab
         // scrolls.

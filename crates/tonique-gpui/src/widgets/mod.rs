@@ -16,6 +16,7 @@ mod splitter;
 mod tab_bar;
 mod text;
 mod text_field;
+mod tooltip;
 
 pub use arrow_keys::arrow_press;
 pub use button::{Flat, glyph, on_press, toggle_button};
@@ -33,3 +34,4 @@ pub use splitter::{Edge, HANDLE_WIDTH, Splitter, splitter_handle};
 pub use tab_bar::tab_bar;
 pub use text::{paint_line, paint_text, shape};
 pub use text_field::{FieldKey, TextField, typing_view};
+pub use tooltip::tooltip;

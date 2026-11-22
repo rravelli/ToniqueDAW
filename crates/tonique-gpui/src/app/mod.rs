@@ -218,12 +218,14 @@ impl Tonique {
                     });
                 });
                 // Where the last press was decides where editing keys go;
-                // a press lets go of the arrow keys, unless on the control
-                // holding them, which takes them back after this.
+                // a press lets go of the arrow keys and stops recording a
+                // shortcut, unless on the control holding them, which takes
+                // them back after this.
                 window.on_mouse_event(move |event: &MouseDownEvent, phase, _, app| {
                     if phase == DispatchPhase::Capture {
                         let _ = pressed.update(app, |this, _| {
                             this.release_arrows();
+                            this.settings.stop_recording();
                             this.bottom_press(event);
                         });
                     }
