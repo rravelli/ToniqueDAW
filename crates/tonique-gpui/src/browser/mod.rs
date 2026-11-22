@@ -251,12 +251,12 @@ impl Tonique {
             BrowserSource::Files => {
                 let list = self.list_view(ListKind::Files, window, context);
                 self.take_folder_drops(panel.child(list), context)
-                    .child(self.preview_view(context))
+                    .children(self.preview_view(context))
                     .into_any_element()
             }
             BrowserSource::Labels => panel
                 .child(self.list_view(ListKind::Labels, window, context))
-                .child(self.preview_view(context))
+                .children(self.preview_view(context))
                 .into_any_element(),
         };
         div()

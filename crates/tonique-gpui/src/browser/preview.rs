@@ -114,7 +114,9 @@ impl Tonique {
         browser.drag = BrowserDrag::None;
     }
 
-    pub(super) fn preview_view(&mut self, context: &mut Context<Self>) -> AnyElement {
+    /// Nothing when no audio file is selected.
+    pub(super) fn preview_view(&mut self, context: &mut Context<Self>) -> Option<AnyElement> {
+        let audio = self.browser.audio.clone()?;
         let theme = self.theme.clone();
         let panel = div()
             .h(px(PREVIEW_HEIGHT))
@@ -122,14 +124,6 @@ impl Tonique {
             .flex()
             .border_t_1()
             .border_color(hsla(theme.separator));
-        let Some(audio) = self.browser.audio.clone() else {
-            return panel
-                .items_center()
-                .justify_center()
-                .text_color(hsla(theme.text_disabled))
-                .child("Select an audio file to preview it")
-                .into_any_element();
-        };
         let this_file = self.state.previewing() == Some(audio.path.as_path());
         let position = if this_file {
             self.state.preview_position() as f64
@@ -165,6 +159,7 @@ impl Tonique {
         panel
             .flex_col()
             .gap_1()
+            .mb(px(4.0))
             .bg(hsla(theme.bg_panel))
             .child(title)
             .child(
@@ -177,6 +172,7 @@ impl Tonique {
             .child(self.preview_waveform(&audio, position, &theme, context))
             .child(self.preview_controls(&audio, &theme, context))
             .into_any_element()
+            .into()
     }
 
     /// The waveform, the part played bright: pressed or dragged, it seeks.
