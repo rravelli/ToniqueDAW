@@ -5,7 +5,7 @@ when a version tag is pushed.
 
 ## Cutting a release
 
-1. Bump `version` in `Cargo.toml` (e.g. `0.2.0`) and run `cargo build` so
+1. Bump `version` in `crates/tonique-egui/Cargo.toml` (e.g. `0.2.0`) and run `cargo build` so
    `Cargo.lock` follows.
 2. Commit on `master`: `git commit -am "chore: release 0.2.0"`.
 3. Tag and push. The tag must be the version prefixed with `v`, or the

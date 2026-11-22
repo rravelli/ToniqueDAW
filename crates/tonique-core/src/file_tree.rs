@@ -1,9 +1,10 @@
 use std::{
     collections::HashMap,
-    ffi::OsStr,
     fs::read_dir,
     path::{Path, PathBuf},
 };
+
+use crate::waveform::DECODED_EXTENSIONS;
 
 #[derive(Debug, Clone)]
 pub struct FolderNode {
@@ -406,16 +407,42 @@ fn ancestors(items: &[FileNode], index: usize, depth: usize) -> Vec<usize> {
     chain
 }
 
+/// What a file shown in the browser holds, told by its extension.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileKind {
+    /// Sound the decoder reads: previewed, dropped on the timeline.
+    Audio,
+    /// A MIDI file.
+    Midi,
+    /// Sound in a format the decoder doesn't read.
+    UnsupportedAudio,
+}
+
+/// Extensions of MIDI files.
+const MIDI_EXTENSIONS: &[&str] = &["mid", "midi"];
+/// Extensions of sound formats the decoder doesn't read (see
+/// [`DECODED_EXTENSIONS`]).
+const UNSUPPORTED_AUDIO_EXTENSIONS: &[&str] =
+    &["aiff", "aif", "aac", "m4a", "alac", "opus", "wma", "caf"];
+
+/// The kind of file `path` is, or `None` when it's none the browser shows.
+pub fn file_kind(path: &Path) -> Option<FileKind> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    let extension = extension.as_str();
+    if DECODED_EXTENSIONS.contains(&extension) {
+        Some(FileKind::Audio)
+    } else if MIDI_EXTENSIONS.contains(&extension) {
+        Some(FileKind::Midi)
+    } else if UNSUPPORTED_AUDIO_EXTENSIONS.contains(&extension) {
+        Some(FileKind::UnsupportedAudio)
+    } else {
+        None
+    }
+}
+
+/// Whether `path` is sound the decoder reads.
 pub fn is_audio_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(OsStr::to_str)
-        .map(|ext| {
-            matches!(
-                ext.to_ascii_lowercase().as_str(),
-                "mp3" | "wav" | "flac" | "ogg" | "aiff" | "aac" | "m4a" | "midi" | "mid"
-            )
-        })
-        .unwrap_or(false)
+    file_kind(path) == Some(FileKind::Audio)
 }
 
 fn read_entries(dir: PathBuf, depth: usize) -> Vec<FileNode> {
@@ -428,13 +455,13 @@ fn read_entries(dir: PathBuf, depth: usize) -> Vec<FileNode> {
                     // The listing tells a folder from a file: asking the disk
                     // for each one is slow on some drives. A link is followed,
                     // unless it's named as a sound: a file, then.
-                    let is_audio = is_audio_file(&path);
+                    let is_shown_file = file_kind(&path).is_some();
                     let is_dir = match entry.file_type() {
-                        Ok(kind) if kind.is_symlink() => !is_audio && path.is_dir(),
+                        Ok(kind) if kind.is_symlink() => !is_shown_file && path.is_dir(),
                         Ok(kind) => kind.is_dir(),
                         Err(_) => path.is_dir(),
                     };
-                    if !is_dir && !is_audio {
+                    if !is_dir && !is_shown_file {
                         return None;
                     }
                     let name_lower = entry.file_name().to_string_lossy().to_lowercase();
@@ -506,6 +533,18 @@ fn filter(
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn files_are_told_apart_by_extension() {
+        let kind = |name: &str| file_kind(Path::new(name));
+        assert_eq!(kind("kick.WAV"), Some(FileKind::Audio));
+        assert_eq!(kind("loop.mp3"), Some(FileKind::Audio));
+        assert_eq!(kind("song.mid"), Some(FileKind::Midi));
+        assert_eq!(kind("pad.aiff"), Some(FileKind::UnsupportedAudio));
+        assert_eq!(kind("notes.txt"), None);
+        assert_eq!(kind("no_extension"), None);
+        assert!(!is_audio_file(Path::new("song.midi")));
+    }
 
     /// Two folders in a fresh temporary directory:
     /// `drums/{kick.wav, loops/break.wav}` and `keys/{pad.wav}`.

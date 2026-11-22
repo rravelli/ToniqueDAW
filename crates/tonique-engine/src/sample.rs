@@ -58,6 +58,14 @@ impl SampleBuffer {
         self.sample_rate
     }
 
+    /// The memory its samples take, in bytes.
+    pub fn byte_size(&self) -> usize {
+        self.channels
+            .iter()
+            .map(|channel| channel.capacity() * size_of::<f32>())
+            .sum()
+    }
+
     /// High-quality conversion to another rate (windowed sinc).
     pub fn resampled(&self, target_rate: f64) -> Self {
         if target_rate == self.sample_rate {

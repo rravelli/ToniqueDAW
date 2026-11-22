@@ -1,9 +1,9 @@
-use crate::analysis::AudioInfo;
+use crate::{analysis::AudioInfo, memory::SourceMemory};
 use std::{
     collections::HashMap,
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, Weak,
         mpsc::{Receiver, Sender, channel},
     },
     time::{Duration, Instant},
@@ -22,6 +22,8 @@ pub struct SourceRegistry {
     engine_rate: f64,
     loaded_tx: Sender<(SourceId, Arc<SampleBuffer>)>,
     loaded_rx: Receiver<(SourceId, Arc<SampleBuffer>)>,
+    /// What the engine was given for each source, to measure it.
+    given: HashMap<SourceId, Weak<SampleBuffer>>,
 }
 
 impl SourceRegistry {
@@ -33,6 +35,7 @@ impl SourceRegistry {
             engine_rate,
             loaded_tx,
             loaded_rx,
+            given: HashMap::new(),
         }
     }
 
@@ -110,8 +113,32 @@ impl SourceRegistry {
     }
 
     /// Sources whose data became available since the last call.
-    pub fn poll_loaded(&self) -> Vec<(SourceId, Arc<SampleBuffer>)> {
-        self.loaded_rx.try_iter().collect()
+    pub fn poll_loaded(&mut self) -> Vec<(SourceId, Arc<SampleBuffer>)> {
+        let loaded: Vec<_> = self.loaded_rx.try_iter().collect();
+        for (id, buffer) in &loaded {
+            self.given.insert(*id, Arc::downgrade(buffer));
+        }
+        loaded
+    }
+
+    /// What the files and the engine's copies of them take.
+    pub fn memory(&self) -> SourceMemory {
+        let mut memory = SourceMemory::default();
+        for (id, audio) in &self.info {
+            memory.files.add(&audio.data);
+            let Some(given) = self.given.get(id).and_then(Weak::upgrade) else {
+                continue;
+            };
+            let shared = audio
+                .data
+                .samples()
+                .is_some_and(|samples| Arc::ptr_eq(samples, &given));
+            if !shared {
+                memory.engine_copies += 1;
+                memory.engine_bytes += given.byte_size();
+            }
+        }
+        memory
     }
 }
 

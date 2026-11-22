@@ -34,7 +34,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub use export::ExportSource;
+pub use export::{ExportSelection, ExportSource};
 pub use groups::RowTarget;
 pub use selection::SelectionBounds;
 use tonique_engine::{
@@ -542,6 +542,11 @@ impl ProjectState {
             .retain(|id| *id == MASTER_TRACK_ID || self.session.edit().track(*id).is_ok());
         self.prune_clip_selection();
     }
+    /// What the audio files clips use take, and the engine's copies.
+    pub fn source_memory(&self) -> crate::memory::SourceMemory {
+        self.sources.memory()
+    }
+
     /// Whether there is still actions to undo
     pub fn can_undo(&self) -> bool {
         self.session.undo_manager().can_undo()

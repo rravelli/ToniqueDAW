@@ -2,3 +2,6 @@
 *.xml
 *.html
 /dist/
+
+# The gpui prototype's bench runs (crates/tonique-gpui/scripts/bench.sh).
+bench-results/

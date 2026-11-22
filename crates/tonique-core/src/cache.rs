@@ -3,7 +3,10 @@ use once_cell::sync::Lazy;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::analysis::{AudioInfo, read_audio_info};
+use crate::{
+    analysis::{AudioInfo, read_audio_info},
+    memory::AudioMemory,
+};
 
 // Inner struct to keep cache logic encapsulated
 pub struct AudioAnalysisCache {
@@ -29,6 +32,15 @@ impl AudioAnalysisCache {
             }
             Err(_) => None,
         }
+    }
+
+    /// What the files it holds take: browsed ones, and those clips use.
+    pub fn memory(&self) -> AudioMemory {
+        let mut memory = AudioMemory::default();
+        for entry in self.inner.iter() {
+            memory.add(&entry.data);
+        }
+        memory
     }
 }
 

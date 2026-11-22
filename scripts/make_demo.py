@@ -3,7 +3,7 @@
 in the folder given (made if missing). Pure standard library.
 
 The README's images are taken of it (see `readme_images` in
-src/ui/app/tests.rs):
+crates/tonique-egui/src/ui/app/tests.rs):
 
     scripts/make_demo.py "$HOME/Documents/Tonique Projects/Demo Song"
 """

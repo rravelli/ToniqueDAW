@@ -1,9 +1,9 @@
 [package]
 name = "tonique-core"
 version = "0.3.0"
-authors = ["Rémi Ravelli <remi.ravelli@gmail.com>"]
-edition = "2024"
-license = "MIT OR Apache-2.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
 publish = false
 description = "Tonique without its UI: project state, grid, clips, audio sources, configuration."
 
@@ -16,7 +16,7 @@ workspace = true
 test-support = []
 
 [dependencies]
-tonique-engine = { path = "../tonique-engine", features = ["device", "signalsmith"] }
+tonique-engine.workspace = true
 creek = { version = "1.2.2", features = ["decode-mp3"] }
 symphonia = "0.5.4"
 once_cell = "1.21.3"
