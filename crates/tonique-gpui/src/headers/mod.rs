@@ -130,7 +130,11 @@ impl Tonique {
         self.headers.bounds.get()
     }
 
-    pub fn headers_view(&mut self, context: &mut Context<Self>) -> impl IntoElement {
+    pub fn headers_view(
+        &mut self,
+        window: &Window,
+        context: &mut Context<Self>,
+    ) -> impl IntoElement {
         let theme = self.theme.clone();
         let open = self.headers.open;
         let width = if open {
@@ -138,10 +142,13 @@ impl Tonique {
         } else {
             COLLAPSED_WIDTH
         };
+        let in_view = self.rows_in_view(window);
         let list = if open {
-            self.header_list(&theme, context).into_any_element()
+            self.header_list(in_view, &theme, context)
+                .into_any_element()
         } else {
-            self.collapsed_list(&theme, context).into_any_element()
+            self.collapsed_list(in_view, &theme, context)
+                .into_any_element()
         };
         let slot = self.headers.bounds.clone();
         div()
@@ -336,8 +343,15 @@ impl Tonique {
     }
 
     /// A header per row, then the button adding a track; below, a click
-    /// clears the selection.
-    fn header_list(&self, theme: &Theme, context: &mut Context<Self>) -> impl IntoElement {
+    /// clears the selection. Only the rows overlapping `in_view` are built
+    /// (and the one being renamed, keeping its field), the others leaving
+    /// their space.
+    fn header_list(
+        &self,
+        in_view: (f32, f32),
+        theme: &Theme,
+        context: &mut Context<Self>,
+    ) -> impl IntoElement {
         let width = self.headers.width.size - PANEL_MARGIN - ROWS_RIGHT;
         let rows = rows(&self.state);
         let scopes = group_scopes(&rows, theme);
@@ -350,6 +364,9 @@ impl Tonique {
             .w_full()
             .h(px(rows_height(&rows)));
         for row in rows {
+            if !row.overlaps(in_view) && self.rename_field(row.track.id).is_none() {
+                continue;
+            }
             placed = placed.child(
                 div()
                     .absolute()
@@ -423,8 +440,14 @@ impl Tonique {
 
     /// Collapsed: each row a bar of its colour and its meter; clicking one
     /// selects it.
-    /// Each row at its top, as in `header_list`.
-    fn collapsed_list(&self, theme: &Theme, context: &mut Context<Self>) -> impl IntoElement {
+    /// Each row at its top, as in `header_list`: only those overlapping
+    /// `in_view`.
+    fn collapsed_list(
+        &self,
+        in_view: (f32, f32),
+        theme: &Theme,
+        context: &mut Context<Self>,
+    ) -> impl IntoElement {
         let rows = rows(&self.state);
         let mut list = div()
             .absolute()
@@ -432,7 +455,7 @@ impl Tonique {
             .left_0()
             .right_0()
             .h(px(rows_height(&rows)));
-        for row in rows {
+        for row in rows.into_iter().filter(|row| row.overlaps(in_view)) {
             list = list.child(
                 div()
                     .absolute()

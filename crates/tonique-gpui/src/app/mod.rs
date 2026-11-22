@@ -341,7 +341,7 @@ impl Render for Tonique {
             }))
             .child(divider(&theme))
             .child(crate::profile::time("view.headers", || {
-                self.headers_view(context)
+                self.headers_view(window, context)
             }));
 
         div()

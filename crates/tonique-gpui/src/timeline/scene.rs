@@ -128,15 +128,17 @@ fn label(line: GridLine) -> String {
 }
 
 impl Tonique {
-    pub(super) fn scene(&self) -> Scene {
+    /// What the timeline paints: the clips of the rows overlapping
+    /// `in_view`, a span of the scrolled content.
+    pub(super) fn scene(&self, in_view: (f32, f32)) -> Scene {
         let state = &self.state;
         let screen_x = |beat: BeatPos| state.grid.beats_to_x(beat, self.viewport());
         let rows = rows(state);
         let (loop_start, loop_end) = state.loop_range();
-        let (scene_rows, mut clips) = self.scene_clips(&rows);
+        let (scene_rows, mut clips) = self.scene_clips(&rows, in_view);
         let overviews = rows
             .iter()
-            .filter(|row| row.is_group())
+            .filter(|row| row.is_group() && row.overlaps(in_view))
             .flat_map(|row| self.group_overview(row))
             .collect();
         clips.extend(self.scene_dragged(&rows));
@@ -229,7 +231,7 @@ impl Tonique {
     }
 
     /// The rows, and their clips: one being trimmed over its neighbours.
-    fn scene_clips(&self, rows: &[Row]) -> (Vec<SceneRow>, Vec<SceneClip>) {
+    fn scene_clips(&self, rows: &[Row], in_view: (f32, f32)) -> (Vec<SceneRow>, Vec<SceneClip>) {
         let state = &self.state;
         let left_behind: HashSet<ClipId> = self
             .dragged_clips()
@@ -248,7 +250,7 @@ impl Tonique {
                 selected: track.selected,
             });
             // A group's clips are its tracks': shown in its overview.
-            if row.is_group() {
+            if row.is_group() || !row.overlaps(in_view) {
                 continue;
             }
             let mut shown: Vec<AudioClip> = track

@@ -125,10 +125,10 @@ impl Tonique {
 
     pub fn timeline_view(
         &mut self,
-        _window: &mut Window,
+        window: &mut Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let scene = self.scene();
+        let scene = self.scene(self.rows_in_view(window));
         let waves = self.waves.clone();
         let slot = self.timeline.bounds.clone();
         let span = self.across_span();
