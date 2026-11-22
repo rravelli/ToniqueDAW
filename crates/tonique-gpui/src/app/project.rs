@@ -2,7 +2,10 @@
 //! the prompt about unsaved changes (also on closing the window), notices
 //! about what went wrong, the recent projects and the window's title.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
 use gpui::{
     Context, MouseButton, PathPromptOptions, PromptLevel, Stateful, Task, Window, div, prelude::*,
@@ -53,7 +56,13 @@ pub struct ProjectFiles {
     closing: bool,
     /// The window's title, as last set.
     title: String,
+    /// When the title last looked for unsaved changes: comparing the
+    /// project with the saved one takes too long to do every frame.
+    title_checked: Option<Instant>,
 }
+
+/// How long the title's star may lag an edit.
+const TITLE_CHECK_INTERVAL: Duration = Duration::from_millis(250);
 
 impl ProjectFiles {
     pub fn new(state: &ProjectState) -> Self {
@@ -64,6 +73,7 @@ impl ProjectFiles {
             pending: None,
             closing: false,
             title: String::new(),
+            title_checked: None,
         }
     }
 
@@ -83,6 +93,12 @@ impl ProjectFiles {
 
     pub fn is_modified(&self, state: &ProjectState) -> bool {
         state.project(self.dir()) != self.saved
+    }
+
+    /// `project` as saved or opened: the title shows it now.
+    fn set_saved(&mut self, project: ProjectFile) {
+        self.saved = project;
+        self.title_checked = None;
     }
 
     fn remember(&mut self, path: &Path) {
@@ -238,7 +254,7 @@ impl Tonique {
             AfterPrompt::New => {
                 self.state.new_project();
                 self.project.path = None;
-                self.project.saved = self.state.project(None);
+                self.project.set_saved(self.state.project(None));
                 self.forget_old_project();
             }
             AfterPrompt::Open(Some(path)) => self.open_project(&path, window, context),
@@ -289,7 +305,7 @@ impl Tonique {
         };
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let mut problems = self.state.load_project(&project, &dir);
-        self.project.saved = self.state.project(Some(&dir));
+        self.project.set_saved(self.state.project(Some(&dir)));
         self.project.remember(path);
         self.project.path = Some(path.to_path_buf());
         self.forget_old_project();
@@ -347,7 +363,7 @@ impl Tonique {
             Ok(()) => {
                 self.project.remember(path);
                 self.project.path = Some(path.to_path_buf());
-                self.project.saved = project;
+                self.project.set_saved(project);
                 true
             }
             Err(error) => {
@@ -386,8 +402,18 @@ impl Tonique {
         self.bottom.forget_project();
     }
 
-    /// The window's title: the project's name, starred while unsaved.
+    /// The window's title: the project's name, starred while unsaved;
+    /// looked at a few times a second.
     pub(super) fn update_title(&mut self, window: &mut Window) {
+        let now = Instant::now();
+        if self
+            .project
+            .title_checked
+            .is_some_and(|checked| now - checked < TITLE_CHECK_INTERVAL)
+        {
+            return;
+        }
+        self.project.title_checked = Some(now);
         let modified = self.project.is_modified(&self.state);
         let title = format!(
             "{}{} — Tonique",

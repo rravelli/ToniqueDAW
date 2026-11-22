@@ -318,6 +318,18 @@ impl ProjectState {
 
     /// The UI view of an engine clip. `None` for MIDI clips, which the UI
     /// can't show yet.
+    /// Whether `clip` has a view, as [`Self::clip_view`] gives: without
+    /// making it.
+    pub(super) fn has_clip_view(&self, clip: &Clip) -> bool {
+        match clip.content {
+            ClipContent::Audio { source, .. } => self
+                .sources
+                .info(source)
+                .is_some_and(|audio| audio.duration.is_some()),
+            _ => false,
+        }
+    }
+
     pub(super) fn clip_view(&self, clip: &Clip) -> Option<AudioClip> {
         let ClipContent::Audio {
             source,

@@ -403,15 +403,19 @@ impl ProjectState {
     /// Where the arrangement's content ends, in beats: the last clip end,
     /// the loop end while looping, or the playhead, whichever is furthest.
     pub fn arrangement_end(&self) -> BeatPos {
-        let bpm = self.bpm();
         let loop_end = if self.looping {
             self.loop_range.1
         } else {
             BeatPos::ZERO
         };
-        self.tracks()
-            .flat_map(|t| t.clips)
-            .map(|c| c.end(bpm))
+        // From the edit's clips, those shown: building the tracks' rows
+        // would copy them all.
+        self.edit()
+            .tracks
+            .iter()
+            .flat_map(|track| &track.clips)
+            .filter(|clip| self.has_clip_view(clip))
+            .map(|clip| clip.start + clip.length)
             .fold(self.playhead.max(loop_end), BeatPos::max)
     }
     pub fn track_count(&self) -> usize {
