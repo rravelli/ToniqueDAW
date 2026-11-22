@@ -3,7 +3,7 @@
 //! sideways swipe) scrolls across, otherwise the rows scroll, from the
 //! timeline or the track list alike. Also keeping edits in view: scrolling
 //! while a drag holds the pointer near an edge, and revealing what an
-//! edit put off screen.
+//! edit put off screen; and following the playhead during playback.
 
 use std::time::{Duration, Instant};
 
@@ -13,7 +13,7 @@ use gpui::{Context, ScrollEvent, Window};
 
 use crate::{
     app::Tonique,
-    core::track::DEFAULT_TRACK_HEIGHT,
+    core::{state::PlaybackState, track::DEFAULT_TRACK_HEIGHT},
     smooth_scroll::{SmoothScroll, WheelDelta},
     timeline::{
         RULER_HEIGHT,
@@ -46,6 +46,10 @@ pub struct TimelineScroll {
     zoom: SmoothScroll,
     /// Where the zoom is centred, local to the timeline.
     zoom_anchor: f32,
+    /// Playing as of the last frame: following resumes when play starts.
+    was_playing: bool,
+    /// Scrolled across by hand since play started: the view stays put.
+    follow_paused: bool,
 }
 
 impl Tonique {
@@ -70,6 +74,7 @@ impl Tonique {
                 wheel.vertical
             };
             let now = scroll.across.push(amount, wheel.eased);
+            scroll.follow_paused = true;
             self.scroll_across(now);
         } else {
             self.scroll_rows_by_wheel(wheel);
@@ -183,6 +188,26 @@ impl Tonique {
         if let Some(range) = self.state.selection_range() {
             self.reveal(range);
         }
+    }
+
+    /// Keeps the playhead in the middle of the view during playback, when
+    /// following it. Near the start of the arrangement the view stays put
+    /// and the playhead moves towards the middle. Not under a drag
+    /// (`dragging`), nor once scrolled across by hand until play starts
+    /// again.
+    pub fn follow_playhead(&mut self, dragging: bool) {
+        let playing = self.state.playback_state() == PlaybackState::Playing;
+        let scroll = &mut self.timeline.scroll;
+        if playing && !scroll.was_playing {
+            scroll.follow_paused = false;
+        }
+        scroll.was_playing = playing;
+        if !playing || !self.state.follow_playhead() || scroll.follow_paused || dragging {
+            return;
+        }
+        let playhead_x = self.state.grid.beats_to_width(self.state.playhead().0);
+        let width = self.viewport().right;
+        self.state.grid.offset.x = (playhead_x - width / 2.).max(0.);
     }
 
     /// Zooms by `amount` around where the wheel was turned.

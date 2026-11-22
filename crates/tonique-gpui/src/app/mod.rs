@@ -291,6 +291,8 @@ impl Render for Tonique {
         self.menu_bar.frame();
         crate::profile::time("state.update", || self.state.update());
         let scrolling = self.step_scrolling() | self.autoscroll();
+        let dragging = context.has_active_drag() || self.is_dragging();
+        self.follow_playhead(dragging);
         self.update_title(window);
         self.waves.borrow_mut().start_frame(window);
         let animating = self.state.playback_state() == PlaybackState::Playing
