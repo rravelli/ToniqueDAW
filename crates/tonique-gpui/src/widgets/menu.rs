@@ -211,6 +211,18 @@ impl Menu {
         }
     }
 
+    /// An item running the keymap's `action`, as its shortcut does.
+    pub fn command<V: 'static>(
+        self,
+        item: MenuItem,
+        action: crate::config::keymap::Action,
+        context: &mut Context<V>,
+    ) -> Self {
+        self.item(item, context, move |_, window, context| {
+            crate::app::command::dispatch(action, window, context);
+        })
+    }
+
     /// An item showing `kind`'s menu, built by `build`, beside it while
     /// hovered or pressed; `open` while it does.
     pub fn submenu(self, item: MenuItem, kind: PopupKind, open: bool, build: MenuBuilder) -> Self {

@@ -37,26 +37,21 @@ impl Tonique {
     }
 
     fn file_menu(&self, context: &mut Context<Self>) -> Menu {
-        let project = |action: ProjectAction| {
-            move |this: &mut Self, window: &mut gpui::Window, context: &mut Context<Self>| {
-                this.project_action(action.clone(), window, context)
-            }
-        };
         let missing = self.state(context).missing_files().len();
         let missing_label = match missing {
             0 | 1 => "Missing files…".to_string(),
             count => format!("{count} missing files…"),
         };
         Menu::new(&crate::theme::current(context))
-            .item(
+            .command(
                 self.action_item("New", Action::NewProject, context),
+                Action::NewProject,
                 context,
-                project(ProjectAction::New),
             )
-            .item(
+            .command(
                 self.action_item("Open…", Action::OpenProject, context),
+                Action::OpenProject,
                 context,
-                project(ProjectAction::Open),
             )
             .submenu(
                 MenuItem::new("Open recent"),
@@ -65,20 +60,20 @@ impl Tonique {
                 self.menu_builder(PopupKind::RecentProjects, context),
             )
             .separator()
-            .item(
+            .command(
                 self.action_item("Save", Action::SaveProject, context),
+                Action::SaveProject,
                 context,
-                project(ProjectAction::Save),
             )
-            .item(
+            .command(
                 self.action_item("Save as…", Action::SaveProjectAs, context),
+                Action::SaveProjectAs,
                 context,
-                project(ProjectAction::SaveAs),
             )
-            .item(
+            .command(
                 self.action_item("Export audio…", Action::ExportAudio, context),
+                Action::ExportAudio,
                 context,
-                |this, window, context| this.open_export(window, context),
             )
             .separator()
             .item(
@@ -135,25 +130,23 @@ impl Tonique {
         let state = self.state(context);
         let (can_undo, can_redo) = (state.can_undo(), state.can_redo());
         Menu::new(&crate::theme::current(context))
-            .item(
+            .command(
                 self.action_item("Undo", Action::Undo, context)
                     .enabled(can_undo),
+                Action::Undo,
                 context,
-                |this, _, context| this.state_mut(context).undo(),
             )
-            .item(
+            .command(
                 self.action_item("Redo", Action::Redo, context)
                     .enabled(can_redo),
+                Action::Redo,
                 context,
-                |this, _, context| this.state_mut(context).redo(),
             )
             .separator()
-            .item(
+            .command(
                 self.action_item("Add audio track", Action::AddTrack, context),
+                Action::AddTrack,
                 context,
-                |this, _, context| {
-                    this.state_mut(context).add_track_below_selection();
-                },
             )
     }
 
@@ -186,26 +179,26 @@ impl Tonique {
             )
             .separator()
         };
-        menu.item(
+        menu.command(
             self.action_item("Browser", Action::ToggleBrowser, context)
                 .checked(self.browser_open)
                 .keep_open(),
+            Action::ToggleBrowser,
             context,
-            |this, _, _| this.browser_open = !this.browser_open,
         )
-        .item(
+        .command(
             self.action_item("Track list", Action::ToggleTrackList, context)
                 .checked(self.headers.is_open())
                 .keep_open(),
+            Action::ToggleTrackList,
             context,
-            |this, _, _| this.headers.toggle_list(),
         )
-        .item(
+        .command(
             self.action_item("Effects panel", Action::ToggleEffectsPanel, context)
                 .checked(self.bottom.open)
                 .keep_open(),
+            Action::ToggleEffectsPanel,
             context,
-            |this, _, _| this.bottom.toggle(),
         )
     }
 

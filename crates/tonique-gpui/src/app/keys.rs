@@ -6,7 +6,12 @@ use gpui::{App, Context, KeyDownEvent, Keystroke, Window};
 use tonique_engine::time::BeatPos;
 
 use crate::{
-    app::{Tonique, dialog::Dialog, project::ProjectAction},
+    app::{
+        Tonique,
+        command::{self, Command},
+        dialog::Dialog,
+        project::ProjectAction,
+    },
     config::keymap::{Action, Key, Mods, format_shortcut},
 };
 
@@ -89,9 +94,7 @@ impl Tonique {
                 else {
                     return;
                 };
-                if !self.bottom_action(action, window, context) {
-                    self.run(action, window, context);
-                }
+                command::dispatch(action, window, context);
             }
         }
         context.notify();
@@ -119,6 +122,19 @@ impl Tonique {
                 self.reveal_selection(context);
             }
         }
+    }
+
+    /// Runs a command reaching the window: the bottom panel's first.
+    pub(super) fn on_command(
+        &mut self,
+        Command(action): &Command,
+        window: &mut Window,
+        context: &mut Context<Self>,
+    ) {
+        if !self.bottom_action(*action, window, context) {
+            self.run(*action, window, context);
+        }
+        context.notify();
     }
 
     /// Runs `action`, as the egui app's `dispatch` and its timeline do.

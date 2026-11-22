@@ -4,6 +4,7 @@
 //! owns Tonique's `ProjectState`, as `ToniqueApp` does in the egui app.
 
 pub mod arrows;
+pub mod command;
 mod dialog;
 mod export;
 mod keys;
@@ -405,6 +406,7 @@ impl Render for Tonique {
         div()
             .track_focus(&self.focus)
             .on_key_down(context.listener(Self::on_key))
+            .on_action(context.listener(Self::on_command))
             .on_mouse_move(context.listener(Self::on_hover))
             .on_mouse_up(MouseButton::Left, context.listener(Self::on_up))
             .on_mouse_up_out(MouseButton::Left, context.listener(Self::on_up))
