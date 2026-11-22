@@ -457,6 +457,7 @@ mod tests {
             timeline_pos: 0,
             playing: true,
             jumped: false,
+            input: crate::input::InputView::NONE,
         });
         g.output(len).channel(0).to_vec()
     }

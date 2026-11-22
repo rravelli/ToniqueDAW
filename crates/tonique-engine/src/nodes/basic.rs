@@ -414,6 +414,7 @@ mod tests {
             timeline_pos: 0,
             playing: true,
             jumped: false,
+            input: crate::input::InputView::NONE,
         };
         for _ in 0..4 {
             g.process_sequential(&info);
@@ -452,6 +453,7 @@ mod tests {
             timeline_pos: 0,
             playing: true,
             jumped: false,
+            input: crate::input::InputView::NONE,
         };
         g.process_sequential(&info);
         // saw at 0 Hz, phase 0 -> constant -1

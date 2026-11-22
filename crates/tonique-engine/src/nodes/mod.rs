@@ -4,6 +4,7 @@ mod automation;
 mod basic;
 mod clip;
 mod fx;
+mod input;
 mod metronome;
 mod synth;
 mod tap;
@@ -15,6 +16,7 @@ pub use clip::{
     balance,
 };
 pub use fx::{EchoNode, FilterMode, FilterNode, UTILITY_SILENT_DB, UtilityNode};
+pub use input::InputNode;
 pub use metronome::MetronomeNode;
 pub use synth::{Envelope, SynthNode};
 pub use tap::TappedNode;

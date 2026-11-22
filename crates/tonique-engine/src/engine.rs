@@ -10,13 +10,14 @@
 //!   play/seek/… ── Command ──────────▶  drained at top of block
 //!   housekeeping ◀── Garbage ─────────  old graphs, swapped-out curves
 //!   position()   ◀── atomics ─────────  transport position, stats
+//!   input callback ── InputFeed ring ─▶  pulled per chunk (see [`crate::input`])
 //! ```
 //!
 //! The processor never frees memory: everything it lets go of goes back
 //! through the garbage ring and is dropped by a housekeeping thread.
 
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -26,6 +27,7 @@ use crate::graph::{
     BlockInfo, CompileError, CompileOptions, CompileStats, CompiledGraph, GraphDescription,
     GraphTopology, NodeIdentity, NodeMessage, compile,
 };
+use crate::input::{InputFeed, InputView};
 use crate::preview::{PreviewControl, PreviewShared, PreviewSource, PreviewStream};
 use crate::rt;
 use crate::time::{BeatPos, SamplePos, TempoMap};
@@ -85,6 +87,8 @@ pub enum Command {
         stream: Option<PreviewStream>,
         generation: u64,
     },
+    /// Replace the input (`None` removes it).
+    SetInput(Option<Box<InputFeed>>),
 }
 
 /// Things the RT thread has let go of, to be dropped elsewhere.
@@ -133,6 +137,8 @@ struct Shared {
     last_migrated: AtomicU64,
     /// Time spent in the last callback relative to its real-time budget, in 1/1000.
     load_permille: AtomicU64,
+    /// Frames from a callback rendering audio to the device playing it.
+    output_latency: AtomicUsize,
 }
 
 /// Graphs on their way to the RT thread. If the ring is full (the audio
@@ -192,6 +198,7 @@ pub struct AudioProcessor {
     preview: Option<PreviewStream>,
     preview_generation: u64,
     preview_shared: Arc<PreviewShared>,
+    input: Option<Box<InputFeed>>,
 }
 
 const COMMAND_CAPACITY: usize = 1024;
@@ -253,6 +260,7 @@ impl Engine {
             preview: None,
             preview_generation: 0,
             preview_shared: preview.shared(),
+            input: None,
         };
         let engine = Engine {
             config,
@@ -443,6 +451,26 @@ impl Engine {
         self.preview.position()
     }
 
+    /// Feed nodes from `feed` (see [`crate::input`]), replacing any input.
+    /// `None` removes it. The old feed is freed off the audio thread.
+    pub fn set_input(&mut self, feed: Option<InputFeed>) -> Result<(), EngineError> {
+        if feed
+            .as_ref()
+            .is_some_and(|f| f.max_block() < self.config.max_block)
+        {
+            return Err(EngineError::Incompatible(
+                "input feed's max block smaller than engine's",
+            ));
+        }
+        self.send(Command::SetInput(feed.map(Box::new)))
+    }
+
+    /// Frames from the audio thread rendering audio to the output device
+    /// playing it, as last reported by the device. 0 without one.
+    pub fn output_latency_frames(&self) -> usize {
+        self.shared.output_latency.load(Ordering::Relaxed)
+    }
+
     /// Free everything the RT thread has retired so far, and hand over any
     /// pending graph. Called periodically by the housekeeping thread.
     pub fn collect_garbage(&self) -> usize {
@@ -482,6 +510,12 @@ impl AudioProcessor {
 
     pub fn graph(&self) -> Option<&CompiledGraph> {
         self.current.as_deref()
+    }
+
+    /// Report the output device's latency (see
+    /// [`Engine::output_latency_frames`]).
+    pub fn set_output_latency_frames(&self, frames: usize) {
+        self.shared.output_latency.store(frames, Ordering::Relaxed);
     }
 
     /// Render one device buffer. `out` is interleaved with `channels`
@@ -565,12 +599,17 @@ impl AudioProcessor {
     }
 
     fn render_chunk(&mut self, out: &mut [f32], channels: usize, n: usize) {
+        let input = match &mut self.input {
+            Some(feed) => feed.pull(n),
+            None => InputView::NONE,
+        };
         let info = BlockInfo {
             block_len: n,
             sample_rate: self.config.sample_rate,
             timeline_pos: self.position,
             playing: self.playing,
             jumped: self.jumped,
+            input,
         };
         self.jumped = false;
         match self.current.as_deref_mut() {
@@ -657,6 +696,11 @@ impl AudioProcessor {
                     let _ = self
                         .garbage
                         .push(Garbage::Command(Command::SetPreview { stream, generation }));
+                }
+                Command::SetInput(mut feed) => {
+                    std::mem::swap(&mut self.input, &mut feed);
+                    // The old feed is freed off the RT thread.
+                    let _ = self.garbage.push(Garbage::Command(Command::SetInput(feed)));
                 }
             }
         }

@@ -8,6 +8,7 @@ pub mod commands;
 mod session;
 mod undo;
 
+use crate::input::InputRoute;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -520,6 +521,9 @@ pub struct Track {
     pub soloed: bool,
     pub output: Output,
     pub sends: Vec<Send>,
+    /// Input channels heard through the track's effects and fader. Set with
+    /// [`EditSession::set_track_monitor`].
+    pub monitor: Option<InputRoute>,
 }
 
 impl Track {
@@ -532,6 +536,7 @@ impl Track {
             soloed: false,
             output: Output::Master,
             sends: Vec::new(),
+            monitor: None,
         }
     }
 
@@ -540,7 +545,7 @@ impl Track {
     }
 
     /// Deep copy with fresh IDs throughout (track, clips, plugins, params).
-    /// Sends are not copied.
+    /// Sends are not copied, and the copy doesn't monitor.
     pub fn duplicate(&self, edit: &mut Edit) -> Self {
         let clips = self.clips.iter().map(|c| c.duplicate(edit)).collect();
         Self {
@@ -551,6 +556,7 @@ impl Track {
             soloed: false,
             output: self.output,
             sends: Vec::new(),
+            monitor: None,
         }
     }
 }

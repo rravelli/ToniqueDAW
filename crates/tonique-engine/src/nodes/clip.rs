@@ -756,6 +756,7 @@ mod tests {
             timeline_pos: at,
             playing: true,
             jumped,
+            input: crate::input::InputView::NONE,
         });
     }
 

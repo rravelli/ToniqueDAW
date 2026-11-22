@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::audio::{AudioBlock, AudioBlockMut};
 use crate::automation::AutomationCurve;
+use crate::input::InputView;
 use crate::midi::MidiEventList;
 use crate::time::SamplePos;
 
@@ -105,6 +106,8 @@ pub struct BlockInfo {
     /// Set on the first block after start, seek or loop wrap-around, so
     /// nodes can flush state that assumed continuous playback.
     pub jumped: bool,
+    /// The input device's audio for this block.
+    pub input: InputView,
 }
 
 /// Outcome of [`Node::take_state_from`].
@@ -147,6 +150,7 @@ pub struct ProcessContext<'a> {
     pub timeline_pos: SamplePos,
     pub playing: bool,
     pub jumped: bool,
+    pub(crate) input_view: InputView,
 }
 
 impl<'a> ProcessContext<'a> {
@@ -179,6 +183,15 @@ impl<'a> ProcessContext<'a> {
         (0..self.num_inputs()).map(|i| self.midi_input(i))
     }
 
+    /// This block's audio from `channel` of the input device, if there's an
+    /// input with such a channel. Not to be confused with [`Self::input`],
+    /// the nodes feeding this one.
+    pub fn device_input(&self, channel: usize) -> Option<&'a [f32]> {
+        // SAFETY: the view was pulled for the block being processed, whose
+        // length this is, and nothing changes it until the block is over.
+        unsafe { self.input_view.channel(channel, self.block_len) }
+    }
+
     /// Sum all audio inputs into the output.
     pub fn sum_inputs_to_output(&mut self) {
         for i in 0..self.num_inputs() {
@@ -196,6 +209,8 @@ impl<'a> ProcessContext<'a> {
         self.midi_out.sort();
     }
 
+    /// This block's timing. The input is left out, as its audio doesn't
+    /// outlive the block: read it with [`Self::device_input`].
     pub fn block_info(&self) -> BlockInfo {
         BlockInfo {
             block_len: self.block_len,
@@ -203,6 +218,7 @@ impl<'a> ProcessContext<'a> {
             timeline_pos: self.timeline_pos,
             playing: self.playing,
             jumped: self.jumped,
+            input: InputView::NONE,
         }
     }
 }
