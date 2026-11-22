@@ -74,6 +74,7 @@ impl Tonique {
             }
             "escape" if self.popup.is_some() => self.popup = None,
             "escape" if self.arrows.is_some() => self.release_arrows(),
+            "escape" if self.bottom.effect_window_open() => self.bottom.close_effect_window(),
             "escape" => self.state.clear_clip_selection(),
             "home" => self.state.seek(BeatPos::ZERO),
             "c" | "x" | "v" if is_clipboard(keystroke) && self.has_keyboard(window, context) => {

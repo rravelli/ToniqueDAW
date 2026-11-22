@@ -10,13 +10,13 @@ use gpui::{
 };
 use tonique_engine::{
     dsp::Biquad,
-    edit::{Parameter, PluginKind},
+    edit::{Parameter, PluginId, PluginKind, TrackId},
     meter::PluginTap,
     nodes::FilterMode,
 };
 
 use crate::{
-    app::Tonique,
+    app::{PopupKind, Tonique},
     bottom::{
         paint::{Align, circle, curve, fill_rounded, text},
         rack::{
@@ -25,12 +25,13 @@ use crate::{
             format_db, format_hz,
             graph::{freq_x, hline, paint_freq_grid, spectrum_points, x_freq},
             knob::KNOB_HEIGHT,
+            shapes::shape_menu,
         },
     },
     core::effect::Setting,
     geometry::Rect,
     theme::{Theme, size, with_alpha},
-    widgets::Flat,
+    widgets::{Flat, Menu},
 };
 
 /// Gain range of the graph, in dB.
@@ -39,8 +40,7 @@ const BOTTOM_DB: f32 = -36.;
 /// Levels of the spectrum shown, in dBFS.
 const SPECTRUM_RANGE: RangeInclusive<f32> = -90.0..=0.;
 const HANDLE_RADIUS: f32 = 5.;
-/// Width of a mode's button; they go two by two.
-const MODE_WIDTH: f32 = 34.;
+const MODE_WIDTH: f32 = 96.;
 
 /// Which side of the filter the spectrum shows.
 #[derive(Clone, Copy, PartialEq)]
@@ -60,15 +60,15 @@ struct ResponseKey {
     width: f32,
 }
 
-/// Shown on the mode's buttons.
+/// Shown in the mode's picker.
 fn mode_name(mode: FilterMode) -> &'static str {
     match mode {
-        FilterMode::LowPass => "LP",
-        FilterMode::HighPass => "HP",
-        FilterMode::BandPass => "BP",
+        FilterMode::LowPass => "Low-pass",
+        FilterMode::HighPass => "High-pass",
+        FilterMode::BandPass => "Band-pass",
         FilterMode::Notch => "Notch",
-        FilterMode::LowShelf => "LS",
-        FilterMode::HighShelf => "HS",
+        FilterMode::LowShelf => "Low shelf",
+        FilterMode::HighShelf => "High shelf",
         FilterMode::Peak => "Peak",
     }
 }
@@ -92,26 +92,22 @@ pub fn from_height(mode: FilterMode, value: f32) -> f32 {
     }
 }
 
-pub struct FilterState {
+/// A spectrum of the audio in or out of an effect, under its graph.
+pub struct LiveSpectrum {
     analyser: Analyser,
-    tap: Tap,
-    /// The response drawn last, a gain per pixel, and what it was for:
-    /// worked out again only when that changes.
-    response: (Option<ResponseKey>, Vec<f32>),
-    /// The graph, as last laid out.
-    pub graph: Rc<Cell<Bounds<Pixels>>>,
+    pub tap: Tap,
 }
 
-impl FilterState {
+impl LiveSpectrum {
     pub fn new() -> Self {
         Self {
             analyser: Analyser::new(),
             tap: Tap::Input,
-            response: (None, Vec::new()),
-            graph: Rc::default(),
         }
     }
 
+    /// Takes in what the side of `tap` shown heard, keeping it recording
+    /// for half a second past the last frame shown.
     pub fn update(&mut self, tap: &PluginTap, sample_rate: f32) {
         let frames = (sample_rate / 2.) as u32;
         let meter = match self.tap {
@@ -125,6 +121,37 @@ impl FilterState {
             }
         };
         self.analyser.update(meter, sample_rate);
+    }
+
+    /// Muted, behind the graph's curve.
+    pub fn paint(&self, window: &mut gpui::Window, rect: Rect, theme: &Theme) {
+        let points = spectrum_points(&self.analyser.spectrum, rect, &SPECTRUM_RANGE);
+        curve(
+            window,
+            &points,
+            rect.bottom(),
+            (theme.text_muted, 1.),
+            with_alpha(theme.text_disabled, 77),
+        );
+    }
+}
+
+pub struct FilterState {
+    pub spectrum: LiveSpectrum,
+    /// The response drawn last, a gain per pixel, and what it was for:
+    /// worked out again only when that changes.
+    response: (Option<ResponseKey>, Vec<f32>),
+    /// The graph, as last laid out.
+    pub graph: Rc<Cell<Bounds<Pixels>>>,
+}
+
+impl FilterState {
+    pub fn new() -> Self {
+        Self {
+            spectrum: LiveSpectrum::new(),
+            response: (None, Vec::new()),
+            graph: Rc::default(),
+        }
     }
 
     /// The filter's gain at each pixel across `scale`, in dB.
@@ -220,7 +247,7 @@ impl Tonique {
         let plugin = effect.plugin.id;
         let enabled = input.enabled();
         let (graph_bounds, tap) = match &*input.editor.borrow() {
-            Editor::Filter(filter) => (filter.graph.clone(), filter.tap),
+            Editor::Filter(filter) => (filter.graph.clone(), filter.spectrum.tap),
             _ => return div().into_any_element(),
         };
         let dragging = matches!(
@@ -262,14 +289,7 @@ impl Tonique {
                     return;
                 };
                 if enabled {
-                    let points = spectrum_points(&filter.analyser.spectrum, rect, &SPECTRUM_RANGE);
-                    curve(
-                        window,
-                        &points,
-                        rect.bottom(),
-                        (theme.text_muted, 1.),
-                        with_alpha(theme.text_disabled, 77),
-                    );
+                    filter.spectrum.paint(window, rect, theme);
                 }
                 let color = if enabled {
                     theme.accent
@@ -379,24 +399,21 @@ impl Tonique {
                 }),
             );
 
-        let modes = FilterMode::ALL.map(|option| {
-            let name = mode_name(option);
-            let track = input.track;
-            Flat::new(name, 16.)
-                .width(MODE_WIDTH)
-                .selected(mode == option)
-                .show(
-                    div().text_size(px(size::SMALL)).child(name),
-                    theme,
-                    context,
-                    move |this, _| {
-                        if mode != option {
-                            this.state
-                                .set_effect_setting(&track, plugin, Setting::Mode(option));
-                        }
-                    },
-                )
-        });
+        let tint = if enabled {
+            theme.accent
+        } else {
+            theme.text_disabled
+        };
+        let picker = self.shape_picker(
+            "filter-mode",
+            mode,
+            mode_name,
+            MODE_WIDTH,
+            tint,
+            PopupKind::FilterShape(input.track, plugin),
+            theme,
+            context,
+        );
         let knobs = div()
             .flex()
             .flex_none()
@@ -421,14 +438,7 @@ impl Tonique {
             .flex()
             .flex_none()
             .gap(px(6.))
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .w(px(2. * MODE_WIDTH + 2.))
-                    .gap(px(2.))
-                    .children(modes),
-            )
+            .child(picker)
             .child(knobs);
         div()
             .size_full()
@@ -441,9 +451,9 @@ impl Tonique {
     }
 
     /// Over the graph: which side of the filter the spectrum shows.
-    fn tap_buttons(
+    pub(super) fn tap_buttons(
         &self,
-        plugin: tonique_engine::edit::PluginId,
+        plugin: PluginId,
         shown: Tap,
         theme: &Theme,
         context: &mut Context<Self>,
@@ -455,9 +465,9 @@ impl Tonique {
                 context,
                 move |this, _| {
                     if let Some(slot) = this.bottom.rack.slots.get(&plugin)
-                        && let Editor::Filter(filter) = &mut *slot.editor.borrow_mut()
+                        && let Some(spectrum) = slot.editor.borrow_mut().spectrum_mut()
                     {
-                        filter.tap = tap;
+                        spectrum.tap = tap;
                     }
                 },
             )
@@ -471,6 +481,36 @@ impl Tonique {
             .children(buttons)
     }
 
+    /// The filter's modes, for its picker, while the filter exists.
+    pub fn filter_shape_menu(
+        &self,
+        track: TrackId,
+        plugin: PluginId,
+        context: &mut Context<Self>,
+    ) -> Option<gpui::Div> {
+        let effect = self
+            .state
+            .effects(&track)
+            .into_iter()
+            .find(|effect| effect.plugin.id == plugin)?;
+        let PluginKind::Filter(mode) = effect.plugin.kind else {
+            return None;
+        };
+        let menu = shape_menu(
+            Menu::new(&self.theme),
+            &FilterMode::ALL,
+            mode,
+            mode_name,
+            self.theme.accent,
+            context,
+            move |this, picked| {
+                this.state
+                    .set_effect_setting(&track, plugin, Setting::Mode(picked));
+            },
+        );
+        Some(menu.into_element())
+    }
+
     /// Follows a filter's graph being dragged to `(x, y)`.
     pub(super) fn follow_graph(drag: &GraphDrag, x: f32, y: f32) {
         let scale = Scale {
@@ -480,6 +520,9 @@ impl Tonique {
         };
         if scale.rect.is_empty() {
             return;
+        }
+        if let Some((switch, _)) = &drag.switched {
+            switch.set(1.);
         }
         drag.cutoff.set(scale.hz(x));
         drag.height.set(to_height(drag.mode, scale.db(y)));

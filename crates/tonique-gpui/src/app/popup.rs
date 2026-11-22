@@ -31,6 +31,14 @@ pub enum PopupKind {
     Track(TrackId),
     /// An effect of the bottom panel's.
     Effect(TrackId, PluginId),
+    /// A filter's modes.
+    FilterShape(TrackId, PluginId),
+    /// An EQ band's shapes, from its picker.
+    EqShape(TrackId, PluginId, usize),
+    /// An EQ band's point, right-clicked.
+    EqPoint(TrackId, PluginId, usize),
+    /// The EQ's bands, to pick one.
+    EqBand(TrackId, PluginId),
     /// Where to put bar 1 of a clip's grid, right-clicked this many
     /// seconds into its file.
     ClipRuler(ClipId, f64),
@@ -113,6 +121,16 @@ impl Tonique {
             PopupKind::Clip(id) => self.clip_menu(id, context)?,
             PopupKind::Track(id) => self.track_menu(id, context)?,
             PopupKind::Effect(track, plugin) => self.effect_menu(track, plugin, context)?,
+            PopupKind::FilterShape(track, plugin) => {
+                self.filter_shape_menu(track, plugin, context)?
+            }
+            PopupKind::EqShape(track, plugin, band) => {
+                self.eq_shape_menu(track, plugin, band, false, context)?
+            }
+            PopupKind::EqPoint(track, plugin, band) => {
+                self.eq_shape_menu(track, plugin, band, true, context)?
+            }
+            PopupKind::EqBand(_, plugin) => self.eq_band_menu(plugin, context)?,
             PopupKind::ClipRuler(id, at) => self.clip_ruler_popup(id, at, context)?,
             PopupKind::ClipWarpMode(id) => self.clip_warp_menu(id, context)?,
             PopupKind::ClipWindow(id) => self.clip_window_menu(id, context)?,

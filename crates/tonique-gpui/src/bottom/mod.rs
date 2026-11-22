@@ -87,7 +87,16 @@ impl BottomPanel {
 
     /// Whether it shows something that moves on its own: meters, spectra.
     pub fn is_animating(&self) -> bool {
-        self.open && self.rack.is_animating()
+        (self.open || self.effect_window_open()) && self.rack.is_animating()
+    }
+
+    /// An effect is open in a full window.
+    pub fn effect_window_open(&self) -> bool {
+        self.rack.expanded().is_some()
+    }
+
+    pub fn close_effect_window(&mut self) {
+        self.rack.close_full_window();
     }
 }
 

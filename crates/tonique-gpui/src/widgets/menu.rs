@@ -38,6 +38,8 @@ pub struct MenuItem {
     keep_open: bool,
     shortcut: Option<SharedString>,
     enabled: bool,
+    /// Drawn in the icon's place: a picture of what it stands for.
+    leading: Option<gpui::AnyElement>,
 }
 
 impl MenuItem {
@@ -53,6 +55,7 @@ impl MenuItem {
             keep_open: false,
             shortcut: None,
             enabled: true,
+            leading: None,
         }
     }
     /// Shown on the right, muted: a shortcut, or a hint like a folder.
@@ -69,6 +72,13 @@ impl MenuItem {
     pub fn icon(self, icon: &'static str) -> Self {
         Self {
             icon: Some(icon),
+            ..self
+        }
+    }
+    /// `element` in the icon's place.
+    pub fn leading(self, element: impl IntoElement) -> Self {
+        Self {
+            leading: Some(element.into_any_element()),
             ..self
         }
     }
@@ -133,6 +143,10 @@ impl Menu {
             is_submenu: true,
             ..Self::new(theme)
         }
+    }
+
+    pub fn theme(&self) -> &Theme {
+        &self.theme
     }
 
     /// A heading, muted.
@@ -265,7 +279,9 @@ impl Menu {
     /// `trailing` (a submenu's arrow).
     fn row(&self, item: MenuItem, trailing: Option<&'static str>) -> Stateful<gpui::Div> {
         let theme = &self.theme;
-        let mark = if item.checked && item.swatch.is_none() {
+        let mark = if item.leading.is_some() {
+            None
+        } else if item.checked && item.swatch.is_none() {
             Some(icons::CHECK)
         } else {
             item.icon
@@ -305,7 +321,8 @@ impl Menu {
                     .children(
                         item.swatch
                             .map(|color| div().size(px(8.)).rounded_full().bg(hsla(color))),
-                    ),
+                    )
+                    .children(item.leading),
             )
             .child(div().flex_1().whitespace_nowrap().child(item.text))
             .children(item.shortcut.map(|shortcut| muted(div()).child(shortcut)))

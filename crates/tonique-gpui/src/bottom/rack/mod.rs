@@ -4,13 +4,16 @@
 //! browser and moved by their header; clicked to select them (Ctrl+click
 //! adds one), and then deleted, duplicated or renamed.
 
+mod dynamics;
 mod editors;
 mod eq;
 mod filter;
 mod frame;
+mod full;
 mod graph;
 mod knob;
-mod plain;
+mod shapes;
+mod tone;
 mod tuner;
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -25,10 +28,15 @@ use crate::{
     app::Tonique,
     bottom::{hint, paint::fill},
     config::keymap::Action,
-    core::{effect::EffectKind, metrics::AudioMetrics, track::TrackRow},
+    core::{
+        effect::{Effect, EffectKind},
+        metrics::AudioMetrics,
+        track::TrackRow,
+    },
     geometry::Rect,
     widgets::TextField,
 };
+use dynamics::LevelDrag;
 use editors::{Editor, EditorInput};
 use filter::GraphDrag;
 pub use knob::KnobArrows;
@@ -55,6 +63,7 @@ struct Slot {
 enum RackDrag {
     Knob(KnobDrag),
     Graph(GraphDrag),
+    Level(LevelDrag),
     /// An effect by its header: moved once dragged a little.
     Move {
         plugin: PluginId,
@@ -84,6 +93,8 @@ pub struct Rack {
     pending: Option<(PluginId, SettingKnob, f32)>,
     /// Something shown moves on its own.
     animating: bool,
+    /// The effect open in a full window.
+    expanded: Option<PluginId>,
 }
 
 impl Rack {
@@ -91,6 +102,7 @@ impl Rack {
         self.leave_track();
         self.renaming = None;
         self.drag = None;
+        self.expanded = None;
     }
 
     /// Effects aren't shown: nothing of them is kept.
@@ -100,6 +112,39 @@ impl Rack {
         // An analyser's buffers are large.
         self.slots.clear();
         self.animating = false;
+        self.expanded = None;
+    }
+
+    /// The effect open in a full window.
+    pub fn expanded(&self) -> Option<PluginId> {
+        self.expanded
+    }
+
+    /// Back to the rack from a full window.
+    pub fn close_full_window(&mut self) {
+        self.expanded = None;
+    }
+
+    /// `effect`'s editor, made the first time, after taking in what it
+    /// heard since the last frame. Whether it shows something moving.
+    fn refresh(&mut self, effect: &Effect, sample_rate: f32) -> bool {
+        let slot = self.slots.entry(effect.plugin.id).or_insert_with(|| Slot {
+            editor: Rc::new(RefCell::new(Editor::new(effect.kind))),
+            levels: AudioMetrics::new(),
+        });
+        // A bypassed effect isn't heard.
+        if !effect.enabled() {
+            return false;
+        }
+        let tap = &effect.plugin.tap;
+        tap.watch_output_for((sample_rate / 2.) as u32);
+        // Taken once, for the meter and the editor: taking them empties
+        // the tap.
+        let output = tap.output.take_levels();
+        slot.levels.update_levels(output);
+        let mut editor = slot.editor.borrow_mut();
+        editor.update(effect, sample_rate, output);
+        editor.is_animated() || crate::meter::is_live(&slot.levels)
     }
 
     pub fn is_dragging(&self) -> bool {
@@ -193,21 +238,22 @@ impl Tonique {
             .resize(effects.len(), Bounds::default());
 
         // Their outputs, while shown: a bypassed effect isn't heard.
+        if rack
+            .expanded
+            .is_some_and(|plugin| !effects.iter().any(|effect| effect.plugin.id == plugin))
+        {
+            rack.expanded = None;
+        }
         let mut animating = false;
         for effect in &effects {
-            let slot = rack.slots.entry(effect.plugin.id).or_insert_with(|| Slot {
-                editor: Rc::new(RefCell::new(Editor::new(effect.kind))),
-                levels: AudioMetrics::new(),
-            });
-            if effect.collapsed || !effect.enabled() {
-                continue;
+            if effect.collapsed {
+                rack.slots.entry(effect.plugin.id).or_insert_with(|| Slot {
+                    editor: Rc::new(RefCell::new(Editor::new(effect.kind))),
+                    levels: AudioMetrics::new(),
+                });
+            } else {
+                animating |= rack.refresh(effect, sample_rate);
             }
-            let output = &effect.plugin.tap;
-            output.watch_output_for((sample_rate / 2.) as u32);
-            slot.levels.update(&output.output, false);
-            let mut editor = slot.editor.borrow_mut();
-            editor.update(effect, sample_rate);
-            animating |= editor.is_animated() || crate::meter::is_live(&slot.levels);
         }
         rack.animating = animating;
 
@@ -232,6 +278,7 @@ impl Tonique {
                         .pending
                         .filter(|(plugin, ..)| *plugin == effect.plugin.id)
                         .map(|(_, knob, value)| (knob, value)),
+                    expanded: false,
                 };
                 let levels = slot.levels.clone();
                 self.effect_frame(index, &input, levels, selected, &theme, context)
@@ -404,6 +451,7 @@ impl Tonique {
                 }
             }
             Some(RackDrag::Graph(drag)) => Self::follow_graph(drag, pointer_x, pointer_y),
+            Some(RackDrag::Level(drag)) => drag.follow(pointer_y),
             Some(RackDrag::Move {
                 start_x,
                 last_x,
@@ -437,6 +485,13 @@ impl Tonique {
                 changes.retain(|(_, before, after)| before != after);
                 if !changes.is_empty() {
                     self.state.commit_params(&changes);
+                }
+            }
+            RackDrag::Level(drag) => {
+                let after = drag.param.get();
+                if after != drag.before {
+                    self.state
+                        .commit_params(&[(drag.param.id, drag.before, after)]);
                 }
             }
             RackDrag::Move {

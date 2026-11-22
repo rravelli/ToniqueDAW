@@ -361,6 +361,10 @@ impl Render for Tonique {
             }))
         };
 
+        // An effect open in a full window covers the timeline and the
+        // bottom panel.
+        let full = self.full_effect_view(window, context);
+        let show_bottom = full.is_none();
         div()
             .track_focus(&self.focus)
             .on_key_down(context.listener(Self::on_key))
@@ -376,10 +380,17 @@ impl Render for Tonique {
             .text_size(px(size::BODY))
             .child(self.menu_bar(context))
             .child(self.transport(window, context))
-            .child(body)
-            .children(crate::profile::time("view.bottom", || {
-                self.bottom_panel_view(window, context)
-            }))
+            .children(full.is_none().then_some(body))
+            .children(full)
+            .children(
+                show_bottom
+                    .then(|| {
+                        crate::profile::time("view.bottom", || {
+                            self.bottom_panel_view(window, context)
+                        })
+                    })
+                    .flatten(),
+            )
             .child(self.drag_listener(context))
             .children(self.popup_view(window, context))
             .children(self.dialog_view(window, context))

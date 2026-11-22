@@ -80,6 +80,8 @@ pub struct Flat {
     selected: bool,
     enabled: bool,
     color: Option<Color>,
+    /// Its fill, hovered or not, instead of the usual.
+    fill: Option<Color>,
     width: Option<f32>,
     /// As wide as its label and this much each side of it, rather than
     /// `width`.
@@ -96,6 +98,7 @@ impl Flat {
             selected: false,
             enabled: true,
             color: None,
+            fill: None,
             width: Some(size),
             padding: None,
             height: size,
@@ -139,6 +142,12 @@ impl Flat {
             ..self
         }
     }
+    pub fn fill(self, color: Color) -> Self {
+        Self {
+            fill: Some(color),
+            ..self
+        }
+    }
 
     /// The button around `label`, without an action: for a caller that
     /// handles the press itself (it needs the event).
@@ -151,6 +160,10 @@ impl Flat {
             (true, true) => (transparent, theme.accent, theme.hover_overlay),
         };
         let foreground = self.color.unwrap_or(foreground);
+        let (fill, hover) = match self.fill {
+            Some(color) => (color, color),
+            None => (fill, hover),
+        };
         let element = div()
             .id(self.id)
             .flex()

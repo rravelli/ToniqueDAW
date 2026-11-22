@@ -291,7 +291,15 @@ impl Tonique {
                 context,
                 move |this, _| this.state.set_effect_collapsed(plugin, true),
             ))
-            .child(div().flex_1().min_w_0().ml(px(2.)).mr(px(1.)).child(name));
+            .child(div().flex_1().min_w_0().ml(px(2.)).mr(px(1.)).child(name))
+            .when(Editor::expandable(effect.kind), |header| {
+                header.child(Flat::ghost("full-window", BUTTON).show(
+                    glyph(icons::ARROWS_OUT_SIMPLE, ICON_SIZE, false),
+                    theme,
+                    context,
+                    move |this, _| this.bottom.rack.expanded = Some(plugin),
+                ))
+            });
         self.grabbed(header, index, plugin, track, false, context)
     }
 
@@ -350,43 +358,53 @@ impl Tonique {
         let effect = &effects[index];
         let theme = &self.theme;
         let collapsed = effect.collapsed;
+        let expandable = Editor::expandable(effect.kind);
         let (icon, text) = if collapsed {
             (icons::CARET_RIGHT, "Expand")
         } else {
             (icons::CARET_DOWN, "Collapse")
         };
+        let menu = Menu::new(theme)
+            .label(effect.name().to_string())
+            .item(
+                MenuItem::new("Rename").icon(icons::TEXT_T),
+                context,
+                move |this, window, context| this.rename_effect(track, plugin, window, context),
+            )
+            .item(
+                MenuItem::new(text).icon(icon),
+                context,
+                move |this, _, _| this.state.set_effect_collapsed(plugin, !collapsed),
+            );
+        let menu = if expandable {
+            menu.item(
+                MenuItem::new("Open in full window").icon(icons::ARROWS_OUT_SIMPLE),
+                context,
+                move |this, _, _| this.bottom.rack.expanded = Some(plugin),
+            )
+        } else {
+            menu
+        };
         Some(
-            Menu::new(theme)
-                .label(effect.name().to_string())
-                .item(
-                    MenuItem::new("Rename").icon(icons::TEXT_T),
-                    context,
-                    move |this, window, context| this.rename_effect(track, plugin, window, context),
-                )
-                .item(
-                    MenuItem::new(text).icon(icon),
-                    context,
-                    move |this, _, _| this.state.set_effect_collapsed(plugin, !collapsed),
-                )
-                .item(
-                    MenuItem::new("Duplicate").icon(icons::COPY),
-                    context,
-                    move |this, _, _| {
-                        this.bottom.rack.selected = this.state.duplicate_effects(&track, &[index]);
-                    },
-                )
-                .separator()
-                .item(
-                    MenuItem::new("Remove")
-                        .icon(icons::TRASH)
-                        .color(theme.danger),
-                    context,
-                    move |this, _, _| {
-                        this.state.remove_effects(&track, &[index]);
-                        this.bottom.rack.selected.clear();
-                    },
-                )
-                .into_element(),
+            menu.item(
+                MenuItem::new("Duplicate").icon(icons::COPY),
+                context,
+                move |this, _, _| {
+                    this.bottom.rack.selected = this.state.duplicate_effects(&track, &[index]);
+                },
+            )
+            .separator()
+            .item(
+                MenuItem::new("Remove")
+                    .icon(icons::TRASH)
+                    .color(theme.danger),
+                context,
+                move |this, _, _| {
+                    this.state.remove_effects(&track, &[index]);
+                    this.bottom.rack.selected.clear();
+                },
+            )
+            .into_element(),
         )
     }
 }

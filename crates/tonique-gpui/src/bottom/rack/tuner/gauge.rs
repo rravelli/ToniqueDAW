@@ -1,23 +1,9 @@
-//! The tuner's editor, as the egui app's gauge: the note heard where it
-//! sits in the chain, arrows towards where to tune it, a strip of segments
-//! lit from the middle out to its cents, and a knob for the pitch of A4.
-//! The egui app's history view isn't here yet.
-
-use std::time::Instant;
-
-use gpui::{AnyElement, Context, canvas, div, prelude::*, px};
-use tonique_engine::{meter::ChannelMeter, pitch::PitchTracker};
+//! The tuner's gauge: the note, arrows towards where to tune it, and a
+//! strip of segments lit from the middle out to its cents.
 
 use crate::{
-    app::Tonique,
-    bottom::{
-        paint::{Align, circle, fill_rounded, polygon, text},
-        rack::{
-            editors::{Editor, EditorInput, KNOB_GAP},
-            knob::KNOB_WIDTH,
-        },
-    },
-    core::note::{IN_TUNE, Note, note},
+    bottom::paint::{Align, circle, fill_rounded, polygon, text},
+    core::note::{IN_TUNE, Note},
     geometry::Rect,
     theme::{Color, Theme, size, with_alpha},
 };
@@ -39,120 +25,42 @@ const NOTE_GAP: f32 = 10.;
 const GLOW_RADIUS: f32 = 34.;
 const GLOW_RINGS: usize = 10;
 const GLOW_STEP: f32 = 1.8;
-const ROUNDING: f32 = 6.;
-
-/// The pitch heard, followed frame after frame.
-pub struct TunerState {
-    tracker: PitchTracker,
-    last: Option<Instant>,
-}
-
-impl TunerState {
-    pub fn new() -> Self {
-        Self {
-            tracker: PitchTracker::new(),
-            last: None,
-        }
-    }
-
-    /// Takes in what `meter` heard since the last frame.
-    pub fn update(&mut self, meter: &ChannelMeter, sample_rate: f32) {
-        let now = Instant::now();
-        let seconds = self
-            .last
-            .map_or(1. / 60., |last| (now - last).as_secs_f32().min(0.1));
-        self.last = Some(now);
-        self.tracker.update(meter, sample_rate, seconds);
-    }
-}
-
-impl Tonique {
-    pub(super) fn tuner_body(
-        &self,
-        input: &EditorInput,
-        theme: &Theme,
-        context: &mut Context<Self>,
-    ) -> AnyElement {
-        let effect = input.effect;
-        let enabled = input.enabled();
-        let reference = effect.plugin.param("reference").map_or(440., |p| p.get());
-        let editor = input.editor.clone();
-        let paint_theme = theme.clone();
-        let display = canvas(
-            |_, _, _| {},
-            move |bounds, _, window, context| {
-                let theme = &paint_theme;
-                let rect = Rect::of(bounds);
-                fill_rounded(window, rect, ROUNDING, theme.bg_deep);
-                let centre = (rect.left + rect.width / 2., rect.top + rect.height / 2.);
-                if !enabled {
-                    text(
-                        window,
-                        context,
-                        "Bypassed",
-                        centre,
-                        Align::CENTER,
-                        size::SMALL,
-                        theme.text_muted,
-                        None,
-                    );
-                    return;
-                }
-                let editor = editor.borrow();
-                let Editor::Tuner(tuner) = &*editor else {
-                    return;
-                };
-                let heard = tuner.tracker.hz().map(|hz| (hz, note(hz, reference)));
-                paint_gauge(window, context, rect, heard, theme);
-            },
-        )
-        .flex_1()
-        .h_full();
-        let knob = self.param_knob(
-            effect,
-            "reference",
-            "A4",
-            |hz| format!("{hz:.0} Hz"),
-            false,
-            theme,
-            context,
-        );
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .gap(px(KNOB_GAP))
-            .child(display)
-            .child(div().flex_none().w(px(KNOB_WIDTH)).children(knob))
-            .into_any_element()
-    }
-}
 
 /// The note, the strip and the readout, centred as one block in `rect`.
-fn paint_gauge(
+pub fn paint(
     window: &mut gpui::Window,
     context: &mut gpui::App,
     rect: Rect,
     heard: Option<(f32, Note)>,
+    large: bool,
     theme: &Theme,
 ) {
+    let scale = if large { 2. } else { 1. };
     let color = match heard {
         Some((_, heard)) if heard.in_tune() => theme.success,
         _ => theme.accent,
     };
-    let note_height = NOTE_SIZE * 1.25;
-    let height = note_height + NOTE_GAP + STRIP_HEIGHT + 8. + size::SMALL;
+    let note_height = NOTE_SIZE * scale * 1.25;
+    let strip_height = STRIP_HEIGHT * scale;
+    let height = note_height + NOTE_GAP * scale + strip_height + 8. + size::SMALL;
     let top = rect.top + (rect.height - height) / 2. + 6.;
     let centre_x = rect.left + rect.width / 2.;
     let note_centre = (centre_x, top + note_height / 2.);
-    let strip_width = (rect.width - 24.).min(SEGMENTS as f32 * 12.);
+    let strip_width = (rect.width - 24.).min(SEGMENTS as f32 * 12. * scale);
     let strip = Rect::new(
         centre_x - strip_width / 2.,
-        top + note_height + NOTE_GAP,
+        top + note_height + NOTE_GAP * scale,
         strip_width,
-        STRIP_HEIGHT,
+        strip_height,
     );
-    paint_note(window, context, note_centre, heard.map(|(_, n)| n), theme);
+    paint_note(
+        window,
+        context,
+        note_centre,
+        heard.map(|(_, n)| n),
+        scale,
+        theme,
+    );
     paint_strip(window, strip, heard.map(|(_, n)| n.cents), color, theme);
     let (readout, readout_color) = match heard {
         Some((hz, heard)) => (
@@ -180,8 +88,10 @@ fn paint_note(
     context: &mut gpui::App,
     centre: (f32, f32),
     heard: Option<Note>,
+    scale: f32,
     theme: &Theme,
 ) {
+    let note_size = NOTE_SIZE * scale;
     let Some(heard) = heard else {
         text(
             window,
@@ -189,7 +99,7 @@ fn paint_note(
             "–",
             centre,
             Align::CENTER,
-            NOTE_SIZE,
+            note_size,
             theme.text_disabled,
             None,
         );
@@ -202,7 +112,7 @@ fn paint_note(
     };
     if heard.in_tune() {
         for ring in 0..GLOW_RINGS {
-            let radius = GLOW_RADIUS - ring as f32 * GLOW_STEP;
+            let radius = (GLOW_RADIUS - ring as f32 * GLOW_STEP) * scale;
             circle(window, centre, radius, with_alpha(theme.success, 6), None);
         }
     }
@@ -212,7 +122,7 @@ fn paint_note(
         heard.name,
         centre,
         Align::CENTER,
-        NOTE_SIZE,
+        note_size,
         color,
         None,
     );
@@ -222,10 +132,10 @@ fn paint_note(
         heard.octave.to_string(),
         (
             centre.0 + name_width / 2. + 1.,
-            centre.1 + NOTE_SIZE * 0.625 - 3.,
+            centre.1 + note_size * 0.625 - 3. * scale,
         ),
         Align::LEFT_BOTTOM,
-        size::BODY,
+        size::BODY * scale,
         color,
         None,
     );
@@ -238,23 +148,24 @@ fn paint_note(
             with_alpha(theme.text_disabled, 102)
         }
     };
-    let flat = (centre.0 - ARROW_DISTANCE, centre.1);
+    let (arrow, distance) = (ARROW_SIZE * scale, ARROW_DISTANCE * scale);
+    let flat = (centre.0 - distance, centre.1);
     polygon(
         window,
         &[
-            (flat.0 - ARROW_SIZE * 0.7, flat.1 - ARROW_SIZE),
-            (flat.0 + ARROW_SIZE * 0.8, flat.1),
-            (flat.0 - ARROW_SIZE * 0.7, flat.1 + ARROW_SIZE),
+            (flat.0 - arrow * 0.7, flat.1 - arrow),
+            (flat.0 + arrow * 0.8, flat.1),
+            (flat.0 - arrow * 0.7, flat.1 + arrow),
         ],
         lit(heard.cents < -IN_TUNE),
     );
-    let sharp = (centre.0 + ARROW_DISTANCE, centre.1);
+    let sharp = (centre.0 + distance, centre.1);
     polygon(
         window,
         &[
-            (sharp.0 + ARROW_SIZE * 0.7, sharp.1 - ARROW_SIZE),
-            (sharp.0 + ARROW_SIZE * 0.7, sharp.1 + ARROW_SIZE),
-            (sharp.0 - ARROW_SIZE * 0.8, sharp.1),
+            (sharp.0 + arrow * 0.7, sharp.1 - arrow),
+            (sharp.0 + arrow * 0.7, sharp.1 + arrow),
+            (sharp.0 - arrow * 0.8, sharp.1),
         ],
         lit(heard.cents > IN_TUNE),
     );

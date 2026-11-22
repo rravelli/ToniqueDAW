@@ -8,6 +8,7 @@ use std::{cell::RefCell, rc::Rc, time::Instant};
 use gpui::{AnyElement, Context, Stateful, canvas, div, prelude::*, px};
 use tonique_engine::{
     edit::{PluginKind, TrackId},
+    meter::Level,
     nodes::UTILITY_SILENT_DB,
     spectrum::Spectrum,
 };
@@ -17,14 +18,15 @@ use crate::{
     bottom::{
         paint::{Align, curve, fill, fill_rounded, text},
         rack::{
+            dynamics::{CompressorState, GateState, LimiterState, gate_width},
             eq::EqState,
-            filter::FilterState,
+            filter::{FilterState, LiveSpectrum},
             format_hz, format_ms, format_percent,
             graph::{hline, level_y, paint_freq_grid, spectrum_points, x_freq},
             knob::{
                 KNOB_HEIGHT, KNOB_WIDTH, Knob, KnobScale, KnobTarget, SettingKnob, nearest_sync,
             },
-            plain::CURVE_WIDTH,
+            tone::CURVE_WIDTH,
             tuner::TunerState,
         },
     },
@@ -54,8 +56,11 @@ pub enum Editor {
     Tuner(TunerState),
     Utility,
     Eq(EqState),
-    /// Knobs only, for now.
-    Knobs,
+    Compressor(CompressorState),
+    Limiter(LimiterState),
+    Gate(GateState),
+    Saturation,
+    Reverb,
 }
 
 /// A spectrum, smoothed frame after frame.
@@ -92,11 +97,33 @@ impl Editor {
             EffectKind::Tuner => Self::Tuner(TunerState::new()),
             EffectKind::Utility => Self::Utility,
             EffectKind::Eq => Self::Eq(EqState::new()),
-            EffectKind::Compressor
-            | EffectKind::Limiter
-            | EffectKind::Gate
-            | EffectKind::Saturation
-            | EffectKind::Reverb => Self::Knobs,
+            EffectKind::Compressor => Self::Compressor(CompressorState::new()),
+            EffectKind::Limiter => Self::Limiter(LimiterState::new()),
+            EffectKind::Gate => Self::Gate(GateState::new()),
+            EffectKind::Saturation => Self::Saturation,
+            EffectKind::Reverb => Self::Reverb,
+        }
+    }
+
+    /// Whether it can open in a full window: a graph that's worth seeing
+    /// big. It then draws at any size.
+    pub fn expandable(kind: EffectKind) -> bool {
+        matches!(
+            kind,
+            EffectKind::Filter
+                | EffectKind::Spectrum
+                | EffectKind::Tuner
+                | EffectKind::Eq
+                | EffectKind::Compressor
+        )
+    }
+
+    /// The spectrum under its graph, if it has one.
+    pub fn spectrum_mut(&mut self) -> Option<&mut LiveSpectrum> {
+        match self {
+            Self::Filter(filter) => Some(&mut filter.spectrum),
+            Self::Eq(eq) => Some(&mut eq.spectrum),
+            _ => None,
         }
     }
 
@@ -111,7 +138,7 @@ impl Editor {
             EffectKind::Eq => 380.,
             EffectKind::Compressor => knobs_width(6),
             EffectKind::Limiter => knobs_width(4),
-            EffectKind::Gate => knobs_width(5),
+            EffectKind::Gate => gate_width(),
             EffectKind::Saturation => knobs_width(3) + CURVE_WIDTH + KNOB_GAP,
             EffectKind::Reverb => knobs_width(5),
         }
@@ -119,28 +146,43 @@ impl Editor {
 
     /// Whether it shows something moving on its own.
     pub fn is_animated(&self) -> bool {
-        matches!(self, Self::Filter(_) | Self::Spectrum(_) | Self::Tuner(_))
+        matches!(
+            self,
+            Self::Filter(_)
+                | Self::Spectrum(_)
+                | Self::Tuner(_)
+                | Self::Eq(_)
+                | Self::Compressor(_)
+                | Self::Limiter(_)
+                | Self::Gate(_)
+        )
     }
 
     /// Takes in the audio of `effect` its graph shows, keeping its tap
-    /// recording for half a second past the last frame shown.
-    pub fn update(&mut self, effect: &Effect, sample_rate: f32) {
+    /// recording for half a second past the last frame shown. `output` is
+    /// what came out of it since the last frame, taken for its meter.
+    pub fn update(&mut self, effect: &Effect, sample_rate: f32, output: Option<[Level; 2]>) {
         if !effect.enabled() {
             return;
         }
         let tap = &effect.plugin.tap;
         let frames = (sample_rate / 2.) as u32;
         match self {
-            Self::Filter(filter) => filter.update(tap, sample_rate),
+            Self::Filter(filter) => filter.spectrum.update(tap, sample_rate),
+            Self::Eq(eq) => eq.spectrum.update(tap, sample_rate),
+            Self::Compressor(compressor) => compressor.record(effect, sample_rate, output),
+            Self::Limiter(limiter) => limiter.update(tap),
+            Self::Gate(gate) => gate.update(tap, sample_rate),
             Self::Spectrum(analyser) => {
                 tap.watch_output_for(frames);
                 analyser.update(&tap.output, sample_rate);
             }
             Self::Tuner(tuner) => {
                 tap.watch_output_for(frames);
-                tuner.update(&tap.output, sample_rate);
+                let reference = effect.plugin.param("reference").map_or(440., |p| p.get());
+                tuner.update(&tap.output, sample_rate, reference);
             }
-            Self::Echo | Self::Utility | Self::Eq(_) | Self::Knobs => {}
+            Self::Echo | Self::Utility | Self::Saturation | Self::Reverb => {}
         }
     }
 }
@@ -153,6 +195,8 @@ pub struct EditorInput<'a> {
     pub editor: Rc<RefCell<Editor>>,
     /// A setting being dragged, not applied yet.
     pub pending: Option<(SettingKnob, f32)>,
+    /// Shown in a full window, with room for more than in the rack.
+    pub expanded: bool,
 }
 
 impl EditorInput<'_> {
@@ -174,7 +218,32 @@ pub fn knobs_width(count: usize) -> f32 {
     count as f32 * KNOB_WIDTH + (count - 1) as f32 * KNOB_GAP + KNOBS_PADDING
 }
 
+/// A knob for a parameter: its name, label, format and whether it's on a
+/// log scale.
+pub(super) type KnobSpec = (&'static str, &'static str, fn(f32) -> String, bool);
+
 impl Tonique {
+    /// A row of `knobs` for `input`'s parameters, then `more`.
+    pub(super) fn knob_row(
+        &self,
+        input: &EditorInput,
+        knobs: &[KnobSpec],
+        more: impl IntoIterator<Item = AnyElement>,
+        theme: &Theme,
+        context: &mut Context<Self>,
+    ) -> gpui::Div {
+        let effect = input.effect;
+        div()
+            .flex()
+            .flex_none()
+            .gap(px(KNOB_GAP))
+            .h(px(KNOB_HEIGHT))
+            .children(knobs.iter().filter_map(|&(param, name, format, log)| {
+                self.param_knob(effect, param, name, format, log, theme, context)
+            }))
+            .children(more)
+    }
+
     /// The controls of `input`'s effect, filling its frame's body.
     pub(super) fn editor_body(
         &self,

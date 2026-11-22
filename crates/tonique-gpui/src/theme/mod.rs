@@ -293,6 +293,14 @@ pub fn with_alpha(color: Color, alpha: u8) -> Color {
     Color { a: alpha, ..color }
 }
 
+/// `color` at `amount` of its opacity, as egui's `gamma_multiply`.
+pub fn faded(color: Color, amount: f32) -> Color {
+    with_alpha(
+        color,
+        (color.a as f32 * amount).round().clamp(0., 255.) as u8,
+    )
+}
+
 /// `overlay` (translucent) painted over `color`.
 pub fn over(color: Color, overlay: Color) -> Color {
     mix(color, with_alpha(overlay, 255), overlay.a as f32 / 255.)
