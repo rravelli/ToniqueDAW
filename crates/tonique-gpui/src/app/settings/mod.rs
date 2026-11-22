@@ -13,7 +13,7 @@ mod audio;
 mod general;
 mod shortcuts;
 
-use gpui::{Context, MouseButton, MouseMoveEvent, SharedString, Window, div, prelude::*, px};
+use gpui::{App, Context, MouseButton, MouseMoveEvent, SharedString, Window, div, prelude::*, px};
 
 use crate::{
     app::{Tonique, dialog::Dialog},
@@ -88,10 +88,10 @@ impl SettingsUi {
 
 impl Tonique {
     /// Opens the settings on `tab`, from the settings in use.
-    pub fn open_settings(&mut self, tab: SettingsTab) {
+    pub fn open_settings(&mut self, tab: SettingsTab, context: &mut App) {
         let settings = &mut self.settings;
         settings.tab = tab;
-        settings.draft = self.state.settings().clone();
+        settings.draft = self.project.read(context).state.settings().clone();
         settings.appearance.open(&settings.draft.theme);
         settings.shortcuts.cancel();
         // Probing the hardware is slow: once, on opening.
@@ -100,17 +100,17 @@ impl Tonique {
     }
 
     /// Opens or closes the settings, as their shortcut does.
-    pub fn toggle_settings(&mut self) {
+    pub fn toggle_settings(&mut self, context: &mut App) {
         if self.dialog == Some(Dialog::Settings) {
             self.dialog = None;
         } else {
-            self.open_settings(SettingsTab::General);
+            self.open_settings(SettingsTab::General, context);
         }
     }
 
     /// Follows a drag in the settings. Returns whether it's one.
-    pub(super) fn settings_drag_move(&mut self, event: &MouseMoveEvent) -> bool {
-        self.general_drag_move(event) | self.audio_drag_move(event)
+    pub(super) fn settings_drag_move(&mut self, event: &MouseMoveEvent, context: &mut App) -> bool {
+        self.general_drag_move(event, context) | self.audio_drag_move(event)
     }
 
     pub(super) fn settings_drag_end(&mut self) {

@@ -3,6 +3,7 @@
 //! one of the closest matches, or picked on disk. Their clips are kept,
 //! silent, until then.
 
+use crate::model::HoldsProject;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -137,7 +138,7 @@ impl Tonique {
             |this, _| this.browser.missing.search.text.clear(),
         );
         let missing: Vec<(SourceId, String, PathBuf)> = self
-            .state
+            .state(context)
             .missing_files()
             .into_iter()
             .map(|(id, audio)| (id, audio.name.clone(), audio.path.clone()))
@@ -288,12 +289,15 @@ impl Tonique {
                                     // Already found along with another, from
                                     // its folder.
                                     let still = this
-                                        .state
+                                        .state(context)
                                         .missing_files()
                                         .iter()
                                         .any(|(missing, _)| missing == id);
                                     if still {
-                                        located += this.state.locate_file(*id, path).unwrap_or(0);
+                                        located += this
+                                            .state_mut(context)
+                                            .locate_file(*id, path)
+                                            .unwrap_or(0);
                                     }
                                 }
                                 this.browser.missing.status = Some(Status::Located(located));
@@ -335,7 +339,7 @@ impl Tonique {
                     return;
                 };
                 this.update(context, |this, context| {
-                    this.locate_missing(id, &path);
+                    this.locate_missing(id, &path, context);
                     context.notify();
                 })
                 .ok();
@@ -343,8 +347,8 @@ impl Tonique {
             .detach();
     }
 
-    fn locate_missing(&mut self, id: SourceId, path: &Path) {
-        self.browser.missing.status = Some(match self.state.locate_file(id, path) {
+    fn locate_missing(&mut self, id: SourceId, path: &Path, context: &mut App) {
+        self.browser.missing.status = Some(match self.state_mut(context).locate_file(id, path) {
             Ok(located) => Status::Located(located),
             Err(error) => Status::Failed(error),
         });
@@ -424,7 +428,7 @@ impl Tonique {
                 .on_mouse_down(
                     MouseButton::Left,
                     context.listener(move |this, _, _, context| {
-                        this.locate_missing(selected, &found);
+                        this.locate_missing(selected, &found, context);
                         context.notify();
                     }),
                 )

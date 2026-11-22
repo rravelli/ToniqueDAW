@@ -1,5 +1,6 @@
 //! What to export, the range and format, and where the files go.
 
+use crate::model::HoldsProject;
 use std::{collections::HashSet, path::PathBuf};
 
 use gpui::{
@@ -65,7 +66,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> gpui::Div {
         let theme = crate::theme::current(context);
-        let state = &self.state;
+        let state = self.state(context);
         let export = &mut self.export;
         // Tracks deleted since are no longer chosen.
         let rows = state.all_rows();
@@ -306,13 +307,31 @@ impl Tonique {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> Vec<gpui::AnyElement> {
-        let state = &self.state;
+        let state = self.state(context);
         let options = self.export.options;
         let length = |range| {
             state
                 .export_seconds(range)
                 .map_or_else(|_| "empty".to_string(), duration)
         };
+        let (project_length, loop_length) =
+            (length(ExportRange::Project), length(ExportRange::Loop));
+        let mut details = format!("WAV  ·  {}", audio_format(state));
+        if let Ok(seconds) = state.export_seconds(options.range) {
+            let config = state.engine_config();
+            let seconds = seconds + options.tail_seconds as f64;
+            let bytes = seconds
+                * config.sample_rate
+                * (config.output_channels * sample_bytes(options.format)) as f64;
+            details += &match files {
+                0 | 1 => format!("  ·  ≈ {}", file_size(bytes)),
+                count => format!(
+                    "  ·  ≈ {} each, {} in all",
+                    file_size(bytes),
+                    file_size(bytes * count as f64)
+                ),
+            };
+        }
         let choice = match options.range {
             ExportRange::Project => RangeChoice::Project,
             ExportRange::Loop => RangeChoice::Loop,
@@ -324,12 +343,9 @@ impl Tonique {
             vec![
                 (
                     RangeChoice::Project,
-                    format!("Whole project  ·  {}", length(ExportRange::Project)),
+                    format!("Whole project  ·  {project_length}"),
                 ),
-                (
-                    RangeChoice::Loop,
-                    format!("Loop region  ·  {}", length(ExportRange::Loop)),
-                ),
+                (RangeChoice::Loop, format!("Loop region  ·  {loop_length}")),
                 (RangeChoice::Custom, "Custom".to_string()),
             ],
             theme,
@@ -375,22 +391,6 @@ impl Tonique {
             context,
             |this, format| this.export.options.format = format,
         );
-        let mut details = format!("WAV  ·  {}", audio_format(state));
-        if let Ok(seconds) = state.export_seconds(options.range) {
-            let config = state.engine_config();
-            let seconds = seconds + options.tail_seconds as f64;
-            let bytes = seconds
-                * config.sample_rate
-                * (config.output_channels * sample_bytes(options.format)) as f64;
-            details += &match files {
-                0 | 1 => format!("  ·  ≈ {}", file_size(bytes)),
-                count => format!(
-                    "  ·  ≈ {} each, {} in all",
-                    file_size(bytes),
-                    file_size(bytes * count as f64)
-                ),
-            };
-        }
 
         let mut elements = vec![
             section_header("Range", theme).into_any_element(),
@@ -414,7 +414,7 @@ impl Tonique {
     fn custom_range(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
         let (start, end) = self.export.custom.unwrap_or_default();
         let seconds = self
-            .state
+            .state(context)
             .export_seconds(ExportRange::Custom(start, end))
             .ok();
         div()
@@ -459,7 +459,7 @@ impl Tonique {
             .h(px(CHOICE_HEIGHT))
             .into_any_element();
         }
-        let text = format_bars(beats.0, self.state.time_signature());
+        let text = format_bars(beats.0, self.state(context).time_signature());
         let typed = text.clone();
         div()
             .id(id)
@@ -499,7 +499,7 @@ impl Tonique {
             return;
         };
         window.focus(&self.focus, context);
-        let signature = self.state.time_signature();
+        let signature = self.state(context).time_signature();
         let Some(beats) = parse_bars(&field.text, signature).filter(|_| keep) else {
             return;
         };

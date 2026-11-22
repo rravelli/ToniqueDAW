@@ -12,6 +12,7 @@ mod menu;
 
 pub use drag::Param;
 
+use crate::model::HoldsProject;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -19,7 +20,7 @@ use std::{
 };
 
 use gpui::{
-    Bounds, Context, DragMoveEvent, MouseButton, Pixels, ScrollEvent, Window, canvas, div,
+    App, Bounds, Context, DragMoveEvent, MouseButton, Pixels, ScrollEvent, Window, canvas, div,
     prelude::*, px,
 };
 use tonique_engine::edit::TrackId;
@@ -115,14 +116,20 @@ impl HeadersUi {
 
 impl Tonique {
     /// The row of track or group `id`, the master's included.
-    pub fn track_row(&self, id: TrackId) -> Option<TrackRow> {
+    pub fn track_row(&self, id: TrackId, context: &App) -> Option<TrackRow> {
         if id == MASTER_TRACK_ID {
-            return Some(self.state.master_track());
+            return Some(self.state(context).master_track());
         }
-        if self.state.is_group(id) {
-            return self.state.groups().into_iter().find(|group| group.id == id);
+        if self.state(context).is_group(id) {
+            return self
+                .state(context)
+                .groups()
+                .into_iter()
+                .find(|group| group.id == id);
         }
-        self.state.tracks().find(|candidate| candidate.id == id)
+        self.state(context)
+            .tracks()
+            .find(|candidate| candidate.id == id)
     }
 
     /// The track list's, as last laid out.
@@ -144,7 +151,7 @@ impl Tonique {
         } else {
             COLLAPSED_WIDTH
         };
-        let in_view = self.rows_in_view(window);
+        let in_view = self.rows_in_view(window, context);
         let list = if open {
             self.header_list(rows, in_view, &theme, context)
                 .into_any_element()
@@ -162,18 +169,18 @@ impl Tonique {
             .overflow_hidden()
             .bg(hsla(theme.bg_panel))
             .on_scroll(context.listener(|this, event: &ScrollEvent, _, context| {
-                this.scroll_rows_by_wheel(WheelDelta::of(event.delta));
+                this.scroll_rows_by_wheel(WheelDelta::of(event.delta), context);
                 context.notify();
             }))
             .on_drag_move(context.listener(
                 |this, event: &DragMoveEvent<DraggedEffect>, _, context| {
-                    this.follow_effect_drag(event.event.position);
+                    this.follow_effect_drag(event.event.position, context);
                     context.notify();
                 },
             ))
             .on_drop(
                 context.listener(|this, dragged: &DraggedEffect, window, context| {
-                    this.drop_effect(dragged, window.mouse_position());
+                    this.drop_effect(dragged, window.mouse_position(), context);
                     context.notify();
                 }),
             )
@@ -186,7 +193,9 @@ impl Tonique {
             )
             .child(list)
             .child(self.rows_scrollbar(rows, context))
-            .when(open, |element| element.child(self.row_marker(&theme)))
+            .when(open, |element| {
+                element.child(self.row_marker(&theme, context))
+            })
             // Over the rows, in line with the timeline's footer.
             .child(self.list_footer(open, &theme, context))
             // Over the rows, in line with the ruler.
@@ -204,10 +213,10 @@ impl Tonique {
 
     /// Where a row being moved would land: a line between rows, or a
     /// group's header outlined.
-    fn row_marker(&self, theme: &Theme) -> impl IntoElement {
-        let marker = self.row_drop().map(|(_, _, marker)| marker);
+    fn row_marker(&self, theme: &Theme, context: &App) -> impl IntoElement {
+        let marker = self.row_drop(context).map(|(_, _, marker)| marker);
         let accent = theme.accent;
-        let footer = footer_height(&self.state);
+        let footer = footer_height(self.state(context));
         canvas(
             |_, _, _| {},
             move |bounds, _, window, _| {
@@ -278,7 +287,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, _, _, context| {
                     context.stop_propagation();
-                    this.state.set_all_collapsed(collapsed);
+                    this.state_mut(context).set_all_collapsed(collapsed);
                     context.notify();
                 }),
             )
@@ -323,13 +332,13 @@ impl Tonique {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let master = self.state.master_track();
+        let master = self.state(context).master_track();
         let footer = div()
             .absolute()
             .bottom_0()
             .left_0()
             .right_0()
-            .h(px(footer_height(&self.state)))
+            .h(px(footer_height(self.state(context))))
             .pt(px(FOOTER_PADDING))
             .bg(hsla(theme.bg_panel))
             .border_t_1()
@@ -403,7 +412,7 @@ impl Tonique {
         );
         let list = div()
             .absolute()
-            .top(px(RULER_HEIGHT - self.state.grid.offset.y))
+            .top(px(RULER_HEIGHT - self.state(context).grid.offset.y))
             .left(px(PANEL_MARGIN))
             .right(px(ROWS_RIGHT))
             .flex()
@@ -422,8 +431,8 @@ impl Tonique {
                     .child("Add track"),
                 theme,
                 context,
-                |this, _| {
-                    this.state.add_track();
+                |this, context| {
+                    this.state_mut(context).add_track();
                 },
             );
         let below = div()
@@ -433,7 +442,7 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(|this, _, _, context| {
-                    this.state.clear_track_selection();
+                    this.state_mut(context).clear_track_selection();
                     context.notify();
                 }),
             );
@@ -453,7 +462,7 @@ impl Tonique {
     ) -> impl IntoElement {
         let mut list = div()
             .absolute()
-            .top(px(RULER_HEIGHT - self.state.grid.offset.y))
+            .top(px(RULER_HEIGHT - self.state(context).grid.offset.y))
             .left_0()
             .right_0()
             .h(px(rows_height(rows)));
@@ -483,7 +492,7 @@ impl Tonique {
         } else {
             track.color
         };
-        let metrics = self.state.metrics.tracks.get(&id).cloned();
+        let metrics = self.state(context).metrics.tracks.get(&id).cloned();
         let canvas_theme = theme.clone();
         let inset = 4.;
         div()
@@ -504,7 +513,7 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(move |this, _, _, context| {
-                    this.state.select_track(&id);
+                    this.state_mut(context).select_track(&id);
                     context.notify();
                 }),
             )

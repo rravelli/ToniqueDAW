@@ -1,7 +1,9 @@
 //! The project in miniature, above the options.
 
+use crate::model::HoldsProject;
 use gpui::{
-    ContentMask, Context, CursorStyle, MouseButton, MouseDownEvent, Window, canvas, prelude::*, px,
+    App, ContentMask, Context, CursorStyle, MouseButton, MouseDownEvent, Window, canvas,
+    prelude::*, px,
 };
 use tonique_engine::time::BeatPos;
 
@@ -53,8 +55,8 @@ fn lanes_rect(rect: Rect) -> Rect {
 impl Tonique {
     /// The whole beat under `pointer_x` in the preview, if it shows the
     /// project.
-    pub(super) fn preview_beat(&self, pointer_x: f32) -> Option<BeatPos> {
-        let shown = preview_beats(&self.state, self.export.options.range);
+    pub(super) fn preview_beat(&self, pointer_x: f32, context: &App) -> Option<BeatPos> {
+        let shown = preview_beats(self.state(context), self.export.options.range);
         let inner = lanes_rect(Rect::of(self.export.preview_bounds.get()));
         if shown <= 0. || inner.width <= 0. {
             return None;
@@ -73,7 +75,7 @@ impl Tonique {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let state = &self.state;
+        let state = self.state(context);
         let export = &self.export;
         let frame = card(PREVIEW_HEIGHT, theme);
         if state.export_span(ExportRange::Project).is_err() {
@@ -176,7 +178,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(|this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
-                    this.preview_down(event);
+                    this.preview_down(event, context);
                     context.notify();
                 }),
             )

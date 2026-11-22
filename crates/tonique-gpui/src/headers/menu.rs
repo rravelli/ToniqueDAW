@@ -1,6 +1,7 @@
 //! A track's or a group's menu, as its header's in the egui app, and
 //! renaming one in place.
 
+use crate::model::HoldsProject;
 use gpui::{Context, KeyDownEvent, Window, div, prelude::*, px};
 use tonique_engine::edit::TrackId;
 
@@ -19,7 +20,7 @@ const SWATCH: f32 = 14.;
 
 impl Tonique {
     pub fn track_menu(&self, id: TrackId, context: &mut Context<Self>) -> Option<gpui::Div> {
-        let track = self.track_row(id)?;
+        let track = self.track_row(id, context)?;
         let theme = &*crate::theme::current(context);
         let index = track.first_track_index;
         let menu = Menu::new(theme).label(display_name(&track.name, index));
@@ -31,7 +32,7 @@ impl Tonique {
         }
         let is_group = track.kind == TrackKind::Group;
         // The whole selection when this row is part of it.
-        let selection = self.state.selected_tracks().clone();
+        let selection = self.state(context).selected_tracks().clone();
         let targets = if selection.contains(&id) {
             selection
         } else {
@@ -46,28 +47,28 @@ impl Tonique {
             .item(
                 MenuItem::new("Add Audio Track").icon(icons::PLUS),
                 context,
-                move |this, _, _| {
-                    this.state.add_track_at(index);
+                move |this, _, context| {
+                    this.state_mut(context).add_track_at(index);
                 },
             )
             .item(
                 MenuItem::new("Group").icon(icons::FOLDER_PLUS),
                 context,
-                move |this, _, _| {
-                    this.state.group(&targets);
+                move |this, _, context| {
+                    this.state_mut(context).group(&targets);
                 },
             );
         let menu = if is_group {
             menu.item(
                 MenuItem::new("Ungroup").icon(icons::FOLDER_MINUS),
                 context,
-                move |this, _, _| this.state.ungroup(id),
+                move |this, _, context| this.state_mut(context).ungroup(id),
             )
         } else {
             menu.item(
                 MenuItem::new("Duplicate").icon(icons::COPY),
                 context,
-                move |this, _, _| this.state.duplicate_track(&id),
+                move |this, _, context| this.state_mut(context).duplicate_track(&id),
             )
         };
         let delete = if is_group {
@@ -82,7 +83,7 @@ impl Tonique {
             .item(
                 MenuItem::new(delete).icon(icons::TRASH).color(theme.danger),
                 context,
-                move |this, _, _| this.state.delete_track(&id),
+                move |this, _, context| this.state_mut(context).delete_track(&id),
             );
         Some(menu.into_element())
     }
@@ -111,8 +112,8 @@ impl Tonique {
                     gpui::MouseButton::Left,
                     context.listener(move |this, _, _, context| {
                         context.stop_propagation();
-                        this.state.track_view_mut(&id).color = color;
-                        this.state.commit_track_view(&id);
+                        this.state_mut(context).track_view_mut(&id).color = color;
+                        this.state_mut(context).commit_track_view(&id);
                         this.popup = None;
                         context.notify();
                     }),
@@ -124,7 +125,10 @@ impl Tonique {
 
     /// Starts typing a new name for track `id`.
     pub fn rename_track(&mut self, id: TrackId, window: &mut Window, context: &mut Context<Self>) {
-        let Some(track) = self.track_row(id).filter(|_| id != MASTER_TRACK_ID) else {
+        let Some(track) = self
+            .track_row(id, context)
+            .filter(|_| id != MASTER_TRACK_ID)
+        else {
             return;
         };
         let mut field = TextField::new(context);
@@ -147,8 +151,8 @@ impl Tonique {
         if keep {
             let name = field.text.trim();
             let name = if name.is_empty() { DEFAULT_NAME } else { name };
-            self.state.track_view_mut(&id).name = name.to_string();
-            self.state.commit_track_view(&id);
+            self.state_mut(context).track_view_mut(&id).name = name.to_string();
+            self.state_mut(context).commit_track_view(&id);
         }
         window.focus(&self.focus, context);
     }

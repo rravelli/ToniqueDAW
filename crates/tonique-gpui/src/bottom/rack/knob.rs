@@ -4,10 +4,11 @@
 //! the arrow keys step it 1% of its travel (10% with Shift), each press an
 //! undo step.
 
+use crate::model::HoldsProject;
 use std::f32::consts::{FRAC_PI_4, PI};
 
 use gpui::{
-    Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, canvas, div, prelude::*, px,
+    App, Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, canvas, div, prelude::*, px,
 };
 use tonique_engine::edit::{Parameter, PluginId, TrackId};
 
@@ -193,7 +194,7 @@ impl Tonique {
                     if event.click_count >= 2 {
                         this.bottom.rack.drag = None;
                         if let Some(default) = default {
-                            this.set_knob(&target, value, default, true);
+                            this.set_knob(&target, value, default, true, context);
                         }
                     } else {
                         this.bottom.rack.drag = Some(RackDrag::Knob(KnobDrag {
@@ -212,7 +213,7 @@ impl Tonique {
 
     /// The knob of `arrows` stepped by `presses`, evenly along its travel
     /// (log knobs too), as one undo step.
-    pub(crate) fn step_knob(&mut self, arrows: &KnobArrows, presses: Presses) {
+    pub(crate) fn step_knob(&mut self, arrows: &KnobArrows, presses: Presses, context: &mut App) {
         if self.bottom.rack.drag.is_some() {
             return;
         }
@@ -220,7 +221,7 @@ impl Tonique {
             KnobTarget::Param(param) => param.get(),
             KnobTarget::Time { track, plugin } => {
                 let effect = self
-                    .state
+                    .state(context)
                     .effects(track)
                     .into_iter()
                     .find(|effect| effect.plugin.id == *plugin);
@@ -234,25 +235,33 @@ impl Tonique {
         let stepped = step_ratio(ratio, presses);
         if stepped != ratio {
             let to = arrows.scale.value(stepped);
-            self.set_knob(&arrows.target, value, to, true);
+            self.set_knob(&arrows.target, value, to, true, context);
         }
     }
 
     /// Sets what `target` sets from `before` to `value`: as an undo step
     /// when `done`, else live (a parameter) or shown (a time).
-    pub(super) fn set_knob(&mut self, target: &KnobTarget, before: f32, value: f32, done: bool) {
+    pub(super) fn set_knob(
+        &mut self,
+        target: &KnobTarget,
+        before: f32,
+        value: f32,
+        done: bool,
+        context: &mut App,
+    ) {
         match target {
             KnobTarget::Param(param) => {
                 param.set(value);
                 if done && before != param.get() {
-                    self.state.commit_params(&[(param.id, before, param.get())]);
+                    self.state_mut(context)
+                        .commit_params(&[(param.id, before, param.get())]);
                 }
             }
             KnobTarget::Time { track, plugin } => {
                 if done {
                     self.bottom.rack.pending = None;
                     if value != before {
-                        self.state.set_effect_setting(
+                        self.state_mut(context).set_effect_setting(
                             track,
                             *plugin,
                             crate::core::effect::Setting::Time(value),

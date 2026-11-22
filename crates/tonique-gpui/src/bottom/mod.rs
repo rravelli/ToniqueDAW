@@ -11,10 +11,11 @@ mod header;
 pub mod paint;
 mod rack;
 
+use crate::model::HoldsProject;
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    AnyElement, Bounds, Context, MouseDownEvent, MouseMoveEvent, Pixels, Window, canvas, div,
+    AnyElement, App, Bounds, Context, MouseDownEvent, MouseMoveEvent, Pixels, Window, canvas, div,
     prelude::*, px,
 };
 use tonique_engine::edit::ClipId;
@@ -93,9 +94,9 @@ impl BottomPanel {
 
 impl Tonique {
     /// Opens the panel on the details of clip `id`, and selects its track.
-    pub fn show_clip_details(&mut self, id: ClipId) {
-        if let Some((track, _)) = self.state.find_clip(id) {
-            self.state.select_track(&track);
+    pub fn show_clip_details(&mut self, id: ClipId, context: &mut App) {
+        if let Some((track, _)) = self.state(context).find_clip(id) {
+            self.state_mut(context).select_track(&track);
             self.bottom.view = BottomView::Clip(id);
             self.bottom.open = true;
         }
@@ -110,25 +111,25 @@ impl Tonique {
         self.bottom.view = BottomView::Effects;
     }
 
-    fn show_bottom_view(&mut self, view: BottomView) {
+    fn show_bottom_view(&mut self, view: BottomView, context: &mut App) {
         match view {
-            BottomView::Clip(id) => self.show_clip_details(id),
+            BottomView::Clip(id) => self.show_clip_details(id, context),
             BottomView::Effects => self.bottom.view = BottomView::Effects,
         }
     }
 
     /// While the panel shows a clip, show the one selected instead, when
     /// exactly one is; and the track's effects once the clip is gone.
-    fn follow_clip_selection(&mut self) {
+    fn follow_clip_selection(&mut self, context: &mut App) {
         let BottomView::Clip(shown) = self.bottom.view else {
             return;
         };
-        if let [selected] = self.state.selected_clips()
+        if let [selected] = self.state(context).selected_clips()
             && *selected != shown
-            && self.state.find_clip(*selected).is_some()
+            && self.state(context).find_clip(*selected).is_some()
         {
             self.bottom.view = BottomView::Clip(*selected);
-        } else if self.state.find_clip(shown).is_none() {
+        } else if self.state(context).find_clip(shown).is_none() {
             self.bottom.view = BottomView::Effects;
         }
     }
@@ -159,7 +160,7 @@ impl Tonique {
         if self.bottom.view != BottomView::Effects {
             return false;
         }
-        let Some(track) = self.state.selected_track() else {
+        let Some(track) = self.state(context).selected_track() else {
             return false;
         };
         self.rack_action(track.id, action, window, context);
@@ -167,7 +168,12 @@ impl Tonique {
     }
 
     /// Follows a drag in the panel. Returns whether it's one.
-    pub fn bottom_drag_move(&mut self, event: &MouseMoveEvent, window_height: f32) -> bool {
+    pub fn bottom_drag_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window_height: f32,
+        context: &mut App,
+    ) -> bool {
         // The timeline keeps some room above.
         if self
             .bottom
@@ -177,13 +183,13 @@ impl Tonique {
         {
             return true;
         }
-        self.rack_drag_move(event) | self.clip_drag_move(event)
+        self.rack_drag_move(event, context) | self.clip_drag_move(event, context)
     }
 
-    pub fn bottom_drag_end(&mut self) {
+    pub fn bottom_drag_end(&mut self, context: &mut App) {
         self.bottom.height.end();
-        self.rack_drag_end();
-        self.clip_drag_end();
+        self.rack_drag_end(context);
+        self.clip_drag_end(context);
     }
 
     /// Whether the pointer is over the panel, which then redraws as it
@@ -201,10 +207,10 @@ impl Tonique {
             self.bottom.focused = false;
             return None;
         }
-        self.follow_clip_selection();
+        self.follow_clip_selection(context);
         let theme = crate::theme::current(context);
         let clip = match self.bottom.view {
-            BottomView::Clip(id) => self.state.clip_with_track(id),
+            BottomView::Clip(id) => self.state(context).clip_with_track(id),
             BottomView::Effects => None,
         };
         let content = match clip {
@@ -224,12 +230,12 @@ impl Tonique {
                     .child(header)
                     .child(details)
             }
-            None => match self.state.selected_track() {
+            None => match self.state(context).selected_track() {
                 Some(track) => {
                     // A tab to the clip selected on this track, if one is.
-                    let selected_clip = match self.state.selected_clips() {
+                    let selected_clip = match self.state(context).selected_clips() {
                         [id] if self
-                            .state
+                            .state(context)
                             .find_clip(*id)
                             .is_some_and(|(owner, _)| owner == track.id) =>
                         {

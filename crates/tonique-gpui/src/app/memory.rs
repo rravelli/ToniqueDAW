@@ -2,6 +2,7 @@
 //! the audio files' data and the waveform tiles hold. Opened by clicking
 //! the frame rate in the menu bar.
 
+use crate::model::HoldsProject;
 use gpui::{Context, SharedString, div, prelude::*, px};
 use tonique_core::memory::AudioMemory;
 
@@ -74,7 +75,7 @@ fn audio_rows(menu: Menu, theme: &Theme, memory: &AudioMemory) -> Menu {
 impl Tonique {
     pub(super) fn memory_popup(&self, context: &mut Context<Self>) -> gpui::Div {
         let theme = &*crate::theme::current(context);
-        let sources = self.state.source_memory();
+        let sources = self.state(context).source_memory();
         let cache = AUDIO_ANALYSIS_CACHE.memory();
         let waves = self.waves.borrow().memory();
         let resident = self

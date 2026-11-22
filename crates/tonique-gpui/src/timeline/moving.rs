@@ -4,7 +4,8 @@
 //! edit cursor; with Ctrl, copies of it do. Rows past the last one are
 //! added on drop.
 
-use gpui::{Modifiers, Pixels, Point};
+use crate::model::HoldsProject;
+use gpui::{App, Modifiers, Pixels, Point};
 use tonique_engine::{
     edit::{ClipId, TrackId},
     time::BeatPos,
@@ -78,31 +79,37 @@ impl Tonique {
         mut press: ClipMove,
         position: Point<Pixels>,
         modifiers: &Modifiers,
+        context: &mut App,
     ) -> Option<ClipMove> {
         if press.dragged.is_none() {
             if (position - press.start).magnitude() <= MOVE_THRESHOLD {
                 return Some(press);
             }
-            press.dragged = Some(self.start_clip_drag(&press, duplicating(modifiers)));
+            press.dragged = Some(self.start_clip_drag(&press, duplicating(modifiers), context));
         }
         let mut dragged = press.dragged.take()?;
         if dragged.duplicate && !duplicating(modifiers) {
-            self.expand_on_hover(None, false);
+            self.expand_on_hover(None, false, context);
             return None;
         }
         let (local_x, local_y) = self.local(position);
         let over_lanes = self.timeline.bounds.get().contains(&position);
-        self.expand_on_hover(over_lanes.then_some(local_y), true);
-        let offset = self.beats_at(local_x) - press.grab;
-        self.place_dragged(&mut dragged, offset, local_y, modifiers.alt);
+        self.expand_on_hover(over_lanes.then_some(local_y), true, context);
+        let offset = self.beats_at(local_x, context) - press.grab;
+        self.place_dragged(&mut dragged, offset, local_y, modifiers.alt, context);
         press.dragged = Some(dragged);
         Some(press)
     }
 
     /// What a drag of the selection takes: grabbing a clip outside it (or
     /// outside its zone) takes that clip alone.
-    fn start_clip_drag(&mut self, press: &ClipMove, duplicate: bool) -> DraggedClips {
-        let state = &mut self.state;
+    fn start_clip_drag(
+        &mut self,
+        press: &ClipMove,
+        duplicate: bool,
+        context: &mut App,
+    ) -> DraggedClips {
+        let state = &mut *self.state_mut(context);
         let outside_zone = state
             .selection_bounds()
             .is_some_and(|zone| press.grab < zone.start_pos || press.grab > zone.end_pos);
@@ -137,8 +144,15 @@ impl Tonique {
 
     /// Where the dragged clips would land, `offset` beats from where they
     /// were grabbed, with the pointer at `local_y`.
-    fn place_dragged(&self, dragged: &mut DraggedClips, offset: f64, local_y: f32, alt: bool) {
-        let state = &self.state;
+    fn place_dragged(
+        &self,
+        dragged: &mut DraggedClips,
+        offset: f64,
+        local_y: f32,
+        alt: bool,
+        context: &App,
+    ) {
+        let state = self.state(context);
         let rows = rows(state);
         // Below the rows: on new tracks; the topmost clip not above the first.
         let lowest_offset = dragged
@@ -147,7 +161,7 @@ impl Tonique {
             .map(|clip| clip.track_offset)
             .min()
             .unwrap_or(0);
-        let pointer_track = self.pointer_track(&rows, local_y) as i32;
+        let pointer_track = self.pointer_track(&rows, local_y, context) as i32;
         let pointer_track = pointer_track.max(-lowest_offset);
 
         let mut delta = f64::INFINITY;
@@ -200,9 +214,9 @@ impl Tonique {
     /// Drops the dragged clips: moved (with a zone, its part of them,
     /// split off), or copied; tracks added for those past the last row.
     /// One undo step; what landed is selected.
-    pub(super) fn drop_clips(&mut self, dragged: DraggedClips) {
+    pub(super) fn drop_clips(&mut self, dragged: DraggedClips, context: &mut App) {
         let ids = dragged.ids();
-        let state = &mut self.state;
+        let state = &mut *self.state_mut(context);
         let mut tracks: Vec<TrackId> = state.tracks().map(|track| track.id).collect();
         let mut landed = Vec::new();
         state.begin_batch();

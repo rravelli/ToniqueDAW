@@ -5,11 +5,13 @@
 //! time in the file (10 ms, a second with Shift). Each press is an undo
 //! step.
 
+use crate::model::HoldsProject;
 use crate::{
     app::Tonique,
     bottom::clip::{audio::ClipSlider, inspector::Field},
     utils::steps::Presses,
 };
+use gpui::App;
 
 /// A value of the inspector's holding the arrow keys, of the clip shown.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -19,7 +21,7 @@ pub enum ClipArrows {
 }
 
 impl Tonique {
-    pub(crate) fn step_clip(&mut self, arrows: ClipArrows, presses: Presses) {
+    pub(crate) fn step_clip(&mut self, arrows: ClipArrows, presses: Presses, context: &mut App) {
         if self.bottom.clip.drag.is_some() {
             return;
         }
@@ -27,13 +29,13 @@ impl Tonique {
             .bottom
             .clip
             .clip
-            .and_then(|id| self.state.clip_with_track(id))
+            .and_then(|id| self.state(context).clip_with_track(id))
         else {
             return;
         };
         match arrows {
-            ClipArrows::Slider(slider) => self.step_clip_slider(&clip, slider, presses),
-            ClipArrows::Field(field) => self.step_field(&clip, field, presses),
+            ClipArrows::Slider(slider) => self.step_clip_slider(&clip, slider, presses, context),
+            ClipArrows::Field(field) => self.step_field(&clip, field, presses, context),
         }
     }
 }

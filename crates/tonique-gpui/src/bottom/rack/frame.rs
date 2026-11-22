@@ -4,6 +4,7 @@
 //! header (the whole strip) is dragged to move the effect, double-clicked
 //! to fold it, and right-clicked for its menu.
 
+use crate::model::HoldsProject;
 use gpui::{
     Anchor, AnyElement, Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, Window,
     canvas, div, prelude::*, px,
@@ -130,7 +131,7 @@ impl Tonique {
                 glyph(icons::CARET_RIGHT, ICON_SIZE, false),
                 theme,
                 context,
-                move |this, _| this.state.set_effect_collapsed(plugin, false),
+                move |this, context| this.state_mut(context).set_effect_collapsed(plugin, false),
             ))
             .child(
                 div()
@@ -188,7 +189,8 @@ impl Tonique {
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     if event.click_count >= 2 {
                         this.bottom.rack.drag = None;
-                        this.state.set_effect_collapsed(plugin, !collapsed);
+                        this.state_mut(context)
+                            .set_effect_collapsed(plugin, !collapsed);
                     } else {
                         let pointer_x = f32::from(event.position.x);
                         this.bottom.rack.drag = Some(RackDrag::Move {
@@ -228,7 +230,10 @@ impl Tonique {
             glyph(icons::POWER, ICON_SIZE, false),
             theme,
             context,
-            move |this, _| this.state.set_effect_enabled(&track, plugin, !enabled),
+            move |this, context| {
+                this.state_mut(context)
+                    .set_effect_enabled(&track, plugin, !enabled)
+            },
         )
     }
 
@@ -289,7 +294,7 @@ impl Tonique {
                 glyph(icons::CARET_DOWN, ICON_SIZE, false),
                 theme,
                 context,
-                move |this, _| this.state.set_effect_collapsed(plugin, true),
+                move |this, context| this.state_mut(context).set_effect_collapsed(plugin, true),
             ))
             .child(div().flex_1().min_w_0().ml(px(2.)).mr(px(1.)).child(name));
         self.grabbed(header, index, plugin, track, false, context)
@@ -305,7 +310,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) {
         let Some(effect) = self
-            .state
+            .state(context)
             .effects(&track)
             .into_iter()
             .find(|effect| effect.plugin.id == plugin)
@@ -313,7 +318,7 @@ impl Tonique {
             return;
         };
         if effect.collapsed {
-            self.state.set_effect_collapsed(plugin, false);
+            self.state_mut(context).set_effect_collapsed(plugin, false);
         }
         let mut field = TextField::new(context);
         field.start(effect.name().to_string(), window, context);
@@ -330,8 +335,11 @@ impl Tonique {
             return;
         };
         if keep {
-            self.state
-                .rename_effect(&track, plugin, Some(field.text.trim().to_string()));
+            self.state_mut(context).rename_effect(
+                &track,
+                plugin,
+                Some(field.text.trim().to_string()),
+            );
         }
         window.focus(&self.focus, context);
     }
@@ -343,7 +351,7 @@ impl Tonique {
         plugin: PluginId,
         context: &mut Context<Self>,
     ) -> Option<gpui::Div> {
-        let effects = self.state.effects(&track);
+        let effects = self.state(context).effects(&track);
         let index = effects
             .iter()
             .position(|effect| effect.plugin.id == plugin)?;
@@ -366,13 +374,17 @@ impl Tonique {
                 .item(
                     MenuItem::new(text).icon(icon),
                     context,
-                    move |this, _, _| this.state.set_effect_collapsed(plugin, !collapsed),
+                    move |this, _, context| {
+                        this.state_mut(context)
+                            .set_effect_collapsed(plugin, !collapsed)
+                    },
                 )
                 .item(
                     MenuItem::new("Duplicate").icon(icons::COPY),
                     context,
-                    move |this, _, _| {
-                        this.bottom.rack.selected = this.state.duplicate_effects(&track, &[index]);
+                    move |this, _, context| {
+                        this.bottom.rack.selected =
+                            this.state_mut(context).duplicate_effects(&track, &[index]);
                     },
                 )
                 .separator()
@@ -381,8 +393,8 @@ impl Tonique {
                         .icon(icons::TRASH)
                         .color(theme.danger),
                     context,
-                    move |this, _, _| {
-                        this.state.remove_effects(&track, &[index]);
+                    move |this, _, context| {
+                        this.state_mut(context).remove_effects(&track, &[index]);
                         this.bottom.rack.selected.clear();
                     },
                 )

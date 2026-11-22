@@ -6,6 +6,7 @@
 //! Unlike egui, gpui has no colour picker: a colour is edited by typing
 //! its hex value.
 
+use crate::model::HoldsProject;
 use gpui::{App, Context, MouseButton, Window, div, prelude::*, px};
 
 use crate::{
@@ -90,7 +91,7 @@ impl Tonique {
     /// Uses `theme` everywhere, new tracks taking their colours from its
     /// palette.
     pub fn install_theme(&mut self, theme: Theme, context: &mut App) {
-        self.state.set_track_palette(&theme.palette);
+        self.state_mut(context).set_track_palette(&theme.palette);
         crate::theme::install(theme, context);
     }
 
@@ -101,14 +102,14 @@ impl Tonique {
         form.warnings = warnings;
         form.open(id);
         self.install_theme(theme, context);
-        let mut settings = self.state.settings().clone();
+        let mut settings = self.state(context).settings().clone();
         settings.theme = id.to_string();
         self.settings.draft.theme = settings.theme.clone();
-        self.state.apply_settings(settings);
+        self.state_mut(context).apply_settings(settings);
     }
 
     fn duplicate_theme(&mut self, context: &mut App) {
-        let current = self.state.settings().theme.clone();
+        let current = self.state(context).settings().theme.clone();
         match self.settings.appearance.themes.duplicate(&current) {
             Ok(id) => self.select_theme(&id, context),
             Err(error) => self.settings.appearance.error = Some(error),
@@ -119,7 +120,7 @@ impl Tonique {
     /// one's.
     fn reload_themes(&mut self, context: &mut App) {
         self.settings.appearance.themes = ThemeLibrary::load();
-        let current = self.state.settings().theme.clone();
+        let current = self.state(context).settings().theme.clone();
         self.select_theme(&current, context);
     }
 
@@ -200,7 +201,7 @@ impl Tonique {
 
     /// The themes to choose from, the one in use ticked.
     pub fn theme_menu(&self, context: &mut Context<Self>) -> gpui::Div {
-        let current = &self.state.settings().theme;
+        let current = &self.state(context).settings().theme.clone();
         let themes = self.settings.appearance.themes.list();
         let missing = (!themes.iter().any(|theme| theme.id == *current))
             .then(|| (current.clone(), format!("{current} (not found)")));
@@ -235,7 +236,7 @@ impl Tonique {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let current = self.state.settings().theme.clone();
+        let current = self.state(context).settings().theme.clone();
         let form = &mut self.settings.appearance;
         if form.draft.as_ref().is_none_or(|draft| draft.id != current) {
             form.open(&current);

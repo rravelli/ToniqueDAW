@@ -19,10 +19,11 @@ mod missing;
 mod preview;
 mod rows;
 
+use crate::model::HoldsProject;
 use std::{cell::Cell, collections::HashMap, path::PathBuf, rc::Rc};
 
 use gpui::{
-    Bounds, Context, FocusHandle, MouseButton, Pixels, Render, SharedString, Window, div,
+    App, Bounds, Context, FocusHandle, MouseButton, Pixels, Render, SharedString, Window, div,
     prelude::*, px,
 };
 
@@ -199,11 +200,11 @@ impl Browser {
 impl Tonique {
     /// Shows the missing files' tab, `path`'s selected if given (a missing
     /// clip's).
-    pub fn show_missing_files(&mut self, path: Option<PathBuf>) {
+    pub fn show_missing_files(&mut self, path: Option<PathBuf>, context: &mut App) {
         self.browser_open = true;
         self.set_browser_source(BrowserSource::Missing);
         if let Some(path) = path {
-            self.browser.missing.select_path(&self.state, &path);
+            self.browser.missing.select_path(self.state(context), &path);
         }
     }
 
@@ -226,7 +227,9 @@ impl Tonique {
             (BrowserSource::Effects, icons::MAGIC_WAND, "Effects"),
         ];
         // Missing files below the rest, while there are (or shown).
-        if !self.state.missing_files().is_empty() || self.browser.source == BrowserSource::Missing {
+        if !self.state(context).missing_files().is_empty()
+            || self.browser.source == BrowserSource::Missing
+        {
             sources.push((BrowserSource::Missing, icons::WARNING, "Missing files"));
         }
         let rail = icon_rail(

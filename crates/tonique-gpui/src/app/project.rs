@@ -2,14 +2,15 @@
 //! the prompt about unsaved changes (also on closing the window), notices
 //! about what went wrong, the recent projects and the window's title.
 
+use crate::model::HoldsProject;
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
 use gpui::{
-    Context, MouseButton, PathPromptOptions, PromptLevel, Stateful, Task, Window, div, prelude::*,
-    px,
+    App, Context, MouseButton, PathPromptOptions, PromptLevel, Stateful, Task, Window, div,
+    prelude::*, px,
 };
 
 use crate::{
@@ -140,8 +141,8 @@ impl Tonique {
             ProjectAction::Save => self.save_project(window, context).detach(),
             ProjectAction::SaveAs => self.save_project_as(window, context).detach(),
             ProjectAction::ClearRecent => {
-                self.project.recent.clear();
-                self.project.recent.save();
+                self.files.recent.clear();
+                self.files.recent.save();
             }
         }
     }
@@ -154,11 +155,11 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        if !self.project.is_modified(&self.state) {
+        if !self.files.is_modified(self.state(context)) {
             self.run_after_prompt(then, window, context);
             return;
         }
-        self.project.pending = Some(then);
+        self.files.pending = Some(then);
         self.dialog = Some(Dialog::Unsaved);
         // Enter answers it, not a focused list or field.
         window.focus(&self.focus, context);
@@ -173,7 +174,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) {
         self.dialog = None;
-        let Some(then) = self.project.pending.take() else {
+        let Some(then) = self.files.pending.take() else {
             return;
         };
         if !save {
@@ -225,7 +226,7 @@ impl Tonique {
             .gap(px(6.))
             .child(dialog_title(format!(
                 "Save changes to “{}”?",
-                self.project.name()
+                self.files.name()
             )))
             .child(dialog_body(
                 "Your changes will be lost if you don't save them.",
@@ -252,15 +253,15 @@ impl Tonique {
     ) {
         match then {
             AfterPrompt::New => {
-                self.state.new_project();
-                self.project.path = None;
-                self.project.set_saved(self.state.project(None));
+                self.state_mut(context).new_project();
+                self.files.path = None;
+                self.files.set_saved(self.state(context).project(None));
                 self.forget_old_project();
             }
             AfterPrompt::Open(Some(path)) => self.open_project(&path, window, context),
             AfterPrompt::Open(None) => self.pick_project(window, context),
             AfterPrompt::Close => {
-                self.project.closing = true;
+                self.files.closing = true;
                 window.remove_window();
             }
         }
@@ -296,7 +297,7 @@ impl Tonique {
             Ok(project) => project,
             Err(error) => {
                 if !path.exists() {
-                    self.project.forget(path);
+                    self.files.forget(path);
                 }
                 let title = format!("Couldn't open “{}”", project_name(path));
                 self.notice(&title, &[error], window, context);
@@ -304,14 +305,15 @@ impl Tonique {
             }
         };
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-        let mut problems = self.state.load_project(&project, &dir);
-        self.project.set_saved(self.state.project(Some(&dir)));
-        self.project.remember(path);
-        self.project.path = Some(path.to_path_buf());
+        let mut problems = self.state_mut(context).load_project(&project, &dir);
+        self.files
+            .set_saved(self.state(context).project(Some(&dir)));
+        self.files.remember(path);
+        self.files.path = Some(path.to_path_buf());
         self.forget_old_project();
-        let missing = self.state.missing_files().len();
+        let missing = self.state(context).missing_files().len();
         if missing > 0 {
-            self.show_missing_files(None);
+            self.show_missing_files(None, context);
             problems.push(format!(
                 "{missing} audio file{} not found: see the browser's Missing tab.",
                 if missing == 1 { " was" } else { "s were" }
@@ -326,15 +328,15 @@ impl Tonique {
     /// Saves to the project's file, or asks where. The task tells whether
     /// it saved.
     fn save_project(&mut self, window: &mut Window, context: &mut Context<Self>) -> Task<bool> {
-        match self.project.path.clone() {
+        match self.files.path.clone() {
             Some(path) => Task::ready(self.write_project(&path, window, context)),
             None => self.save_project_as(window, context),
         }
     }
 
     fn save_project_as(&mut self, window: &mut Window, context: &mut Context<Self>) -> Task<bool> {
-        let name = format!("{}.{EXTENSION}", self.project.name());
-        let picked = context.prompt_for_new_path(&start_dir(&self.project), Some(&name));
+        let name = format!("{}.{EXTENSION}", self.files.name());
+        let picked = context.prompt_for_new_path(&start_dir(&self.files), Some(&name));
         context.spawn_in(window, async move |this, context| {
             let Ok(Ok(Some(mut path))) = picked.await else {
                 return false;
@@ -358,12 +360,12 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> bool {
-        let project = self.state.project(path.parent());
+        let project = self.state(context).project(path.parent());
         match project.write(path) {
             Ok(()) => {
-                self.project.remember(path);
-                self.project.path = Some(path.to_path_buf());
-                self.project.set_saved(project);
+                self.files.remember(path);
+                self.files.path = Some(path.to_path_buf());
+                self.files.set_saved(project);
                 true
             }
             Err(error) => {
@@ -404,25 +406,25 @@ impl Tonique {
 
     /// The window's title: the project's name, starred while unsaved;
     /// looked at a few times a second.
-    pub(super) fn update_title(&mut self, window: &mut Window) {
+    pub(super) fn update_title(&mut self, window: &mut Window, context: &mut App) {
         let now = Instant::now();
         if self
-            .project
+            .files
             .title_checked
             .is_some_and(|checked| now - checked < TITLE_CHECK_INTERVAL)
         {
             return;
         }
-        self.project.title_checked = Some(now);
-        let modified = self.project.is_modified(&self.state);
+        self.files.title_checked = Some(now);
+        let modified = self.files.is_modified(self.state(context));
         let title = format!(
             "{}{} — Tonique",
-            self.project.name(),
+            self.files.name(),
             if modified { " *" } else { "" }
         );
-        if title != self.project.title {
+        if title != self.files.title {
             window.set_window_title(&title);
-            self.project.title = title;
+            self.files.title = title;
         }
     }
 
@@ -433,7 +435,7 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> bool {
-        if self.project.closing || !self.project.is_modified(&self.state) {
+        if self.files.closing || !self.files.is_modified(self.state(context)) {
             return true;
         }
         self.after_prompt(AfterPrompt::Close, window, context);

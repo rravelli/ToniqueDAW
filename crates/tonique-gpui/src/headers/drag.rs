@@ -3,7 +3,8 @@
 //! width (its left edge, collapsing it when dragged well past its
 //! narrowest).
 
-use gpui::{MouseDownEvent, MouseMoveEvent};
+use crate::model::HoldsProject;
+use gpui::{App, MouseDownEvent, MouseMoveEvent};
 use tonique_engine::edit::TrackId;
 
 use crate::{
@@ -125,38 +126,44 @@ pub enum HeaderDrag {
 }
 
 impl Tonique {
-    pub(super) fn param(&self, id: TrackId, param: Param) -> f32 {
-        self.track_row(id)
+    pub(super) fn param(&self, id: TrackId, param: Param, context: &App) -> f32 {
+        self.track_row(id, context)
             .map_or(param.scale().default_value(), |track| param.of(&track))
     }
 
-    fn set_param(&mut self, id: TrackId, param: Param, value: f32) {
+    fn set_param(&mut self, id: TrackId, param: Param, value: f32, context: &mut App) {
         match param {
-            Param::Volume => self.state.set_volume(id, value),
-            Param::Pan => self.state.set_pan(id, value),
+            Param::Volume => self.state_mut(context).set_volume(id, value),
+            Param::Pan => self.state_mut(context).set_pan(id, value),
         }
     }
 
     /// `from` to `to`, as one undo step.
-    fn commit_param(&mut self, id: TrackId, param: Param, from: f32, to: f32) {
+    fn commit_param(&mut self, id: TrackId, param: Param, from: f32, to: f32, context: &mut App) {
         match param {
-            Param::Volume => self.state.commit_volume(id, from, to),
-            Param::Pan => self.state.commit_pan(id, from, to),
+            Param::Volume => self.state_mut(context).commit_volume(id, from, to),
+            Param::Pan => self.state_mut(context).commit_pan(id, from, to),
         }
     }
 
     /// A press on a slider: a drag from there, or a double-click back to
     /// its default; it takes the arrow keys either way.
-    pub(super) fn slider_down(&mut self, id: TrackId, param: Param, event: &MouseDownEvent) {
+    pub(super) fn slider_down(
+        &mut self,
+        id: TrackId,
+        param: Param,
+        event: &MouseDownEvent,
+        context: &mut App,
+    ) {
         self.hold_arrows(ArrowHolder::Header(id, param));
-        let value = self.param(id, param);
+        let value = self.param(id, param, context);
         let scale = param.scale();
         if event.click_count >= 2 {
             self.headers.drag = None;
             let default = scale.default_value();
             if value != default {
-                self.set_param(id, param, default);
-                self.commit_param(id, param, value, default);
+                self.set_param(id, param, default, context);
+                self.commit_param(id, param, value, default, context);
             }
             return;
         }
@@ -169,15 +176,21 @@ impl Tonique {
     }
 
     /// A slider stepped by the arrow keys, as one undo step.
-    pub(crate) fn step_header(&mut self, id: TrackId, param: Param, presses: Presses) {
+    pub(crate) fn step_header(
+        &mut self,
+        id: TrackId,
+        param: Param,
+        presses: Presses,
+        context: &mut App,
+    ) {
         if self.headers.drag.is_some() {
             return;
         }
-        let value = self.param(id, param);
+        let value = self.param(id, param, context);
         let stepped = param.scale().stepped(value, presses);
         if stepped != value {
-            self.set_param(id, param, stepped);
-            self.commit_param(id, param, value, stepped);
+            self.set_param(id, param, stepped, context);
+            self.commit_param(id, param, value, stepped, context);
         }
     }
 
@@ -211,7 +224,7 @@ impl Tonique {
 
     /// Where the row being moved would land, if it's moved and somewhere
     /// it can go: not on itself or into a group it holds.
-    pub(super) fn row_drop(&self) -> Option<(TrackId, RowTarget, RowMarker)> {
+    pub(super) fn row_drop(&self, context: &App) -> Option<(TrackId, RowTarget, RowMarker)> {
         let Some(HeaderDrag::Row {
             track,
             last_y,
@@ -221,8 +234,8 @@ impl Tonique {
         else {
             return None;
         };
-        let offset = self.state.grid.offset.y;
-        let rows: Vec<ListRow> = rows(&self.state)
+        let offset = self.state(context).grid.offset.y;
+        let rows: Vec<ListRow> = rows(self.state(context))
             .iter()
             .map(|row| ListRow {
                 track: row.track.id,
@@ -235,7 +248,7 @@ impl Tonique {
         let (target, marker) = row_target(&rows, local_y)?;
         let allowed = match target {
             RowTarget::Before(row) | RowTarget::Into(row) => {
-                row != track && !self.state.ancestors(row).contains(&track)
+                row != track && !self.state(context).ancestors(row).contains(&track)
             }
             RowTarget::End => true,
         };
@@ -244,7 +257,12 @@ impl Tonique {
 
     /// Follows a drag in the track list, `window_width` wide. Returns
     /// whether it's one.
-    pub fn header_drag_move(&mut self, event: &MouseMoveEvent, window_width: f32) -> bool {
+    pub fn header_drag_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window_width: f32,
+        context: &mut App,
+    ) -> bool {
         let pointer_x = f32::from(event.position.x);
         // The timeline keeps at least as much room as the list.
         if let Some(wanted) = self.headers.width.drag_to(pointer_x, window_width / 2.) {
@@ -265,13 +283,13 @@ impl Tonique {
                 else {
                     return false;
                 };
-                let current = self.param(track, param);
+                let current = self.param(track, param, context);
                 let width = f32::from(bounds.size.width);
                 let Some(HeaderDrag::Slider { drag, .. }) = self.headers.drag.as_mut() else {
                     return false;
                 };
                 if let Some(value) = drag.follow(pointer_x, event.modifiers.shift, width, current) {
-                    self.set_param(track, param, value);
+                    self.set_param(track, param, value, context);
                 }
                 true
             }
@@ -283,7 +301,7 @@ impl Tonique {
                 let moved_by = f32::from(event.position.y) - *start_y;
                 let height = (*start_height + moved_by).clamp(MIN_EXPANDED_HEIGHT, MAX_ROW_HEIGHT);
                 let track = *track;
-                self.state.track_view_mut(&track).height = height;
+                self.state_mut(context).track_view_mut(&track).height = height;
                 true
             }
             Some(HeaderDrag::Row {
@@ -299,19 +317,19 @@ impl Tonique {
         }
     }
 
-    pub fn header_drag_end(&mut self) {
+    pub fn header_drag_end(&mut self, context: &mut App) {
         self.headers.width.end();
-        let target = self.row_drop();
+        let target = self.row_drop(context);
         match self.headers.drag.take() {
             Some(HeaderDrag::Slider { track, param, drag }) => {
-                let value = self.param(track, param);
+                let value = self.param(track, param, context);
                 if drag.moved && value != drag.start {
-                    self.commit_param(track, param, drag.start, value);
+                    self.commit_param(track, param, drag.start, value, context);
                 }
             }
             Some(HeaderDrag::Row { .. }) => {
                 if let Some((track, target, _)) = target {
-                    self.state.move_row(track, target);
+                    self.state_mut(context).move_row(track, target);
                 }
             }
             _ => {}

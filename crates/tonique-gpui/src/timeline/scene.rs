@@ -1,6 +1,8 @@
 //! What the timeline shows this frame, taken out of the state so the
 //! canvas can paint it after the view is built.
 
+use crate::model::HoldsProject;
+use gpui::App;
 use std::collections::HashSet;
 
 use tonique_engine::{edit::ClipId, time::BeatPos};
@@ -135,17 +137,18 @@ impl Tonique {
         rows: &[Row],
         in_view: (f32, f32),
         theme: std::rc::Rc<Theme>,
+        context: &App,
     ) -> Scene {
-        let state = &self.state;
+        let state = self.state(context);
         let screen_x = |beat: BeatPos| state.grid.beats_to_x(beat, self.viewport());
         let (loop_start, loop_end) = state.loop_range();
-        let (scene_rows, mut clips) = self.scene_clips(rows, in_view, &theme);
+        let (scene_rows, mut clips) = self.scene_clips(rows, in_view, &theme, context);
         let overviews = rows
             .iter()
             .filter(|row| row.is_group() && row.overlaps(in_view))
-            .flat_map(|row| self.group_overview(row))
+            .flat_map(|row| self.group_overview(row, context))
             .collect();
-        clips.extend(self.scene_dragged(rows, &theme));
+        clips.extend(self.scene_dragged(rows, &theme, context));
         let dragged = self.dragged_clips();
         Scene {
             theme: theme.clone(),
@@ -154,20 +157,20 @@ impl Tonique {
             rows: scene_rows,
             overviews,
             clips,
-            drop: self.scene_drop(rows, &theme),
-            new_lanes: self.scene_new_lanes(rows),
-            zone: self.scene_zone(rows),
+            drop: self.scene_drop(rows, &theme, context),
+            new_lanes: self.scene_new_lanes(rows, context),
+            zone: self.scene_zone(rows, context),
             snap_line: dragged.and_then(|dragged| dragged.snapped_to).map(screen_x),
-            cursor_hint: self.cursor_hint(rows),
-            lit_handle: self.lit_handle(rows),
-            effect_drop: self.scene_effect_drop(rows),
-            marks: self.marks(),
+            cursor_hint: self.cursor_hint(rows, context),
+            lit_handle: self.lit_handle(rows, context),
+            effect_drop: self.scene_effect_drop(rows, context),
+            marks: self.marks(context),
             playhead: screen_x(state.playhead()),
             edit_cursor: screen_x(state.edit_cursor()),
             looping: state.looping(),
             loop_x: (screen_x(loop_start), screen_x(loop_end)),
-            loop_lit: self.loop_lit(),
-            playhead_lit: self.playhead_lit(),
+            loop_lit: self.loop_lit(context),
+            playhead_lit: self.playhead_lit(context),
             footer_height: footer_height(state),
             scope: state
                 .metrics
@@ -179,8 +182,8 @@ impl Tonique {
     }
 
     /// The grid's lines, the bars' labels and the times, in view.
-    fn marks(&self) -> Marks {
-        let grid = &self.state.grid;
+    fn marks(&self, context: &App) -> Marks {
+        let grid = &self.state(context).grid;
         let viewport = self.viewport();
         let wide = Span {
             right: viewport.right + OVERSCAN,
@@ -200,7 +203,7 @@ impl Tonique {
             .map(|(beat, line)| (screen_x(beat), label(line), is_bar(&line)))
             .collect();
 
-        let bpm = self.state.bpm();
+        let bpm = self.state(context).bpm();
         let step = grid.time_step(bpm);
         let seconds_at = |beat: BeatPos| beat.0 * 60. / bpm as f64;
         let first = (seconds_at(from).max(0.) / step).floor() as i64;
@@ -240,20 +243,21 @@ impl Tonique {
         rows: &[Row],
         in_view: (f32, f32),
         theme: &Theme,
+        context: &App,
     ) -> (Vec<SceneRow>, Vec<SceneClip>) {
-        let state = &self.state;
+        let state = self.state(context);
         let left_behind: HashSet<ClipId> = self
             .dragged_clips()
             .filter(|dragged| !dragged.duplicate)
             .map(|dragged| dragged.ids().into_iter().collect())
             .unwrap_or_default();
-        let lit = self.lit_header(rows);
+        let lit = self.lit_header(rows, context);
         let mut scene_rows = Vec::new();
         let mut clips = Vec::new();
         for row in rows {
             let track = &row.track;
             scene_rows.push(SceneRow {
-                top: self.row_top(row),
+                top: self.row_top(row, context),
                 height: track.height,
                 color: track.color,
                 selected: track.selected,
@@ -272,14 +276,14 @@ impl Tonique {
                 let behind = left_behind.contains(&clip.id);
                 clips.push(SceneClip {
                     lit: lit == Some(clip.id) && !behind,
-                    rect: self.clip_rect(&clip, row),
+                    rect: self.clip_rect(&clip, row, context),
                     color: if behind {
                         theme.hover_overlay
                     } else {
                         track.color
                     },
                     selected: (!behind && state.is_clip_selected(clip.id))
-                        .then(|| self.selected_span(&clip))
+                        .then(|| self.selected_span(&clip, context))
                         .flatten(),
                     left_behind: behind,
                     silenced: track.is_silenced(),
@@ -294,14 +298,14 @@ impl Tonique {
     /// What's inside a group, in a band as tall as a collapsed row at the
     /// top of its lane: a strip per track in it, in order, with that
     /// track's clips in its colour, faint so they don't pass for clips.
-    fn group_overview(&self, row: &Row) -> Vec<(Rect, Color)> {
-        let state = &self.state;
+    fn group_overview(&self, row: &Row, context: &App) -> Vec<(Rect, Color)> {
+        let state = self.state(context);
         let tracks = state.group_tracks(row.track.id);
         if tracks.is_empty() {
             return Vec::new();
         }
         let viewport = self.viewport();
-        let top = self.row_top(row) + OVERVIEW_INSET;
+        let top = self.row_top(row, context) + OVERVIEW_INSET;
         let band = (TRACK_COLLAPSED_HEIGHT.min(row.track.height) - 2. * OVERVIEW_INSET).max(0.);
         let strip = band / tracks.len() as f32;
         let bpm = state.bpm();
@@ -332,8 +336,8 @@ impl Tonique {
 
     /// Where a selected clip is lit across: its part in the zone, or all
     /// of it.
-    fn selected_span(&self, clip: &AudioClip) -> Option<(f32, f32)> {
-        let state = &self.state;
+    fn selected_span(&self, clip: &AudioClip, context: &App) -> Option<(f32, f32)> {
+        let state = self.state(context);
         let screen_x = |beat: BeatPos| state.grid.beats_to_x(beat, self.viewport());
         let end = clip.end(state.bpm());
         let (start, stop) = match state.selection_bounds() {
@@ -345,20 +349,20 @@ impl Tonique {
 
     /// The dragged clips where they'd land, selected, over everything; on
     /// the tracks a drop would add, in the colours they'll get.
-    fn scene_dragged(&self, rows: &[Row], theme: &Theme) -> Vec<SceneClip> {
+    fn scene_dragged(&self, rows: &[Row], theme: &Theme, context: &App) -> Vec<SceneClip> {
         let Some(dragged) = self.dragged_clips() else {
             return Vec::new();
         };
-        let tracks: Vec<TrackRow> = self.state.tracks().collect();
+        let tracks: Vec<TrackRow> = self.state(context).tracks().collect();
         let colors = self
-            .state
+            .state(context)
             .new_track_colors(dragged.added_tracks(tracks.len()));
         dragged
             .clips
             .iter()
             .map(|dragged_clip| {
                 let index = dragged_clip.track_index;
-                let (top, height) = self.track_span(rows, index);
+                let (top, height) = self.track_span(rows, index, context);
                 let target = tracks.get(index);
                 let color = target.map_or_else(
                     || {
@@ -370,7 +374,7 @@ impl Tonique {
                     |track| track.color,
                 );
                 let clip = dragged_clip.clip.clone();
-                let rect = self.clip_rect_at(&clip, top, height);
+                let rect = self.clip_rect_at(&clip, top, height, context);
                 SceneClip {
                     selected: Some((rect.left, rect.right())),
                     rect,
@@ -386,30 +390,33 @@ impl Tonique {
     }
 
     /// The lanes of the tracks a drag of clips or audio would add.
-    fn scene_new_lanes(&self, rows: &[Row]) -> Vec<(f32, Color)> {
-        let track_count = self.state.track_count();
+    fn scene_new_lanes(&self, rows: &[Row], context: &App) -> Vec<(f32, Color)> {
+        let track_count = self.state(context).track_count();
         let count = match (self.dragged_clips(), &self.timeline.drop_target) {
             (Some(dragged), _) => dragged.added_tracks(track_count),
             (None, Some(target)) if target.track_index.is_none() => 1,
             _ => 0,
         };
-        self.state
+        self.state(context)
             .new_track_colors(count)
             .into_iter()
             .enumerate()
-            .map(|(index, color)| (self.track_span(rows, track_count + index).0, color))
+            .map(|(index, color)| (self.track_span(rows, track_count + index, context).0, color))
             .collect()
     }
 
     /// The selection zone: from the top of its first track's row to the
     /// bottom of its last's (a collapsed group's, for a hidden track).
-    fn scene_zone(&self, rows: &[Row]) -> Option<Rect> {
-        let zone = self.state.selection_bounds()?;
-        let (top, _) = self.track_span(rows, zone.start_track_index);
-        let (last_top, last_height) = self.track_span(rows, zone.end_track_index);
+    fn scene_zone(&self, rows: &[Row], context: &App) -> Option<Rect> {
+        let zone = self.state(context).selection_bounds()?;
+        let (top, _) = self.track_span(rows, zone.start_track_index, context);
+        let (last_top, last_height) = self.track_span(rows, zone.end_track_index, context);
         let viewport = self.viewport();
-        let left = self.state.grid.beats_to_x(zone.start_pos, viewport);
-        let right = self.state.grid.beats_to_x(zone.end_pos, viewport);
+        let left = self
+            .state(context)
+            .grid
+            .beats_to_x(zone.start_pos, viewport);
+        let right = self.state(context).grid.beats_to_x(zone.end_pos, viewport);
         Some(Rect::new(
             left,
             top,
@@ -420,16 +427,16 @@ impl Tonique {
 
     /// Over a clip's body while not dragging: where a click would place
     /// the edit cursor (snapped as it would be), and the body.
-    fn cursor_hint(&self, rows: &[Row]) -> Option<(f32, Rect)> {
+    fn cursor_hint(&self, rows: &[Row], context: &App) -> Option<(f32, Rect)> {
         let (TimelineDrag::None, Some((local_x, local_y))) =
             (&self.timeline.drag, self.timeline.hover)
         else {
             return None;
         };
-        let (row, clip, ClipPart::Body) = self.clip_at(rows, local_x, local_y)? else {
+        let (row, clip, ClipPart::Body) = self.clip_at(rows, local_x, local_y, context)? else {
             return None;
         };
-        let rect = self.clip_rect(&clip, &rows[row]);
+        let rect = self.clip_rect(&clip, &rows[row], context);
         let body = Rect::new(
             rect.left,
             rect.top + HEADER_HEIGHT,
@@ -437,12 +444,18 @@ impl Tonique {
             rect.height - HEADER_HEIGHT,
         );
         let alt = self.timeline.hover_alt;
-        let beat = self.state.grid.snap(self.beats_at(local_x), alt);
-        Some((self.state.grid.beats_to_x(beat, self.viewport()), body))
+        let beat = self
+            .state(context)
+            .grid
+            .snap(self.beats_at(local_x, context), alt);
+        Some((
+            self.state(context).grid.beats_to_x(beat, self.viewport()),
+            body,
+        ))
     }
 
     /// The trim handle being dragged, or else under the pointer.
-    fn lit_handle(&self, rows: &[Row]) -> Option<Rect> {
+    fn lit_handle(&self, rows: &[Row], context: &App) -> Option<Rect> {
         if let TimelineDrag::Trim {
             original,
             start_edge,
@@ -450,32 +463,35 @@ impl Tonique {
         } = &self.timeline.drag
         {
             let clip = current.as_ref().unwrap_or(original);
-            let (row, _) = self.state.clip_with_track(clip.id)?;
+            let (row, _) = self.state(context).clip_with_track(clip.id)?;
             let row = rows.iter().find(|shown| shown.track.id == row.id)?;
-            return Some(handle_rect(self.clip_rect(clip, row), *start_edge));
+            return Some(handle_rect(self.clip_rect(clip, row, context), *start_edge));
         }
         let (TimelineDrag::None, Some((local_x, local_y))) =
             (&self.timeline.drag, self.timeline.hover)
         else {
             return None;
         };
-        let (row, clip, part) = self.clip_at(rows, local_x, local_y)?;
+        let (row, clip, part) = self.clip_at(rows, local_x, local_y, context)?;
         let start_edge = match part {
             ClipPart::TrimStart => true,
             ClipPart::TrimEnd => false,
             _ => return None,
         };
-        Some(handle_rect(self.clip_rect(&clip, &rows[row]), start_edge))
+        Some(handle_rect(
+            self.clip_rect(&clip, &rows[row], context),
+            start_edge,
+        ))
     }
 
     /// The clip whose header the pointer is over, while not dragging.
-    fn lit_header(&self, rows: &[Row]) -> Option<ClipId> {
+    fn lit_header(&self, rows: &[Row], context: &App) -> Option<ClipId> {
         let (TimelineDrag::None, Some((local_x, local_y))) =
             (&self.timeline.drag, self.timeline.hover)
         else {
             return None;
         };
-        match self.clip_at(rows, local_x, local_y) {
+        match self.clip_at(rows, local_x, local_y, context) {
             Some((_, clip, ClipPart::Header)) => Some(clip.id),
             _ => None,
         }
@@ -483,26 +499,26 @@ impl Tonique {
 
     /// The lane an effect would be dropped on: a track's, or the master's
     /// in the footer, as high as its header.
-    fn scene_effect_drop(&self, rows: &[Row]) -> Option<(f32, f32)> {
+    fn scene_effect_drop(&self, rows: &[Row], context: &App) -> Option<(f32, f32)> {
         let target = self.timeline.effect_target?;
         if target == MASTER_TRACK_ID {
-            let master = self.state.master_track();
-            return Some((self.lanes_bottom() + FOOTER_PADDING, master.height));
+            let master = self.state(context).master_track();
+            return Some((self.lanes_bottom(context) + FOOTER_PADDING, master.height));
         }
         let row = rows.iter().find(|row| row.track.id == target)?;
-        Some((self.row_top(row), row.track.height))
+        Some((self.row_top(row, context), row.track.height))
     }
 
     /// The clip a drop would add.
-    fn scene_drop(&self, rows: &[Row], theme: &Theme) -> Option<SceneClip> {
+    fn scene_drop(&self, rows: &[Row], theme: &Theme, context: &App) -> Option<SceneClip> {
         let target = self.timeline.drop_target.as_ref()?;
-        let state = &self.state;
+        let state = self.state(context);
         let track = target
             .track_index
             .and_then(|index| state.track_from_index(index));
         let (top, height, color) = match (target.track_index, track) {
             (Some(index), Some(track)) => {
-                let (top, height) = self.track_span(rows, index);
+                let (top, height) = self.track_span(rows, index, context);
                 (top, height, track.color)
             }
             _ => (

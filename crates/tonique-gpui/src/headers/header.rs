@@ -4,6 +4,7 @@
 //! renamed in place, its menu on a right-click, and its height dragged
 //! from its bottom edge.
 
+use crate::model::HoldsProject;
 use gpui::{
     Anchor, AnyElement, Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, canvas, div,
     prelude::*, px,
@@ -119,19 +120,19 @@ impl Tonique {
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     // A double-click shows its effects, or hides them.
                     if event.click_count == 2 {
-                        let was_selected = this.state.selected_tracks().contains(&id);
-                        this.state.select_track(&id);
+                        let was_selected = this.state(context).selected_tracks().contains(&id);
+                        this.state_mut(context).select_track(&id);
                         this.toggle_effects_of_selected(was_selected);
                         context.notify();
                         return;
                     }
                     // Ctrl+click adds to the selection, Shift+click selects a range.
                     if event.modifiers.control || event.modifiers.platform {
-                        this.state.toggle_track_selected(id);
+                        this.state_mut(context).toggle_track_selected(id);
                     } else if event.modifiers.shift {
-                        this.state.select_rows_to(id);
+                        this.state_mut(context).select_rows_to(id);
                     } else {
-                        this.state.select_track(&id);
+                        this.state_mut(context).select_track(&id);
                     }
                     // Dragged a little, it moves; the master stays in its footer.
                     if !master {
@@ -143,7 +144,7 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Right,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
-                    this.state.select_track(&id);
+                    this.state_mut(context).select_track(&id);
                     this.toggle_popup(PopupKind::Track(id), event.position, Anchor::TopLeft);
                     context.notify();
                 }),
@@ -208,7 +209,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, _, _, context| {
                     context.stop_propagation();
-                    this.state.set_collapsed(&id, !collapsed);
+                    this.state_mut(context).set_collapsed(&id, !collapsed);
                     context.notify();
                 }),
             )
@@ -269,7 +270,7 @@ impl Tonique {
             MouseButton::Left,
             context.listener(move |this, _, _, context| {
                 context.stop_propagation();
-                this.state.set_mute(id, !muted);
+                this.state_mut(context).set_mute(id, !muted);
                 context.notify();
             }),
         );
@@ -279,7 +280,8 @@ impl Tonique {
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
                     // Shift: this one alone.
-                    this.state.toggle_solo(id, event.modifiers.shift);
+                    this.state_mut(context)
+                        .toggle_solo(id, event.modifiers.shift);
                     context.notify();
                 }),
             )
@@ -296,14 +298,14 @@ impl Tonique {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let metrics = self.state.metrics.tracks.get(&id).cloned();
+        let metrics = self.state(context).metrics.tracks.get(&id).cloned();
         let canvas_theme = theme.clone();
         place(rect)
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(move |this, _, _, context| {
                     context.stop_propagation();
-                    this.state.reset_meter_clip(id);
+                    this.state_mut(context).reset_meter_clip(id);
                     context.notify();
                 }),
             )
@@ -342,7 +344,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
-                    this.slider_down(id, param, event);
+                    this.slider_down(id, param, event, context);
                     context.notify();
                 }),
             )

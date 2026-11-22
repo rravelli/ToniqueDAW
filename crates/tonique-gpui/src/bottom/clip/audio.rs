@@ -2,10 +2,11 @@
 //! transposition), and how it follows the project's tempo (its warp mode,
 //! how it's stretched, its file's tempo).
 
+use crate::model::HoldsProject;
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    AnyElement, Bounds, Context, CursorStyle, MouseButton, MouseDownEvent, Pixels, Stateful,
+    AnyElement, App, Bounds, Context, CursorStyle, MouseButton, MouseDownEvent, Pixels, Stateful,
     canvas, div, prelude::*, px,
 };
 use tonique_engine::edit::{ClipId, MAX_TRANSPOSE, StretchWindow, WarpMode};
@@ -130,15 +131,19 @@ impl Tonique {
             true,
             theme,
             context,
-            move |this| {
-                this.edit_warp(id, |clip, bpm| {
-                    let warp = if clip.warp == WarpMode::Off {
-                        WarpMode::Spectral
-                    } else {
-                        WarpMode::Off
-                    };
-                    clip.set_warp(warp, clip.bpm, clip.transpose, clip.detune, bpm);
-                });
+            move |this, context| {
+                this.edit_warp(
+                    id,
+                    |clip, bpm| {
+                        let warp = if clip.warp == WarpMode::Off {
+                            WarpMode::Spectral
+                        } else {
+                            WarpMode::Off
+                        };
+                        clip.set_warp(warp, clip.bpm, clip.transpose, clip.detune, bpm);
+                    },
+                    context,
+                );
             },
         )
         .child(self.picker(
@@ -168,8 +173,8 @@ impl Tonique {
                 if formants { "Keep" } else { "Move" },
                 theme,
                 context,
-                move |this, _| {
-                    this.edit_warp(id, |clip, _| clip.stretch.formants ^= true);
+                move |this, context| {
+                    this.edit_warp(id, |clip, _| clip.stretch.formants ^= true, context);
                 },
             );
         div()
@@ -272,7 +277,7 @@ impl Tonique {
                             MouseButton::Left,
                             context.listener(move |this, _, window, context| {
                                 context.stop_propagation();
-                                if let Some((_, clip)) = this.state.clip_with_track(id) {
+                                if let Some((_, clip)) = this.state(context).clip_with_track(id) {
                                     this.type_bpm(&clip, window, context);
                                 }
                                 context.notify();
@@ -288,11 +293,11 @@ impl Tonique {
             Flat::new(label, FIELD_HEIGHT)
                 .width(TEMPO_BUTTON_WIDTH)
                 .enabled(enabled)
-                .show(label, theme, context, move |this, _| {
-                    let Some((_, clip)) = this.state.clip_with_track(id) else {
+                .show(label, theme, context, move |this, context| {
+                    let Some((_, clip)) = this.state(context).clip_with_track(id) else {
                         return;
                     };
-                    let bpm = this.state.bpm();
+                    let bpm = this.state(context).bpm();
                     let mut edited = clip.clone();
                     edited.set_warp(
                         clip.warp,
@@ -301,7 +306,7 @@ impl Tonique {
                         clip.detune,
                         bpm,
                     );
-                    this.state.commit_resize_clip(edited);
+                    this.state_mut(context).commit_resize_clip(edited);
                 })
         };
         div()
@@ -313,13 +318,13 @@ impl Tonique {
     }
 
     /// Clip `id` edited by `edit` at once, heard, as one undo step.
-    fn edit_warp(&mut self, id: ClipId, edit: impl FnOnce(&mut AudioClip, f32)) {
-        let Some((_, clip)) = self.state.clip_with_track(id) else {
+    fn edit_warp(&mut self, id: ClipId, edit: impl FnOnce(&mut AudioClip, f32), context: &mut App) {
+        let Some((_, clip)) = self.state(context).clip_with_track(id) else {
             return;
         };
         let mut edited = clip.clone();
-        edit(&mut edited, self.state.bpm());
-        self.state.edit_clip_live(edited, true);
+        edit(&mut edited, self.state(context).bpm());
+        self.state_mut(context).edit_clip_live(edited, true);
     }
 
     /// The slider of `slider`, in the clip's colour: dragged, heard as it
@@ -371,8 +376,14 @@ impl Tonique {
                     this.hold_arrows(holder.clone());
                     if event.click_count >= 2 {
                         this.bottom.clip.drag = None;
-                        if let Some((_, clip)) = this.state.clip_with_track(id) {
-                            this.set_slider(&clip, slider, scale.default_value(), Some(value));
+                        if let Some((_, clip)) = this.state(context).clip_with_track(id) {
+                            this.set_slider(
+                                &clip,
+                                slider,
+                                scale.default_value(),
+                                Some(value),
+                                context,
+                            );
                         }
                     } else {
                         let pointer_x = f32::from(event.position.x);
@@ -389,22 +400,34 @@ impl Tonique {
 
     /// Sets `slider` of `clip` to `value`: live, or as an undo step from
     /// `done`'s value when it's given.
-    fn set_slider(&mut self, clip: &AudioClip, slider: ClipSlider, value: f32, done: Option<f32>) {
+    fn set_slider(
+        &mut self,
+        clip: &AudioClip,
+        slider: ClipSlider,
+        value: f32,
+        done: Option<f32>,
+        context: &mut App,
+    ) {
         if let Some(param) = slider.param() {
             match done {
-                Some(start) => self.state.commit_clip_param(clip.id, param, start, value),
-                None => self.state.set_clip_param(clip.id, param, value),
+                Some(start) => self
+                    .state_mut(context)
+                    .commit_clip_param(clip.id, param, start, value),
+                None => self
+                    .state_mut(context)
+                    .set_clip_param(clip.id, param, value),
             }
             return;
         }
-        let bpm = self.state.bpm();
+        let bpm = self.state(context).bpm();
         let (transpose, detune) = match slider {
             ClipSlider::Transpose => (value as i32, clip.detune),
             _ => (clip.transpose, value),
         };
         let mut edited = clip.clone();
         edited.set_warp(clip.warp, clip.bpm, transpose, detune, bpm);
-        self.state.edit_clip_live(edited, done.is_some());
+        self.state_mut(context)
+            .edit_clip_live(edited, done.is_some());
     }
 
     /// `slider` stepped by `presses` of the arrow keys, as one undo step;
@@ -414,6 +437,7 @@ impl Tonique {
         clip: &AudioClip,
         slider: ClipSlider,
         presses: Presses,
+        context: &mut App,
     ) {
         let value = slider.value(clip);
         let scale = slider.scale();
@@ -421,18 +445,30 @@ impl Tonique {
             let (transpose, detune) = carried(clip.transpose, scale.carried(value, presses));
             if (transpose, detune) != (clip.transpose, clip.detune) {
                 let mut edited = clip.clone();
-                edited.set_warp(clip.warp, clip.bpm, transpose, detune, self.state.bpm());
-                self.state.edit_clip_live(edited, true);
+                edited.set_warp(
+                    clip.warp,
+                    clip.bpm,
+                    transpose,
+                    detune,
+                    self.state(context).bpm(),
+                );
+                self.state_mut(context).edit_clip_live(edited, true);
             }
             return;
         }
         let stepped = scale.stepped(value, presses);
         if stepped != value {
-            self.set_slider(clip, slider, stepped, Some(value));
+            self.set_slider(clip, slider, stepped, Some(value), context);
         }
     }
 
-    pub(super) fn follow_slider(&mut self, clip: &AudioClip, pointer_x: f32, fine: bool) {
+    pub(super) fn follow_slider(
+        &mut self,
+        clip: &AudioClip,
+        pointer_x: f32,
+        fine: bool,
+        context: &mut App,
+    ) {
         let Some(ClipDrag::Slider {
             slider,
             drag,
@@ -444,34 +480,44 @@ impl Tonique {
         let (slider, width) = (*slider, f32::from(bounds.size.width));
         let current = slider.value(clip);
         if let Some(value) = drag.follow(pointer_x, fine, width, current) {
-            self.set_slider(clip, slider, value, None);
+            self.set_slider(clip, slider, value, None, context);
         }
     }
 
-    pub(super) fn end_slider(&mut self, clip: &AudioClip, slider: ClipSlider, drag: SliderDrag) {
+    pub(super) fn end_slider(
+        &mut self,
+        clip: &AudioClip,
+        slider: ClipSlider,
+        drag: SliderDrag,
+        context: &mut App,
+    ) {
         if drag.moved {
-            self.set_slider(clip, slider, slider.value(clip), Some(drag.start));
+            self.set_slider(clip, slider, slider.value(clip), Some(drag.start), context);
         }
     }
 
     /// The warp modes: stretching (tonal) is the only one yet.
     pub fn clip_warp_menu(&self, id: ClipId, context: &mut Context<Self>) -> Option<gpui::Div> {
-        let (_, clip) = self.state.clip_with_track(id)?;
+        let (_, clip) = self.state(context).clip_with_track(id)?;
         Some(
             Menu::new(&crate::theme::current(context))
                 .item(
                     MenuItem::new("Tonal").checked(clip.warp == WarpMode::Spectral),
                     context,
-                    move |this, _, _| {
-                        this.edit_warp(id, |clip, bpm| {
-                            clip.set_warp(
-                                WarpMode::Spectral,
-                                clip.bpm,
-                                clip.transpose,
-                                clip.detune,
-                                bpm,
-                            )
-                        })
+                    move |this, _, context| {
+                        this.edit_warp(
+                            id,
+                            |clip, bpm| {
+                                clip.set_warp(
+                                    WarpMode::Spectral,
+                                    clip.bpm,
+                                    clip.transpose,
+                                    clip.detune,
+                                    bpm,
+                                )
+                            },
+                            context,
+                        )
                     },
                 )
                 .into_element(),
@@ -480,13 +526,15 @@ impl Tonique {
 
     /// The stretch's windows.
     pub fn clip_window_menu(&self, id: ClipId, context: &mut Context<Self>) -> Option<gpui::Div> {
-        let (_, clip) = self.state.clip_with_track(id)?;
+        let (_, clip) = self.state(context).clip_with_track(id)?;
         let mut menu = Menu::new(&crate::theme::current(context));
         for window in StretchWindow::ALL {
             menu = menu.item(
                 MenuItem::new(window_name(window)).checked(clip.stretch.window == window),
                 context,
-                move |this, _, _| this.edit_warp(id, |clip, _| clip.stretch.window = window),
+                move |this, _, context| {
+                    this.edit_warp(id, |clip, _| clip.stretch.window = window, context)
+                },
             );
         }
         Some(menu.into_element())

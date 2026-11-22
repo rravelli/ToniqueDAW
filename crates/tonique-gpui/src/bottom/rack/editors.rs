@@ -3,6 +3,7 @@
 //! edited. What an editor keeps (an analyser's spectrum) is in its
 //! [`Editor`], shared with the canvases drawing it.
 
+use crate::model::HoldsProject;
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use gpui::{AnyElement, Context, Stateful, canvas, div, prelude::*, px};
@@ -191,10 +192,11 @@ impl Tonique {
             Flat::new(param, TOGGLE_SIZE.1)
                 .width(TOGGLE_SIZE.0)
                 .selected(on)
-                .show(label, theme, context, move |this, _| {
+                .show(label, theme, context, move |this, context| {
                     let (old, new) = (parameter.get(), if on { 0. } else { 1. });
                     parameter.set(new);
-                    this.state.commit_params(&[(parameter.id, old, new)]);
+                    this.state_mut(context)
+                        .commit_params(&[(parameter.id, old, new)]);
                 }),
         )
     }

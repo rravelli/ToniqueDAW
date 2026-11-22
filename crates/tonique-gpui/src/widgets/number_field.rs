@@ -6,7 +6,7 @@
 use std::cell::Cell;
 
 use gpui::{
-    AnyElement, Context, CursorStyle, KeyDownEvent, MouseButton, MouseDownEvent, Window, div,
+    AnyElement, App, Context, CursorStyle, KeyDownEvent, MouseButton, MouseDownEvent, Window, div,
     prelude::*, px,
 };
 
@@ -171,7 +171,7 @@ impl NumberField {
         window: &Window,
         context: &mut Context<Tonique>,
         get: fn(&mut Tonique) -> &mut NumberField,
-        set: fn(&mut Tonique, f32),
+        set: fn(&mut Tonique, f32, &mut App),
     ) -> AnyElement {
         let field = div()
             .id(id)
@@ -186,12 +186,12 @@ impl NumberField {
             .whitespace_nowrap();
         if let Some(edit) = &self.edit {
             // Leaving it, by Enter or a click elsewhere, takes the value.
-            let finish = move |this: &mut Tonique, keep: bool| {
+            let finish = move |this: &mut Tonique, keep: bool, context: &mut App| {
                 let field = get(this);
                 let value = field.typed().filter(|_| keep);
                 field.edit = None;
                 if let Some(value) = value {
-                    set(this, value);
+                    set(this, value, context);
                 }
             };
             return field
@@ -205,8 +205,8 @@ impl NumberField {
                             return;
                         };
                         match edit.key(event) {
-                            FieldKey::Submit => finish(this, true),
-                            FieldKey::Cancel => finish(this, false),
+                            FieldKey::Submit => finish(this, true, context),
+                            FieldKey::Cancel => finish(this, false, context),
                             FieldKey::Edited => {}
                             FieldKey::Ignored => return,
                         }
@@ -218,7 +218,7 @@ impl NumberField {
                     },
                 ))
                 .on_mouse_down_out(context.listener(move |this, _, _, context| {
-                    finish(this, true);
+                    finish(this, true, context);
                     context.notify();
                 }))
                 .into_any_element();

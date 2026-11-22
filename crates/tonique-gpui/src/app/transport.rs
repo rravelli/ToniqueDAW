@@ -2,9 +2,10 @@
 //! transport centred, the grid's step, the song's tempo and time
 //! signature, warnings and the audio load on the right.
 
+use crate::model::HoldsProject;
 use gpui::{
-    Anchor, Context, MouseButton, MouseDownEvent, MouseMoveEvent, Window, div, point, prelude::*,
-    px,
+    Anchor, App, Context, MouseButton, MouseDownEvent, MouseMoveEvent, Window, div, point,
+    prelude::*, px,
 };
 use tonique_engine::time::TimeSignature;
 
@@ -72,21 +73,21 @@ impl Transport {
     }
 }
 
-fn set_bpm(this: &mut Tonique, bpm: f32) {
-    this.state.set_bpm(bpm);
+fn set_bpm(this: &mut Tonique, bpm: f32, context: &mut App) {
+    this.state_mut(context).set_bpm(bpm);
 }
 
-fn set_numerator(this: &mut Tonique, numerator: f32) {
-    let current = this.state.time_signature();
+fn set_numerator(this: &mut Tonique, numerator: f32, context: &mut App) {
+    let current = this.state(context).time_signature();
     if let Some(signature) = TimeSignature::new(numerator.round() as u32, current.denominator) {
-        this.state.set_time_signature(signature);
+        this.state_mut(context).set_time_signature(signature);
     }
 }
 
-fn set_denominator(this: &mut Tonique, denominator: f32) {
-    let current = this.state.time_signature();
+fn set_denominator(this: &mut Tonique, denominator: f32, context: &mut App) {
+    let current = this.state(context).time_signature();
     if let Some(signature) = TimeSignature::new(current.numerator, denominator as u32) {
-        this.state.set_time_signature(signature);
+        this.state_mut(context).set_time_signature(signature);
     }
 }
 
@@ -115,27 +116,31 @@ fn open_below(this: &mut Tonique, kind: PopupKind, event: &MouseDownEvent) {
 
 impl Tonique {
     /// Follows a drag of the song's fields. Returns whether it's one.
-    pub(super) fn transport_drag_move(&mut self, event: &MouseMoveEvent) -> bool {
+    pub(super) fn transport_drag_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        context: &mut App,
+    ) -> bool {
         let pointer_x = f32::from(event.position.x);
         let fine = event.modifiers.shift;
-        let signature = self.state.time_signature();
+        let signature = self.state(context).time_signature();
         let (numerator, denominator) = (signature.numerator as f32, signature.denominator as f32);
         if let Some(bpm) = self
             .transport
             .bpm
-            .drag_to(pointer_x, fine, self.state.bpm())
+            .drag_to(pointer_x, fine, self.state(context).bpm())
         {
-            set_bpm(self, bpm);
+            set_bpm(self, bpm, context);
         } else if let Some(new_numerator) =
             self.transport.numerator.drag_to(pointer_x, fine, numerator)
         {
-            set_numerator(self, new_numerator);
+            set_numerator(self, new_numerator, context);
         } else if let Some(new_denominator) =
             self.transport
                 .denominator
                 .drag_to(pointer_x, fine, denominator)
         {
-            set_denominator(self, new_denominator);
+            set_denominator(self, new_denominator, context);
         } else {
             return self.transport.is_dragging();
         }
@@ -165,7 +170,8 @@ impl Tonique {
     }
 
     fn transport_left(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
-        let state = &self.state;
+        let state = self.state(context);
+        let (can_undo, can_redo) = (state.can_undo(), state.can_redo());
         let open = self.browser_open;
         let graph = self.graph.is_open();
         div()
@@ -190,22 +196,22 @@ impl Tonique {
                 ))
             })
             .child(gap(GROUP_GAP))
-            .child(Flat::ghost("undo", BUTTON).enabled(state.can_undo()).show(
+            .child(Flat::ghost("undo", BUTTON).enabled(can_undo).show(
                 glyph(icons::ARROW_U_UP_LEFT, 15., false),
                 theme,
                 context,
-                |this, _| this.state.undo(),
+                |this, context| this.state_mut(context).undo(),
             ))
-            .child(Flat::ghost("redo", BUTTON).enabled(state.can_redo()).show(
+            .child(Flat::ghost("redo", BUTTON).enabled(can_redo).show(
                 glyph(icons::ARROW_U_UP_RIGHT, 15., false),
                 theme,
                 context,
-                |this, _| this.state.redo(),
+                |this, context| this.state_mut(context).redo(),
             ))
     }
 
     fn transport_center(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
-        let state = &self.state;
+        let state = self.state(context);
         let playing = state.playback_state() == PlaybackState::Playing;
         // Blinks on the beat.
         let metronome = state.metronome();
@@ -233,31 +239,31 @@ impl Tonique {
                         glyph(icons::METRONOME, 15., metronome),
                         theme,
                         context,
-                        |this, _| this.state.toggle_metronome(),
+                        |this, context| this.state_mut(context).toggle_metronome(),
                     ),
             )
             .child(Flat::new("play", BUTTON).selected(playing).show(
                 glyph(if playing { icons::STOP } else { icons::PLAY }, 12., true),
                 theme,
                 context,
-                |this, _| this.toggle_play(),
+                |this, context| this.toggle_play(context),
             ))
             .child(Flat::new("loop", BUTTON).selected(looping).show(
                 glyph(icons::REPEAT, 14., looping),
                 theme,
                 context,
-                |this, _| {
-                    let looping = this.state.looping();
-                    this.state.set_looping(!looping)
+                |this, context| {
+                    let looping = this.state(context).looping();
+                    this.state_mut(context).set_looping(!looping)
                 },
             ))
             .child(Flat::new("follow", BUTTON).selected(follow).show(
                 glyph(icons::CARET_LINE_RIGHT, 14., follow),
                 theme,
                 context,
-                |this, _| {
-                    let follow = this.state.follow_playhead();
-                    this.state.set_follow_playhead(!follow)
+                |this, context| {
+                    let follow = this.state(context).follow_playhead();
+                    this.state_mut(context).set_follow_playhead(!follow)
                 },
             ))
             .child(gap(GROUP_GAP))
@@ -276,7 +282,7 @@ impl Tonique {
         window: &Window,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let state = &self.state;
+        let state = self.state(context);
         let load = state.metrics.latency;
         let load_color = if load >= USAGE_DANGER {
             theme.danger
@@ -286,6 +292,7 @@ impl Tonique {
             theme.text_muted
         };
         let missing = !state.missing_files().is_empty();
+        let audio_lost = state.audio_lost();
         div()
             .flex_1()
             .min_w_0()
@@ -305,13 +312,13 @@ impl Tonique {
                         .on_mouse_down(
                             MouseButton::Left,
                             context.listener(|this, _, _, context| {
-                                this.show_missing_files(None);
+                                this.show_missing_files(None, context);
                                 context.notify();
                             }),
                         ),
                 )
             })
-            .when(state.audio_lost(), |element| {
+            .when(audio_lost, |element| {
                 element.child(
                     Flat::new("no-audio", BUTTON)
                         .color(theme.danger)
@@ -319,7 +326,7 @@ impl Tonique {
                         .on_mouse_down(
                             MouseButton::Left,
                             context.listener(|this, _, _, context| {
-                                this.open_settings(SettingsTab::Audio);
+                                this.open_settings(SettingsTab::Audio, context);
                                 context.notify();
                             }),
                         ),
@@ -344,7 +351,7 @@ impl Tonique {
     /// The grid's step, muted while adaptive, dimmed further while edits
     /// don't snap; pressed, the grid's menu.
     fn grid_step(&self, theme: &Theme, context: &mut Context<Self>) -> impl IntoElement {
-        let grid = &self.state.grid;
+        let grid = &self.state(context).grid;
         let (step, color) = if grid.settings.adaptive {
             (grid.line_step(), theme.text_muted)
         } else {
@@ -383,7 +390,7 @@ impl Tonique {
         window: &Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let state = &self.state;
+        let state = self.state(context);
         let transport = &self.transport;
         let signature = state.time_signature();
         let field = (SIGNATURE_FIELD_WIDTH, BUTTON);

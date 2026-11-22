@@ -1,7 +1,8 @@
 //! Where things are on the timeline: its rows, the clips on them, and the
 //! beats under the pointer.
 
-use gpui::{Pixels, Point, Window};
+use crate::model::HoldsProject;
+use gpui::{App, Pixels, Point, Window};
 use tonique_engine::time::BeatPos;
 
 use crate::{
@@ -156,13 +157,13 @@ impl Tonique {
 
     /// Where the lanes end and the master's footer starts, local to the
     /// timeline.
-    pub(super) fn lanes_bottom(&self) -> f32 {
-        (self.height() - footer_height(&self.state)).max(RULER_HEIGHT)
+    pub(super) fn lanes_bottom(&self, context: &App) -> f32 {
+        (self.height() - footer_height(self.state(context))).max(RULER_HEIGHT)
     }
 
     /// Whether `local_y` is on the footer, below the lanes.
-    pub(super) fn in_footer(&self, local_y: f32) -> bool {
-        local_y >= self.lanes_bottom()
+    pub(super) fn in_footer(&self, local_y: f32, context: &App) -> bool {
+        local_y >= self.lanes_bottom(context)
     }
 
     /// A point in the window, local to the timeline.
@@ -174,74 +175,80 @@ impl Tonique {
     /// The span of the rows in view, in the scrolled content: from the
     /// lanes' top down by the window's height, more than the lanes ever
     /// show, so it holds before the panels are laid out at a new size.
-    pub fn rows_in_view(&self, window: &Window) -> (f32, f32) {
-        let top = self.state.grid.offset.y;
+    pub fn rows_in_view(&self, window: &Window, context: &App) -> (f32, f32) {
+        let top = self.state(context).grid.offset.y;
         (top, top + f32::from(window.viewport_size().height))
     }
 
     /// A row's top, local to the timeline.
-    pub(super) fn row_top(&self, row: &Row) -> f32 {
-        RULER_HEIGHT + row.top - self.state.grid.offset.y
+    pub(super) fn row_top(&self, row: &Row, context: &App) -> f32 {
+        RULER_HEIGHT + row.top - self.state(context).grid.offset.y
     }
 
     /// The row at `local_y`, if it's on one shown (not under the footer).
-    pub(super) fn row_at(&self, rows: &[Row], local_y: f32) -> Option<usize> {
-        if self.in_footer(local_y) {
+    pub(super) fn row_at(&self, rows: &[Row], local_y: f32, context: &App) -> Option<usize> {
+        if self.in_footer(local_y, context) {
             return None;
         }
         rows.iter().position(|row| {
-            let top = self.row_top(row);
+            let top = self.row_top(row, context);
             local_y >= top && local_y < top + row.track.height + ROW_GAP
         })
     }
 
     /// The track under `local_y`, in the engine's order: on a group's
     /// header, its first (clips always land on tracks).
-    pub(super) fn track_at(&self, rows: &[Row], local_y: f32) -> Option<usize> {
-        self.row_at(rows, local_y)
+    pub(super) fn track_at(&self, rows: &[Row], local_y: f32, context: &App) -> Option<usize> {
+        self.row_at(rows, local_y, context)
             .map(|row| rows[row].track.first_track_index)
     }
 
     /// The track under `local_y`, for a drag: above the rows, the first;
     /// below them (or on the footer), past the last.
-    pub(super) fn pointer_track(&self, rows: &[Row], local_y: f32) -> usize {
+    pub(super) fn pointer_track(&self, rows: &[Row], local_y: f32, context: &App) -> usize {
         if local_y < RULER_HEIGHT {
             return 0;
         }
-        self.track_at(rows, local_y)
-            .unwrap_or(self.state.track_count())
+        self.track_at(rows, local_y, context)
+            .unwrap_or(self.state(context).track_count())
     }
 
     /// The top and height, local to the timeline, of the row showing track
     /// `track_index`: past the last track, the rows a drop adds, as tall as
     /// new tracks are.
-    pub(super) fn track_span(&self, rows: &[Row], track_index: usize) -> (f32, f32) {
-        let track_count = self.state.track_count();
+    pub(super) fn track_span(&self, rows: &[Row], track_index: usize, context: &App) -> (f32, f32) {
+        let track_count = self.state(context).track_count();
         if track_index < track_count
             && let Some(row) = showing_row(rows, track_index)
         {
             let row = &rows[row];
-            return (self.row_top(row), row.track.height);
+            return (self.row_top(row, context), row.track.height);
         }
         let past =
             track_index.saturating_sub(track_count) as f32 * (DEFAULT_TRACK_HEIGHT + ROW_GAP);
-        let top = RULER_HEIGHT + rows_height(rows) + past - self.state.grid.offset.y;
+        let top = RULER_HEIGHT + rows_height(rows) + past - self.state(context).grid.offset.y;
         (top, DEFAULT_TRACK_HEIGHT)
     }
 
-    pub(super) fn clip_rect(&self, clip: &AudioClip, row: &Row) -> Rect {
-        self.clip_rect_at(clip, self.row_top(row), row.track.height)
+    pub(super) fn clip_rect(&self, clip: &AudioClip, row: &Row, context: &App) -> Rect {
+        self.clip_rect_at(clip, self.row_top(row, context), row.track.height, context)
     }
 
     /// Where `clip` is on a row at `top`, `height` high, local to the
     /// timeline.
-    pub(super) fn clip_rect_at(&self, clip: &AudioClip, top: f32, height: f32) -> Rect {
+    pub(super) fn clip_rect_at(
+        &self,
+        clip: &AudioClip,
+        top: f32,
+        height: f32,
+        context: &App,
+    ) -> Rect {
         let viewport = self.viewport();
-        let start_x = self.state.grid.beats_to_x(clip.position, viewport);
+        let start_x = self.state(context).grid.beats_to_x(clip.position, viewport);
         let end_x = self
-            .state
+            .state(context)
             .grid
-            .beats_to_x(clip.end(self.state.bpm()), viewport);
+            .beats_to_x(clip.end(self.state(context).bpm()), viewport);
         Rect::new(start_x, top, end_x - start_x, height)
     }
 
@@ -252,15 +259,16 @@ impl Tonique {
         rows: &[Row],
         local_x: f32,
         local_y: f32,
+        context: &App,
     ) -> Option<(usize, AudioClip, ClipPart)> {
-        let row_index = self.row_at(rows, local_y)?;
+        let row_index = self.row_at(rows, local_y, context)?;
         let row = &rows[row_index];
         if row.is_group() {
             return None;
         }
         row.track.clips.iter().rev().find_map(|clip| {
-            let clip = self.state.shown_clip(clip);
-            let row = self.clip_rect(&clip, row);
+            let clip = self.state(context).shown_clip(clip);
+            let row = self.clip_rect(&clip, row, context);
             if !row.contains(local_x, local_y) {
                 return None;
             }
@@ -278,15 +286,17 @@ impl Tonique {
         })
     }
 
-    pub(super) fn beats_at(&self, local_x: f32) -> BeatPos {
-        self.state.grid.x_to_beats(local_x, self.viewport())
+    pub(super) fn beats_at(&self, local_x: f32, context: &App) -> BeatPos {
+        self.state(context)
+            .grid
+            .x_to_beats(local_x, self.viewport())
     }
 
     /// The beat at `local_x` on the grid (unless `alt`), not before the start.
-    pub(super) fn snapped(&self, local_x: f32, alt: bool) -> BeatPos {
-        self.state
+    pub(super) fn snapped(&self, local_x: f32, alt: bool, context: &App) -> BeatPos {
+        self.state(context)
             .grid
-            .snap(self.beats_at(local_x), alt)
+            .snap(self.beats_at(local_x, context), alt)
             .max(BeatPos::ZERO)
     }
 }

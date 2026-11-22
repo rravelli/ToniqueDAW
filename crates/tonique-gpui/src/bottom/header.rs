@@ -120,7 +120,7 @@ impl Tonique {
                             MouseButton::Left,
                             context.listener(move |this, _, _, context| {
                                 context.stop_propagation();
-                                this.show_bottom_view(view);
+                                this.show_bottom_view(view, context);
                                 context.notify();
                             }),
                         )

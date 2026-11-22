@@ -1,11 +1,12 @@
 //! The General tab: the metronome's level, applied as it's dragged or
 //! stepped by the arrow keys once clicked (1%, 10% with Shift).
 
+use crate::model::HoldsProject;
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    Bounds, Context, CursorStyle, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, canvas, div,
-    prelude::*, px,
+    App, Bounds, Context, CursorStyle, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, canvas,
+    div, prelude::*, px,
 };
 
 use crate::{
@@ -43,28 +44,28 @@ fn level_scale() -> Scale {
 
 impl Tonique {
     /// Applies and saves the metronome's level.
-    fn set_metronome_level(&mut self, level: f32) {
+    fn set_metronome_level(&mut self, level: f32, context: &mut App) {
         self.settings.draft.metronome_level = level;
-        let mut settings = self.state.settings().clone();
+        let mut settings = self.state(context).settings().clone();
         settings.metronome_level = level;
-        self.state.apply_settings(settings);
+        self.state_mut(context).apply_settings(settings);
     }
 
     /// The level stepped by the arrow keys.
-    pub(crate) fn step_metronome_level(&mut self, presses: Presses) {
-        let level = self.state.settings().metronome_level;
+    pub(crate) fn step_metronome_level(&mut self, presses: Presses, context: &mut App) {
+        let level = self.state(context).settings().metronome_level;
         let stepped = level_scale().stepped(level, presses);
         if stepped != level && self.settings.general.level_drag.is_none() {
-            self.set_metronome_level(stepped);
+            self.set_metronome_level(stepped, context);
         }
     }
 
-    fn level_down(&mut self, event: &MouseDownEvent) {
+    fn level_down(&mut self, event: &MouseDownEvent, context: &mut App) {
         self.hold_arrows(ArrowHolder::MetronomeLevel);
-        let level = self.state.settings().metronome_level;
+        let level = self.state(context).settings().metronome_level;
         if event.click_count >= 2 {
             self.settings.general.level_drag = None;
-            self.set_metronome_level(level_scale().default_value());
+            self.set_metronome_level(level_scale().default_value(), context);
             return;
         }
         let pointer_x = f32::from(event.position.x);
@@ -72,15 +73,15 @@ impl Tonique {
         self.settings.general.level_drag = Some(drag);
     }
 
-    pub(super) fn general_drag_move(&mut self, event: &MouseMoveEvent) -> bool {
-        let current = self.state.settings().metronome_level;
+    pub(super) fn general_drag_move(&mut self, event: &MouseMoveEvent, context: &mut App) -> bool {
+        let current = self.state(context).settings().metronome_level;
         let width = f32::from(self.settings.general.level_bounds.get().size.width);
         let Some(drag) = self.settings.general.level_drag.as_mut() else {
             return false;
         };
         let pointer_x = f32::from(event.position.x);
         if let Some(level) = drag.follow(pointer_x, event.modifiers.shift, width, current) {
-            self.set_metronome_level(level);
+            self.set_metronome_level(level, context);
         }
         true
     }
@@ -90,7 +91,7 @@ impl Tonique {
     }
 
     pub(super) fn general_tab(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
-        let level = self.state.settings().metronome_level;
+        let level = self.state(context).settings().metronome_level;
         let slot = self.settings.general.level_bounds.clone();
         let canvas_theme = theme.clone();
         let accent = theme.accent;
@@ -103,7 +104,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(|this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
-                    this.level_down(event);
+                    this.level_down(event, context);
                     context.notify();
                 }),
             )
@@ -131,7 +132,7 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(|this, _, _, context| {
-                    this.set_metronome_level(Settings::default().metronome_level);
+                    this.set_metronome_level(Settings::default().metronome_level, context);
                     context.notify();
                 }),
             );

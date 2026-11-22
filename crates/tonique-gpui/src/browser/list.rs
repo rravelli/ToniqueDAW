@@ -3,14 +3,15 @@
 //! scrolled into folders, the way down to the first row shown stays
 //! pinned at the top; a scrollbar runs down the right.
 
+use crate::model::HoldsProject;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
 
 use gpui::{
-    AnyElement, Context, KeyDownEvent, ScrollStrategy, Task, UniformListScrollHandle, Window, div,
-    prelude::*, px, uniform_list,
+    AnyElement, App, Context, KeyDownEvent, ScrollStrategy, Task, UniformListScrollHandle, Window,
+    div, prelude::*, px, uniform_list,
 };
 
 use crate::{
@@ -133,7 +134,13 @@ fn folder_names(roots: &[PathBuf]) -> HashMap<PathBuf, String> {
 impl Tonique {
     /// Select row `index` of `kind`: open or close a folder, or select (and
     /// preview) a file.
-    pub(super) fn browser_select(&mut self, kind: ListKind, index: usize, toggle_folder: bool) {
+    pub(super) fn browser_select(
+        &mut self,
+        kind: ListKind,
+        index: usize,
+        toggle_folder: bool,
+        context: &mut App,
+    ) {
         let list = self.browser.list_mut(kind);
         let Some(item) = list.tree.items.get(index).cloned() else {
             return;
@@ -155,10 +162,10 @@ impl Tonique {
             audio.load_peaks();
         }
         if self.browser.auto_preview {
-            self.state.play_preview(item.path);
-        } else if self.state.previewing().is_some() {
+            self.state_mut(context).play_preview(item.path);
+        } else if self.state(context).previewing().is_some() {
             // Another file's.
-            self.state.pause_preview();
+            self.state_mut(context).pause_preview();
         }
     }
 
@@ -207,15 +214,17 @@ impl Tonique {
                 kind,
                 selected.map_or(0, |index| (index + 1).min(len - 1)),
                 false,
+                context,
             ),
             "up" => self.browser_select(
                 kind,
                 selected.map_or(0, |index| index.saturating_sub(1)),
                 false,
+                context,
             ),
             _ => {
                 let Some(index) = selected else { return true };
-                self.browser_open_key(kind, index, key);
+                self.browser_open_key(kind, index, key, context);
             }
         }
         let list = self.browser.list(kind);
@@ -228,7 +237,7 @@ impl Tonique {
 
     /// Right opens a folder, Left closes it (or goes to the folder a file
     /// is in), Enter toggles a folder or plays or stops a file.
-    fn browser_open_key(&mut self, kind: ListKind, index: usize, key: &str) {
+    fn browser_open_key(&mut self, kind: ListKind, index: usize, key: &str, context: &mut App) {
         let list = self.browser.list_mut(kind);
         let Some(node) = list.tree.items.get(index).cloned() else {
             return;
@@ -251,10 +260,10 @@ impl Tonique {
             "left" => select_parent(list, index, node.depth),
             "enter" if is_audio_file(&node.path) => {
                 // Whether or not selecting plays.
-                if self.state.previewing() == Some(node.path.as_path()) {
-                    self.state.pause_preview();
+                if self.state(context).previewing() == Some(node.path.as_path()) {
+                    self.state_mut(context).pause_preview();
                 } else {
-                    self.state.play_preview(node.path);
+                    self.state_mut(context).play_preview(node.path);
                 }
             }
             _ => {}

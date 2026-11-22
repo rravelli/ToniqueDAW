@@ -2,7 +2,8 @@
 //! engine's block size and threads. Changes wait in the draft until
 //! applied, which restarts the audio.
 
-use gpui::{Context, MouseButton, MouseMoveEvent, Window, div, prelude::*, px};
+use crate::model::HoldsProject;
+use gpui::{App, Context, MouseButton, MouseMoveEvent, Window, div, prelude::*, px};
 
 use crate::{
     app::{
@@ -135,8 +136,8 @@ impl Tonique {
     }
 
     /// The sample rate buffer lengths are shown at.
-    fn draft_rate(&self) -> u32 {
-        let running = self.state.audio().map(|audio| audio.sample_rate);
+    fn draft_rate(&self, context: &App) -> u32 {
+        let running = self.state(context).audio().map(|audio| audio.sample_rate);
         self.settings
             .draft
             .sample_rate
@@ -215,7 +216,7 @@ impl Tonique {
                     .and_then(|capabilities| capabilities.buffer_range);
                 let fits =
                     |frames: &u32| range.is_none_or(|(min, max)| (min..=max).contains(frames));
-                let rate = self.draft_rate();
+                let rate = self.draft_rate(context);
                 let options = std::iter::once((None, "Device default".to_string())).chain(
                     BUFFER_SIZES
                         .into_iter()
@@ -304,7 +305,7 @@ impl Tonique {
         let buffer = draft
             .buffer_frames
             .map_or("Device default".into(), |frames| {
-                buffer_label(frames, self.draft_rate())
+                buffer_label(frames, self.draft_rate(context))
             });
         let rows = setting_rows([
             setting_row("Device", device, theme),
@@ -333,7 +334,7 @@ impl Tonique {
                 theme,
             ),
         ]);
-        let running = self.state.audio().map(|audio| {
+        let running = self.state(context).audio().map(|audio| {
             let buffer = audio
                 .buffer_frames
                 .map_or("device default".into(), |frames| {
@@ -373,7 +374,7 @@ impl Tonique {
             window,
             context,
             |this| &mut this.settings.audio.worker_threads,
-            |this, workers| this.settings.draft.worker_threads = workers as usize,
+            |this, workers, _| this.settings.draft.worker_threads = workers as usize,
         );
         let threshold = form.parallel_threshold.view(
             "threshold",
@@ -386,7 +387,7 @@ impl Tonique {
             window,
             context,
             |this| &mut this.settings.audio.parallel_threshold,
-            |this, threshold| this.settings.draft.parallel_threshold = threshold as usize,
+            |this, threshold, _| this.settings.draft.parallel_threshold = threshold as usize,
         );
         let block = format!("{} frames", draft.block_size);
         let rows = setting_rows([
@@ -405,9 +406,9 @@ impl Tonique {
             setting_row("Worker threads", well(workers), theme),
             setting_row("Parallel threshold", well(threshold), theme),
         ]);
-        let config = self.state.engine_config();
+        let config = self.state(context).engine_config();
         let nodes = self
-            .state
+            .state(context)
             .graph
             .topology()
             .map_or(String::new(), |topology| {
@@ -418,7 +419,7 @@ impl Tonique {
             config.sample_rate,
             config.max_block,
             config.worker_threads,
-            self.state.cpu_load() * 100.
+            self.state(context).cpu_load() * 100.
         );
         div()
             .flex()
@@ -432,9 +433,12 @@ impl Tonique {
     /// Apply or revert the draft's audio changes, or fill it with the
     /// defaults; above, what went wrong last.
     fn audio_buttons(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
-        let pending = self.state.settings().audio_differs(&self.settings.draft);
-        let error = self.state.audio_error.as_ref().map(|error| {
-            let text = if self.state.audio_lost() {
+        let pending = self
+            .state(context)
+            .settings()
+            .audio_differs(&self.settings.draft);
+        let error = self.state(context).audio_error.as_ref().map(|error| {
+            let text = if self.state(context).audio_lost() {
                 format!("No audio output ({error}), retrying…")
             } else {
                 format!("Couldn't apply audio settings: {error}")
@@ -458,10 +462,10 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(|this, _, _, context| {
                     // Only the audio fields: the others are already applied.
-                    let mut settings = this.state.settings().clone();
+                    let mut settings = this.state(context).settings().clone();
                     settings.set_audio(&this.settings.draft);
-                    this.state.apply_settings(settings);
-                    this.settings.draft = this.state.settings().clone();
+                    this.state_mut(context).apply_settings(settings);
+                    this.settings.draft = this.state(context).settings().clone();
                     context.notify();
                 }),
             )
@@ -473,7 +477,7 @@ impl Tonique {
             revert.on_mouse_down(
                 MouseButton::Left,
                 context.listener(|this, _, _, context| {
-                    this.settings.draft = this.state.settings().clone();
+                    this.settings.draft = this.state(context).settings().clone();
                     context.notify();
                 }),
             )

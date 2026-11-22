@@ -3,7 +3,7 @@
 //! with Shift), as one undo step; Esc or a press anywhere else lets go.
 //! The other shortcuts still run meanwhile.
 
-use gpui::{Context, Keystroke, Window};
+use gpui::{App, Context, Keystroke, Window};
 use tonique_engine::edit::TrackId;
 
 use crate::{
@@ -28,7 +28,7 @@ pub enum ArrowHolder {
     Number {
         id: &'static str,
         get: fn(&mut Tonique) -> &mut NumberField,
-        set: fn(&mut Tonique, f32),
+        set: fn(&mut Tonique, f32, &mut App),
     },
 }
 
@@ -75,7 +75,7 @@ impl Tonique {
         &mut self,
         keystroke: &Keystroke,
         window: &Window,
-        context: &Context<Self>,
+        context: &mut Context<Self>,
     ) -> bool {
         let (Some(presses), Some(holder)) = (arrow_press(keystroke), self.arrows.clone()) else {
             return false;
@@ -84,13 +84,13 @@ impl Tonique {
             return false;
         }
         match holder {
-            ArrowHolder::Header(track, param) => self.step_header(track, param, presses),
-            ArrowHolder::Clip(arrows) => self.step_clip(arrows, presses),
-            ArrowHolder::Knob(arrows) => self.step_knob(&arrows, presses),
-            ArrowHolder::MetronomeLevel => self.step_metronome_level(presses),
+            ArrowHolder::Header(track, param) => self.step_header(track, param, presses, context),
+            ArrowHolder::Clip(arrows) => self.step_clip(arrows, presses, context),
+            ArrowHolder::Knob(arrows) => self.step_knob(&arrows, presses, context),
+            ArrowHolder::MetronomeLevel => self.step_metronome_level(presses, context),
             ArrowHolder::Number { get, set, .. } => {
                 if let Some(value) = get(self).stepped(presses) {
-                    set(self, value);
+                    set(self, value, context);
                 }
             }
         }

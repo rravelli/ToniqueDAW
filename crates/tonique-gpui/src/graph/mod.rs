@@ -9,11 +9,12 @@
 
 mod paint;
 
+use crate::model::HoldsProject;
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
-    Bounds, ContentMask, Context, CursorStyle, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels,
-    ScrollEvent, Task, Window, canvas, div, prelude::*,
+    App, Bounds, ContentMask, Context, CursorStyle, MouseButton, MouseDownEvent, MouseMoveEvent,
+    Pixels, ScrollEvent, Task, Window, canvas, div, prelude::*,
 };
 use tonique_engine::graph::GraphTopology;
 
@@ -184,7 +185,7 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let scene = self.graph_scene(crate::theme::current(context), window);
+        let scene = self.graph_scene(crate::theme::current(context), window, context);
         let slot = self.graph.bounds.clone();
         let cursor = if self.graph.is_dragging() {
             CursorStyle::ClosedHand
@@ -221,8 +222,9 @@ impl Tonique {
         &mut self,
         theme: std::rc::Rc<crate::theme::Theme>,
         window: &Window,
+        context: &mut App,
     ) -> GraphScene {
-        let Some(topology) = self.state.graph.topology().cloned() else {
+        let Some(topology) = self.state(context).graph.topology().cloned() else {
             return GraphScene::empty(theme);
         };
         let graph = &mut self.graph;
@@ -242,8 +244,8 @@ impl Tonique {
             .then(|| graph.node_at(&positions, pointer))
             .flatten();
 
-        let monitor = &self.state.graph;
-        let owners = track_names(&self.state);
+        let monitor = &self.project.read(context).state.graph;
+        let owners = track_names(&self.project.read(context).state);
         let titles = topology
             .nodes
             .iter()
@@ -252,7 +254,11 @@ impl Tonique {
         let nodes_cpu: f32 = monitor.cpu.iter().sum();
         GraphScene {
             theme,
-            stats: stats_line(&topology, self.state.metrics.latency, nodes_cpu),
+            stats: stats_line(
+                &topology,
+                self.project.read(context).state.metrics.latency,
+                nodes_cpu,
+            ),
             topology: Some(topology),
             positions,
             pan: graph.pan,

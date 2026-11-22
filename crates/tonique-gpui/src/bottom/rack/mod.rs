@@ -10,10 +10,11 @@ mod frame;
 mod graph;
 mod knob;
 
+use crate::model::HoldsProject;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use gpui::{
-    AnyElement, Bounds, Context, DragMoveEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    AnyElement, App, Bounds, Context, DragMoveEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
     Pixels, Window, canvas, div, prelude::*, px,
 };
 use tonique_engine::edit::{PluginId, TrackId};
@@ -152,8 +153,8 @@ impl Tonique {
         if !context.has_active_drag() {
             rack.insert = None;
         }
-        let sample_rate = self.state.engine_config().sample_rate as f32;
-        let effects = self.state.effects(&track.id);
+        let sample_rate = self.state(context).engine_config().sample_rate as f32;
+        let effects = self.state(context).effects(&track.id);
         let rack = &mut self.bottom.rack;
         rack.slots
             .retain(|id, _| effects.iter().any(|effect| effect.plugin.id == *id));
@@ -293,7 +294,8 @@ impl Tonique {
                         .bottom
                         .rack
                         .insert_index(f32::from(window.mouse_position().x));
-                    this.state.add_effect(&track_id, dragged.kind, index);
+                    this.state_mut(context)
+                        .add_effect(&track_id, dragged.kind, index);
                     let rack = &mut this.bottom.rack;
                     rack.insert = None;
                     rack.selected = vec![index];
@@ -341,18 +343,20 @@ impl Tonique {
         let selected = self.bottom.rack.selected.clone();
         match action {
             Action::Delete if !selected.is_empty() => {
-                self.state.remove_effects(&track, &selected);
+                self.state_mut(context).remove_effects(&track, &selected);
                 self.bottom.rack.selected.clear();
             }
             Action::Duplicate if !selected.is_empty() => {
-                self.bottom.rack.selected = self.state.duplicate_effects(&track, &selected);
+                self.bottom.rack.selected =
+                    self.state_mut(context).duplicate_effects(&track, &selected);
             }
             Action::SelectAll => {
-                self.bottom.rack.selected = (0..self.state.effects(&track).len()).collect();
+                self.bottom.rack.selected =
+                    (0..self.state(context).effects(&track).len()).collect();
             }
             Action::Rename => {
                 if let Some(&index) = selected.first()
-                    && let Some(effect) = self.state.effects(&track).get(index)
+                    && let Some(effect) = self.state(context).effects(&track).get(index)
                 {
                     let plugin = effect.plugin.id;
                     self.rename_effect(track, plugin, window, context);
@@ -362,7 +366,7 @@ impl Tonique {
         }
     }
 
-    pub(super) fn rack_drag_move(&mut self, event: &MouseMoveEvent) -> bool {
+    pub(super) fn rack_drag_move(&mut self, event: &MouseMoveEvent, context: &mut App) -> bool {
         let (pointer_x, pointer_y) = (f32::from(event.position.x), f32::from(event.position.y));
         let fine = event.modifiers.shift;
         let mut knob = None;
@@ -385,21 +389,23 @@ impl Tonique {
             }
         }
         if let Some((target, before, value)) = knob {
-            self.set_knob(&target, before, value, false);
+            self.set_knob(&target, before, value, false, context);
         }
         true
     }
 
-    pub(super) fn rack_drag_end(&mut self) {
+    pub(super) fn rack_drag_end(&mut self, context: &mut App) {
         let Some(drag) = self.bottom.rack.drag.take() else {
             return;
         };
         match drag {
-            RackDrag::Knob(drag) => self.set_knob(&drag.target, drag.before, drag.value, true),
+            RackDrag::Knob(drag) => {
+                self.set_knob(&drag.target, drag.before, drag.value, true, context)
+            }
             RackDrag::Graph(drag) => {
                 let (cutoff, q) = (drag.cutoff.get(), drag.q.get());
                 if (cutoff, q) != drag.before {
-                    self.state.commit_params(&[
+                    self.state_mut(context).commit_params(&[
                         (drag.cutoff.id, drag.before.0, cutoff),
                         (drag.q.id, drag.before.1, q),
                     ]);
@@ -416,13 +422,13 @@ impl Tonique {
                     return;
                 };
                 // Still where it was picked up: nothing else moved it.
-                let effects = self.state.effects(&track);
+                let effects = self.state(context).effects(&track);
                 if effects.get(from).map(|effect| effect.plugin.id) != Some(plugin) {
                     return;
                 }
                 let index = self.bottom.rack.insert_index(last_x);
                 if index != from && index != from + 1 {
-                    self.state.move_effect(&track, from, index);
+                    self.state_mut(context).move_effect(&track, from, index);
                     let to = if index > from { index - 1 } else { index };
                     self.bottom.rack.selected = vec![to];
                 }

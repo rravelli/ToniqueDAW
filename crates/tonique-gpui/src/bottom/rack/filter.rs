@@ -2,6 +2,7 @@
 //! for cutoff and resonance dragged anywhere on it, the mode, and cutoff and
 //! Q knobs.
 
+use crate::model::HoldsProject;
 use std::{cell::Cell, f32::consts::PI, ops::RangeInclusive, rc::Rc};
 
 use gpui::{
@@ -315,7 +316,7 @@ impl Tonique {
                         if let (Some(first), Some(second)) = initial {
                             cutoff.set(first);
                             q.set(second);
-                            this.state.commit_params(&[
+                            this.state_mut(context).commit_params(&[
                                 (cutoff.id, before.0, cutoff.get()),
                                 (q.id, before.1, q.get()),
                             ]);
@@ -342,9 +343,9 @@ impl Tonique {
                         div().text_size(px(size::SMALL)).child(name),
                         theme,
                         context,
-                        move |this, _| {
+                        move |this, context| {
                             if mode != option {
-                                this.state.set_effect_setting(
+                                this.state_mut(context).set_effect_setting(
                                     &track,
                                     plugin,
                                     Setting::Mode(option),

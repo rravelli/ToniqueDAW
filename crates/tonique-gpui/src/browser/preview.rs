@@ -2,8 +2,9 @@
 //! format, its waveform to seek in, play, auto-preview, and the preview's
 //! volume.
 
+use crate::model::HoldsProject;
 use gpui::{
-    AnyElement, Context, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, canvas, div,
+    AnyElement, App, Context, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, canvas, div,
     prelude::*, px,
 };
 
@@ -59,7 +60,7 @@ fn short_time(seconds: f64) -> String {
 }
 
 impl Tonique {
-    fn seek_preview_at(&mut self, pointer_x: Pixels) {
+    fn seek_preview_at(&mut self, pointer_x: Pixels, context: &mut App) {
         let Some(audio) = self.browser.audio.clone() else {
             return;
         };
@@ -70,35 +71,36 @@ impl Tonique {
         let fraction = (f32::from(pointer_x - bounds.origin.x)
             / f32::from(bounds.size.width).max(1.))
         .clamp(0., 1.);
-        if self.state.previewing() != Some(audio.path.as_path()) {
-            self.state.play_preview(audio.path.clone());
+        if self.state(context).previewing() != Some(audio.path.as_path()) {
+            self.state_mut(context).play_preview(audio.path.clone());
         }
-        self.state.seek_preview((fraction as f64 * frames) as usize);
+        self.state_mut(context)
+            .seek_preview((fraction as f64 * frames) as usize);
     }
 
-    fn set_preview_volume_at(&mut self, pointer_x: Pixels) {
+    fn set_preview_volume_at(&mut self, pointer_x: Pixels, context: &mut App) {
         let bounds = self.browser.volume_bounds.get();
         self.browser.volume = (f32::from(pointer_x - bounds.origin.x)
             / f32::from(bounds.size.width).max(1.))
         .clamp(0., 1.);
         self.browser.muted = false;
-        self.apply_preview_gain();
+        self.apply_preview_gain(context);
     }
 
-    fn apply_preview_gain(&mut self) {
+    fn apply_preview_gain(&mut self, context: &mut App) {
         let gain = if self.browser.muted {
             0.
         } else {
             preview_gain(self.browser.volume)
         };
-        self.state.set_preview_gain(gain);
+        self.state_mut(context).set_preview_gain(gain);
     }
 
-    pub fn browser_drag_move(&mut self, event: &MouseMoveEvent) -> bool {
+    pub fn browser_drag_move(&mut self, event: &MouseMoveEvent, context: &mut App) -> bool {
         match self.browser.drag {
             BrowserDrag::None => return false,
-            BrowserDrag::Seek => self.seek_preview_at(event.position.x),
-            BrowserDrag::Volume => self.set_preview_volume_at(event.position.x),
+            BrowserDrag::Seek => self.seek_preview_at(event.position.x, context),
+            BrowserDrag::Volume => self.set_preview_volume_at(event.position.x, context),
         }
         true
     }
@@ -124,9 +126,9 @@ impl Tonique {
             .flex()
             .border_t_1()
             .border_color(hsla(theme.separator));
-        let this_file = self.state.previewing() == Some(audio.path.as_path());
+        let this_file = self.state(context).previewing() == Some(audio.path.as_path());
         let position = if this_file {
-            self.state.preview_position() as f64
+            self.state(context).preview_position() as f64
         } else {
             0.
         };
@@ -199,7 +201,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(|this, event: &MouseDownEvent, _, context| {
                     this.browser.drag = BrowserDrag::Seek;
-                    this.seek_preview_at(event.position.x);
+                    this.seek_preview_at(event.position.x, context);
                     context.notify();
                 }),
             )
@@ -252,8 +254,8 @@ impl Tonique {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let playing = self.state.preview_playback_state() == PlaybackState::Playing
-            && self.state.previewing() == Some(audio.path.as_path());
+        let playing = self.state(context).preview_playback_state() == PlaybackState::Playing
+            && self.state(context).previewing() == Some(audio.path.as_path());
         let path = audio.path.clone();
         let play = on_press(
             div()
@@ -278,11 +280,11 @@ impl Tonique {
                 .cursor_pointer()
                 .child(icon_fill(if playing { icons::STOP } else { icons::PLAY })),
             context,
-            move |this, _| {
+            move |this, context| {
                 if playing {
-                    this.state.pause_preview();
+                    this.state_mut(context).pause_preview();
                 } else {
-                    this.state.play_preview(path.clone());
+                    this.state_mut(context).play_preview(path.clone());
                 }
             },
         );
@@ -304,9 +306,9 @@ impl Tonique {
                     icons::SPEAKER_LOW
                 })),
             context,
-            |this, _| {
+            |this, context| {
                 this.browser.muted = !this.browser.muted;
-                this.apply_preview_gain();
+                this.apply_preview_gain(context);
             },
         );
         div()
@@ -344,7 +346,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(|this, event: &MouseDownEvent, _, context| {
                     this.browser.drag = BrowserDrag::Volume;
-                    this.set_preview_volume_at(event.position.x);
+                    this.set_preview_volume_at(event.position.x, context);
                     context.notify();
                 }),
             )

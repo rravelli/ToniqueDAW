@@ -2,6 +2,7 @@
 //! label's), a folder, an audio file to drag onto the timeline, or another
 //! file, dimmed; and the row ending the folders, adding one.
 
+use crate::model::HoldsProject;
 use gpui::{
     Anchor, AnyElement, App, Context, MouseButton, MouseDownEvent, Stateful, div, prelude::*, px,
 };
@@ -80,7 +81,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, _: &MouseDownEvent, window, context| {
                     window.focus(&this.browser.list_focus, context);
-                    this.browser_select(kind, index, true);
+                    this.browser_select(kind, index, true, context);
                     context.notify();
                 }),
             )
@@ -249,8 +250,8 @@ impl Tonique {
         );
         let kind = (!item.is_dir).then(|| file_kind(&item.path)).flatten();
         let audio = kind == Some(FileKind::Audio);
-        let previewing = self.state.previewing() == Some(item.path.as_path())
-            && self.state.preview_playback_state() == PlaybackState::Playing;
+        let previewing = self.state(context).previewing() == Some(item.path.as_path())
+            && self.state(context).preview_playback_state() == PlaybackState::Playing;
         let glyph = match (item.is_dir, open, kind) {
             _ if previewing => icons::SPEAKER_HIGH,
             (true, true, _) => icons::FOLDER_OPEN,

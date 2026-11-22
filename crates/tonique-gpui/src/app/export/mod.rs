@@ -12,9 +12,10 @@ mod parts;
 mod preview;
 mod progress;
 
+use crate::model::HoldsProject;
 use std::{cell::Cell, collections::HashSet, path::PathBuf, rc::Rc};
 
-use gpui::{Bounds, Context, MouseDownEvent, MouseMoveEvent, Pixels, Window};
+use gpui::{App, Bounds, Context, MouseDownEvent, MouseMoveEvent, Pixels, Window};
 use tonique_engine::time::BeatPos;
 
 use crate::{
@@ -115,8 +116,8 @@ impl Tonique {
         if export.is_running() {
             return;
         }
-        export.name.text = self.project.name();
-        if let Some(dir) = self.project.dir() {
+        export.name.text = self.files.name();
+        if let Some(dir) = self.files.dir() {
             export.folder.text = dir.display().to_string();
         }
         export.existing = None;
@@ -140,11 +141,14 @@ impl Tonique {
 
     fn start_export(&mut self, window: &mut Window, context: &mut Context<Self>) {
         let export = &mut self.export;
-        let sources = export.selection.sources(&self.state);
+        let sources = export.selection.sources(&self.project.read(context).state);
         let dir = PathBuf::from(export.folder.text.trim());
-        let started = self
-            .state
-            .export(&dir, &export.name.text, &sources, export.options);
+        let started = self.project.read(context).state.export(
+            &dir,
+            &export.name.text,
+            &sources,
+            export.options,
+        );
         export.step = match started {
             Ok(running) => Step::Running(running),
             Err(detail) => Step::Failed {
@@ -199,12 +203,12 @@ impl Tonique {
 
     /// Starts moving the exported part's bound nearest the pointer, which
     /// goes there: the range becomes a custom one.
-    fn preview_down(&mut self, event: &MouseDownEvent) {
-        let Some(at) = self.preview_beat(f32::from(event.position.x)) else {
+    fn preview_down(&mut self, event: &MouseDownEvent, context: &mut App) {
+        let Some(at) = self.preview_beat(f32::from(event.position.x), context) else {
             return;
         };
         let (start, end) = self
-            .state
+            .state(context)
             .export_span(self.export.options.range)
             .ok()
             .or(self.export.custom)
@@ -221,11 +225,11 @@ impl Tonique {
     }
 
     /// Follows a drag in the preview. Returns whether it's one.
-    pub(super) fn export_drag_move(&mut self, event: &MouseMoveEvent) -> bool {
+    pub(super) fn export_drag_move(&mut self, event: &MouseMoveEvent, context: &mut App) -> bool {
         let Some(bound) = self.export.dragged_bound else {
             return false;
         };
-        if let Some(at) = self.preview_beat(f32::from(event.position.x)) {
+        if let Some(at) = self.preview_beat(f32::from(event.position.x), context) {
             self.move_bound(bound, at);
         }
         true

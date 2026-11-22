@@ -23,7 +23,7 @@ mod scroll;
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    Bounds, ContentMask, Context, CursorStyle, Modifiers, MouseButton, Pixels, Point, Window,
+    App, Bounds, ContentMask, Context, CursorStyle, Modifiers, MouseButton, Pixels, Point, Window,
     canvas, div, prelude::*, px,
 };
 
@@ -87,7 +87,7 @@ impl TimelineUi {
 }
 
 impl Tonique {
-    fn cursor(&self, rows: &[Row]) -> CursorStyle {
+    fn cursor(&self, rows: &[Row], context: &App) -> CursorStyle {
         match &self.timeline.drag {
             TimelineDrag::Move(press) if press.dragged.is_some() => return CursorStyle::ClosedHand,
             TimelineDrag::Zone { moved: true, .. } => return CursorStyle::IBeam,
@@ -103,8 +103,8 @@ impl Tonique {
         let Some((local_x, local_y)) = self.timeline.hover else {
             return CursorStyle::Arrow;
         };
-        if local_y < LOOP_HEIGHT && !self.on_playhead_head(local_x, local_y) {
-            return match self.loop_grab_at(local_x) {
+        if local_y < LOOP_HEIGHT && !self.on_playhead_head(local_x, local_y, context) {
+            return match self.loop_grab_at(local_x, context) {
                 Some(LoopGrab::Start | LoopGrab::End) => CursorStyle::ResizeLeftRight,
                 Some(_) => CursorStyle::OpenHand,
                 None => CursorStyle::PointingHand,
@@ -113,10 +113,10 @@ impl Tonique {
         if local_y < RULER_HEIGHT {
             return CursorStyle::PointingHand;
         }
-        if self.in_footer(local_y) {
+        if self.in_footer(local_y, context) {
             return CursorStyle::Arrow;
         }
-        match self.clip_at(rows, local_x, local_y) {
+        match self.clip_at(rows, local_x, local_y, context) {
             Some((_, _, ClipPart::TrimStart | ClipPart::TrimEnd)) => CursorStyle::ResizeLeftRight,
             Some((_, _, ClipPart::Header)) => CursorStyle::OpenHand,
             _ => CursorStyle::IBeam,
@@ -130,14 +130,11 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let scene = self.scene(
-            rows,
-            self.rows_in_view(window),
-            crate::theme::current(context),
-        );
+        let in_view = self.rows_in_view(window, context);
+        let scene = self.scene(rows, in_view, crate::theme::current(context), context);
         let waves = self.waves.clone();
         let slot = self.timeline.bounds.clone();
-        let span = self.across_span();
+        let span = self.across_span(context);
         let this = context.weak_entity();
         // Along the bottom of the lanes, over the last of them.
         let across_bar = scrollbar(
@@ -147,7 +144,7 @@ impl Tonique {
             move |_| Some(span),
             move |offset, _, app| {
                 let _ = this.update(app, |this, context| {
-                    this.set_across(offset);
+                    this.set_across(offset, context);
                     context.notify();
                 });
             },
@@ -155,7 +152,7 @@ impl Tonique {
         .absolute()
         .left_0()
         .right_0()
-        .top(px(self.lanes_bottom() - SCROLLBAR_WIDTH))
+        .top(px(self.lanes_bottom(context) - SCROLLBAR_WIDTH))
         .h(px(SCROLLBAR_WIDTH));
 
         let view = div()
@@ -164,7 +161,7 @@ impl Tonique {
             .flex_1()
             .min_w_0()
             .h_full()
-            .cursor(self.cursor(rows))
+            .cursor(self.cursor(rows, context))
             .on_mouse_down(MouseButton::Left, context.listener(Self::on_timeline_down))
             .on_mouse_down(MouseButton::Right, context.listener(Self::on_timeline_menu))
             .on_scroll(context.listener(Self::on_timeline_scroll));
@@ -194,7 +191,7 @@ impl Tonique {
     /// Down the track list's far side, along the lanes: the rows scroll
     /// with them.
     pub fn rows_scrollbar(&self, rows: &[Row], context: &mut Context<Self>) -> impl IntoElement {
-        let span = self.rows_span(rows);
+        let span = self.rows_span(rows, context);
         let this = context.weak_entity();
         scrollbar(
             Axis::Vertical,
@@ -203,7 +200,7 @@ impl Tonique {
             move |_| Some(span),
             move |offset, _, app| {
                 let _ = this.update(app, |this, context| {
-                    this.set_rows(offset);
+                    this.set_rows(offset, context);
                     context.notify();
                 });
             },

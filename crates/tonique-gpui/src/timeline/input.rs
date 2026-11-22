@@ -3,8 +3,10 @@
 //! the root view follows the drag; a right-click opens a menu. The wheel
 //! is [`super::scroll`]'s, moving clips [`super::moving`]'s.
 
+use crate::model::HoldsProject;
 use gpui::{
-    Anchor, Context, Modifiers, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Window,
+    Anchor, App, Context, Modifiers, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    Window,
 };
 use tonique_engine::time::BeatPos;
 
@@ -72,44 +74,51 @@ impl Tonique {
         window.focus(&self.focus, context);
         let (local_x, local_y) = self.local(event.position);
         let alt = event.modifiers.alt;
-        self.timeline.drag = if self.on_playhead_head(local_x, local_y) {
+        self.timeline.drag = if self.on_playhead_head(local_x, local_y, context) {
             TimelineDrag::Scrub
         } else if local_y < LOOP_HEIGHT {
-            let anchor = self.snapped(local_x, alt);
+            let anchor = self.snapped(local_x, alt, context);
             TimelineDrag::Loop {
                 grab: self
-                    .loop_grab_at(local_x)
+                    .loop_grab_at(local_x, context)
                     .unwrap_or(LoopGrab::Create { anchor }),
                 moved: false,
             }
         } else if local_y < RULER_HEIGHT {
-            self.state.seek(self.beats_at(local_x).max(BeatPos::ZERO));
+            let beat = self.beats_at(local_x, context).max(BeatPos::ZERO);
+            self.state_mut(context).seek(beat);
             TimelineDrag::Scrub
-        } else if self.in_footer(local_y) {
+        } else if self.in_footer(local_y, context) {
             // The master's footer only shows its output.
             TimelineDrag::None
         } else {
-            self.press_lanes(event, local_x, local_y)
+            self.press_lanes(event, local_x, local_y, context)
         };
         context.notify();
     }
 
     /// A press below the ruler: on a clip's edge, its header, or anywhere
     /// else (the edit cursor, or a zone).
-    fn press_lanes(&mut self, event: &MouseDownEvent, local_x: f32, local_y: f32) -> TimelineDrag {
-        let rows = rows(&self.state);
-        let hit = self.clip_at(&rows, local_x, local_y);
+    fn press_lanes(
+        &mut self,
+        event: &MouseDownEvent,
+        local_x: f32,
+        local_y: f32,
+        context: &mut App,
+    ) -> TimelineDrag {
+        let rows = rows(self.state(context));
+        let hit = self.clip_at(&rows, local_x, local_y, context);
         // A double-click on a clip shows its details in the bottom panel.
         if event.click_count >= 2
             && let Some((_, clip, _)) = &hit
         {
-            self.state.select_clips(vec![clip.id]);
-            self.show_clip_details(clip.id);
+            self.state_mut(context).select_clips(vec![clip.id]);
+            self.show_clip_details(clip.id, context);
             return TimelineDrag::None;
         }
         match hit {
             Some((row, clip, part @ (ClipPart::TrimStart | ClipPart::TrimEnd))) => {
-                self.state.select_track(&rows[row].track.id);
+                self.state_mut(context).select_track(&rows[row].track.id);
                 TimelineDrag::Trim {
                     original: clip,
                     start_edge: matches!(part, ClipPart::TrimStart),
@@ -117,16 +126,16 @@ impl Tonique {
                 }
             }
             Some((row, clip, ClipPart::Header)) => {
-                self.state.select_track(&rows[row].track.id);
+                self.state_mut(context).select_track(&rows[row].track.id);
                 let shift = event.modifiers.shift;
                 if shift {
-                    self.state.toggle_clip_selected(clip.id);
+                    self.state_mut(context).toggle_clip_selected(clip.id);
                 }
                 TimelineDrag::Move(ClipMove {
                     id: clip.id,
                     track_index: rows[row].track.first_track_index,
                     start: event.position,
-                    grab: self.beats_at(local_x),
+                    grab: self.beats_at(local_x, context),
                     shift,
                     dragged: None,
                 })
@@ -135,16 +144,16 @@ impl Tonique {
                 // The body of a clip, or an empty lane.
                 let row = hit
                     .map(|(row, ..)| row)
-                    .or_else(|| self.row_at(&rows, local_y));
+                    .or_else(|| self.row_at(&rows, local_y, context));
                 if let Some(row) = row {
-                    self.state.select_track(&rows[row].track.id);
+                    self.state_mut(context).select_track(&rows[row].track.id);
                 }
                 // Zones span tracks: on a group's header, from its first.
-                let last = self.state.track_count().saturating_sub(1);
+                let last = self.state(context).track_count().saturating_sub(1);
                 TimelineDrag::Zone {
                     anchor: (
                         row.map_or(last, |row| rows[row].track.first_track_index),
-                        self.snapped(local_x, event.modifiers.alt),
+                        self.snapped(local_x, event.modifiers.alt, context),
                     ),
                     start: event.position,
                     moved: false,
@@ -161,13 +170,13 @@ impl Tonique {
         context: &mut Context<Self>,
     ) {
         let (local_x, local_y) = self.local(event.position);
-        if self.in_footer(local_y) {
+        if self.in_footer(local_y, context) {
             return;
         }
-        let kind = match self.clip_at(&rows(&self.state), local_x, local_y) {
+        let kind = match self.clip_at(&rows(self.state(context)), local_x, local_y, context) {
             Some((_, clip, _)) => {
-                if !self.state.is_clip_selected(clip.id) {
-                    self.state.select_clips(vec![clip.id]);
+                if !self.state(context).is_clip_selected(clip.id) {
+                    self.state_mut(context).select_clips(vec![clip.id]);
                 }
                 PopupKind::Clip(clip.id)
             }
@@ -179,28 +188,34 @@ impl Tonique {
 
     /// Follows the pointer during a timeline drag. Returns whether anything
     /// changed.
-    pub fn timeline_drag_move(&mut self, event: &MouseMoveEvent) -> bool {
+    pub fn timeline_drag_move(&mut self, event: &MouseMoveEvent, context: &mut App) -> bool {
         if matches!(self.timeline.drag, TimelineDrag::None) {
             return false;
         }
         self.timeline.pointer = Some((event.position, event.modifiers));
-        self.follow_timeline_drag(event.position, &event.modifiers);
+        self.follow_timeline_drag(event.position, &event.modifiers, context);
         true
     }
 
     /// Follows the pointer at `position` (in the window) with the drag:
     /// when it moves, and when the timeline scrolls under it.
-    pub(super) fn follow_timeline_drag(&mut self, position: Point<Pixels>, modifiers: &Modifiers) {
+    pub(super) fn follow_timeline_drag(
+        &mut self,
+        position: Point<Pixels>,
+        modifiers: &Modifiers,
+        context: &mut App,
+    ) {
         let (local_x, local_y) = self.local(position);
         let alt = modifiers.alt;
         self.timeline.drag = match std::mem::take(&mut self.timeline.drag) {
             TimelineDrag::None => TimelineDrag::None,
             TimelineDrag::Scrub => {
-                self.state.seek(self.beats_at(local_x).max(BeatPos::ZERO));
+                let beat = self.beats_at(local_x, context).max(BeatPos::ZERO);
+                self.state_mut(context).seek(beat);
                 TimelineDrag::Scrub
             }
             TimelineDrag::Loop { grab, .. } => {
-                self.drag_loop(grab, local_x, alt);
+                self.drag_loop(grab, local_x, alt, context);
                 TimelineDrag::Loop { grab, moved: true }
             }
             TimelineDrag::Zone {
@@ -210,7 +225,7 @@ impl Tonique {
             } => {
                 let moved = moved || (position - start).magnitude() > ZONE_THRESHOLD;
                 if moved {
-                    self.draw_zone(anchor, local_x, local_y, alt);
+                    self.draw_zone(anchor, local_x, local_y, alt, context);
                 }
                 TimelineDrag::Zone {
                     anchor,
@@ -219,15 +234,15 @@ impl Tonique {
                 }
             }
             TimelineDrag::Move(press) => self
-                .follow_clip_move(press, position, modifiers)
+                .follow_clip_move(press, position, modifiers, context)
                 .map_or(TimelineDrag::None, TimelineDrag::Move),
             TimelineDrag::Trim {
                 original,
                 start_edge,
                 ..
             } => {
-                let clip = self.trimmed(&original, start_edge, local_x, modifiers);
-                self.state.resize_clip(clip.clone());
+                let clip = self.trimmed(&original, start_edge, local_x, modifiers, context);
+                self.state_mut(context).resize_clip(clip.clone());
                 TimelineDrag::Trim {
                     original,
                     start_edge,
@@ -239,15 +254,24 @@ impl Tonique {
 
     /// Selects the clips in the zone from `anchor` (a track's index and a
     /// beat) to the pointer, on the tracks between, snapped as trims are.
-    fn draw_zone(&mut self, anchor: (usize, BeatPos), local_x: f32, local_y: f32, alt: bool) {
-        let track_count = self.state.track_count();
+    fn draw_zone(
+        &mut self,
+        anchor: (usize, BeatPos),
+        local_x: f32,
+        local_y: f32,
+        alt: bool,
+        context: &mut App,
+    ) {
+        let track_count = self.state(context).track_count();
         if track_count == 0 {
             return;
         }
-        let rows = rows(&self.state);
-        let track = self.pointer_track(&rows, local_y).min(track_count - 1);
-        let beats = self.snapped(local_x, alt);
-        self.state
+        let rows = rows(self.state(context));
+        let track = self
+            .pointer_track(&rows, local_y, context)
+            .min(track_count - 1);
+        let beats = self.snapped(local_x, alt, context);
+        self.state_mut(context)
             .select_in_bounds(SelectionBounds::between(anchor, (track, beats)));
     }
 
@@ -261,9 +285,10 @@ impl Tonique {
         start_edge: bool,
         local_x: f32,
         modifiers: &Modifiers,
+        context: &App,
     ) -> AudioClip {
-        let state = &self.state;
-        let beats = self.beats_at(local_x);
+        let state = self.state(context);
+        let beats = self.beats_at(local_x, context);
         let at = if state.grid.snaps(modifiers.alt) {
             let targets = state.snap_targets(&[original.id]);
             state.grid.snap_to_targets(beats, &targets).0
@@ -280,7 +305,7 @@ impl Tonique {
         clip
     }
 
-    pub fn timeline_drag_end(&mut self, event: &MouseUpEvent) {
+    pub fn timeline_drag_end(&mut self, event: &MouseUpEvent, context: &mut App) {
         self.timeline.pointer = None;
         match std::mem::take(&mut self.timeline.drag) {
             // A click on the loop toggles looping; off it, it seeks.
@@ -289,36 +314,38 @@ impl Tonique {
                 moved: false,
             } => {
                 let (local_x, _) = self.local(event.position);
-                self.state.seek(self.beats_at(local_x).max(BeatPos::ZERO));
+                let beat = self.beats_at(local_x, context).max(BeatPos::ZERO);
+                self.state_mut(context).seek(beat);
             }
             TimelineDrag::Loop { moved: false, .. } => {
-                let looping = self.state.looping();
-                self.state.set_looping(!looping);
+                let looping = self.state(context).looping();
+                self.state_mut(context).set_looping(!looping);
             }
             // A click on a lane places the edit cursor.
             TimelineDrag::Zone { moved: false, .. } => {
                 let (local_x, _) = self.local(event.position);
-                self.state.clear_clip_selection();
-                self.state
-                    .set_edit_cursor(self.snapped(local_x, event.modifiers.alt));
+                let cursor = self.snapped(local_x, event.modifiers.alt, context);
+                let mut state = self.state_mut(context);
+                state.clear_clip_selection();
+                state.set_edit_cursor(cursor);
             }
             TimelineDrag::Move(ClipMove {
                 dragged: Some(dragged),
                 ..
             }) => {
-                self.drop_clips(dragged);
+                self.drop_clips(dragged, context);
                 let over_lanes = self.timeline.bounds.get().contains(&event.position);
                 let (_, local_y) = self.local(event.position);
-                self.expand_on_hover(over_lanes.then_some(local_y), false);
+                self.expand_on_hover(over_lanes.then_some(local_y), false, context);
             }
             // A click on a clip's header selects it alone.
             TimelineDrag::Move(ClipMove {
                 id, shift: false, ..
-            }) => self.state.select_clips(vec![id]),
+            }) => self.state_mut(context).select_clips(vec![id]),
             TimelineDrag::Trim {
                 current: Some(clip),
                 ..
-            } => self.state.commit_resize_clip(clip),
+            } => self.state_mut(context).commit_resize_clip(clip),
             _ => {}
         }
     }

@@ -1,5 +1,7 @@
 //! Dragging the markers and the loop, and the clip edits they make.
 
+use crate::model::HoldsProject;
+use gpui::App;
 use tonique_engine::{edit::ClipLoop, time::BeatPos};
 
 use crate::{
@@ -88,9 +90,10 @@ impl Tonique {
         layout: Layout,
         x: f32,
         y: f32,
+        context: &App,
     ) -> Option<Area> {
         let details = &self.bottom.clip;
-        let bpm = self.state.bpm();
+        let bpm = self.state(context).bpm();
         let span = layout.span();
         let at = |file: f64| details.x(file, bpm, span);
         let mut areas = Vec::new();
@@ -152,12 +155,18 @@ impl Tonique {
 
     /// Follows a handle dragged to `pointer_x`: the edit shows while
     /// dragged, and applies as one undo step on release.
-    pub(super) fn follow_handle(&mut self, clip: &AudioClip, pointer_x: f32, alt: bool) {
+    pub(super) fn follow_handle(
+        &mut self,
+        clip: &AudioClip,
+        pointer_x: f32,
+        alt: bool,
+        context: &mut App,
+    ) {
         let Some(ClipDrag::Handle(drag)) = &self.bottom.clip.drag else {
             return;
         };
-        let bpm = self.state.bpm();
-        let shown = self.state.shown_clip(clip);
+        let bpm = self.state(context).bpm();
+        let shown = self.state(context).shown_clip(clip);
         let details = &self.bottom.clip;
         let span = details.layout().span();
         let at = details.file_at_x(pointer_x, bpm, span, alt);
@@ -191,7 +200,7 @@ impl Tonique {
             }
         };
         if let Some(edited) = edited {
-            self.state.resize_clip(edited);
+            self.state_mut(context).resize_clip(edited);
         }
     }
 }

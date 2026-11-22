@@ -4,8 +4,9 @@
 //! typed; edits show while dragged and apply as one undo step once released
 //! (or stepped, or typed).
 
+use crate::model::HoldsProject;
 use gpui::{
-    AnyElement, Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, Window, div,
+    AnyElement, App, Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, Window, div,
     prelude::*, px,
 };
 use tonique_engine::time::{BeatPos, TimeSignature};
@@ -213,7 +214,7 @@ impl Tonique {
                         |this, _| this.bottom.clip.panels.audio ^= true,
                     ),
             );
-        let shown = self.state.shown_clip(clip);
+        let shown = self.state(context).shown_clip(clip);
         let mut row = div()
             .id("clip-panels")
             .flex_1()
@@ -286,17 +287,17 @@ impl Tonique {
             true,
             theme,
             context,
-            move |this| {
-                let Some((_, clip)) = this.state.clip_with_track(id) else {
+            move |this, context| {
+                let Some((_, clip)) = this.state(context).clip_with_track(id) else {
                     return;
                 };
-                let bpm = this.state.bpm();
+                let bpm = this.state(context).bpm();
                 let mut toggled = clip.clone();
                 match clip.active_loop() {
                     Some(_) => toggled.set_loop(None, bpm),
                     None => toggled.set_loop(Some(default_loop(&clip, bpm)), bpm),
                 }
-                this.state.commit_resize_clip(toggled);
+                this.state_mut(context).commit_resize_clip(toggled);
             },
         );
         div()
@@ -334,8 +335,8 @@ impl Tonique {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let bpm = self.state.bpm();
-        let signature = self.state.time_signature();
+        let bpm = self.state(context).bpm();
+        let signature = self.state(context).time_signature();
         let value = field.value(shown, bpm);
         let typing = match &self.bottom.clip.typing {
             Some((Typed::Field(typed), text)) if *typed == field => Some(text),
@@ -375,7 +376,9 @@ impl Tonique {
                                     this.hold_arrows(holder.clone());
                                     if event.click_count >= 2 {
                                         this.bottom.clip.drag = None;
-                                        if let Some((_, clip)) = this.state.clip_with_track(id) {
+                                        if let Some((_, clip)) =
+                                            this.state(context).clip_with_track(id)
+                                        {
                                             this.type_field(field, &clip, window, context);
                                         }
                                         context.notify();
@@ -401,7 +404,13 @@ impl Tonique {
     }
 
     /// Follows a field dragged to `pointer_x`; Alt keeps it off the grid.
-    pub(super) fn follow_field(&mut self, clip: &AudioClip, pointer_x: f32, alt: bool) {
+    pub(super) fn follow_field(
+        &mut self,
+        clip: &AudioClip,
+        pointer_x: f32,
+        alt: bool,
+        context: &mut App,
+    ) {
         let Some(ClipDrag::Field {
             field,
             start_x,
@@ -418,20 +427,27 @@ impl Tonique {
         }
         let value = *start + moved_by as f64 * field.speed();
         let field = *field;
-        let bpm = self.state.bpm();
-        let shown = self.state.shown_clip(clip);
-        self.state.resize_clip(field.apply(&shown, value, bpm, alt));
+        let bpm = self.state(context).bpm();
+        let shown = self.state(context).shown_clip(clip);
+        self.state_mut(context)
+            .resize_clip(field.apply(&shown, value, bpm, alt));
     }
 
     /// `field` stepped by `presses` of the arrow keys, as one undo step;
     /// positions and lengths stay on sixteenths.
-    pub(super) fn step_field(&mut self, clip: &AudioClip, field: Field, presses: Presses) {
-        let bpm = self.state.bpm();
+    pub(super) fn step_field(
+        &mut self,
+        clip: &AudioClip,
+        field: Field,
+        presses: Presses,
+        context: &mut App,
+    ) {
+        let bpm = self.state(context).bpm();
         let value = field.value(clip, bpm);
-        let step = field.key_step(self.state.time_signature());
+        let step = field.key_step(self.state(context).time_signature());
         let edited = field.apply(clip, value + presses.amount(step), bpm, false);
         if field.value(&edited, bpm) != value {
-            self.state.commit_resize_clip(edited);
+            self.state_mut(context).commit_resize_clip(edited);
         }
     }
 
@@ -443,8 +459,8 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        let value = field.value(clip, self.state.bpm());
-        let text = field.format(value, self.state.time_signature());
+        let value = field.value(clip, self.state(context).bpm());
+        let text = field.format(value, self.state(context).time_signature());
         let mut typed = TextField::new(context);
         typed.start(text, window, context);
         self.bottom.clip.typing = Some((Typed::Field(field), typed));
@@ -474,14 +490,14 @@ impl Tonique {
         let (Some((typed, text)), Some(id), true) = (typing, self.bottom.clip.clip, keep) else {
             return;
         };
-        let Some((_, clip)) = self.state.clip_with_track(id) else {
+        let Some((_, clip)) = self.state(context).clip_with_track(id) else {
             return;
         };
-        let bpm = self.state.bpm();
+        let bpm = self.state(context).bpm();
         match typed {
             Typed::Field(field) => {
-                if let Some(value) = field.parse(&text.text, self.state.time_signature()) {
-                    self.state
+                if let Some(value) = field.parse(&text.text, self.state(context).time_signature()) {
+                    self.state_mut(context)
                         .commit_resize_clip(field.apply(&clip, value, bpm, false));
                 }
             }
@@ -491,7 +507,7 @@ impl Tonique {
                 {
                     let mut edited = clip.clone();
                     edited.set_warp(clip.warp, file_bpm, clip.transpose, clip.detune, bpm);
-                    self.state.commit_resize_clip(edited);
+                    self.state_mut(context).commit_resize_clip(edited);
                 }
             }
         }
@@ -597,7 +613,7 @@ pub(super) fn toggle_section(
     enabled: bool,
     theme: &Theme,
     context: &mut Context<Tonique>,
-    action: impl Fn(&mut Tonique) + 'static,
+    action: impl Fn(&mut Tonique, &mut App) + 'static,
 ) -> gpui::Div {
     let label = div()
         .text_size(px(size::SMALL))
@@ -607,7 +623,9 @@ pub(super) fn toggle_section(
         .fit(5.)
         .selected(on)
         .enabled(enabled)
-        .show(label, theme, context, move |this, _| action(this));
+        .show(label, theme, context, move |this, context| {
+            action(this, context)
+        });
     div()
         .flex()
         .items_center()

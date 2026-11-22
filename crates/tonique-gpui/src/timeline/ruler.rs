@@ -3,7 +3,8 @@
 //! move it, or the empty lane to draw a new one; click the bar to toggle
 //! looping), and the playhead's head, dragged to scrub.
 
-use gpui::{Corners, PathBuilder, Window, point, px};
+use crate::model::HoldsProject;
+use gpui::{App, Corners, PathBuilder, Window, point, px};
 use tonique_engine::time::BeatPos;
 
 use crate::{
@@ -48,11 +49,11 @@ pub enum LoopGrab {
 impl Tonique {
     /// Whether the pointer at (`local_x`, `local_y`) grabs the playhead's
     /// head: around it, a little wider and taller than it.
-    pub(super) fn on_playhead_head(&self, local_x: f32, local_y: f32) -> bool {
+    pub(super) fn on_playhead_head(&self, local_x: f32, local_y: f32, context: &App) -> bool {
         let playhead_x = self
-            .state
+            .state(context)
             .grid
-            .beats_to_x(self.state.playhead(), self.viewport());
+            .beats_to_x(self.state(context).playhead(), self.viewport());
         let around = Rect::new(
             playhead_x - HEAD_WIDTH,
             0.,
@@ -63,35 +64,35 @@ impl Tonique {
     }
 
     /// The playhead's head is under the pointer, or dragged.
-    pub(super) fn playhead_lit(&self) -> bool {
+    pub(super) fn playhead_lit(&self, context: &App) -> bool {
         match (&self.timeline.drag, self.timeline.hover) {
             (TimelineDrag::None, Some((local_x, local_y))) => {
-                self.on_playhead_head(local_x, local_y)
+                self.on_playhead_head(local_x, local_y, context)
             }
             _ => false,
         }
     }
 
     /// The loop's part being dragged, or under the pointer.
-    pub(super) fn loop_lit(&self) -> Option<LoopGrab> {
+    pub(super) fn loop_lit(&self, context: &App) -> Option<LoopGrab> {
         match (&self.timeline.drag, self.timeline.hover) {
             (TimelineDrag::Loop { grab, .. }, _) => Some(*grab),
             (TimelineDrag::None, Some((local_x, local_y)))
-                if local_y < LOOP_HEIGHT && !self.on_playhead_head(local_x, local_y) =>
+                if local_y < LOOP_HEIGHT && !self.on_playhead_head(local_x, local_y, context) =>
             {
-                self.loop_grab_at(local_x)
+                self.loop_grab_at(local_x, context)
             }
             _ => None,
         }
     }
 
     /// The loop's part at `local_x`: an end, or the bar between them.
-    pub(super) fn loop_grab_at(&self, local_x: f32) -> Option<LoopGrab> {
-        let (start, end) = self.state.loop_range();
+    pub(super) fn loop_grab_at(&self, local_x: f32, context: &App) -> Option<LoopGrab> {
+        let (start, end) = self.state(context).loop_range();
         let viewport = self.viewport();
         let (start_x, end_x) = (
-            self.state.grid.beats_to_x(start, viewport),
-            self.state.grid.beats_to_x(end, viewport),
+            self.state(context).grid.beats_to_x(start, viewport),
+            self.state(context).grid.beats_to_x(end, viewport),
         );
         let (to_start, to_end) = ((local_x - start_x).abs(), (local_x - end_x).abs());
         if to_start.min(to_end) <= GRIP_WIDTH {
@@ -102,7 +103,8 @@ impl Tonique {
             })
         } else if start_x < local_x && local_x < end_x {
             Some(LoopGrab::Move {
-                offset: (local_x - start_x) as f64 / self.state.grid.pixels_per_beat() as f64,
+                offset: (local_x - start_x) as f64
+                    / self.state(context).grid.pixels_per_beat() as f64,
             })
         } else {
             None
@@ -110,25 +112,29 @@ impl Tonique {
     }
 
     /// Follows a drag of `grab` to `local_x`.
-    pub(super) fn drag_loop(&mut self, grab: LoopGrab, local_x: f32, alt: bool) {
-        let (start, end) = self.state.loop_range();
-        let snapped = self.snapped(local_x, alt);
-        let step = self.state.grid.snap_step();
+    pub(super) fn drag_loop(&mut self, grab: LoopGrab, local_x: f32, alt: bool, context: &mut App) {
+        let (start, end) = self.state(context).loop_range();
+        let snapped = self.snapped(local_x, alt, context);
+        let step = self.state(context).grid.snap_step();
         match grab {
-            LoopGrab::Start => self.state.set_loop_range(snapped.min(end - step), end),
-            LoopGrab::End => self.state.set_loop_range(start, snapped.max(start + step)),
+            LoopGrab::Start => self
+                .state_mut(context)
+                .set_loop_range(snapped.min(end - step), end),
+            LoopGrab::End => self
+                .state_mut(context)
+                .set_loop_range(start, snapped.max(start + step)),
             LoopGrab::Move { offset } => {
-                let grid = &self.state.grid;
+                let grid = &self.state(context).grid;
                 let new_start = grid
-                    .snap(self.beats_at(local_x) - offset, alt)
+                    .snap(self.beats_at(local_x, context) - offset, alt)
                     .max(BeatPos::ZERO);
-                self.state
+                self.state_mut(context)
                     .set_loop_range(new_start, new_start + (end - start));
             }
             LoopGrab::Create { anchor } => {
                 if snapped != anchor {
-                    self.state.set_loop_range(anchor, snapped);
-                    self.state.set_looping(true);
+                    self.state_mut(context).set_loop_range(anchor, snapped);
+                    self.state_mut(context).set_looping(true);
                 }
             }
         }

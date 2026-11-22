@@ -18,8 +18,8 @@ mod transport;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use gpui::{
-    Context, DispatchPhase, FocusHandle, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Render, Subscription, Task, Window, canvas, div, prelude::*, px,
+    App, Context, DispatchPhase, Entity, FocusHandle, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Render, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
 use tonique_engine::{engine::Engine, time::BeatPos};
 
@@ -41,6 +41,7 @@ use crate::{
     core::state::{PlaybackState, ProjectState},
     graph::GraphUi,
     headers::HeadersUi,
+    model::{HoldsProject, Project},
     theme::{FONT_UI, Theme, ThemeLibrary, hsla, size},
     timeline::TimelineUi,
     wave::WaveCache,
@@ -53,7 +54,7 @@ const BROWSER_MIN: f32 = 100.;
 const BROWSER_MAX: f32 = 400.;
 
 pub struct Tonique {
-    pub state: ProjectState,
+    pub project: Entity<Project>,
     pub focus: FocusHandle,
     pub timeline: TimelineUi,
     pub headers: HeadersUi,
@@ -69,7 +70,7 @@ pub struct Tonique {
     transport: Transport,
     menu_bar: MenuBarUi,
     /// The project's file, and the recent ones.
-    project: ProjectFiles,
+    files: ProjectFiles,
     /// The dialog open, if any, over everything.
     dialog: Option<Dialog>,
     settings: SettingsUi,
@@ -85,6 +86,12 @@ pub struct Tonique {
     /// The browser reads its folders again when the window gets the focus
     /// back.
     _activation: Subscription,
+}
+
+impl HoldsProject for Tonique {
+    fn project(&self) -> &Entity<Project> {
+        &self.project
+    }
 }
 
 impl Tonique {
@@ -140,11 +147,12 @@ impl Tonique {
                 context.notify();
             }
         });
+        let browser = Browser::new(&mut state, context);
         Self {
-            browser: Browser::new(&mut state, context),
+            browser,
             headers: HeadersUi::new(),
             graph: GraphUi::new(),
-            state,
+            project: context.new(|_| Project::new(state)),
             focus,
             timeline: TimelineUi::default(),
             waves: Rc::default(),
@@ -156,7 +164,7 @@ impl Tonique {
             dialog: None,
             settings: SettingsUi::new(themes, theme_warnings),
             export: ExportUi::new(context),
-            project,
+            files: project,
             popup: None,
             arrows: None,
             bench,
@@ -165,17 +173,17 @@ impl Tonique {
         }
     }
 
-    fn toggle_play(&mut self) {
-        if self.state.playback_state() == PlaybackState::Playing {
-            self.state.stop();
+    fn toggle_play(&mut self, context: &mut App) {
+        if self.state(context).playback_state() == PlaybackState::Playing {
+            self.state_mut(context).stop();
         } else {
-            self.state.play();
+            self.state_mut(context).play();
         }
     }
 
     /// Drags follow the pointer anywhere in the window, over a dialog too:
     /// heard before any element, whatever is under the pointer.
-    fn follow_drags(&mut self, event: &MouseMoveEvent, window: &Window) -> bool {
+    fn follow_drags(&mut self, event: &MouseMoveEvent, window: &Window, context: &mut App) -> bool {
         let width = f32::from(window.viewport_size().width);
         let height = f32::from(window.viewport_size().height);
         // The timeline keeps at least as much room as either panel.
@@ -183,13 +191,13 @@ impl Tonique {
             .browser_width
             .drag_to(f32::from(event.position.x), width / 2.)
             .is_some();
-        self.timeline_drag_move(event)
-            | self.header_drag_move(event, width)
-            | self.browser_drag_move(event)
-            | self.transport_drag_move(event)
-            | self.settings_drag_move(event)
-            | self.export_drag_move(event)
-            | self.bottom_drag_move(event, height)
+        self.timeline_drag_move(event, context)
+            | self.header_drag_move(event, width, context)
+            | self.browser_drag_move(event, context)
+            | self.transport_drag_move(event, context)
+            | self.settings_drag_move(event, context)
+            | self.export_drag_move(event, context)
+            | self.bottom_drag_move(event, height, context)
             | self.graph_drag_move(event)
             | browser
     }
@@ -216,7 +224,7 @@ impl Tonique {
                         return;
                     }
                     let _ = this.update(app, |this, context| {
-                        if this.follow_drags(event, window) {
+                        if this.follow_drags(event, window, context) {
                             context.notify();
                         }
                     });
@@ -241,14 +249,14 @@ impl Tonique {
     }
 
     fn on_up(&mut self, event: &MouseUpEvent, _window: &mut Window, context: &mut Context<Self>) {
-        self.timeline_drag_end(event);
-        self.header_drag_end();
+        self.timeline_drag_end(event, context);
+        self.header_drag_end(context);
         self.browser_drag_end();
         self.browser_width.end();
         self.transport.end_drags();
         self.settings_drag_end();
         self.export_drag_end();
-        self.bottom_drag_end();
+        self.bottom_drag_end(context);
         self.graph_drag_end();
         context.notify();
     }
@@ -301,28 +309,29 @@ fn divider(theme: &Theme) -> gpui::Div {
 impl Render for Tonique {
     fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
         if let Some(bench) = &mut self.bench {
-            bench.frame(&mut self.state);
+            bench.frame(&mut self.project.as_mut(context).state);
             // Every frame, as the egui app draws.
             window.request_animation_frame();
         }
         crate::profile::frame();
         self.menu_bar.frame();
-        self.state.set_monitor_graph(self.graph.is_open());
-        crate::profile::time("state.update", || self.state.update());
-        let scrolling = self.step_scrolling() | self.autoscroll();
+        self.state_mut(context)
+            .set_monitor_graph(self.graph.is_open());
+        crate::profile::time("state.update", || self.state_mut(context).update());
+        let scrolling = self.step_scrolling(context) | self.autoscroll(context);
         let dragging = context.has_active_drag() || self.is_dragging();
-        self.follow_playhead(dragging);
-        self.update_title(window);
+        self.follow_playhead(dragging, context);
+        self.update_title(window, context);
         self.waves.borrow_mut().start_frame(window);
-        let animating = self.state.playback_state() == PlaybackState::Playing
-            || self.state.preview_playback_state() == PlaybackState::Playing
+        let animating = self.state(context).playback_state() == PlaybackState::Playing
+            || self.state(context).preview_playback_state() == PlaybackState::Playing
             || context.has_active_drag()
             || self.is_dragging()
             || scrolling
             || self.bottom.is_animating()
             || self.export.is_running()
             // Meters falling back after playback.
-            || self.state.metrics.tracks.values().any(crate::meter::is_live);
+            || self.state(context).metrics.tracks.values().any(crate::meter::is_live);
         if animating {
             window.request_animation_frame();
         }
@@ -334,7 +343,7 @@ impl Render for Tonique {
 
         // The rows as this frame shows them, for both views: building them
         // clones every track's clips.
-        let rows = crate::timeline::rows(&self.state);
+        let rows = crate::timeline::rows(self.state(context));
         let theme = crate::theme::current(context);
         let body = div()
             .flex()
