@@ -8,7 +8,7 @@ use tonique_engine::{edit::ClipId, time::BeatPos};
 use crate::{
     app::Tonique,
     core::{
-        clip::AudioClip,
+        clip::{AudioClip, Crossfades},
         grid::GridLine,
         state::MASTER_TRACK_ID,
         track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackRow},
@@ -16,7 +16,9 @@ use crate::{
     geometry::Rect,
     theme::{Color, Theme, with_alpha},
     timeline::{
-        FOOTER_PADDING, RULER_HEIGHT, footer_height,
+        FOOTER_PADDING, RULER_HEIGHT,
+        fades::paint::SceneFades,
+        footer_height,
         input::TimelineDrag,
         moving::{ClipMove, DraggedClips},
         rows::{ClipPart, HEADER_HEIGHT, Row, Span, handle_rect, rows, rows_height},
@@ -57,6 +59,9 @@ pub struct SceneClip {
     pub left_behind: bool,
     pub silenced: bool,
     pub collapsed: bool,
+    /// Where it crosses the clips it touches, which takes the place of its
+    /// fades there.
+    pub crossed: Crossfades,
 }
 
 /// The ruler's marks, local to the timeline.
@@ -92,6 +97,8 @@ pub struct Scene {
     pub cursor_hint: Option<(f32, Rect)>,
     /// The trim handle under the pointer or dragged.
     pub lit_handle: Option<Rect>,
+    /// The crossfades, and the fades' handles and curves to grab.
+    pub fades: SceneFades,
     /// The lane an effect would be dropped on, local to the timeline: its
     /// top and height.
     pub effect_drop: Option<(f32, f32)>,
@@ -154,6 +161,7 @@ impl Tonique {
             snap_line: dragged.and_then(|dragged| dragged.snapped_to).map(screen_x),
             cursor_hint: self.cursor_hint(&rows),
             lit_handle: self.lit_handle(&rows),
+            fades: self.scene_fades(&rows),
             effect_drop: self.scene_effect_drop(&rows),
             marks: self.marks(),
             playhead: screen_x(state.playhead()),
@@ -228,14 +236,18 @@ impl Tonique {
         }
     }
 
+    /// The clips a drag of clips leaves behind (unless it copies them).
+    pub(super) fn left_behind(&self) -> HashSet<ClipId> {
+        self.dragged_clips()
+            .filter(|dragged| !dragged.duplicate)
+            .map(|dragged| dragged.ids().into_iter().collect())
+            .unwrap_or_default()
+    }
+
     /// The rows, and their clips: one being trimmed over its neighbours.
     fn scene_clips(&self, rows: &[Row]) -> (Vec<SceneRow>, Vec<SceneClip>) {
         let state = &self.state;
-        let left_behind: HashSet<ClipId> = self
-            .dragged_clips()
-            .filter(|dragged| !dragged.duplicate)
-            .map(|dragged| dragged.ids().into_iter().collect())
-            .unwrap_or_default();
+        let left_behind = self.left_behind();
         let lit = self.lit_header(rows);
         let mut scene_rows = Vec::new();
         let mut clips = Vec::new();
@@ -251,6 +263,7 @@ impl Tonique {
             if row.is_group() {
                 continue;
             }
+            let fades = self.track_fades(row, &left_behind);
             let mut shown: Vec<AudioClip> = track
                 .clips
                 .iter()
@@ -273,6 +286,7 @@ impl Tonique {
                     left_behind: behind,
                     silenced: track.is_silenced(),
                     collapsed: track.collapsed,
+                    crossed: fades.of(clip.id),
                     clip,
                 });
             }
@@ -368,6 +382,7 @@ impl Tonique {
                     left_behind: false,
                     silenced: target.is_some_and(|track| track.is_silenced()),
                     collapsed: target.is_some_and(|track| track.collapsed),
+                    crossed: Crossfades::default(),
                     clip,
                 }
             })
@@ -418,6 +433,9 @@ impl Tonique {
         let (row, clip, ClipPart::Body) = self.clip_at(rows, local_x, local_y)? else {
             return None;
         };
+        if self.fade_at(rows, local_x, local_y).is_some() {
+            return None;
+        }
         let rect = self.clip_rect(&clip, &rows[row]);
         let body = Rect::new(
             rect.left,
@@ -521,6 +539,7 @@ impl Tonique {
             left_behind: false,
             silenced: false,
             collapsed: false,
+            crossed: Crossfades::default(),
         };
         Some(ghost)
     }

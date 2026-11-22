@@ -10,6 +10,7 @@
 mod clip;
 mod drop;
 mod expand;
+mod fades;
 mod footer;
 mod input;
 mod menus;
@@ -28,6 +29,7 @@ use gpui::{
 };
 
 pub use drop::DropTarget;
+pub use fades::{FadeEnd, shape_name};
 pub use rows::{FOOTER_PADDING, Row, footer_height, rows};
 
 use tonique_engine::edit::TrackId;
@@ -86,12 +88,22 @@ impl TimelineUi {
     }
 }
 
+/// Lengths are dragged across, curves up and down.
+fn fade_cursor(part: fades::FadePart) -> CursorStyle {
+    if part.is_curve() {
+        CursorStyle::ResizeUpDown
+    } else {
+        CursorStyle::ResizeLeftRight
+    }
+}
+
 impl Tonique {
     fn cursor(&self) -> CursorStyle {
         match &self.timeline.drag {
             TimelineDrag::Move(press) if press.dragged.is_some() => return CursorStyle::ClosedHand,
             TimelineDrag::Zone { moved: true, .. } => return CursorStyle::IBeam,
             TimelineDrag::Trim { .. } | TimelineDrag::Scrub => return CursorStyle::ResizeLeftRight,
+            TimelineDrag::Fade(drag) => return fade_cursor(drag.hit.part),
             TimelineDrag::Loop { grab, .. } => {
                 return match grab {
                     LoopGrab::Move { .. } => CursorStyle::ClosedHand,
@@ -116,7 +128,11 @@ impl Tonique {
         if self.in_footer(local_y) {
             return CursorStyle::Arrow;
         }
-        match self.clip_at(&rows(&self.state), local_x, local_y) {
+        let rows = rows(&self.state);
+        if let Some(hit) = self.fade_at(&rows, local_x, local_y) {
+            return fade_cursor(hit.part);
+        }
+        match self.clip_at(&rows, local_x, local_y) {
             Some((_, _, ClipPart::TrimStart | ClipPart::TrimEnd)) => CursorStyle::ResizeLeftRight,
             Some((_, _, ClipPart::Header)) => CursorStyle::OpenHand,
             _ => CursorStyle::IBeam,

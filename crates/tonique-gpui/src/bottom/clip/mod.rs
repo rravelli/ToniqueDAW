@@ -10,6 +10,7 @@
 
 mod arrows;
 mod audio;
+mod fades;
 mod inspector;
 mod markers;
 

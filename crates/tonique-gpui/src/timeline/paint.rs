@@ -10,6 +10,7 @@ use crate::{
     timeline::{
         BARS_HEIGHT, DROP_FILL_ALPHA, DROP_OUTLINE, LOOP_HEIGHT, ROW_GAP, RULER_HEIGHT,
         clip::{ClipPaint, paint_clip},
+        fades::paint::{paint_handles, paint_label, paint_seams},
         footer::paint_footer,
         ruler::{paint_loop, paint_playhead},
         scene::Scene,
@@ -91,6 +92,13 @@ pub fn paint(
     paint_effect_drop(scene, &canvas, window);
     paint_ruler(scene, &canvas, window, context);
     paint_cursors(scene, &canvas, window);
+    paint_label(
+        window,
+        context,
+        &scene.fades,
+        &scene.theme,
+        (canvas.left, canvas.top),
+    );
 }
 
 /// The lanes, the gaps between them, the loop and the grid over them.
@@ -185,6 +193,9 @@ fn paint_clips(
         for clip in &scene.clips {
             paint_clip(&mut painter, clip, false);
         }
+        let origin = (canvas.left, canvas.top);
+        paint_seams(painter.window, &scene.fades, &scene.theme, origin, lanes);
+        paint_handles(painter.window, &scene.fades, &scene.theme, origin, lanes);
         if let Some(clip) = &scene.drop {
             paint_clip(&mut painter, clip, true);
         }

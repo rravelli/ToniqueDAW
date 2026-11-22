@@ -13,6 +13,7 @@ use crate::{
     core::{clip::AudioClip, state::SelectionBounds},
     timeline::{
         LOOP_HEIGHT, RULER_HEIGHT,
+        fades::{FadeDrag, FadePart},
         moving::ClipMove,
         rows::{ClipPart, rows},
         ruler::LoopGrab,
@@ -48,6 +49,8 @@ pub enum TimelineDrag {
         start_edge: bool,
         current: Option<AudioClip>,
     },
+    /// A fade's handle or curve, or a seam's.
+    Fade(FadeDrag),
 }
 
 impl TimelineDrag {
@@ -98,6 +101,11 @@ impl Tonique {
     /// else (the edit cursor, or a zone).
     fn press_lanes(&mut self, event: &MouseDownEvent, local_x: f32, local_y: f32) -> TimelineDrag {
         let rows = rows(&self.state);
+        if let Some(hit) = self.fade_at(&rows, local_x, local_y) {
+            return self
+                .press_fade(hit, local_y, event.click_count)
+                .map_or(TimelineDrag::None, TimelineDrag::Fade);
+        }
         let hit = self.clip_at(&rows, local_x, local_y);
         // A double-click on a clip shows its details in the bottom panel.
         if event.click_count >= 2
@@ -153,7 +161,8 @@ impl Tonique {
         }
     }
 
-    /// A right-click: a clip's menu over a clip, the grid's elsewhere.
+    /// A right-click: a fade's menu over a fade, a clip's over a clip, the
+    /// grid's elsewhere.
     pub(super) fn on_timeline_menu(
         &mut self,
         event: &MouseDownEvent,
@@ -164,14 +173,20 @@ impl Tonique {
         if self.in_footer(local_y) {
             return;
         }
-        let kind = match self.clip_at(&rows(&self.state), local_x, local_y) {
-            Some((_, clip, _)) => {
-                if !self.state.is_clip_selected(clip.id) {
-                    self.state.select_clips(vec![clip.id]);
-                }
-                PopupKind::Clip(clip.id)
+        let rows = rows(&self.state);
+        let kind = if let Some(hit) = self.fade_at(&rows, local_x, local_y) {
+            let end = match hit.part {
+                FadePart::Handle(end) | FadePart::Curve(end) => Some(end),
+                FadePart::SeamHandle | FadePart::SeamCurve => None,
+            };
+            PopupKind::Fade(hit.clip.id, end)
+        } else if let Some((_, clip, _)) = self.clip_at(&rows, local_x, local_y) {
+            if !self.state.is_clip_selected(clip.id) {
+                self.state.select_clips(vec![clip.id]);
             }
-            None => PopupKind::Grid,
+            PopupKind::Clip(clip.id)
+        } else {
+            PopupKind::Grid
         };
         self.toggle_popup(kind, event.position, Anchor::TopLeft);
         context.notify();
@@ -233,6 +248,10 @@ impl Tonique {
                     start_edge,
                     current: Some(clip),
                 }
+            }
+            TimelineDrag::Fade(mut drag) => {
+                self.follow_fade(&mut drag, local_x, local_y);
+                TimelineDrag::Fade(drag)
             }
         };
     }
@@ -319,6 +338,7 @@ impl Tonique {
                 current: Some(clip),
                 ..
             } => self.state.commit_resize_clip(clip),
+            TimelineDrag::Fade(drag) => self.end_fade(drag),
             _ => {}
         }
     }

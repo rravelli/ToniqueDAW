@@ -16,6 +16,7 @@ use crate::app::{
     settings::AudioChoice,
 };
 use crate::browser::ListKind;
+use crate::timeline::FadeEnd;
 
 /// Over dialogs, as a dialog's dropdowns open menus.
 const BACKDROP_PRIORITY: usize = 2;
@@ -28,6 +29,11 @@ pub enum PopupKind {
     /// The grid's settings: from the transport bar and the timeline.
     Grid,
     Clip(ClipId),
+    /// A clip's fade at an end, or its crossfade with none: its shapes
+    /// and a reset.
+    Fade(ClipId, Option<FadeEnd>),
+    /// The shapes of a clip's fade, from the inspector.
+    FadeShape(ClipId, FadeEnd),
     Track(TrackId),
     /// An effect of the bottom panel's.
     Effect(TrackId, PluginId),
@@ -111,6 +117,8 @@ impl Tonique {
         Some(match kind {
             PopupKind::Grid => self.grid_menu(context),
             PopupKind::Clip(id) => self.clip_menu(id, context)?,
+            PopupKind::Fade(id, end) => self.fade_menu(id, end, true, context)?,
+            PopupKind::FadeShape(id, end) => self.fade_menu(id, Some(end), false, context)?,
             PopupKind::Track(id) => self.track_menu(id, context)?,
             PopupKind::Effect(track, plugin) => self.effect_menu(track, plugin, context)?,
             PopupKind::ClipRuler(id, at) => self.clip_ruler_popup(id, at, context)?,

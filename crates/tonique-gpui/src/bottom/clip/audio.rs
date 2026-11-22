@@ -204,7 +204,7 @@ impl Tonique {
     /// A dropdown opening `kind`'s menu, `width` wide (its cell's when 0);
     /// greyed out and inert unless `enabled`.
     #[allow(clippy::too_many_arguments)]
-    fn picker(
+    pub(super) fn picker(
         &self,
         id: &'static str,
         label: &'static str,

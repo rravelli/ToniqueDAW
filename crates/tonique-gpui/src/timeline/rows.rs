@@ -18,7 +18,7 @@ use crate::{
 
 /// A clip's header: dragged to move it.
 pub const HEADER_HEIGHT: f32 = 16.;
-const TRIM_HANDLE: f32 = 7.;
+pub const TRIM_HANDLE: f32 = 7.;
 const MIN_TRIM_HANDLE: f32 = 2.;
 
 /// The timeline's extent across the screen, for Tonique's grid.

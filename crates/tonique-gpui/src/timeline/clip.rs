@@ -9,7 +9,7 @@ use crate::{
     theme::{
         BLACK, Color, Theme, WHITE, contrast, hsla, icon_font, mix, mono, over, size, with_alpha,
     },
-    timeline::{rows::HEADER_HEIGHT, scene::SceneClip},
+    timeline::{fades::paint::paint_clip_fades, rows::HEADER_HEIGHT, scene::SceneClip},
     wave::{WaveCache, paint_clip_waveform},
     widgets::paint_text,
 };
@@ -29,6 +29,16 @@ const WAVE_CONTRAST: f32 = 3.;
 const GHOST_ALPHA: u8 = 170;
 /// Room a name needs to be drawn at all.
 const NAME_MIN_WIDTH: f32 = 12.;
+
+/// The ink of a waveform on the body of a clip in `color`: black, unless
+/// that's too dark for it to read, then white.
+pub fn wave_ink(theme: &Theme, color: Color) -> Color {
+    if contrast(BLACK, mix(theme.bg_base, color, BODY_TINT)) >= WAVE_CONTRAST {
+        BLACK
+    } else {
+        WHITE
+    }
+}
 
 /// What painting clips needs.
 pub struct ClipPaint<'frame> {
@@ -194,6 +204,27 @@ pub fn paint_clip(painter: &mut ClipPaint, scene_clip: &SceneClip, ghost: bool) 
                 });
             }
         }
+        // Its fades, in the selection's ink when it's all selected.
+        let all_selected = scene_clip.selected.is_some_and(|(start, stop)| {
+            start <= scene_clip.rect.left + 0.5 && stop >= scene_clip.rect.right() - 0.5
+        });
+        paint_clip_fades(
+            painter.window,
+            painter.theme,
+            (&scene_clip.clip, scene_clip.crossed, painter.bpm),
+            Rect::new(
+                origin_x + scene_clip.rect.left,
+                rect.top,
+                scene_clip.rect.width,
+                rect.height,
+            ),
+            shown,
+            if all_selected {
+                look.selected_wave
+            } else {
+                look.wave
+            },
+        );
     }
     let header = Rect::new(
         rect.left,

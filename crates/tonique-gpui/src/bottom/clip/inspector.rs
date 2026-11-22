@@ -16,9 +16,10 @@ use crate::{
         ClipArrows, ClipDrag,
         markers::{default_loop, trimmed_end, with_loop},
     },
-    core::clip::{AudioClip, MIN_LENGTH},
+    core::clip::{AudioClip, Crossfades, MIN_LENGTH},
     icons,
     theme::{Color, Theme, hsla, size},
+    timeline::FadeEnd,
     utils::{
         format_bars, format_time, parse_bars, parse_parts,
         steps::{self, KeyStep, Presses},
@@ -50,6 +51,8 @@ pub(super) struct Panels {
     clip: bool,
     /// How it sounds: gain, pan, warp and transposition.
     audio: bool,
+    /// How it fades in and out.
+    fades: bool,
 }
 
 impl Default for Panels {
@@ -57,6 +60,7 @@ impl Default for Panels {
         Self {
             clip: true,
             audio: true,
+            fades: true,
         }
     }
 }
@@ -64,7 +68,7 @@ impl Default for Panels {
 impl Panels {
     /// The inspector's width: its rail and the panels shown.
     pub(super) fn width(self) -> f32 {
-        let shown = self.clip as u8 + self.audio as u8;
+        let shown = self.clip as u8 + self.audio as u8 + self.fades as u8;
         RAIL_WIDTH + shown as f32 * (PANEL_GAP + PANEL_WIDTH)
     }
 }
@@ -79,6 +83,9 @@ pub enum Field {
     Offset,
     LoopPosition,
     LoopLength,
+    /// Its fades' lengths, in seconds.
+    FadeIn,
+    FadeOut,
 }
 
 /// What's being typed.
@@ -90,8 +97,9 @@ pub(super) enum Typed {
 }
 
 impl Field {
-    /// Its value for `clip`: beats, or seconds of the file.
-    fn value(self, clip: &AudioClip, bpm: f32) -> f64 {
+    /// Its value for `clip`, `crossed` its crossfades: beats, or seconds
+    /// (of the file, or of the timeline for fades).
+    pub(super) fn value(self, clip: &AudioClip, crossed: Crossfades, bpm: f32) -> f64 {
         let looped = clip
             .active_loop()
             .unwrap_or_else(|| default_loop(clip, bpm));
@@ -102,6 +110,8 @@ impl Field {
             Self::Offset => clip.offset,
             Self::LoopPosition => looped.start_s,
             Self::LoopLength => clip.file_beats(looped.end_s - looped.start_s, bpm),
+            Self::FadeIn => FadeEnd::In.heard(clip, crossed, bpm).length_s,
+            Self::FadeOut => FadeEnd::Out.heard(clip, crossed, bpm).length_s,
         }
     }
 
@@ -109,7 +119,7 @@ impl Field {
     /// 10 ms (a second).
     fn key_step(self, signature: TimeSignature) -> KeyStep {
         match self {
-            Self::Offset | Self::LoopPosition => steps::SECONDS,
+            Self::Offset | Self::LoopPosition | Self::FadeIn | Self::FadeOut => steps::SECONDS,
             _ => steps::beats(signature),
         }
     }
@@ -117,7 +127,7 @@ impl Field {
     /// How much a pixel's drag changes it.
     fn speed(self) -> f64 {
         match self {
-            Self::Offset | Self::LoopPosition => 0.005,
+            Self::Offset | Self::LoopPosition | Self::FadeIn | Self::FadeOut => 0.005,
             _ => 1. / 16.,
         }
     }
@@ -126,7 +136,7 @@ impl Field {
         match self {
             Self::Start | Self::End => format_bars(value, signature),
             Self::Length | Self::LoopLength => format_length(value, signature),
-            Self::Offset | Self::LoopPosition => format_time(value),
+            Self::Offset | Self::LoopPosition | Self::FadeIn | Self::FadeOut => format_time(value),
         }
     }
 
@@ -134,13 +144,20 @@ impl Field {
         match self {
             Self::Start | Self::End => parse_bars(text, signature),
             Self::Length | Self::LoopLength => parse_length(text, signature),
-            Self::Offset | Self::LoopPosition => parse_time(text),
+            Self::Offset | Self::LoopPosition | Self::FadeIn | Self::FadeOut => parse_time(text),
         }
     }
 
     /// `clip` with this set to `value`; positions and lengths snap to
-    /// sixteenths unless `free`.
-    fn apply(self, clip: &AudioClip, value: f64, bpm: f32, free: bool) -> AudioClip {
+    /// sixteenths unless `free`. Fades leave room for `crossed`.
+    fn apply(
+        self,
+        clip: &AudioClip,
+        crossed: Crossfades,
+        value: f64,
+        bpm: f32,
+        free: bool,
+    ) -> AudioClip {
         let snap = |beats: f64| {
             if free {
                 beats
@@ -172,6 +189,16 @@ impl Field {
             Self::LoopLength => {
                 let end = looped.start_s + clip.file_seconds(snap(value).max(MIN_LENGTH), bpm);
                 with_loop(clip, looped.start_s, end, bpm)
+            }
+            Self::FadeIn | Self::FadeOut => {
+                let end = if self == Self::FadeIn {
+                    FadeEnd::In
+                } else {
+                    FadeEnd::Out
+                };
+                let mut faded = clip.clone();
+                end.set_length(&mut faded, value.max(0.), crossed, bpm);
+                faded
             }
         }
     }
@@ -212,6 +239,16 @@ impl Tonique {
                         context,
                         |this, _| this.bottom.clip.panels.audio ^= true,
                     ),
+            )
+            .child(
+                Flat::ghost("panel-fades", RAIL_WIDTH)
+                    .selected(panels.fades)
+                    .show(
+                        glyph(icons::CHART_LINE_UP, size::HEADING, false),
+                        &theme,
+                        context,
+                        |this, _| this.bottom.clip.panels.fades ^= true,
+                    ),
             );
         let shown = self.state.shown_clip(clip);
         let mut row = div()
@@ -230,6 +267,9 @@ impl Tonique {
                 "audio-panel",
                 self.audio_panel(&shown, color, &theme, context),
             ));
+        }
+        if panels.fades {
+            parts.push(("fades-panel", self.fades_panel(&shown, &theme, context)));
         }
         for (id, content) in parts {
             row = row
@@ -325,7 +365,7 @@ impl Tonique {
     /// A position's label above its value: dragged sideways, clicked to
     /// take the arrow keys, or double-clicked and typed.
     #[allow(clippy::too_many_arguments)]
-    fn field_cell(
+    pub(super) fn field_cell(
         &self,
         label: &'static str,
         field: Field,
@@ -336,7 +376,8 @@ impl Tonique {
     ) -> gpui::Div {
         let bpm = self.state.bpm();
         let signature = self.state.time_signature();
-        let value = field.value(shown, bpm);
+        let crossed = self.state.crossfades_of(shown.id);
+        let value = field.value(shown, crossed, bpm);
         let typing = match &self.bottom.clip.typing {
             Some((Typed::Field(typed), text)) if *typed == field => Some(text),
             _ => None,
@@ -420,17 +461,20 @@ impl Tonique {
         let field = *field;
         let bpm = self.state.bpm();
         let shown = self.state.shown_clip(clip);
-        self.state.resize_clip(field.apply(&shown, value, bpm, alt));
+        let crossed = self.state.crossfades_of(clip.id);
+        self.state
+            .resize_clip(field.apply(&shown, crossed, value, bpm, alt));
     }
 
     /// `field` stepped by `presses` of the arrow keys, as one undo step;
     /// positions and lengths stay on sixteenths.
     pub(super) fn step_field(&mut self, clip: &AudioClip, field: Field, presses: Presses) {
         let bpm = self.state.bpm();
-        let value = field.value(clip, bpm);
+        let crossed = self.state.crossfades_of(clip.id);
+        let value = field.value(clip, crossed, bpm);
         let step = field.key_step(self.state.time_signature());
-        let edited = field.apply(clip, value + presses.amount(step), bpm, false);
-        if field.value(&edited, bpm) != value {
+        let edited = field.apply(clip, crossed, value + presses.amount(step), bpm, false);
+        if field.value(&edited, crossed, bpm) != value {
             self.state.commit_resize_clip(edited);
         }
     }
@@ -443,7 +487,8 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        let value = field.value(clip, self.state.bpm());
+        let crossed = self.state.crossfades_of(clip.id);
+        let value = field.value(clip, crossed, self.state.bpm());
         let text = field.format(value, self.state.time_signature());
         let mut typed = TextField::new(context);
         typed.start(text, window, context);
@@ -481,8 +526,9 @@ impl Tonique {
         match typed {
             Typed::Field(field) => {
                 if let Some(value) = field.parse(&text.text, self.state.time_signature()) {
+                    let crossed = self.state.crossfades_of(clip.id);
                     self.state
-                        .commit_resize_clip(field.apply(&clip, value, bpm, false));
+                        .commit_resize_clip(field.apply(&clip, crossed, value, bpm, false));
                 }
             }
             Typed::Bpm => {
@@ -669,6 +715,27 @@ mod tests {
         assert_eq!(parse_time("1:23.25"), Some(83.25));
         assert_eq!(parse_time("4.5"), Some(4.5));
         assert_eq!(parse_time("-1"), None);
+    }
+
+    #[test]
+    fn fades_are_set_in_seconds_as_far_as_the_clip_leaves_room() {
+        use crate::analysis::AudioInfo;
+        use tonique_engine::edit::ClipId;
+        // 4 s long at 120 bpm.
+        let clip = AudioClip::new(ClipId(1), AudioInfo::silent(4.), BeatPos(0.), 120.);
+        let none = Crossfades::default();
+        let faded = Field::FadeIn.apply(&clip, none, 1.5, 120., false);
+        assert_eq!(Field::FadeIn.value(&faded, none, 120.), 1.5);
+        assert_eq!(Field::FadeOut.value(&faded, none, 120.), 0.);
+        // The fade out stops at the fade in.
+        let faded = Field::FadeOut.apply(&faded, none, 10., 120., false);
+        let both =
+            Field::FadeIn.value(&faded, none, 120.) + Field::FadeOut.value(&faded, none, 120.);
+        assert!((both - 4.).abs() < 1e-9, "{both}");
+        assert_eq!(
+            Field::FadeIn.format(0.25, TimeSignature::default()),
+            format_time(0.25)
+        );
     }
 
     #[test]
