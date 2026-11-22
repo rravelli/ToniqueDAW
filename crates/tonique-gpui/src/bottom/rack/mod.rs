@@ -5,10 +5,13 @@
 //! adds one), and then deleted, duplicated or renamed.
 
 mod editors;
+mod eq;
 mod filter;
 mod frame;
 mod graph;
 mod knob;
+mod plain;
+mod tuner;
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -29,7 +32,7 @@ use crate::{
 use editors::{Editor, EditorInput};
 use filter::GraphDrag;
 pub use knob::KnobArrows;
-use knob::KnobDrag;
+use knob::{KnobDrag, SettingKnob};
 
 /// Between effects, and around them.
 const GAP: f32 = 8.;
@@ -77,8 +80,8 @@ pub struct Rack {
     insert: Option<usize>,
     /// The effects' frames, as last laid out.
     frames: Rc<RefCell<Vec<Bounds<Pixels>>>>,
-    /// A time knob's value while dragged, not applied yet.
-    pending: Option<(PluginId, f32)>,
+    /// A setting knob's value while dragged, not applied yet.
+    pending: Option<(PluginId, SettingKnob, f32)>,
     /// Something shown moves on its own.
     animating: bool,
 }
@@ -135,6 +138,33 @@ pub fn format_percent(ratio: f32) -> String {
 
 pub fn format_ms(seconds: f32) -> String {
     format!("{:.0} ms", seconds * 1000.)
+}
+
+pub fn format_db(db: f32) -> String {
+    format!("{db:+.1} dB")
+}
+
+/// A time in ms: tenths below 10 ms, seconds from one.
+pub fn format_time_ms(ms: f32) -> String {
+    if ms < 10. {
+        format!("{ms:.1} ms")
+    } else if ms < 1000. {
+        format!("{ms:.0} ms")
+    } else {
+        format!("{:.1} s", ms / 1000.)
+    }
+}
+
+pub fn format_seconds(seconds: f32) -> String {
+    format!("{seconds:.1} s")
+}
+
+pub fn format_ratio(ratio: f32) -> String {
+    if ratio >= 10. {
+        format!("{ratio:.0}:1")
+    } else {
+        format!("{ratio:.1}:1")
+    }
 }
 
 impl Tonique {
@@ -200,8 +230,8 @@ impl Tonique {
                         .bottom
                         .rack
                         .pending
-                        .filter(|(plugin, _)| *plugin == effect.plugin.id)
-                        .map(|(_, value)| value),
+                        .filter(|(plugin, ..)| *plugin == effect.plugin.id)
+                        .map(|(_, knob, value)| (knob, value)),
                 };
                 let levels = slot.levels.clone();
                 self.effect_frame(index, &input, levels, selected, &theme, context)
@@ -397,12 +427,16 @@ impl Tonique {
         match drag {
             RackDrag::Knob(drag) => self.set_knob(&drag.target, drag.before, drag.value, true),
             RackDrag::Graph(drag) => {
-                let (cutoff, q) = (drag.cutoff.get(), drag.q.get());
-                if (cutoff, q) != drag.before {
-                    self.state.commit_params(&[
-                        (drag.cutoff.id, drag.before.0, cutoff),
-                        (drag.q.id, drag.before.1, q),
-                    ]);
+                let mut changes = vec![
+                    (drag.cutoff.id, drag.before.0, drag.cutoff.get()),
+                    (drag.height.id, drag.before.1, drag.height.get()),
+                ];
+                if let Some((param, before)) = &drag.switched {
+                    changes.push((param.id, *before, param.get()));
+                }
+                changes.retain(|(_, before, after)| before != after);
+                if !changes.is_empty() {
+                    self.state.commit_params(&changes);
                 }
             }
             RackDrag::Move {

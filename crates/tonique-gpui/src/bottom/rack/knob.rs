@@ -9,7 +9,7 @@ use std::f32::consts::{FRAC_PI_4, PI};
 use gpui::{
     Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, canvas, div, prelude::*, px,
 };
-use tonique_engine::edit::{Parameter, PluginId, TrackId};
+use tonique_engine::edit::{Parameter, PluginId, PluginKind, TrackId};
 
 use crate::{
     app::{ArrowHolder, Tonique},
@@ -17,7 +17,7 @@ use crate::{
         paint::{Align, circle, polyline, text},
         rack::RackDrag,
     },
-    core::effect::Setting,
+    core::effect::{ECHO_SYNCS, Setting},
     geometry::Rect,
     theme::{Theme, size},
     utils::steps::{Presses, step_ratio},
@@ -71,9 +71,61 @@ impl KnobScale {
 pub enum KnobTarget {
     /// A parameter, live while dragged, one undo step once released.
     Param(Parameter),
-    /// An effect's echo time: shown while dragged, applied once released,
-    /// as it replaces the plugin.
-    Time { track: TrackId, plugin: PluginId },
+    /// One of an effect's settings: shown while dragged, applied once
+    /// released, as it replaces the plugin.
+    Setting {
+        track: TrackId,
+        plugin: PluginId,
+        knob: SettingKnob,
+    },
+}
+
+/// A setting a knob turns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingKnob {
+    /// An echo's time, in seconds.
+    Time,
+    /// A synced echo's note value, as its place in [`ECHO_SYNCS`].
+    Sync,
+    /// A limiter's lookahead, in ms.
+    Lookahead,
+}
+
+impl SettingKnob {
+    /// Its value in `plugin`, if it has it.
+    pub fn read(self, plugin: &PluginKind) -> Option<f32> {
+        Setting::all_of(plugin)
+            .into_iter()
+            .find_map(|setting| match (self, setting) {
+                (SettingKnob::Time, Setting::Time(time_s)) => Some(time_s),
+                (SettingKnob::Sync, Setting::Sync(Some(beats))) => Some(nearest_sync(beats) as f32),
+                (SettingKnob::Lookahead, Setting::Lookahead(ms)) => Some(ms),
+                _ => None,
+            })
+    }
+
+    /// The setting at `value`.
+    pub fn setting(self, value: f32) -> Setting {
+        match self {
+            SettingKnob::Time => Setting::Time(value),
+            SettingKnob::Sync => {
+                let index = (value.round().max(0.) as usize).min(ECHO_SYNCS.len() - 1);
+                Setting::Sync(Some(ECHO_SYNCS[index].0))
+            }
+            SettingKnob::Lookahead => Setting::Lookahead(value),
+        }
+    }
+}
+
+/// The place in [`ECHO_SYNCS`] of the note value nearest `beats`.
+pub fn nearest_sync(beats: f32) -> usize {
+    ECHO_SYNCS
+        .iter()
+        .enumerate()
+        .min_by(|(_, first), (_, second)| {
+            (first.0 - beats).abs().total_cmp(&(second.0 - beats).abs())
+        })
+        .map_or(0, |(index, _)| index)
 }
 
 /// A knob holding the arrow keys.
@@ -218,15 +270,19 @@ impl Tonique {
         }
         let value = match &arrows.target {
             KnobTarget::Param(param) => param.get(),
-            KnobTarget::Time { track, plugin } => {
+            KnobTarget::Setting {
+                track,
+                plugin,
+                knob,
+            } => {
                 let effect = self
                     .state
                     .effects(track)
                     .into_iter()
                     .find(|effect| effect.plugin.id == *plugin);
-                match effect.and_then(|effect| Setting::of(&effect.plugin.kind)) {
-                    Some(Setting::Time(time_s)) => time_s,
-                    _ => return,
+                match effect.and_then(|effect| knob.read(&effect.plugin.kind)) {
+                    Some(value) => value,
+                    None => return,
                 }
             }
         };
@@ -248,18 +304,19 @@ impl Tonique {
                     self.state.commit_params(&[(param.id, before, param.get())]);
                 }
             }
-            KnobTarget::Time { track, plugin } => {
+            KnobTarget::Setting {
+                track,
+                plugin,
+                knob,
+            } => {
                 if done {
                     self.bottom.rack.pending = None;
-                    if value != before {
-                        self.state.set_effect_setting(
-                            track,
-                            *plugin,
-                            crate::core::effect::Setting::Time(value),
-                        );
+                    if knob.setting(value) != knob.setting(before) {
+                        self.state
+                            .set_effect_setting(track, *plugin, knob.setting(value));
                     }
                 } else {
-                    self.bottom.rack.pending = Some((*plugin, value));
+                    self.bottom.rack.pending = Some((*plugin, *knob, value));
                 }
             }
         }
@@ -269,9 +326,18 @@ impl Tonique {
 fn same_target(first: &KnobTarget, second: &KnobTarget) -> bool {
     match (first, second) {
         (KnobTarget::Param(first), KnobTarget::Param(second)) => first.id == second.id,
-        (KnobTarget::Time { plugin: first, .. }, KnobTarget::Time { plugin: second, .. }) => {
-            first == second
-        }
+        (
+            KnobTarget::Setting {
+                plugin: first,
+                knob: first_knob,
+                ..
+            },
+            KnobTarget::Setting {
+                plugin: second,
+                knob: second_knob,
+                ..
+            },
+        ) => first == second && first_knob == second_knob,
         _ => false,
     }
 }
@@ -385,9 +451,10 @@ mod tests {
             log: false,
         };
         let mut drag = KnobDrag {
-            target: KnobTarget::Time {
+            target: KnobTarget::Setting {
                 track: TrackId(1),
                 plugin: PluginId(1),
+                knob: SettingKnob::Time,
             },
             scale,
             last_y: 100.,

@@ -1,14 +1,15 @@
 //! The filter's editor: its response over the live spectrum, with a handle
-//! for cutoff and resonance dragged anywhere on it, the mode, and cutoff and
-//! Q knobs.
+//! for the frequency and resonance (or gain, for the shelves and peak)
+//! dragged anywhere on it, the mode, and frequency, Q and gain knobs.
 
-use std::{cell::Cell, f32::consts::PI, ops::RangeInclusive, rc::Rc};
+use std::{cell::Cell, ops::RangeInclusive, rc::Rc};
 
 use gpui::{
     AnyElement, Bounds, ContentMask, Context, CursorStyle, MouseButton, MouseDownEvent, Pixels,
     canvas, div, prelude::*, px,
 };
 use tonique_engine::{
+    dsp::Biquad,
     edit::{Parameter, PluginKind},
     meter::PluginTap,
     nodes::FilterMode,
@@ -21,7 +22,7 @@ use crate::{
         rack::{
             RackDrag,
             editors::{Analyser, Editor, EditorInput},
-            format_hz,
+            format_db, format_hz,
             graph::{freq_x, hline, paint_freq_grid, spectrum_points, x_freq},
             knob::KNOB_HEIGHT,
         },
@@ -38,6 +39,8 @@ const BOTTOM_DB: f32 = -36.;
 /// Levels of the spectrum shown, in dBFS.
 const SPECTRUM_RANGE: RangeInclusive<f32> = -90.0..=0.;
 const HANDLE_RADIUS: f32 = 5.;
+/// Width of a mode's button; they go two by two.
+const MODE_WIDTH: f32 = 34.;
 
 /// Which side of the filter the spectrum shows.
 #[derive(Clone, Copy, PartialEq)]
@@ -52,8 +55,41 @@ struct ResponseKey {
     mode: FilterMode,
     cutoff: f32,
     q: f32,
+    gain: f32,
     sample_rate: f32,
     width: f32,
+}
+
+/// Shown on the mode's buttons.
+fn mode_name(mode: FilterMode) -> &'static str {
+    match mode {
+        FilterMode::LowPass => "LP",
+        FilterMode::HighPass => "HP",
+        FilterMode::BandPass => "BP",
+        FilterMode::Notch => "Notch",
+        FilterMode::LowShelf => "LS",
+        FilterMode::HighShelf => "HS",
+        FilterMode::Peak => "Peak",
+    }
+}
+
+/// The value of the handle's parameter at `db` up the graph: the gain
+/// itself, or Q.
+pub fn to_height(mode: FilterMode, db: f32) -> f32 {
+    if mode.has_gain() {
+        db
+    } else {
+        10f32.powf(db / 20.)
+    }
+}
+
+/// Where the handle's parameter puts it up the graph, in dB.
+pub fn from_height(mode: FilterMode, value: f32) -> f32 {
+    if mode.has_gain() {
+        value
+    } else {
+        20. * value.max(1e-3).log10()
+    }
 }
 
 pub struct FilterState {
@@ -95,12 +131,13 @@ impl FilterState {
     fn response(&mut self, key: ResponseKey, scale: &Scale) -> &[f32] {
         if self.response.0 != Some(key) {
             let rect = scale.rect;
+            let filter = Biquad::new(key.mode, key.cutoff, key.q, key.gain, key.sample_rate);
             self.response = (
                 Some(key),
                 (0..=key.width.ceil() as usize)
                     .map(|column| {
                         let hz = scale.hz(rect.left + column as f32);
-                        response_db(key.mode, key.cutoff, key.q, key.sample_rate, hz)
+                        filter.response_db(hz, key.sample_rate)
                     })
                     .collect(),
             );
@@ -109,61 +146,51 @@ impl FilterState {
     }
 }
 
-/// Gain of the engine's filter at `hz`, in dB. Mirrors `FilterNode`'s RBJ
-/// biquad, so the curve shows what's heard.
-pub fn response_db(mode: FilterMode, cutoff: f32, q: f32, sample_rate: f32, hz: f32) -> f32 {
-    let frequency = cutoff.clamp(10., sample_rate * 0.49);
-    let w0 = 2. * PI * frequency / sample_rate;
-    let (sin0, cos0) = w0.sin_cos();
-    let alpha = sin0 / (2. * q.max(0.05));
-    let (b0, b1, b2) = match mode {
-        FilterMode::LowPass => ((1. - cos0) / 2., 1. - cos0, (1. - cos0) / 2.),
-        FilterMode::HighPass => ((1. + cos0) / 2., -(1. + cos0), (1. + cos0) / 2.),
-    };
-    let (a0, a1, a2) = (1. + alpha, -2. * cos0, 1. - alpha);
-    let w = 2. * PI * hz / sample_rate;
-    let magnitude = |c0: f32, c1: f32, c2: f32| {
-        let real = c0 + c1 * w.cos() + c2 * (2. * w).cos();
-        let imaginary = -(c1 * w.sin() + c2 * (2. * w).sin());
-        (real * real + imaginary * imaginary).sqrt()
-    };
-    20. * (magnitude(b0, b1, b2) / magnitude(a0, a1, a2))
-        .max(1e-9)
-        .log10()
-}
-
 /// Maps frequencies and gains to the graph and back.
 pub struct Scale {
     pub rect: Rect,
+    pub top_db: f32,
+    pub bottom_db: f32,
 }
 
 impl Scale {
-    fn x(&self, hz: f32) -> f32 {
+    /// The filter's graph in `rect`.
+    pub fn filter(rect: Rect) -> Self {
+        Self {
+            rect,
+            top_db: TOP_DB,
+            bottom_db: BOTTOM_DB,
+        }
+    }
+
+    pub fn x(&self, hz: f32) -> f32 {
         freq_x(self.rect, hz)
     }
     pub fn hz(&self, x: f32) -> f32 {
         x_freq(self.rect, x)
     }
-    fn y(&self, db: f32) -> f32 {
-        self.rect.top + (TOP_DB - db) / (TOP_DB - BOTTOM_DB) * self.rect.height
+    pub fn y(&self, db: f32) -> f32 {
+        self.rect.top + (self.top_db - db) / (self.top_db - self.bottom_db) * self.rect.height
     }
     pub fn db(&self, y: f32) -> f32 {
-        TOP_DB - (y - self.rect.top) / self.rect.height * (TOP_DB - BOTTOM_DB)
-    }
-
-    /// The cutoff and Q the handle at `(x, y)` sets: the resonance is the
-    /// gain at the cutoff.
-    pub fn handle_values(&self, x: f32, y: f32) -> (f32, f32) {
-        (self.hz(x), 10f32.powf(self.db(y) / 20.))
+        self.top_db - (y - self.rect.top) / self.rect.height * (self.top_db - self.bottom_db)
     }
 }
 
-/// The filter's graph being dragged.
+/// A filter's handle being dragged: the pointer's x sets its frequency,
+/// its y its height (the resonance, the gain at the cutoff of a low- or
+/// high-pass, which is Q; or the gain of a shelf or peak).
 pub struct GraphDrag {
     pub cutoff: Parameter,
-    pub q: Parameter,
+    pub height: Parameter,
+    pub mode: FilterMode,
     pub before: (f32, f32),
     pub graph: Rc<Cell<Bounds<Pixels>>>,
+    /// Gains the graph spans, top and bottom.
+    pub range: (f32, f32),
+    /// A parameter set as the drag started (an EQ band switched on), and
+    /// its value before: part of the drag's undo step.
+    pub switched: Option<(Parameter, f32)>,
 }
 
 impl Tonique {
@@ -183,6 +210,13 @@ impl Tonique {
         ) else {
             return div().into_any_element();
         };
+        let gain = effect.plugin.param("gain").cloned();
+        // The handle's height: the gain for the shelves and peak, else the
+        // resonance.
+        let height = match &gain {
+            Some(gain) if mode.has_gain() => gain.clone(),
+            _ => q.clone(),
+        };
         let plugin = effect.plugin.id;
         let enabled = input.enabled();
         let (graph_bounds, tap) = match &*input.editor.borrow() {
@@ -194,13 +228,14 @@ impl Tonique {
             Some(RackDrag::Graph(drag)) if drag.cutoff.id == cutoff.id
         );
         let initial = (
-            effect.kind.initial_value(&effect.plugin, "cutoff"),
-            effect.kind.initial_value(&effect.plugin, "q"),
+            effect.kind.initial_value(&effect.plugin, cutoff.name),
+            effect.kind.initial_value(&effect.plugin, height.name),
         );
 
         let editor = input.editor.clone();
         let paint_theme = theme.clone();
-        let (cutoff_value, q_value) = (cutoff.get(), q.get());
+        let (cutoff_value, q_value, height_value) = (cutoff.get(), q.get(), height.get());
+        let gain_value = gain.as_ref().map_or(0., |gain| gain.get());
         let sample_rate = input.sample_rate;
         let slot = graph_bounds.clone();
         let painting = canvas(
@@ -208,7 +243,7 @@ impl Tonique {
             move |bounds, _, window, context| {
                 let theme = &paint_theme;
                 let rect = Rect::of(bounds);
-                let scale = Scale { rect };
+                let scale = Scale::filter(rect);
                 let active = dragging || bounds.contains(&window.mouse_position());
                 fill_rounded(window, rect, 2., theme.bg_deep);
                 paint_freq_grid(window, context, rect, theme);
@@ -245,6 +280,7 @@ impl Tonique {
                     mode,
                     cutoff: cutoff_value,
                     q: q_value,
+                    gain: gain_value,
                     sample_rate,
                     width: rect.width,
                 };
@@ -266,7 +302,10 @@ impl Tonique {
                         with_alpha(color, 38),
                     );
                 });
-                let handle = (scale.x(cutoff_value), scale.y(20. * q_value.log10()));
+                let handle = (
+                    scale.x(cutoff_value),
+                    scale.y(from_height(mode, height_value)),
+                );
                 let handle_fill = if active { color } else { theme.bg_deep };
                 circle(
                     window,
@@ -276,10 +315,15 @@ impl Tonique {
                     Some((1.5, color)),
                 );
                 if active {
+                    let detail = if mode.has_gain() {
+                        format_db(gain_value)
+                    } else {
+                        format!("Q {q_value:.2}")
+                    };
                     text(
                         window,
                         context,
-                        format!("{} · Q {q_value:.2}", format_hz(cutoff_value)),
+                        format!("{} · {detail}", format_hz(cutoff_value)),
                         (rect.right() - 4., rect.top + 3.),
                         Align::RIGHT_TOP,
                         size::SMALL,
@@ -292,7 +336,7 @@ impl Tonique {
         .absolute()
         .size_full();
 
-        let (press_cutoff, press_q) = (cutoff.clone(), q.clone());
+        let (press_cutoff, press_height) = (cutoff.clone(), height.clone());
         let graph = div()
             .id("filter-graph")
             .relative()
@@ -308,57 +352,56 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
-                    let (cutoff, q) = (press_cutoff.clone(), press_q.clone());
-                    let before = (cutoff.get(), q.get());
+                    let (cutoff, height) = (press_cutoff.clone(), press_height.clone());
+                    let before = (cutoff.get(), height.get());
                     if event.click_count >= 2 {
                         this.bottom.rack.drag = None;
                         if let (Some(first), Some(second)) = initial {
                             cutoff.set(first);
-                            q.set(second);
+                            height.set(second);
                             this.state.commit_params(&[
                                 (cutoff.id, before.0, cutoff.get()),
-                                (q.id, before.1, q.get()),
+                                (height.id, before.1, height.get()),
                             ]);
                         }
                     } else {
                         this.bottom.rack.drag = Some(RackDrag::Graph(GraphDrag {
                             cutoff,
-                            q,
+                            height,
+                            mode,
                             before,
                             graph: graph_bounds.clone(),
+                            range: (TOP_DB, BOTTOM_DB),
+                            switched: None,
                         }));
                     }
                     context.notify();
                 }),
             );
 
-        let modes =
-            [(FilterMode::LowPass, "LP"), (FilterMode::HighPass, "HP")].map(|(option, name)| {
-                let track = input.track;
-                Flat::new(name, 18.)
-                    .width(28.)
-                    .selected(mode == option)
-                    .show(
-                        div().text_size(px(size::SMALL)).child(name),
-                        theme,
-                        context,
-                        move |this, _| {
-                            if mode != option {
-                                this.state.set_effect_setting(
-                                    &track,
-                                    plugin,
-                                    Setting::Mode(option),
-                                );
-                            }
-                        },
-                    )
-            });
-        let controls = div()
+        let modes = FilterMode::ALL.map(|option| {
+            let name = mode_name(option);
+            let track = input.track;
+            Flat::new(name, 16.)
+                .width(MODE_WIDTH)
+                .selected(mode == option)
+                .show(
+                    div().text_size(px(size::SMALL)).child(name),
+                    theme,
+                    context,
+                    move |this, _| {
+                        if mode != option {
+                            this.state
+                                .set_effect_setting(&track, plugin, Setting::Mode(option));
+                        }
+                    },
+                )
+        });
+        let knobs = div()
             .flex()
             .flex_none()
             .gap(px(6.))
             .h(px(KNOB_HEIGHT))
-            .child(div().flex().flex_col().gap(px(2.)).children(modes))
             .children(self.param_knob(effect, "cutoff", "Freq", format_hz, true, theme, context))
             .children(self.param_knob(
                 effect,
@@ -368,7 +411,25 @@ impl Tonique {
                 true,
                 theme,
                 context,
-            ));
+            ))
+            .when(mode.has_gain(), |knobs| {
+                knobs.children(
+                    self.param_knob(effect, "gain", "Gain", format_db, false, theme, context),
+                )
+            });
+        let controls = div()
+            .flex()
+            .flex_none()
+            .gap(px(6.))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .w(px(2. * MODE_WIDTH + 2.))
+                    .gap(px(2.))
+                    .children(modes),
+            )
+            .child(knobs);
         div()
             .size_full()
             .flex()
@@ -410,17 +471,18 @@ impl Tonique {
             .children(buttons)
     }
 
-    /// Follows the filter's graph being dragged to `(x, y)`.
+    /// Follows a filter's graph being dragged to `(x, y)`.
     pub(super) fn follow_graph(drag: &GraphDrag, x: f32, y: f32) {
         let scale = Scale {
             rect: Rect::of(drag.graph.get()),
+            top_db: drag.range.0,
+            bottom_db: drag.range.1,
         };
         if scale.rect.is_empty() {
             return;
         }
-        let (cutoff, q) = scale.handle_values(x, y);
-        drag.cutoff.set(cutoff);
-        drag.q.set(q);
+        drag.cutoff.set(scale.hz(x));
+        drag.height.set(to_height(drag.mode, scale.db(y)));
     }
 }
 
@@ -428,25 +490,22 @@ impl Tonique {
 mod tests {
     use super::*;
 
-    const SAMPLE_RATE: f32 = 48_000.;
-
     #[test]
-    fn response_matches_the_filter() {
-        for mode in [FilterMode::LowPass, FilterMode::HighPass] {
-            // The gain at the cutoff is Q.
-            let db = response_db(mode, 1000., 4., SAMPLE_RATE, 1000.);
-            assert!((db - 20. * 4f32.log10()).abs() < 0.01, "{db}");
+    fn heights_map_back() {
+        for mode in FilterMode::ALL {
+            let db = from_height(mode, to_height(mode, 6.));
+            assert!((db - 6.).abs() < 1e-3, "{mode:?}: {db}");
         }
-        let low = |hz| response_db(FilterMode::LowPass, 1000., 0.707, SAMPLE_RATE, hz);
-        assert!(low(20.).abs() < 0.01, "passes the lows");
-        assert!(low(10_000.) < -35., "cuts the highs: {}", low(10_000.));
+        assert!(
+            (to_height(FilterMode::LowPass, 0.) - 1.).abs() < 1e-6,
+            "Q 1 at 0 dB"
+        );
+        assert_eq!(to_height(FilterMode::Peak, -3.), -3., "the gain itself");
     }
 
     #[test]
     fn scale_maps_back() {
-        let scale = Scale {
-            rect: Rect::new(10., 20., 300., 100.),
-        };
+        let scale = Scale::filter(Rect::new(10., 20., 300., 100.));
         assert!((scale.hz(scale.x(1234.)) - 1234.).abs() < 0.1);
         assert!((scale.db(scale.y(-7.)) + 7.).abs() < 1e-3);
         assert_eq!(scale.y(TOP_DB), 20.);

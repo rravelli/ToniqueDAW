@@ -5,6 +5,7 @@ pub mod graph_layout;
 pub mod graph_monitor;
 pub mod grid;
 pub mod metrics;
+pub mod note;
 pub mod project;
 pub mod state;
 pub mod track;

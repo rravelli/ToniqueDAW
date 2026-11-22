@@ -17,20 +17,29 @@ use crate::{
     bottom::{
         paint::{Align, curve, fill, fill_rounded, text},
         rack::{
+            eq::EqState,
             filter::FilterState,
             format_hz, format_ms, format_percent,
             graph::{hline, level_y, paint_freq_grid, spectrum_points, x_freq},
-            knob::{KNOB_HEIGHT, Knob, KnobScale, KnobTarget},
+            knob::{
+                KNOB_HEIGHT, KNOB_WIDTH, Knob, KnobScale, KnobTarget, SettingKnob, nearest_sync,
+            },
+            plain::CURVE_WIDTH,
+            tuner::TunerState,
         },
     },
-    core::effect::{ECHO_TIME, ECHO_TIMES, Effect, EffectKind},
+    core::effect::{ECHO_SYNC, ECHO_SYNCS, ECHO_TIME, ECHO_TIMES, Effect, EffectKind, Setting},
     geometry::Rect,
     theme::{Theme, size},
     widgets::Flat,
 };
 
 /// Size of a parameter's switch.
-const TOGGLE_SIZE: (f32, f32) = (30., 20.);
+pub(super) const TOGGLE_SIZE: (f32, f32) = (30., 20.);
+/// Between knobs side by side.
+pub(super) const KNOB_GAP: f32 = 6.;
+/// Of a frame, around a row of knobs.
+const KNOBS_PADDING: f32 = 22.;
 /// Repeats an echo draws, at most.
 const REPEATS: usize = 12;
 /// Levels a spectrum shows, in dBFS, and between its level lines.
@@ -42,7 +51,11 @@ pub enum Editor {
     Filter(FilterState),
     Echo,
     Spectrum(Analyser),
+    Tuner(TunerState),
     Utility,
+    Eq(EqState),
+    /// Knobs only, for now.
+    Knobs,
 }
 
 /// A spectrum, smoothed frame after frame.
@@ -76,23 +89,37 @@ impl Editor {
             EffectKind::Filter => Self::Filter(FilterState::new()),
             EffectKind::Echo => Self::Echo,
             EffectKind::Spectrum => Self::Spectrum(Analyser::new()),
+            EffectKind::Tuner => Self::Tuner(TunerState::new()),
             EffectKind::Utility => Self::Utility,
+            EffectKind::Eq => Self::Eq(EqState::new()),
+            EffectKind::Compressor
+            | EffectKind::Limiter
+            | EffectKind::Gate
+            | EffectKind::Saturation
+            | EffectKind::Reverb => Self::Knobs,
         }
     }
 
     /// Width of the editor's frame.
     pub fn width(kind: EffectKind) -> f32 {
         match kind {
-            EffectKind::Filter => 280.,
-            EffectKind::Echo => 200.,
+            EffectKind::Filter => 300.,
+            EffectKind::Echo => knobs_width(6) + TOGGLE_SIZE.0 + KNOB_GAP,
             EffectKind::Spectrum => 320.,
-            EffectKind::Utility => 172.,
+            EffectKind::Tuner => 236.,
+            EffectKind::Utility => knobs_width(3),
+            EffectKind::Eq => 380.,
+            EffectKind::Compressor => knobs_width(6),
+            EffectKind::Limiter => knobs_width(4),
+            EffectKind::Gate => knobs_width(5),
+            EffectKind::Saturation => knobs_width(3) + CURVE_WIDTH + KNOB_GAP,
+            EffectKind::Reverb => knobs_width(5),
         }
     }
 
     /// Whether it shows something moving on its own.
     pub fn is_animated(&self) -> bool {
-        matches!(self, Self::Filter(_) | Self::Spectrum(_))
+        matches!(self, Self::Filter(_) | Self::Spectrum(_) | Self::Tuner(_))
     }
 
     /// Takes in the audio of `effect` its graph shows, keeping its tap
@@ -109,7 +136,11 @@ impl Editor {
                 tap.watch_output_for(frames);
                 analyser.update(&tap.output, sample_rate);
             }
-            Self::Echo | Self::Utility => {}
+            Self::Tuner(tuner) => {
+                tap.watch_output_for(frames);
+                tuner.update(&tap.output, sample_rate);
+            }
+            Self::Echo | Self::Utility | Self::Eq(_) | Self::Knobs => {}
         }
     }
 }
@@ -120,14 +151,27 @@ pub struct EditorInput<'a> {
     pub track: TrackId,
     pub sample_rate: f32,
     pub editor: Rc<RefCell<Editor>>,
-    /// A time being dragged, not applied yet.
-    pub pending: Option<f32>,
+    /// A setting being dragged, not applied yet.
+    pub pending: Option<(SettingKnob, f32)>,
 }
 
 impl EditorInput<'_> {
     pub fn enabled(&self) -> bool {
         self.effect.enabled()
     }
+
+    /// The value of `knob` shown: being dragged, or `value`.
+    pub fn shown(&self, knob: SettingKnob, value: f32) -> f32 {
+        match self.pending {
+            Some((pending, shown)) if pending == knob => shown,
+            _ => value,
+        }
+    }
+}
+
+/// Width of a frame holding a row of `count` knobs.
+pub fn knobs_width(count: usize) -> f32 {
+    count as f32 * KNOB_WIDTH + (count - 1) as f32 * KNOB_GAP + KNOBS_PADDING
 }
 
 impl Tonique {
@@ -142,7 +186,14 @@ impl Tonique {
             EffectKind::Filter => self.filter_body(input, theme, context),
             EffectKind::Echo => self.echo_body(input, theme, context),
             EffectKind::Spectrum => spectrum_body(input, theme),
+            EffectKind::Tuner => self.tuner_body(input, theme, context),
             EffectKind::Utility => self.utility_body(input, theme, context),
+            EffectKind::Eq => self.eq_body(input, theme, context),
+            EffectKind::Compressor => self.compressor_body(input, theme, context),
+            EffectKind::Limiter => self.limiter_body(input, theme, context),
+            EffectKind::Gate => self.gate_body(input, theme, context),
+            EffectKind::Saturation => self.saturation_body(input, theme, context),
+            EffectKind::Reverb => self.reverb_body(input, theme, context),
         }
     }
 
@@ -175,8 +226,47 @@ impl Tonique {
         Some(self.knob_view(param, knob, KnobTarget::Param(parameter), theme, context))
     }
 
+    /// A knob for one of `input`'s settings, now at `value`: on a log
+    /// scale when `log`.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn setting_knob(
+        &self,
+        input: &EditorInput,
+        knob: SettingKnob,
+        (value, range, default): (f32, std::ops::RangeInclusive<f32>, f32),
+        name: &'static str,
+        format: impl Fn(f32) -> String,
+        log: bool,
+        theme: &Theme,
+        context: &mut Context<Self>,
+    ) -> Stateful<gpui::Div> {
+        let shown = input.shown(knob, value);
+        self.knob_view(
+            name,
+            Knob {
+                name,
+                value: shown,
+                scale: KnobScale {
+                    min: *range.start(),
+                    max: *range.end(),
+                    log,
+                },
+                text: format(shown),
+                default: Some(default),
+                active: input.enabled(),
+            },
+            KnobTarget::Setting {
+                track: input.track,
+                plugin: input.effect.plugin.id,
+                knob,
+            },
+            theme,
+            context,
+        )
+    }
+
     /// A button switching a 0/1 parameter, as an undo step.
-    fn param_toggle(
+    pub(super) fn param_toggle(
         &self,
         effect: &Effect,
         param: &'static str,
@@ -199,7 +289,8 @@ impl Tonique {
         )
     }
 
-    /// The repeats fading out, and time, feedback and mix knobs.
+    /// The repeats fading out, a sync switch, and time, feedback, mix and
+    /// cut knobs.
     fn echo_body(
         &self,
         input: &EditorInput,
@@ -207,7 +298,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> AnyElement {
         let effect = input.effect;
-        let PluginKind::Echo { time_s } = effect.plugin.kind else {
+        let PluginKind::Echo { time_s, sync } = effect.plugin.kind else {
             return div().into_any_element();
         };
         let feedback = effect.plugin.param("feedback").map_or(0., |p| p.get());
@@ -254,10 +345,14 @@ impl Tonique {
                         color,
                     );
                 }
+                let per_repeat = match sync {
+                    Some(beats) => ECHO_SYNCS[nearest_sync(beats)].1.to_string(),
+                    None => format_ms(time_s),
+                };
                 text(
                     window,
                     context,
-                    format!("{} per repeat", format_ms(time_s)),
+                    format!("{per_repeat} per repeat"),
                     (rect.right() - 4., rect.top + 3.),
                     Align::RIGHT_TOP,
                     size::SMALL,
@@ -270,33 +365,60 @@ impl Tonique {
         .min_h_0()
         .w_full();
 
-        let shown_time = input.pending.unwrap_or(time_s);
-        let time = self.knob_view(
-            "time",
-            Knob {
-                name: "Time",
-                value: shown_time,
-                scale: KnobScale {
-                    min: *ECHO_TIMES.start(),
-                    max: *ECHO_TIMES.end(),
-                    log: true,
+        let time = match sync {
+            Some(beats) => self.setting_knob(
+                input,
+                SettingKnob::Sync,
+                (
+                    nearest_sync(beats) as f32,
+                    0.0..=(ECHO_SYNCS.len() - 1) as f32,
+                    nearest_sync(ECHO_SYNC) as f32,
+                ),
+                "Time",
+                |index| {
+                    ECHO_SYNCS[(index.round() as usize).min(ECHO_SYNCS.len() - 1)]
+                        .1
+                        .into()
                 },
-                text: format_ms(shown_time),
-                default: Some(ECHO_TIME),
-                active: enabled,
-            },
-            KnobTarget::Time {
-                track: input.track,
-                plugin: effect.plugin.id,
-            },
-            theme,
-            context,
-        );
+                false,
+                theme,
+                context,
+            ),
+            None => self.setting_knob(
+                input,
+                SettingKnob::Time,
+                (time_s, ECHO_TIMES, ECHO_TIME),
+                "Time",
+                format_ms,
+                true,
+                theme,
+                context,
+            ),
+        };
+        let track = input.track;
+        let plugin = effect.plugin.id;
+        let sync_button = Flat::new("sync", TOGGLE_SIZE.1)
+            .width(TOGGLE_SIZE.0)
+            .selected(sync.is_some())
+            .show(
+                div().text_size(px(size::SMALL)).child("Sync"),
+                theme,
+                context,
+                move |this, _| {
+                    let sync = match sync {
+                        Some(_) => None,
+                        None => Some(ECHO_SYNC),
+                    };
+                    this.state
+                        .set_effect_setting(&track, plugin, Setting::Sync(sync));
+                },
+            );
         let knobs = div()
             .flex()
             .flex_none()
             .gap(px(6.))
             .h(px(KNOB_HEIGHT))
+            .child(sync_button)
             .child(time)
             .children(self.param_knob(
                 effect,
@@ -307,7 +429,13 @@ impl Tonique {
                 theme,
                 context,
             ))
-            .children(self.param_knob(effect, "mix", "Mix", format_percent, false, theme, context));
+            .children(self.param_knob(effect, "mix", "Mix", format_percent, false, theme, context))
+            .children(self.param_knob(
+                effect, "low_cut", "Low cut", format_hz, true, theme, context,
+            ))
+            .children(self.param_knob(
+                effect, "high_cut", "High cut", format_hz, true, theme, context,
+            ));
         div()
             .size_full()
             .flex()
