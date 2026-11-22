@@ -179,8 +179,7 @@ impl Tonique {
         )
         .on_drop(
             context.listener(|this, paths: &ExternalPaths, window, context| {
-                // Without a move during the drag (some systems), from where
-                // the pointer is now.
+                // No move came before the drop: from where the pointer is.
                 let target = this.timeline.drop_target.take().or_else(|| {
                     let audio =
                         AUDIO_ANALYSIS_CACHE.get_or_analyze(paths.paths().first()?.clone())?;

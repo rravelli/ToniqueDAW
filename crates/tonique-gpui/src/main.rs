@@ -65,9 +65,10 @@ fn main() {
                         ..Default::default()
                     }),
                     focus: true,
-                    // gpui-fast caps frames to ~30 fps in low-power mode (e.g. the
-                    // `power-saver` profile) and while inactive; the egui app
-                    // doesn't, so a bench lifts the caps to compare like for like.
+                    // Matches the desktop entry, so the window shows as Tonique's.
+                    app_id: Some("Tonique".into()),
+                    // gpui-fast caps frames in low-power mode and while inactive;
+                    // the egui app doesn't, so a bench lifts the caps.
                     ..if bench::Bench::requested() {
                         WindowOptions {
                             low_power_frame_interval: None,
