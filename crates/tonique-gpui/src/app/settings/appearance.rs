@@ -261,6 +261,7 @@ impl Tonique {
                 label,
                 CONTROL_WIDTH,
                 PopupKind::Theme,
+                self.menu_builder(PopupKind::Theme, context),
                 open,
                 theme,
                 context,

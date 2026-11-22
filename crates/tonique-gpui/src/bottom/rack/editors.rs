@@ -3,6 +3,7 @@
 //! edited. What an editor keeps (an analyser's spectrum) is in its
 //! [`Editor`], shared with the canvases drawing it.
 
+use crate::bottom::BottomPanel;
 use crate::model::HoldsProject;
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
@@ -14,7 +15,6 @@ use tonique_engine::{
 };
 
 use crate::{
-    app::Tonique,
     bottom::{
         paint::{Align, curve, fill, fill_rounded, text},
         rack::{
@@ -131,7 +131,7 @@ impl EditorInput<'_> {
     }
 }
 
-impl Tonique {
+impl BottomPanel {
     /// The controls of `input`'s effect, filling its frame's body.
     pub(super) fn editor_body(
         &self,

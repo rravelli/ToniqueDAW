@@ -257,7 +257,8 @@ impl Tonique {
     ) -> gpui::Stateful<gpui::Div> {
         let kind = PopupKind::Setting(choice);
         let open = crate::popup::shown(context) == Some(kind);
-        select(id, label, width, kind, open, theme, context)
+        let build = self.menu_builder(kind, context);
+        select(id, label, width, kind, build, open, theme, context)
     }
 
     pub(super) fn audio_tab(

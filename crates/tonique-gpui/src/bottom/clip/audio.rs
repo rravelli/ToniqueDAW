@@ -2,6 +2,7 @@
 //! transposition), and how it follows the project's tempo (its warp mode,
 //! how it's stretched, its file's tempo).
 
+use crate::bottom::BottomPanel;
 use crate::model::HoldsProject;
 use std::{cell::Cell, rc::Rc};
 
@@ -12,7 +13,7 @@ use gpui::{
 use tonique_engine::edit::{ClipId, MAX_TRANSPOSE, StretchWindow, WarpMode};
 
 use crate::{
-    app::{ArrowHolder, PopupKind, Tonique},
+    app::{ArrowHolder, PopupKind},
     bottom::clip::{
         ClipArrows, ClipDrag,
         inspector::{
@@ -101,7 +102,7 @@ fn window_name(window: StretchWindow) -> &'static str {
     }
 }
 
-impl Tonique {
+impl BottomPanel {
     /// Gain and pan, sliders like a track's heard as they're dragged, and
     /// the transposition and detune alike; the warp, switched by its title,
     /// its mode beside it; the stretch's window and formants; the file's
@@ -221,7 +222,8 @@ impl Tonique {
     ) -> Stateful<gpui::Div> {
         let open = crate::popup::shown(context) == Some(kind);
         let element = if enabled {
-            select(id, label, width.max(1.), kind, open, theme, context)
+            let build = self.menu_builder(kind, context);
+            select(id, label, width.max(1.), kind, build, open, theme, context)
         } else {
             div()
                 .id(id)
@@ -253,7 +255,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> gpui::Div {
         let id = shown.id;
-        let typing = match &self.bottom.clip.typing {
+        let typing = match &self.clip.typing {
             Some((Typed::Bpm, text)) => Some(text),
             _ => None,
         };
@@ -263,7 +265,7 @@ impl Tonique {
                 text,
                 theme,
                 context,
-                |this| this.bottom.clip.typing.as_mut().map(|(_, text)| text),
+                |this| this.clip.typing.as_mut().map(|(_, text)| text),
                 Self::finish_typing,
             )
             .h(px(FIELD_HEIGHT))
@@ -373,9 +375,18 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
-                    crate::app::arrows::hold(holder.clone(), context);
+                    crate::app::arrows::hold_in(
+                        holder.clone(),
+                        crate::app::arrows::stepper(
+                            context.weak_entity(),
+                            move |this, presses, context| {
+                                this.step_clip(ClipArrows::Slider(slider), presses, context)
+                            },
+                        ),
+                        context,
+                    );
                     if event.click_count >= 2 {
-                        this.bottom.clip.drag = None;
+                        this.clip.drag = None;
                         if let Some((_, clip)) = this.state(context).clip_with_track(id) {
                             this.set_slider(
                                 &clip,
@@ -387,7 +398,7 @@ impl Tonique {
                         }
                     } else {
                         let pointer_x = f32::from(event.position.x);
-                        this.bottom.clip.drag = Some(ClipDrag::Slider {
+                        this.clip.drag = Some(ClipDrag::Slider {
                             slider,
                             drag: SliderDrag::new(scale, value, pointer_x, event.modifiers.shift),
                             bounds: bounds.get(),
@@ -473,7 +484,7 @@ impl Tonique {
             slider,
             drag,
             bounds,
-        }) = self.bottom.clip.drag.as_mut()
+        }) = self.clip.drag.as_mut()
         else {
             return;
         };

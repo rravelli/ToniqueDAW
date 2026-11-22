@@ -195,7 +195,7 @@ impl Tonique {
         )
         .command(
             self.action_item("Effects panel", Action::ToggleEffectsPanel, context)
-                .checked(self.bottom.open)
+                .checked(self.bottom.read(context).shown.open)
                 .keep_open(),
             Action::ToggleEffectsPanel,
             context,

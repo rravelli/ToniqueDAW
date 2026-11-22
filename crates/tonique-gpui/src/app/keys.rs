@@ -127,7 +127,10 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        if !self.bottom_action(*action, window, context) {
+        let taken = self.bottom.update(context, |bottom, context| {
+            bottom.bottom_action(*action, window, context)
+        });
+        if !taken {
             self.run(*action, window, context);
         }
         context.notify();
@@ -179,7 +182,10 @@ impl Tonique {
             Action::SaveProject => self.project_action(ProjectAction::Save, window, context),
             Action::SaveProjectAs => self.project_action(ProjectAction::SaveAs, window, context),
             Action::OpenSettings => self.toggle_settings(context),
-            Action::ToggleEffectsPanel => self.bottom.toggle(),
+            Action::ToggleEffectsPanel => self.bottom.update(context, |bottom, context| {
+                bottom.toggle();
+                context.notify();
+            }),
             Action::ExportAudio => self.open_export(window, context),
             Action::ToggleGraphView => self.toggle_graph(context),
             _ => {}

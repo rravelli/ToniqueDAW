@@ -113,7 +113,10 @@ impl Tonique {
             && let Some((_, clip, _)) = &hit
         {
             self.state_mut(context).select_clips(vec![clip.id]);
-            self.show_clip_details(clip.id, context);
+            self.bottom.update(context, |bottom, context| {
+                bottom.show_clip_details(clip.id, context);
+                context.notify();
+            });
             return TimelineDrag::None;
         }
         match hit {

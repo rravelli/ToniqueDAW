@@ -1,13 +1,13 @@
 //! The panel's header: the track's name (and the clip's, when showing
 //! one) on the track's colour, and the Clip and Effects tabs on its right.
 
+use crate::bottom::BottomPanel;
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use gpui::{Context, MouseButton, canvas, div, prelude::*, px};
 use tonique_engine::edit::ClipId;
 
 use crate::{
-    app::Tonique,
     bottom::{BottomView, paint::polygon},
     core::{clip::AudioClip, track::TrackRow},
     theme::{Color, hsla, size, with_alpha},
@@ -23,7 +23,7 @@ const TAB_RADIUS: f32 = 4.;
 /// From the header's top to a selected tab's.
 const TAB_TOP: f32 = 2.;
 
-impl Tonique {
+impl BottomPanel {
     /// Track name, and the clip's when showing one. With `tabs` (the view
     /// shown, and a clip of the track), Clip and Effects tabs on the right
     /// switch between them.

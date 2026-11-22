@@ -5,9 +5,9 @@
 //! time in the file (10 ms, a second with Shift). Each press is an undo
 //! step.
 
+use crate::bottom::BottomPanel;
 use crate::model::HoldsProject;
 use crate::{
-    app::Tonique,
     bottom::clip::{audio::ClipSlider, inspector::Field},
     utils::steps::Presses,
 };
@@ -20,13 +20,12 @@ pub enum ClipArrows {
     Field(Field),
 }
 
-impl Tonique {
+impl BottomPanel {
     pub(crate) fn step_clip(&mut self, arrows: ClipArrows, presses: Presses, context: &mut App) {
-        if self.bottom.clip.drag.is_some() {
+        if self.clip.drag.is_some() {
             return;
         }
         let Some((_, clip)) = self
-            .bottom
             .clip
             .clip
             .and_then(|id| self.state(context).clip_with_track(id))

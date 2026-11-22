@@ -1,11 +1,11 @@
 //! Dragging the markers and the loop, and the clip edits they make.
 
+use crate::bottom::BottomPanel;
 use crate::model::HoldsProject;
 use gpui::App;
 use tonique_engine::{edit::ClipLoop, time::BeatPos};
 
 use crate::{
-    app::Tonique,
     bottom::{
         clip::{ClipDrag, ClipScene, LOOP_BAR_HEIGHT, Layout, RULER_HEIGHT},
         paint::{fill, polygon},
@@ -80,7 +80,7 @@ pub(super) struct HandleDrag {
     pub grabbed: Option<ClipLoop>,
 }
 
-impl Tonique {
+impl BottomPanel {
     /// The handle at `(x, y)` in the view, if any: the markers by their
     /// flags (or the lines under them), the loop's bracket by its edges or
     /// its middle.
@@ -92,7 +92,7 @@ impl Tonique {
         y: f32,
         context: &App,
     ) -> Option<Area> {
-        let details = &self.bottom.clip;
+        let details = &self.clip;
         let bpm = self.state(context).bpm();
         let span = layout.span();
         let at = |file: f64| details.x(file, bpm, span);
@@ -162,12 +162,12 @@ impl Tonique {
         alt: bool,
         context: &mut App,
     ) {
-        let Some(ClipDrag::Handle(drag)) = &self.bottom.clip.drag else {
+        let Some(ClipDrag::Handle(drag)) = &self.clip.drag else {
             return;
         };
         let bpm = self.state(context).bpm();
         let shown = self.state(context).shown_clip(clip);
-        let details = &self.bottom.clip;
+        let details = &self.clip;
         let span = details.layout().span();
         let at = details.file_at_x(pointer_x, bpm, span, alt);
         let edited = match drag.area.handle {

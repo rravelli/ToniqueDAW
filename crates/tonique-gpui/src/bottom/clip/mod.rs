@@ -15,6 +15,7 @@ mod markers;
 
 pub use arrows::ClipArrows;
 
+use crate::bottom::BottomPanel;
 use crate::model::HoldsProject;
 use std::{cell::Cell, rc::Rc};
 
@@ -25,7 +26,7 @@ use gpui::{
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 use crate::{
-    app::{PopupKind, Tonique},
+    app::PopupKind,
     bottom::paint::{Align, fill, fill_rounded, text},
     core::{
         clip::AudioClip,
@@ -312,7 +313,7 @@ struct ClipScene {
     lit: Option<Area>,
 }
 
-impl Tonique {
+impl BottomPanel {
     pub(super) fn clip_details_view(
         &mut self,
         clip: &AudioClip,
@@ -321,7 +322,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> AnyElement {
         let bpm = self.state(context).bpm();
-        let details = &mut self.bottom.clip;
+        let details = &mut self.clip;
         if details.clip != Some(clip.id) {
             details.typing = None;
             details.clip = Some(clip.id);
@@ -365,7 +366,7 @@ impl Tonique {
         );
         let cursor = self.clip_cursor(scene.lit.as_ref(), window);
         let waves = self.waves.clone();
-        let slot = self.bottom.clip.view.clone();
+        let slot = self.clip.view.clone();
         let painting = canvas(
             move |bounds, _, _| slot.set(bounds),
             move |bounds, _, window, context| {
@@ -382,17 +383,17 @@ impl Tonique {
         )
         .size_full();
         let id = clip.id;
-        let span = self.bottom.clip.scroll_span(clip, bpm, layout.width);
-        let (min, _) = self.bottom.clip.scroll_range(clip, bpm, layout.width);
+        let span = self.clip.scroll_span(clip, bpm, layout.width);
+        let (min, _) = self.clip.scroll_range(clip, bpm, layout.width);
         let this = context.weak_entity();
         let across_bar = scrollbar(
             Axis::Horizontal,
-            &self.bottom.clip.scrollbar,
+            &self.clip.scrollbar,
             &crate::theme::current(context),
             move |_| Some(span),
             move |offset, _, app| {
                 let _ = this.update(app, |this, context| {
-                    this.bottom.clip.grid.offset.x = min + offset;
+                    this.clip.grid.offset.x = min + offset;
                     context.notify();
                 });
             },
@@ -434,9 +435,8 @@ impl Tonique {
 
         // The waveform gives way to the inspector, down to its least; then
         // the inspector's panels scroll.
-        let room = f32::from(self.bottom.bounds.get().size.width) - 3. * PADDING;
+        let room = f32::from(self.bounds.get().size.width) - 3. * PADDING;
         let inspector_width = self
-            .bottom
             .clip
             .panels
             .width()
@@ -464,7 +464,7 @@ impl Tonique {
         window: &Window,
         context: &App,
     ) -> ClipScene {
-        let details = &self.bottom.clip;
+        let details = &self.clip;
         let bpm = self.state(context).bpm();
         let span = layout.span();
         let x = |file: f64| details.x(file, bpm, span);
@@ -504,7 +504,7 @@ impl Tonique {
     }
 
     fn clip_cursor(&self, lit: Option<&Area>, window: &Window) -> CursorStyle {
-        let details = &self.bottom.clip;
+        let details = &self.clip;
         match &details.drag {
             Some(ClipDrag::Pan { .. }) => return CursorStyle::ClosedHand,
             Some(ClipDrag::Handle(drag)) if drag.area.handle == Handle::Loop => {
@@ -538,18 +538,18 @@ impl Tonique {
         };
         let shown = self.state(context).shown_clip(&clip);
         let bpm = self.state(context).bpm();
-        let details = &self.bottom.clip;
+        let details = &self.clip;
         let layout = details.layout();
         let (pointer_x, pointer_y) = details.local(event.position);
         if let Some(area) = self.handle_at(&shown, layout, pointer_x, pointer_y, context) {
-            self.bottom.clip.drag = Some(ClipDrag::Handle(markers::HandleDrag {
+            self.clip.drag = Some(ClipDrag::Handle(markers::HandleDrag {
                 area,
                 press_x: pointer_x,
                 grabbed: shown.looped,
             }));
             return;
         }
-        let details = &mut self.bottom.clip;
+        let details = &mut self.clip;
         if pointer_y < layout.lane.0 {
             if event.click_count >= 2 {
                 details.fit(&clip, bpm, layout.width);
@@ -566,7 +566,7 @@ impl Tonique {
 
     /// A right-click on the ruler: where to put bar 1.
     fn clip_ruler_menu(&mut self, id: ClipId, event: &MouseDownEvent, context: &mut Context<Self>) {
-        let details = &self.bottom.clip;
+        let details = &self.clip;
         let (pointer_x, pointer_y) = details.local(event.position);
         if pointer_y >= RULER_HEIGHT {
             return;
@@ -590,7 +590,7 @@ impl Tonique {
         };
         let bpm = self.state(context).bpm();
         let wheel = WheelDelta::of(event.delta);
-        let details = &mut self.bottom.clip;
+        let details = &mut self.clip;
         let layout = details.layout();
         let (pointer_x, pointer_y) = details.local(event.position);
         let command = event.modifiers.control || event.modifiers.platform;
@@ -641,19 +641,19 @@ impl Tonique {
     }
 
     pub(super) fn clip_drag_move(&mut self, event: &MouseMoveEvent, context: &mut App) -> bool {
-        let Some(id) = self.bottom.clip.clip else {
+        let Some(id) = self.clip.clip else {
             return false;
         };
-        if self.bottom.clip.drag.is_none() {
+        if self.clip.drag.is_none() {
             return false;
         }
         let Some((_, clip)) = self.state(context).clip_with_track(id) else {
-            self.bottom.clip.drag = None;
+            self.clip.drag = None;
             return false;
         };
         let bpm = self.state(context).bpm();
-        let (pointer_x, _) = self.bottom.clip.local(event.position);
-        let details = &mut self.bottom.clip;
+        let (pointer_x, _) = self.clip.local(event.position);
+        let details = &mut self.clip;
         let layout = details.layout();
         match details.drag.as_mut() {
             Some(ClipDrag::Pan { last_x }) => {
@@ -682,10 +682,10 @@ impl Tonique {
     }
 
     pub(super) fn clip_drag_end(&mut self, context: &mut App) {
-        let Some(drag) = self.bottom.clip.drag.take() else {
+        let Some(drag) = self.clip.drag.take() else {
             return;
         };
-        let Some(id) = self.bottom.clip.clip else {
+        let Some(id) = self.clip.clip else {
             return;
         };
         let Some((_, clip)) = self.state(context).clip_with_track(id) else {

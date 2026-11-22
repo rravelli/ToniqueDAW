@@ -68,7 +68,7 @@ pub struct Tonique {
     pub browser_open: bool,
     pub browser_width: Splitter,
     /// The selected track's effects, or a clip's details, at the bottom.
-    pub bottom: BottomPanel,
+    pub bottom: Entity<BottomPanel>,
     transport: Entity<TransportBar>,
     menu_bar: MenuBarUi,
     /// The project's file, and the recent ones.
@@ -151,13 +151,13 @@ impl Tonique {
             browser,
             headers: HeadersUi::new(),
             graph: context.new(|_| GraphView::new(project.clone())),
+            bottom: context.new(|_| BottomPanel::new(project.clone(), waves.clone())),
             project,
             focus,
             timeline: TimelineUi::default(),
             waves,
             browser_open: true,
             browser_width: Splitter::new(Edge::Right, BROWSER_WIDTH, BROWSER_MIN, BROWSER_MAX),
-            bottom: BottomPanel::new(),
             transport,
             menu_bar: MenuBarUi::default(),
             dialog: None,
@@ -214,7 +214,6 @@ impl Tonique {
     /// heard before any element, whatever is under the pointer.
     fn follow_drags(&mut self, event: &MouseMoveEvent, window: &Window, context: &mut App) -> bool {
         let width = f32::from(window.viewport_size().width);
-        let height = f32::from(window.viewport_size().height);
         // The timeline keeps at least as much room as either panel.
         let browser = self
             .browser_width
@@ -224,13 +223,12 @@ impl Tonique {
             | self.header_drag_move(event, width, context)
             | self.settings_drag_move(event, context)
             | self.export_drag_move(event, context)
-            | self.bottom_drag_move(event, height, context)
             | browser
     }
 
     /// The pointer over the window, not under a dialog or a menu.
     fn on_hover(&mut self, event: &MouseMoveEvent, _: &mut Window, context: &mut Context<Self>) {
-        if self.timeline_hover(event) | self.bottom_hover(event) {
+        if self.timeline_hover(event) {
             context.notify();
         }
     }
@@ -259,12 +257,11 @@ impl Tonique {
                 // a press lets go of the arrow keys and stops recording a
                 // shortcut, unless on the control holding them, which takes
                 // them back after this.
-                window.on_mouse_event(move |event: &MouseDownEvent, phase, _, app| {
+                window.on_mouse_event(move |_: &MouseDownEvent, phase, _, app| {
                     if phase == DispatchPhase::Capture {
                         let _ = pressed.update(app, |this, context| {
                             crate::app::arrows::release(context);
                             this.settings.stop_recording();
-                            this.bottom_press(event);
                         });
                     }
                 });
@@ -280,7 +277,6 @@ impl Tonique {
         self.browser_width.end();
         self.settings_drag_end();
         self.export_drag_end();
-        self.bottom_drag_end(context);
         context.notify();
     }
 
@@ -290,7 +286,6 @@ impl Tonique {
             || self.browser_width.is_dragging()
             || self.settings.is_dragging()
             || self.export.is_dragging()
-            || self.bottom.is_dragging()
     }
 
     /// The browser, resizable from its right edge.
@@ -353,7 +348,6 @@ impl Render for Tonique {
             || context.has_active_drag()
             || self.is_dragging()
             || scrolling
-            || self.bottom.is_animating()
             || self.export.is_running()
             // Meters falling back after playback.
             || self.state(context).metrics.tracks.values().any(crate::meter::is_live);
@@ -377,6 +371,7 @@ impl Render for Tonique {
         // clones every track's clips.
         let rows = crate::timeline::rows(self.state(context));
         let theme = crate::theme::current(context);
+        let bottom_open = self.bottom.read(context).shown.open;
         let body = div()
             .flex()
             .flex_1()
@@ -416,9 +411,7 @@ impl Render for Tonique {
             .child(self.menu_bar(context))
             .child(self.transport.clone())
             .child(body)
-            .children(crate::profile::time("view.bottom", || {
-                self.bottom_panel_view(window, context)
-            }))
+            .when(bottom_open, |element| element.child(self.bottom.clone()))
             .child(self.drag_listener(context))
             .child(self.popups.clone())
             .children(self.dialog_view(window, context))

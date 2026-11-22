@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use gpui::{App, Context, Global, Keystroke, Window};
+use gpui::{App, Context, Global, Keystroke, WeakEntity, Window};
 use tonique_engine::edit::TrackId;
 
 use crate::{
@@ -19,6 +19,19 @@ use crate::{
 /// Steps a control of a view's by some arrow presses.
 pub type Stepper = Rc<dyn Fn(Presses, &mut App)>;
 
+/// A stepper calling `step` on `view`, then redrawing it.
+pub fn stepper<V: 'static>(
+    view: WeakEntity<V>,
+    step: impl Fn(&mut V, Presses, &mut Context<V>) + 'static,
+) -> Stepper {
+    Rc::new(move |presses, context| {
+        let _ = view.update(context, |view, context| {
+            step(view, presses, context);
+            context.notify();
+        });
+    })
+}
+
 /// A control holding the arrow keys.
 #[derive(Clone)]
 pub enum ArrowHolder {
@@ -30,8 +43,8 @@ pub enum ArrowHolder {
     Knob(KnobArrows),
     /// The metronome's level, in settings.
     MetronomeLevel,
-    /// A number field known by `id`, in whichever view, stepped by `step`.
-    Number { id: &'static str, step: Stepper },
+    /// A number field known by its id, in whichever view.
+    Number(&'static str),
 }
 
 impl ArrowHolder {
@@ -44,22 +57,30 @@ impl ArrowHolder {
             (Self::Clip(arrows), Self::Clip(other)) => arrows == other,
             (Self::Knob(arrows), Self::Knob(other)) => arrows.is(other),
             (Self::MetronomeLevel, Self::MetronomeLevel) => true,
-            (Self::Number { id, .. }, Self::Number { id: other, .. }) => id == other,
+            (Self::Number(id), Self::Number(other)) => id == other,
             _ => false,
         }
     }
 }
 
 /// The control holding the arrow keys, if any, app-wide: any view's
-/// control can take them.
+/// control can take them. With a stepper, its view steps it; without, the
+/// window does.
 #[derive(Default)]
-struct HeldArrows(Option<ArrowHolder>);
+struct HeldArrows(Option<(ArrowHolder, Option<Stepper>)>);
 
 impl Global for HeldArrows {}
 
-/// `holder` takes the arrow keys, from whichever had them.
+/// `holder`, one of the window's controls, takes the arrow keys, from
+/// whichever had them.
 pub fn hold(holder: ArrowHolder, context: &mut App) {
-    context.set_global(HeldArrows(Some(holder)));
+    context.set_global(HeldArrows(Some((holder, None))));
+}
+
+/// `holder`, a control of a view's stepped by `step`, takes the arrow
+/// keys.
+pub fn hold_in(holder: ArrowHolder, step: Stepper, context: &mut App) {
+    context.set_global(HeldArrows(Some((holder, Some(step)))));
 }
 
 /// Whether `holder` has the arrow keys: outlined in the accent.
@@ -69,7 +90,7 @@ pub fn holds(holder: &ArrowHolder, context: &App) -> bool {
 
 /// Whether the number field known by `id` has the arrow keys.
 pub fn holds_number(id: &str, context: &App) -> bool {
-    matches!(held(context), Some(ArrowHolder::Number { id: held, .. }) if *held == id)
+    matches!(held(context), Some(ArrowHolder::Number(held)) if *held == id)
 }
 
 /// No control has the arrow keys any more.
@@ -79,6 +100,10 @@ pub fn release(context: &mut App) {
 
 /// The control holding the arrow keys.
 pub fn held(context: &App) -> Option<&ArrowHolder> {
+    held_with_stepper(context).map(|(holder, _)| holder)
+}
+
+fn held_with_stepper(context: &App) -> Option<&(ArrowHolder, Option<Stepper>)> {
     context
         .try_global::<HeldArrows>()
         .and_then(|held| held.0.as_ref())
@@ -93,22 +118,25 @@ impl Tonique {
         window: &Window,
         context: &mut Context<Self>,
     ) -> bool {
-        let (Some(presses), Some(holder)) = (arrow_press(keystroke), held(context).cloned()) else {
+        let (Some(presses), Some((holder, step))) =
+            (arrow_press(keystroke), held_with_stepper(context).cloned())
+        else {
             return false;
         };
         if !self.has_keyboard(window, context) {
             return false;
         }
+        // A view's control: stepped by its view, after this (it may be
+        // this one, being updated).
+        if let Some(step) = step {
+            context.defer(move |context| step(presses, context));
+            return true;
+        }
         match holder {
             ArrowHolder::Header(track, param) => self.step_header(track, param, presses, context),
-            ArrowHolder::Clip(arrows) => self.step_clip(arrows, presses, context),
-            ArrowHolder::Knob(arrows) => self.step_knob(&arrows, presses, context),
+            // Stepped by their views.
+            ArrowHolder::Clip(_) | ArrowHolder::Knob(_) | ArrowHolder::Number(_) => {}
             ArrowHolder::MetronomeLevel => self.step_metronome_level(presses, context),
-            // The field's view may be this one, being updated: step it
-            // after.
-            ArrowHolder::Number { step, .. } => {
-                context.defer(move |context| step(presses, context))
-            }
         }
         true
     }

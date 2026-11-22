@@ -4,6 +4,7 @@
 //! header (the whole strip) is dragged to move the effect, double-clicked
 //! to fold it, and right-clicked for its menu.
 
+use crate::bottom::BottomPanel;
 use crate::model::HoldsProject;
 use gpui::{
     Anchor, AnyElement, Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, Window,
@@ -12,7 +13,7 @@ use gpui::{
 use tonique_engine::edit::{PluginId, TrackId};
 
 use crate::{
-    app::{PopupKind, Tonique},
+    app::{PopupKind, focus_main},
     bottom::rack::{RackDrag, editors::Editor, editors::EditorInput},
     core::{effect::Effect, metrics::AudioMetrics},
     geometry::Rect,
@@ -33,7 +34,7 @@ const STRIP_WIDTH: f32 = 24.;
 const BUTTON: f32 = 15.;
 const ICON_SIZE: f32 = 10.;
 
-impl Tonique {
+impl BottomPanel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn effect_frame(
         &self,
@@ -153,7 +154,7 @@ impl Tonique {
 
     /// The effect's element, its bounds kept for selecting and dropping.
     fn recorded(&self, index: usize, plugin: PluginId) -> Stateful<gpui::Div> {
-        let frames = self.bottom.rack.frames.clone();
+        let frames = self.rack.frames.clone();
         div()
             .id(("effect", plugin.0 as usize))
             .relative()
@@ -188,12 +189,12 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     if event.click_count >= 2 {
-                        this.bottom.rack.drag = None;
+                        this.rack.drag = None;
                         this.state_mut(context)
                             .set_effect_collapsed(plugin, !collapsed);
                     } else {
                         let pointer_x = f32::from(event.position.x);
-                        this.bottom.rack.drag = Some(RackDrag::Move {
+                        this.rack.drag = Some(RackDrag::Move {
                             plugin,
                             from: index,
                             start_x: pointer_x,
@@ -254,13 +255,13 @@ impl Tonique {
         } else {
             theme.text_muted
         };
-        let name = match &self.bottom.rack.renaming {
+        let name = match &self.rack.renaming {
             Some((_, renaming, field)) if *renaming == plugin => typing_view(
                 "effect-rename",
                 field,
                 theme,
                 context,
-                |this| this.bottom.rack.renaming.as_mut().map(|(.., field)| field),
+                |this| this.rack.renaming.as_mut().map(|(.., field)| field),
                 Self::finish_effect_rename,
             )
             .h(px(HEADER_HEIGHT - 4.))
@@ -323,7 +324,7 @@ impl Tonique {
         }
         let mut field = TextField::new(context);
         field.start(effect.name().to_string(), window, context);
-        self.bottom.rack.renaming = Some((track, plugin, field));
+        self.rack.renaming = Some((track, plugin, field));
     }
 
     fn finish_effect_rename(
@@ -332,7 +333,7 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        let Some((track, plugin, field)) = self.bottom.rack.renaming.take() else {
+        let Some((track, plugin, field)) = self.rack.renaming.take() else {
             return;
         };
         if keep {
@@ -342,7 +343,7 @@ impl Tonique {
                 Some(field.text.trim().to_string()),
             );
         }
-        window.focus(&self.focus, context);
+        focus_main(window, context);
     }
 
     /// An effect's menu, while it exists.
@@ -384,7 +385,7 @@ impl Tonique {
                     MenuItem::new("Duplicate").icon(icons::COPY),
                     context,
                     move |this, _, context| {
-                        this.bottom.rack.selected =
+                        this.rack.selected =
                             this.state_mut(context).duplicate_effects(&track, &[index]);
                     },
                 )
@@ -396,7 +397,7 @@ impl Tonique {
                     context,
                     move |this, _, context| {
                         this.state_mut(context).remove_effects(&track, &[index]);
-                        this.bottom.rack.selected.clear();
+                        this.rack.selected.clear();
                     },
                 )
                 .into_element(),

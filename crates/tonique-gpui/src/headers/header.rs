@@ -122,7 +122,10 @@ impl Tonique {
                     if event.click_count == 2 {
                         let was_selected = this.state(context).selected_tracks().contains(&id);
                         this.state_mut(context).select_track(&id);
-                        this.toggle_effects_of_selected(was_selected);
+                        this.bottom.update(context, |bottom, context| {
+                            bottom.toggle_effects_of_selected(was_selected);
+                            context.notify();
+                        });
                         context.notify();
                         return;
                     }

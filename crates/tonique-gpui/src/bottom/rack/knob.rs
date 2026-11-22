@@ -4,6 +4,7 @@
 //! the arrow keys step it 1% of its travel (10% with Shift), each press an
 //! undo step.
 
+use crate::bottom::BottomPanel;
 use crate::model::HoldsProject;
 use std::f32::consts::{FRAC_PI_4, PI};
 
@@ -13,7 +14,7 @@ use gpui::{
 use tonique_engine::edit::{Parameter, PluginId, TrackId};
 
 use crate::{
-    app::{ArrowHolder, Tonique},
+    app::ArrowHolder,
     bottom::{
         paint::{Align, circle, polyline, text},
         rack::RackDrag,
@@ -131,7 +132,7 @@ pub struct Knob {
     pub active: bool,
 }
 
-impl Tonique {
+impl BottomPanel {
     pub(super) fn knob_view(
         &self,
         id: impl Into<gpui::ElementId>,
@@ -141,7 +142,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> Stateful<gpui::Div> {
         let dragging = matches!(
-            &self.bottom.rack.drag,
+            &self.rack.drag,
             Some(RackDrag::Knob(drag)) if same_target(&drag.target, &target)
         );
         let Knob {
@@ -190,14 +191,24 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
-                    crate::app::arrows::hold(holder.clone(), context);
+                    let ArrowHolder::Knob(arrows) = holder.clone() else {
+                        return;
+                    };
+                    crate::app::arrows::hold_in(
+                        holder.clone(),
+                        crate::app::arrows::stepper(
+                            context.weak_entity(),
+                            move |this, presses, context| this.step_knob(&arrows, presses, context),
+                        ),
+                        context,
+                    );
                     if event.click_count >= 2 {
-                        this.bottom.rack.drag = None;
+                        this.rack.drag = None;
                         if let Some(default) = default {
                             this.set_knob(&target, value, default, true, context);
                         }
                     } else {
-                        this.bottom.rack.drag = Some(RackDrag::Knob(KnobDrag {
+                        this.rack.drag = Some(RackDrag::Knob(KnobDrag {
                             target: target.clone(),
                             scale,
                             last_y: f32::from(event.position.y),
@@ -214,7 +225,7 @@ impl Tonique {
     /// The knob of `arrows` stepped by `presses`, evenly along its travel
     /// (log knobs too), as one undo step.
     pub(crate) fn step_knob(&mut self, arrows: &KnobArrows, presses: Presses, context: &mut App) {
-        if self.bottom.rack.drag.is_some() {
+        if self.rack.drag.is_some() {
             return;
         }
         let value = match &arrows.target {
@@ -259,7 +270,7 @@ impl Tonique {
             }
             KnobTarget::Time { track, plugin } => {
                 if done {
-                    self.bottom.rack.pending = None;
+                    self.rack.pending = None;
                     if value != before {
                         self.state_mut(context).set_effect_setting(
                             track,
@@ -268,7 +279,7 @@ impl Tonique {
                         );
                     }
                 } else {
-                    self.bottom.rack.pending = Some((*plugin, value));
+                    self.rack.pending = Some((*plugin, value));
                 }
             }
         }

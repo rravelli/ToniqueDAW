@@ -401,7 +401,8 @@ impl Tonique {
         crate::popup::close(context);
         self.headers.forget_project();
         self.timeline.forget_project();
-        self.bottom.forget_project();
+        self.bottom
+            .update(context, |bottom, _| bottom.forget_project());
     }
 
     /// The window's title: the project's name, starred while unsaved;

@@ -4,6 +4,7 @@
 //! typed; edits show while dragged and apply as one undo step once released
 //! (or stepped, or typed).
 
+use crate::bottom::BottomPanel;
 use crate::model::HoldsProject;
 use gpui::{
     AnyElement, App, Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, Window, div,
@@ -12,7 +13,7 @@ use gpui::{
 use tonique_engine::time::{BeatPos, TimeSignature};
 
 use crate::{
-    app::{ArrowHolder, Tonique},
+    app::{ArrowHolder, focus_main},
     bottom::clip::{
         ClipArrows, ClipDrag,
         markers::{default_loop, trimmed_end, with_loop},
@@ -178,7 +179,7 @@ impl Field {
     }
 }
 
-impl Tonique {
+impl BottomPanel {
     pub(super) fn inspector_view(
         &self,
         clip: &AudioClip,
@@ -187,7 +188,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> AnyElement {
         let theme = crate::theme::current(context);
-        let panels = self.bottom.clip.panels;
+        let panels = self.clip.panels;
         let rail = div()
             .flex()
             .flex_col()
@@ -201,7 +202,7 @@ impl Tonique {
                         glyph(icons::BROWSER, size::HEADING, false),
                         &theme,
                         context,
-                        |this, _| this.bottom.clip.panels.clip ^= true,
+                        |this, _| this.clip.panels.clip ^= true,
                     ),
             )
             .child(
@@ -211,7 +212,7 @@ impl Tonique {
                         glyph(icons::WAVEFORM, size::HEADING, false),
                         &theme,
                         context,
-                        |this, _| this.bottom.clip.panels.audio ^= true,
+                        |this, _| this.clip.panels.audio ^= true,
                     ),
             );
         let shown = self.state(context).shown_clip(clip);
@@ -338,7 +339,7 @@ impl Tonique {
         let bpm = self.state(context).bpm();
         let signature = self.state(context).time_signature();
         let value = field.value(shown, bpm);
-        let typing = match &self.bottom.clip.typing {
+        let typing = match &self.clip.typing {
             Some((Typed::Field(typed), text)) if *typed == field => Some(text),
             _ => None,
         };
@@ -348,7 +349,7 @@ impl Tonique {
                 text,
                 theme,
                 context,
-                |this| this.bottom.clip.typing.as_mut().map(|(_, text)| text),
+                |this| this.clip.typing.as_mut().map(|(_, text)| text),
                 Self::finish_typing,
             )
             .h(px(FIELD_HEIGHT))
@@ -373,9 +374,22 @@ impl Tonique {
                             context.listener(
                                 move |this, event: &MouseDownEvent, window, context| {
                                     context.stop_propagation();
-                                    crate::app::arrows::hold(holder.clone(), context);
+                                    crate::app::arrows::hold_in(
+                                        holder.clone(),
+                                        crate::app::arrows::stepper(
+                                            context.weak_entity(),
+                                            move |this, presses, context| {
+                                                this.step_clip(
+                                                    ClipArrows::Field(field),
+                                                    presses,
+                                                    context,
+                                                )
+                                            },
+                                        ),
+                                        context,
+                                    );
                                     if event.click_count >= 2 {
-                                        this.bottom.clip.drag = None;
+                                        this.clip.drag = None;
                                         if let Some((_, clip)) =
                                             this.state(context).clip_with_track(id)
                                         {
@@ -384,7 +398,7 @@ impl Tonique {
                                         context.notify();
                                         return;
                                     }
-                                    this.bottom.clip.drag = Some(ClipDrag::Field {
+                                    this.clip.drag = Some(ClipDrag::Field {
                                         field,
                                         start_x: f32::from(event.position.x),
                                         start: value,
@@ -416,7 +430,7 @@ impl Tonique {
             start_x,
             start,
             moved,
-        }) = self.bottom.clip.drag.as_mut()
+        }) = self.clip.drag.as_mut()
         else {
             return;
         };
@@ -463,7 +477,7 @@ impl Tonique {
         let text = field.format(value, self.state(context).time_signature());
         let mut typed = TextField::new(context);
         typed.start(text, window, context);
-        self.bottom.clip.typing = Some((Typed::Field(field), typed));
+        self.clip.typing = Some((Typed::Field(field), typed));
     }
 
     /// Starts typing the file's tempo.
@@ -475,7 +489,7 @@ impl Tonique {
     ) {
         let mut typed = TextField::new(context);
         typed.start(format!("{:.2}", clip.bpm), window, context);
-        self.bottom.clip.typing = Some((Typed::Bpm, typed));
+        self.clip.typing = Some((Typed::Bpm, typed));
     }
 
     /// Ends typing: applies what was typed when `keep` and it reads.
@@ -485,9 +499,9 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        let typing = self.bottom.clip.typing.take();
-        window.focus(&self.focus, context);
-        let (Some((typed, text)), Some(id), true) = (typing, self.bottom.clip.clip, keep) else {
+        let typing = self.clip.typing.take();
+        focus_main(window, context);
+        let (Some((typed, text)), Some(id), true) = (typing, self.clip.clip, keep) else {
             return;
         };
         let Some((_, clip)) = self.state(context).clip_with_track(id) else {
@@ -612,8 +626,8 @@ pub(super) fn toggle_section(
     on: bool,
     enabled: bool,
     theme: &Theme,
-    context: &mut Context<Tonique>,
-    action: impl Fn(&mut Tonique, &mut App) + 'static,
+    context: &mut Context<BottomPanel>,
+    action: impl Fn(&mut BottomPanel, &mut App) + 'static,
 ) -> gpui::Div {
     let label = div()
         .text_size(px(size::SMALL))

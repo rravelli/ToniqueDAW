@@ -3,15 +3,15 @@
 //! units with Shift), or double-clicked to type a value. Its value isn't
 //! kept here: the caller passes it in and is told new ones.
 
-use std::{cell::Cell, rc::Rc};
+use std::cell::Cell;
 
 use gpui::{
-    AnyElement, App, Context, CursorStyle, KeyDownEvent, MouseButton, MouseDownEvent, Window, div,
+    AnyElement, Context, CursorStyle, KeyDownEvent, MouseButton, MouseDownEvent, Window, div,
     prelude::*, px,
 };
 
 use crate::{
-    app::{ArrowHolder, arrows::Stepper, focus_main},
+    app::{ArrowHolder, arrows::stepper, focus_main},
     theme::{Theme, hsla},
     utils::steps::{self, Presses},
     widgets::text_field::{FieldKey, TextField},
@@ -226,16 +226,11 @@ impl NumberField {
         self.shown.set(value);
         let text = format!("{}{}", self.spec.format(value), self.spec.suffix);
         let dragging = self.is_dragging();
-        let view = context.weak_entity();
-        let step: Stepper = Rc::new(move |presses, context: &mut App| {
-            let _ = view.update(context, |this, context| {
-                if let Some(value) = get(this).stepped(presses) {
-                    set(this, value, context);
-                }
-                context.notify();
-            });
+        let step = stepper(context.weak_entity(), move |this, presses, context| {
+            if let Some(value) = get(this).stepped(presses) {
+                set(this, value, context);
+            }
         });
-        let holder = ArrowHolder::Number { id, step };
         let accent = hsla(theme.accent);
         field
             .when(held, |element| element.border_1().border_color(accent))
@@ -247,7 +242,7 @@ impl NumberField {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, window, context| {
                     context.stop_propagation();
-                    crate::app::arrows::hold(holder.clone(), context);
+                    crate::app::arrows::hold_in(ArrowHolder::Number(id), step.clone(), context);
                     let field = get(this);
                     if event.click_count >= 2 {
                         field.drag = None;

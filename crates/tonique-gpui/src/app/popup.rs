@@ -73,12 +73,13 @@ impl Tonique {
             PopupKind::Grid => self.grid_menu(context),
             PopupKind::Clip(id) => self.clip_menu(id, context)?,
             PopupKind::Track(id) => self.track_menu(id, context)?,
-            PopupKind::Effect(track, plugin) => self.effect_menu(track, plugin, context)?,
-            PopupKind::ClipRuler(id, at) => self.clip_ruler_popup(id, at, context)?,
-            PopupKind::ClipWarpMode(id) => self.clip_warp_menu(id, context)?,
-            PopupKind::ClipWindow(id) => self.clip_window_menu(id, context)?,
-            // The browser's own.
-            PopupKind::BrowserRow(..) | PopupKind::BrowserRowLabel(..) => return None,
+            // The browser's and the bottom panel's own.
+            PopupKind::BrowserRow(..)
+            | PopupKind::BrowserRowLabel(..)
+            | PopupKind::Effect(..)
+            | PopupKind::ClipRuler(..)
+            | PopupKind::ClipWarpMode(..)
+            | PopupKind::ClipWindow(..) => return None,
             PopupKind::Setting(choice) => self.audio_choice_menu(choice, context),
             PopupKind::Theme => self.theme_menu(context),
             PopupKind::Bar(menu) => self.bar_menu(menu, context),

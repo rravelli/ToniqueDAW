@@ -145,8 +145,11 @@ impl Tonique {
         self.state_mut(context)
             .add_effect(&track, dragged.kind, usize::MAX);
         self.state_mut(context).select_track(&track);
-        self.bottom.open = true;
-        self.bottom.view = BottomView::Effects;
+        self.bottom.update(context, |bottom, context| {
+            bottom.shown.open = true;
+            bottom.shown.view = BottomView::Effects;
+            context.notify();
+        });
     }
 
     /// `view` taking files dragged from the browser and the system, and
