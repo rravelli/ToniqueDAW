@@ -173,7 +173,7 @@ impl Tonique {
         let state = self.state(context);
         let (can_undo, can_redo) = (state.can_undo(), state.can_redo());
         let open = self.browser_open;
-        let graph = self.graph.is_open();
+        let graph = self.graph.read(context).is_open();
         div()
             .flex_1()
             .min_w_0()

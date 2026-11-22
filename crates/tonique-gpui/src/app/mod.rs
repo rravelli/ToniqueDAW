@@ -39,7 +39,7 @@ use crate::{
     browser::Browser,
     config::settings::Settings,
     core::state::{PlaybackState, ProjectState},
-    graph::GraphUi,
+    graph::GraphView,
     headers::HeadersUi,
     model::{HoldsProject, Project},
     theme::{FONT_UI, Theme, ThemeLibrary, hsla, size},
@@ -59,7 +59,7 @@ pub struct Tonique {
     pub timeline: TimelineUi,
     pub headers: HeadersUi,
     /// The audio graph, shown instead of the timeline when open.
-    pub graph: GraphUi,
+    pub graph: Entity<GraphView>,
     pub browser: Browser,
     pub waves: Rc<RefCell<WaveCache>>,
     /// Whether the browser shows, as Tonique's left panel, and how wide.
@@ -140,7 +140,7 @@ impl Tonique {
             this.update(context, |this, context| this.should_close(window, context))
                 .unwrap_or(true)
         });
-        let project = ProjectFiles::new(&state);
+        let files = ProjectFiles::new(&state);
         let activation = context.observe_window_activation(window, |this, window, context| {
             if window.is_window_active() {
                 this.refresh_browser(context);
@@ -148,11 +148,12 @@ impl Tonique {
             }
         });
         let browser = Browser::new(&mut state, context);
+        let project = context.new(|_| Project::new(state));
         Self {
             browser,
             headers: HeadersUi::new(),
-            graph: GraphUi::new(),
-            project: context.new(|_| Project::new(state)),
+            graph: context.new(|_| GraphView::new(project.clone())),
+            project,
             focus,
             timeline: TimelineUi::default(),
             waves: Rc::default(),
@@ -164,13 +165,18 @@ impl Tonique {
             dialog: None,
             settings: SettingsUi::new(themes, theme_warnings),
             export: ExportUi::new(context),
-            files: project,
+            files,
             popup: None,
             arrows: None,
             bench,
             _ticker: ticker,
             _activation: activation,
         }
+    }
+
+    /// Between the timeline and the audio graph.
+    fn toggle_graph(&mut self, context: &mut Context<Self>) {
+        self.graph.update(context, GraphView::toggle);
     }
 
     fn toggle_play(&mut self, context: &mut App) {
@@ -198,7 +204,6 @@ impl Tonique {
             | self.settings_drag_move(event, context)
             | self.export_drag_move(event, context)
             | self.bottom_drag_move(event, height, context)
-            | self.graph_drag_move(event)
             | browser
     }
 
@@ -257,7 +262,6 @@ impl Tonique {
         self.settings_drag_end();
         self.export_drag_end();
         self.bottom_drag_end(context);
-        self.graph_drag_end();
         context.notify();
     }
 
@@ -269,7 +273,6 @@ impl Tonique {
             || self.settings.is_dragging()
             || self.export.is_dragging()
             || self.bottom.is_dragging()
-            || self.graph.is_dragging()
     }
 
     /// The browser, resizable from its right edge.
@@ -315,8 +318,6 @@ impl Render for Tonique {
         }
         crate::profile::frame();
         self.menu_bar.frame();
-        self.state_mut(context)
-            .set_monitor_graph(self.graph.is_open());
         crate::profile::time("state.update", || self.state_mut(context).update());
         let scrolling = self.step_scrolling(context) | self.autoscroll(context);
         let dragging = context.has_active_drag() || self.is_dragging();
@@ -354,10 +355,8 @@ impl Render for Tonique {
                     .child(self.browser_panel(window, context))
                     .child(divider(&theme))
             });
-        let body = if self.graph.is_open() {
-            body.child(crate::profile::time("view.graph", || {
-                self.graph_view(window, context)
-            }))
+        let body = if self.graph.read(context).is_open() {
+            body.child(self.graph.clone())
         } else {
             // As in the egui app: the track list on the timeline's right.
             body.child(crate::profile::time("view.timeline", || {

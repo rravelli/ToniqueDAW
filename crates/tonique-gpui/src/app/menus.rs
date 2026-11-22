@@ -159,7 +159,7 @@ impl Tonique {
     }
 
     fn view_menu(&self, context: &mut Context<Self>) -> Menu {
-        let graph = self.graph.is_open();
+        let graph = self.graph.read(context).is_open();
         let menu = Menu::new(&crate::theme::current(context));
         // The audio graph is a development tool.
         let menu = if !Action::ToggleGraphView.is_available() {
@@ -169,7 +169,7 @@ impl Tonique {
                 MenuItem::new("Timeline").checked(!graph).keep_open(),
                 context,
                 |this, _, context| {
-                    if this.graph.is_open() {
+                    if this.graph.read(context).is_open() {
                         this.toggle_graph(context);
                     }
                 },
@@ -180,7 +180,7 @@ impl Tonique {
                     .keep_open(),
                 context,
                 |this, _, context| {
-                    if !this.graph.is_open() {
+                    if !this.graph.read(context).is_open() {
                         this.toggle_graph(context);
                     }
                 },
