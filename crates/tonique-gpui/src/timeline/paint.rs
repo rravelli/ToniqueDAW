@@ -1,7 +1,7 @@
 //! Painting a [`Scene`]: the lanes and the grid, the clips over them, the
 //! master's footer, the ruler, then the edit cursor and the playhead over everything.
 
-use gpui::{Bounds, ContentMask, PathBuilder, Pixels, Window, point, px};
+use gpui::{Bounds, ContentMask, Pixels, Window, px};
 
 use crate::{
     core::track::DEFAULT_TRACK_HEIGHT,
@@ -11,6 +11,7 @@ use crate::{
         BARS_HEIGHT, DROP_FILL_ALPHA, DROP_OUTLINE, LOOP_HEIGHT, ROW_GAP, RULER_HEIGHT,
         clip::{ClipPaint, paint_clip},
         footer::paint_footer,
+        ruler::{paint_loop, paint_playhead},
         scene::Scene,
     },
     wave::WaveCache,
@@ -32,10 +33,10 @@ const DASH: f32 = 5.;
 const DASH_GAP: f32 = 3.;
 
 /// The timeline's bounds, and painting in them.
-struct Canvas {
+pub(super) struct Canvas {
     left: f32,
     top: f32,
-    width: f32,
+    pub(super) width: f32,
     height: f32,
     /// The footer's height, below the lanes.
     footer: f32,
@@ -43,12 +44,12 @@ struct Canvas {
 
 impl Canvas {
     /// A rect local to the timeline, in the window.
-    fn rect(&self, left: f32, top: f32, width: f32, height: f32) -> Rect {
+    pub(super) fn rect(&self, left: f32, top: f32, width: f32, height: f32) -> Rect {
         Rect::new(self.left + left, self.top + top, width, height)
     }
 
     /// Between the ruler and the footer.
-    fn lanes(&self) -> Rect {
+    pub(super) fn lanes(&self) -> Rect {
         let height = (self.height - RULER_HEIGHT - self.footer).max(0.);
         self.rect(0., RULER_HEIGHT, self.width, height)
     }
@@ -319,19 +320,7 @@ fn paint_ruler(scene: &Scene, canvas: &Canvas, window: &mut Window, context: &mu
         canvas.rect(0., RULER_HEIGHT - 1., canvas.width, 1.),
         theme.separator,
     );
-    let (loop_start, loop_end) = scene.loop_x;
-    let loop_color = if scene.looping {
-        theme.accent
-    } else {
-        theme.text_disabled
-    };
-    let loop_bar = canvas.rect(
-        loop_start,
-        3.,
-        (loop_end - loop_start).max(2.),
-        LOOP_HEIGHT - 5.,
-    );
-    window.paint_quad(gpui::fill(loop_bar.bounds(), hsla(loop_color)).corner_radii(px(3.)));
+    paint_loop(scene, canvas, window);
     for (mark_x, text, bar) in &scene.marks.labels {
         // Bars' ticks run the lane's height; the others' are short.
         let top = if *bar { 2. } else { 9. };
@@ -392,27 +381,5 @@ fn paint_cursors(scene: &Scene, canvas: &Canvas, window: &mut Window) {
             with_alpha(theme.edit_cursor, EDIT_CURSOR_ALPHA),
         );
     }
-    let playhead_x = scene.playhead.round();
-    if !(0.0..=canvas.width).contains(&playhead_x) {
-        return;
-    }
-    canvas.fill(
-        window,
-        canvas.rect(
-            playhead_x,
-            LOOP_HEIGHT,
-            1.,
-            lanes.bottom() - canvas.top - LOOP_HEIGHT,
-        ),
-        theme.playhead,
-    );
-    let (head_x, head_y) = (canvas.left + playhead_x, canvas.top + LOOP_HEIGHT);
-    let mut head = PathBuilder::fill();
-    head.move_to(point(px(head_x - 5.), px(head_y)));
-    head.line_to(point(px(head_x + 6.), px(head_y)));
-    head.line_to(point(px(head_x + 0.5), px(head_y + 7.)));
-    head.close();
-    if let Ok(path) = head.build() {
-        window.paint_path(path, hsla(theme.playhead));
-    }
+    paint_playhead(scene, canvas, window);
 }

@@ -15,6 +15,7 @@ use crate::{
         LOOP_HEIGHT, RULER_HEIGHT,
         moving::ClipMove,
         rows::{ClipPart, rows},
+        ruler::LoopGrab,
     },
 };
 
@@ -30,7 +31,7 @@ pub enum TimelineDrag {
     None,
     Scrub,
     Loop {
-        anchor: BeatPos,
+        grab: LoopGrab,
         moved: bool,
     },
     /// A press on a lane, off the clips' headers and edges: a click places
@@ -71,9 +72,14 @@ impl Tonique {
         window.focus(&self.focus, context);
         let (local_x, local_y) = self.local(event.position);
         let alt = event.modifiers.alt;
-        self.timeline.drag = if local_y < LOOP_HEIGHT {
+        self.timeline.drag = if self.on_playhead_head(local_x, local_y) {
+            TimelineDrag::Scrub
+        } else if local_y < LOOP_HEIGHT {
+            let anchor = self.snapped(local_x, alt);
             TimelineDrag::Loop {
-                anchor: self.snapped(local_x, alt),
+                grab: self
+                    .loop_grab_at(local_x)
+                    .unwrap_or(LoopGrab::Create { anchor }),
                 moved: false,
             }
         } else if local_y < RULER_HEIGHT {
@@ -193,16 +199,9 @@ impl Tonique {
                 self.state.seek(self.beats_at(local_x).max(BeatPos::ZERO));
                 TimelineDrag::Scrub
             }
-            TimelineDrag::Loop { anchor, .. } => {
-                let to = self.snapped(local_x, alt);
-                if to != anchor {
-                    self.state.set_loop_range(anchor.min(to), anchor.max(to));
-                    self.state.set_looping(true);
-                }
-                TimelineDrag::Loop {
-                    anchor,
-                    moved: true,
-                }
+            TimelineDrag::Loop { grab, .. } => {
+                self.drag_loop(grab, local_x, alt);
+                TimelineDrag::Loop { grab, moved: true }
             }
             TimelineDrag::Zone {
                 anchor,
@@ -284,7 +283,14 @@ impl Tonique {
     pub fn timeline_drag_end(&mut self, event: &MouseUpEvent) {
         self.timeline.pointer = None;
         match std::mem::take(&mut self.timeline.drag) {
-            // A click on the loop lane toggles looping.
+            // A click on the loop toggles looping; off it, it seeks.
+            TimelineDrag::Loop {
+                grab: LoopGrab::Create { .. },
+                moved: false,
+            } => {
+                let (local_x, _) = self.local(event.position);
+                self.state.seek(self.beats_at(local_x).max(BeatPos::ZERO));
+            }
             TimelineDrag::Loop { moved: false, .. } => {
                 let looping = self.state.looping();
                 self.state.set_looping(!looping);

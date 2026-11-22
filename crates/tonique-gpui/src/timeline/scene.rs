@@ -20,6 +20,7 @@ use crate::{
         input::TimelineDrag,
         moving::{ClipMove, DraggedClips},
         rows::{ClipPart, HEADER_HEIGHT, Row, Span, handle_rect, rows, rows_height},
+        ruler::LoopGrab,
     },
     utils::format_time,
 };
@@ -99,6 +100,10 @@ pub struct Scene {
     pub edit_cursor: f32,
     pub looping: bool,
     pub loop_x: (f32, f32),
+    /// The loop's part under the pointer or dragged.
+    pub loop_lit: Option<LoopGrab>,
+    /// The playhead's head is under the pointer or dragged.
+    pub playhead_lit: bool,
     /// The footer's height, holding the master.
     pub footer_height: f32,
     /// The master's output, oldest first.
@@ -155,6 +160,8 @@ impl Tonique {
             edit_cursor: screen_x(state.edit_cursor()),
             looping: state.looping(),
             loop_x: (screen_x(loop_start), screen_x(loop_end)),
+            loop_lit: self.loop_lit(),
+            playhead_lit: self.playhead_lit(),
             footer_height: footer_height(state),
             scope: state
                 .metrics

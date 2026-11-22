@@ -16,6 +16,7 @@ mod menus;
 mod moving;
 mod paint;
 mod rows;
+mod ruler;
 mod scene;
 mod scroll;
 
@@ -34,6 +35,7 @@ use tonique_engine::edit::TrackId;
 use crate::app::Tonique;
 use input::TimelineDrag;
 use rows::ClipPart;
+use ruler::LoopGrab;
 
 pub const LOOP_HEIGHT: f32 = 12.;
 pub const BARS_HEIGHT: f32 = 20.;
@@ -87,11 +89,24 @@ impl Tonique {
             TimelineDrag::Move(press) if press.dragged.is_some() => return CursorStyle::ClosedHand,
             TimelineDrag::Zone { moved: true, .. } => return CursorStyle::IBeam,
             TimelineDrag::Trim { .. } | TimelineDrag::Scrub => return CursorStyle::ResizeLeftRight,
+            TimelineDrag::Loop { grab, .. } => {
+                return match grab {
+                    LoopGrab::Move { .. } => CursorStyle::ClosedHand,
+                    _ => CursorStyle::ResizeLeftRight,
+                };
+            }
             _ => {}
         }
         let Some((local_x, local_y)) = self.timeline.hover else {
             return CursorStyle::Arrow;
         };
+        if local_y < LOOP_HEIGHT && !self.on_playhead_head(local_x, local_y) {
+            return match self.loop_grab_at(local_x) {
+                Some(LoopGrab::Start | LoopGrab::End) => CursorStyle::ResizeLeftRight,
+                Some(_) => CursorStyle::OpenHand,
+                None => CursorStyle::PointingHand,
+            };
+        }
         if local_y < RULER_HEIGHT {
             return CursorStyle::PointingHand;
         }
