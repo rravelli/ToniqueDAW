@@ -30,6 +30,9 @@ for image in "$dir"/*.png; do
     # Pixels differing by more than 1%, to ignore rounding in the
     # rasterizer. `compare` exits 1 when the images differ, 2 on errors.
     pixels=$(compare -metric AE -fuzz 1% "$before" "$image" null: 2>&1 || true)
+    # Newer ImageMagick prints the count then its normalized value, as
+    # `0 (0)`: keep the count.
+    pixels=${pixels%% *}
     if [ "$pixels" != "0" ]; then
         echo "$name: $pixels pixels differ"
         echo "$name" >> "$dir/changed.txt"
