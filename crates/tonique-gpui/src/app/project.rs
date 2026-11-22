@@ -256,7 +256,7 @@ impl Tonique {
                 self.state_mut(context).new_project();
                 self.files.path = None;
                 self.files.set_saved(self.state(context).project(None));
-                self.forget_old_project();
+                self.forget_old_project(context);
             }
             AfterPrompt::Open(Some(path)) => self.open_project(&path, window, context),
             AfterPrompt::Open(None) => self.pick_project(window, context),
@@ -310,7 +310,7 @@ impl Tonique {
             .set_saved(self.state(context).project(Some(&dir)));
         self.files.remember(path);
         self.files.path = Some(path.to_path_buf());
-        self.forget_old_project();
+        self.forget_old_project(context);
         let missing = self.state(context).missing_files().len();
         if missing > 0 {
             self.show_missing_files(None, context);
@@ -397,8 +397,8 @@ impl Tonique {
 
     /// What referred to the replaced project's tracks and clips no longer
     /// does.
-    fn forget_old_project(&mut self) {
-        self.popup = None;
+    fn forget_old_project(&mut self, context: &mut App) {
+        crate::popup::close(context);
         self.headers.forget_project();
         self.timeline.forget_project();
         self.bottom.forget_project();

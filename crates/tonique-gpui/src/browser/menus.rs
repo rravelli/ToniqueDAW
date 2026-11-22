@@ -38,9 +38,8 @@ impl Tonique {
     }
 
     /// Whether `kind`'s menu is shown beside an item of the open menu.
-    fn browser_submenu_open(&self, kind: PopupKind) -> bool {
-        let submenu = self.popup.as_ref().and_then(|popup| popup.submenu);
-        submenu.is_some_and(|submenu| submenu.kind == kind)
+    fn browser_submenu_open(&self, kind: PopupKind, context: &gpui::App) -> bool {
+        crate::popup::submenu_shown(context) == Some(kind)
     }
 
     /// One of the browser's folders: searching in it alone, refreshing,
@@ -98,8 +97,8 @@ impl Tonique {
             .submenu(
                 MenuItem::new("Label").icon(icons::TAG),
                 label,
-                self.browser_submenu_open(label),
-                context,
+                self.browser_submenu_open(label, context),
+                self.menu_builder(label, context),
             )
             .separator()
             .item(
@@ -132,8 +131,8 @@ impl Tonique {
         let mut menu = Menu::new(&crate::theme::current(context)).submenu(
             MenuItem::new("Label").icon(icons::TAG),
             label,
-            self.browser_submenu_open(label),
-            context,
+            self.browser_submenu_open(label, context),
+            self.menu_builder(label, context),
         );
         if addable {
             let path = item.path.clone();
@@ -293,7 +292,7 @@ impl Tonique {
     }
 
     fn close_browser_menu(&mut self, window: &mut Window, context: &mut Context<Self>) {
-        self.popup = None;
+        crate::popup::close(context);
         window.focus(&self.browser.list_focus, context);
     }
 }

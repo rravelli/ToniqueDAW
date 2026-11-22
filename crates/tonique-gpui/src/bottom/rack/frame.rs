@@ -212,6 +212,7 @@ impl Tonique {
                         PopupKind::Effect(track, plugin),
                         event.position,
                         Anchor::TopLeft,
+                        context,
                     );
                     context.notify();
                 }),

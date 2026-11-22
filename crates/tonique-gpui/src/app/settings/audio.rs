@@ -256,7 +256,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let kind = PopupKind::Setting(choice);
-        let open = self.popup.as_ref().is_some_and(|popup| popup.kind == kind);
+        let open = crate::popup::shown(context) == Some(kind);
         select(id, label, width, kind, open, theme, context)
     }
 

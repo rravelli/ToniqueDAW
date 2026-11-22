@@ -123,7 +123,7 @@ impl Tonique {
         export.existing = None;
         export.typing = None;
         export.step = Step::Options;
-        self.popup = None;
+        crate::popup::close(context);
         self.dialog = Some(Dialog::Export);
         window.focus(&self.focus, context);
     }

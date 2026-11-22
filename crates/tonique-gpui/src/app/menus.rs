@@ -27,9 +27,8 @@ impl Tonique {
     }
 
     /// Whether `kind`'s menu is shown beside an item of the open menu.
-    fn submenu_open(&self, kind: PopupKind) -> bool {
-        let submenu = self.popup.as_ref().and_then(|popup| popup.submenu);
-        submenu.is_some_and(|submenu| submenu.kind == kind)
+    fn submenu_open(&self, kind: PopupKind, context: &App) -> bool {
+        crate::popup::submenu_shown(context) == Some(kind)
     }
 
     /// A menu item running `action`, with its shortcut.
@@ -62,8 +61,8 @@ impl Tonique {
             .submenu(
                 MenuItem::new("Open recent"),
                 PopupKind::RecentProjects,
-                self.submenu_open(PopupKind::RecentProjects),
-                context,
+                self.submenu_open(PopupKind::RecentProjects, context),
+                self.menu_builder(PopupKind::RecentProjects, context),
             )
             .separator()
             .item(

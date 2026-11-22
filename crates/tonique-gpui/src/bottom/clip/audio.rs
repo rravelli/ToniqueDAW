@@ -219,7 +219,7 @@ impl Tonique {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> Stateful<gpui::Div> {
-        let open = self.popup.as_ref().is_some_and(|popup| popup.kind == kind);
+        let open = crate::popup::shown(context) == Some(kind);
         let element = if enabled {
             select(id, label, width.max(1.), kind, open, theme, context)
         } else {

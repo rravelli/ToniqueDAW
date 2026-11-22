@@ -113,8 +113,8 @@ impl Tonique {
         context: &mut Context<Self>,
     ) {
         let menu = PopupKind::BrowserRow(kind, index);
-        self.toggle_popup(menu, event.position, Anchor::TopLeft);
-        let opened = self.popup.is_some_and(|popup| popup.kind == menu);
+        self.toggle_popup(menu, event.position, Anchor::TopLeft, context);
+        let opened = crate::popup::shown(context) == Some(menu);
         if opened && let Some((label, _)) = self.row_section(kind, index) {
             let name = self.browser.labels[label].name.clone();
             self.browser.label_name.start(name, window, context);

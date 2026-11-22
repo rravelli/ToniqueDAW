@@ -246,10 +246,7 @@ impl Tonique {
             return div();
         };
 
-        let open = self
-            .popup
-            .as_ref()
-            .is_some_and(|popup| popup.kind == PopupKind::Theme);
+        let open = crate::popup::shown(context) == Some(PopupKind::Theme);
         let label = if form.themes.is_preset(&draft.id) {
             draft.theme.name.clone()
         } else {

@@ -565,7 +565,7 @@ impl Tonique {
     }
 
     /// A right-click on the ruler: where to put bar 1.
-    fn clip_ruler_menu(&mut self, id: ClipId, event: &MouseDownEvent, context: &mut App) {
+    fn clip_ruler_menu(&mut self, id: ClipId, event: &MouseDownEvent, context: &mut Context<Self>) {
         let details = &self.bottom.clip;
         let (pointer_x, pointer_y) = details.local(event.position);
         if pointer_y >= RULER_HEIGHT {
@@ -578,6 +578,7 @@ impl Tonique {
             PopupKind::ClipRuler(id, at),
             event.position,
             Anchor::TopLeft,
+            context,
         );
     }
 

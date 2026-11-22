@@ -73,7 +73,7 @@ impl Tonique {
             "enter" if self.dialog == Some(Dialog::Unsaved) => {
                 self.answer_unsaved(true, window, context);
             }
-            "escape" if self.popup.is_some() => self.popup = None,
+            "escape" if crate::popup::shown(context).is_some() => crate::popup::close(context),
             "escape" if crate::app::arrows::held(context).is_some() => {
                 crate::app::arrows::release(context)
             }

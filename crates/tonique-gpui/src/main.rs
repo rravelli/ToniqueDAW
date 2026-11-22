@@ -13,6 +13,7 @@ mod headers;
 mod icons;
 mod meter;
 mod model;
+mod popup;
 mod profile;
 mod smooth_scroll;
 mod theme;

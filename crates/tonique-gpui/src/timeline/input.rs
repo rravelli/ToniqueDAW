@@ -182,7 +182,7 @@ impl Tonique {
             }
             None => PopupKind::Grid,
         };
-        self.toggle_popup(kind, event.position, Anchor::TopLeft);
+        self.toggle_popup(kind, event.position, Anchor::TopLeft, context);
         context.notify();
     }
 

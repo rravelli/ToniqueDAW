@@ -8,7 +8,7 @@ mod dialog;
 mod export;
 mod keys;
 mod memory;
-mod menu_bar;
+pub mod menu_bar;
 mod menus;
 mod popup;
 mod project;
@@ -27,7 +27,7 @@ pub use arrows::ArrowHolder;
 use dialog::Dialog;
 use export::ExportUi;
 use menu_bar::MenuBarUi;
-pub use popup::{Popup, PopupKind};
+pub use popup::PopupKind;
 use project::ProjectFiles;
 use settings::SettingsUi;
 use transport::{Shows, TransportBar, TransportEvent};
@@ -42,6 +42,7 @@ use crate::{
     graph::GraphView,
     headers::HeadersUi,
     model::{HoldsProject, Project, toggle_play},
+    popup::PopupLayer,
     theme::{FONT_UI, Theme, ThemeLibrary, hsla, size},
     timeline::TimelineUi,
     wave::WaveCache,
@@ -76,8 +77,8 @@ pub struct Tonique {
     settings: SettingsUi,
     /// Exporting audio: what's chosen, and the export running.
     export: ExportUi,
-    /// The menu open, if any.
-    pub popup: Option<Popup>,
+    /// The menus' layer, over everything.
+    popups: Entity<PopupLayer>,
     /// `TONIQUE_BENCH`: steers the view and measures frames.
     bench: Option<Bench>,
     _ticker: Task<()>,
@@ -167,7 +168,7 @@ impl Tonique {
             settings: SettingsUi::new(themes, theme_warnings),
             export: ExportUi::new(context),
             files,
-            popup: None,
+            popups: crate::popup::init(context),
             bench,
             _ticker: ticker,
             _subscriptions: vec![activation, transport_events],
@@ -184,7 +185,7 @@ impl Tonique {
             TransportEvent::ToggleBrowser => self.browser_open = !self.browser_open,
             TransportEvent::ToggleGraph => self.toggle_graph(context),
             TransportEvent::ToggleGridMenu(at) => {
-                self.toggle_popup(PopupKind::Grid, *at, Anchor::TopRight);
+                self.toggle_popup(PopupKind::Grid, *at, Anchor::TopRight, context);
             }
             TransportEvent::ShowMissingFiles => self.show_missing_files(None, context),
             TransportEvent::OpenAudioSettings => {
@@ -370,10 +371,7 @@ impl Render for Tonique {
         let shows = Shows {
             browser: self.browser_open,
             graph: self.graph.read(context).is_open(),
-            grid_menu: self
-                .popup
-                .as_ref()
-                .is_some_and(|popup| popup.kind == PopupKind::Grid),
+            grid_menu: crate::popup::shown(context) == Some(PopupKind::Grid),
         };
         self.transport
             .update(context, |transport, context| transport.show(shows, context));
@@ -424,7 +422,7 @@ impl Render for Tonique {
                 self.bottom_panel_view(window, context)
             }))
             .child(self.drag_listener(context))
-            .children(self.popup_view(window, context))
+            .child(self.popups.clone())
             .children(self.dialog_view(window, context))
     }
 }

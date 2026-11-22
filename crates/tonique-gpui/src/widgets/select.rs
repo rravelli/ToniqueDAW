@@ -81,7 +81,7 @@ pub fn select(
                 context.stop_propagation();
                 let below = bounds.get();
                 let at = point(below.left(), below.bottom() + px(MENU_OFFSET));
-                this.toggle_popup(kind, at, Anchor::TopLeft);
+                this.toggle_popup(kind, at, Anchor::TopLeft, context);
                 context.notify();
             }),
         )

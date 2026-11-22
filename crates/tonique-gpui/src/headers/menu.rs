@@ -114,7 +114,7 @@ impl Tonique {
                         context.stop_propagation();
                         this.state_mut(context).track_view_mut(&id).color = color;
                         this.state_mut(context).commit_track_view(&id);
-                        this.popup = None;
+                        crate::popup::close(context);
                         context.notify();
                     }),
                 );

@@ -145,7 +145,12 @@ impl Tonique {
                 MouseButton::Right,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     this.state_mut(context).select_track(&id);
-                    this.toggle_popup(PopupKind::Track(id), event.position, Anchor::TopLeft);
+                    this.toggle_popup(
+                        PopupKind::Track(id),
+                        event.position,
+                        Anchor::TopLeft,
+                        context,
+                    );
                     context.notify();
                 }),
             )
