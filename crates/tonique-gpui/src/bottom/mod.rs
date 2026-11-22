@@ -202,7 +202,7 @@ impl Tonique {
             return None;
         }
         self.follow_clip_selection();
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let clip = match self.bottom.view {
             BottomView::Clip(id) => self.state.clip_with_track(id),
             BottomView::Effects => None,

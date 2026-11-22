@@ -34,7 +34,7 @@ impl Tonique {
         tabs: Option<(BottomView, ClipId)>,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let color = track.color;
         let ink = theme.text_on(color);
         let mut title = display_name(&track.name, track.first_track_index);

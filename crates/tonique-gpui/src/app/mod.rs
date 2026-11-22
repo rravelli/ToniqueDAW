@@ -54,7 +54,6 @@ const BROWSER_MAX: f32 = 400.;
 
 pub struct Tonique {
     pub state: ProjectState,
-    pub theme: Theme,
     pub focus: FocusHandle,
     pub timeline: TimelineUi,
     pub headers: HeadersUi,
@@ -100,6 +99,7 @@ impl Tonique {
         let (theme, theme_warnings) = themes.resolve(&settings.theme);
         let mut state = ProjectState::new(engine);
         state.set_track_palette(&theme.palette);
+        crate::theme::install(theme, context);
         state.attach_audio(audio, settings);
         let mut bench = Bench::from_env("gpui-fast");
         match &mut bench {
@@ -145,7 +145,6 @@ impl Tonique {
             headers: HeadersUi::new(),
             graph: GraphUi::new(),
             state,
-            theme,
             focus,
             timeline: TimelineUi::default(),
             waves: Rc::default(),
@@ -271,7 +270,7 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         div()
             .relative()
             .flex_none()
@@ -336,7 +335,7 @@ impl Render for Tonique {
         // The rows as this frame shows them, for both views: building them
         // clones every track's clips.
         let rows = crate::timeline::rows(&self.state);
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let body = div()
             .flex()
             .flex_1()

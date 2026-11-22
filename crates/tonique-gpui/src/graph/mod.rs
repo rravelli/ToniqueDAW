@@ -184,7 +184,7 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let scene = self.graph_scene(window);
+        let scene = self.graph_scene(crate::theme::current(context), window);
         let slot = self.graph.bounds.clone();
         let cursor = if self.graph.is_dragging() {
             CursorStyle::ClosedHand
@@ -217,8 +217,11 @@ impl Tonique {
 
     /// What the canvas paints this frame, fitting the graph first when it
     /// changed or was just shown.
-    fn graph_scene(&mut self, window: &Window) -> GraphScene {
-        let theme = self.theme.clone();
+    fn graph_scene(
+        &mut self,
+        theme: std::rc::Rc<crate::theme::Theme>,
+        window: &Window,
+    ) -> GraphScene {
         let Some(topology) = self.state.graph.topology().cloned() else {
             return GraphScene::empty(theme);
         };

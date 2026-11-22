@@ -200,7 +200,7 @@ impl Tonique {
     /// the right, where the eye ends; losing the changes apart on the
     /// left, so it isn't clicked by mistake.
     pub(super) fn unsaved_dialog(&self, context: &mut Context<Self>) -> gpui::Div {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let answer = |button: Stateful<gpui::Div>, save: Option<bool>| {
             button.on_mouse_down(
                 MouseButton::Left,

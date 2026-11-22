@@ -1,7 +1,7 @@
 //! The browser's effects, searched by name or purpose: one row each,
 //! dragged onto the bottom panel's effects or onto a track.
 
-use gpui::{AnyElement, Context, KeyDownEvent, Window, div, prelude::*, px};
+use gpui::{AnyElement, App, Context, KeyDownEvent, Window, div, prelude::*, px};
 
 use crate::{
     app::Tonique,
@@ -57,8 +57,8 @@ impl Tonique {
         context.notify();
     }
 
-    pub(super) fn effects_list(&self) -> AnyElement {
-        let theme = &self.theme;
+    pub(super) fn effects_list(&self, context: &App) -> AnyElement {
+        let theme = &*crate::theme::current(context);
         let query = self.browser.effect_search.text.trim();
         let found: Vec<EffectKind> = EffectKind::ALL
             .into_iter()
@@ -74,7 +74,6 @@ impl Tonique {
                 .into_any_element();
         }
         let rows = found.into_iter().enumerate().map(|(index, kind)| {
-            let ghost_theme = theme.clone();
             let background = theme.bg_panel;
             div()
                 .id(("effect-row", index))
@@ -93,7 +92,6 @@ impl Tonique {
                 .on_drag(DraggedEffect { kind }, move |_, _, _, context| {
                     context.new(|_| DragGhost {
                         name: kind.name().into(),
-                        theme: ghost_theme.clone(),
                     })
                 })
         });

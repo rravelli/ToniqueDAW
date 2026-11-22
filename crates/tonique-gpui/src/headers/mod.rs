@@ -137,7 +137,7 @@ impl Tonique {
         window: &Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let open = self.headers.open;
         let width = if open {
             self.headers.width.size

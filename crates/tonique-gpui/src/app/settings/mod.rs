@@ -123,7 +123,7 @@ impl Tonique {
         window: &Window,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let close = Flat::ghost("close-settings", CLOSE_SIZE)
             .element(glyph(icons::X, size::HEADING, false), &theme)
             .on_mouse_down(

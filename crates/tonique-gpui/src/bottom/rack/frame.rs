@@ -348,7 +348,7 @@ impl Tonique {
             .iter()
             .position(|effect| effect.plugin.id == plugin)?;
         let effect = &effects[index];
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let collapsed = effect.collapsed;
         let (icon, text) = if collapsed {
             (icons::CARET_RIGHT, "Expand")

@@ -72,8 +72,8 @@ fn audio_rows(menu: Menu, theme: &Theme, memory: &AudioMemory) -> Menu {
 }
 
 impl Tonique {
-    pub(super) fn memory_popup(&self, _context: &mut Context<Self>) -> gpui::Div {
-        let theme = &self.theme;
+    pub(super) fn memory_popup(&self, context: &mut Context<Self>) -> gpui::Div {
+        let theme = &*crate::theme::current(context);
         let sources = self.state.source_memory();
         let cache = AUDIO_ANALYSIS_CACHE.memory();
         let waves = self.waves.borrow().memory();

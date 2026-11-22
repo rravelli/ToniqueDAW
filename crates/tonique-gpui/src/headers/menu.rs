@@ -20,7 +20,7 @@ const SWATCH: f32 = 14.;
 impl Tonique {
     pub fn track_menu(&self, id: TrackId, context: &mut Context<Self>) -> Option<gpui::Div> {
         let track = self.track_row(id)?;
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let index = track.first_track_index;
         let menu = Menu::new(theme).label(display_name(&track.name, index));
         // The master can't be renamed, copied or deleted: only its colour

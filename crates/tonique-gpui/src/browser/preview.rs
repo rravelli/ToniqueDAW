@@ -117,7 +117,7 @@ impl Tonique {
     /// Nothing when no audio file is selected.
     pub(super) fn preview_view(&mut self, context: &mut Context<Self>) -> Option<AnyElement> {
         let audio = self.browser.audio.clone()?;
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let panel = div()
             .h(px(PREVIEW_HEIGHT))
             .flex_none()

@@ -3,7 +3,7 @@
 //! file, dimmed; and the row ending the folders, adding one.
 
 use gpui::{
-    Anchor, AnyElement, Context, MouseButton, MouseDownEvent, Stateful, div, prelude::*, px,
+    Anchor, AnyElement, App, Context, MouseButton, MouseDownEvent, Stateful, div, prelude::*, px,
 };
 
 use crate::{
@@ -53,7 +53,7 @@ impl Tonique {
         } else {
             ("row", index)
         };
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let base = if item.depth == 0 {
             theme.bg_raised
         } else {
@@ -97,7 +97,7 @@ impl Tonique {
         if item.depth == 0 {
             self.header_row(row, kind, index, &item, context)
         } else {
-            self.item_row(row, &item, open)
+            self.item_row(row, &item, open, context)
         }
     }
 
@@ -131,7 +131,7 @@ impl Tonique {
         item: &FileNode,
         context: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let list = self.browser.list(kind);
         let section = self.browser.sections.get(&item.path).copied();
         let scoped = kind == ListKind::Files && list.scope.as_ref() == Some(&item.path);
@@ -235,8 +235,14 @@ impl Tonique {
 
     /// A folder or file inside a section: its icon (a speaker while it's
     /// previewed), its name, and its label's dot.
-    fn item_row(&self, row: Stateful<gpui::Div>, item: &FileNode, open: bool) -> AnyElement {
-        let theme = self.theme.clone();
+    fn item_row(
+        &self,
+        row: Stateful<gpui::Div>,
+        item: &FileNode,
+        open: bool,
+        context: &App,
+    ) -> AnyElement {
+        let theme = crate::theme::current(context);
         let name = item.path.file_name().map_or_else(
             || item.path.display().to_string(),
             |file_name| file_name.to_string_lossy().into_owned(),
@@ -286,7 +292,6 @@ impl Tonique {
         row.on_drag(dragged, move |_, _, _, context| {
             context.new(|_| DragGhost {
                 name: name.clone().into(),
-                theme: theme.clone(),
             })
         })
         .into_any_element()
@@ -294,7 +299,7 @@ impl Tonique {
 
     /// The row ending the folders: adds one, picked on disk.
     pub(super) fn add_folder_row(&self, context: &mut Context<Self>) -> AnyElement {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         div()
             .id("add-folder")
             .h(px(ROW_HEIGHT))

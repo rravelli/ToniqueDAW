@@ -135,7 +135,7 @@ impl Tonique {
     }
 
     pub(super) fn menu_bar(&self, context: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let titles = BarMenu::ALL.map(|menu| self.bar_title(menu, theme, context));
         div()
             .id("menu-bar")
@@ -168,7 +168,7 @@ impl Tonique {
 
     /// The frame rate and memory; clicked, the memory's details.
     fn debug_info(&self, context: &mut Context<Self>) -> Option<Stateful<gpui::Div>> {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let text = self.menu_bar.debug_text()?;
         let open = self
             .popup

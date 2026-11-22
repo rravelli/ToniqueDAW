@@ -368,7 +368,7 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let list = self.browser.list(kind);
         let (placeholder, key, clear): (String, _, fn(&mut Self, &mut Context<Self>)) = match kind {
             ListKind::Files => (
@@ -433,7 +433,7 @@ impl Tonique {
     /// A search found nothing: says so, and in a folder, offers to search
     /// them all.
     fn nothing_found_view(&self, kind: ListKind, context: &mut Context<Self>) -> AnyElement {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let scope = self.browser.list(kind).scope_name();
         let text = match &scope {
             Some(folder) => format!("No files match in {folder}"),
@@ -501,7 +501,7 @@ impl Tonique {
                 &list.scrollbar,
                 // Clear of the browser's resize grip, down the same edge.
                 HANDLE_WIDTH,
-                &self.theme,
+                &crate::theme::current(context),
                 context,
             ))
             .into_any_element()
@@ -542,11 +542,11 @@ impl Tonique {
                     .left_0()
                     .right_0()
                     .top(px(tops[level]))
-                    .bg(hsla(self.theme.bg_panel))
+                    .bg(hsla(crate::theme::current(context).bg_panel))
                     .when(level == last, |element| {
                         element
                             .border_b_1()
-                            .border_color(hsla(self.theme.separator))
+                            .border_color(hsla(crate::theme::current(context).separator))
                     })
                     .child(self.browser_row(kind, index, true, context))
                     .into_any_element()

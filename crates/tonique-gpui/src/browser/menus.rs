@@ -60,7 +60,7 @@ impl Tonique {
             MenuItem::new("Search in this folder")
         };
         let label = PopupKind::BrowserRowLabel(kind, index);
-        Menu::new(&self.theme)
+        Menu::new(&crate::theme::current(context))
             .item(search.icon(icons::MAGNIFYING_GLASS), context, {
                 let path = owned.clone();
                 move |this, _, context| {
@@ -105,7 +105,7 @@ impl Tonique {
             .item(
                 MenuItem::new("Remove from browser")
                     .icon(icons::FOLDER_MINUS)
-                    .color(self.theme.danger),
+                    .color(crate::theme::current(context).danger),
                 context,
                 move |this, _, context| this.remove_folder(&owned, context),
             )
@@ -129,7 +129,7 @@ impl Tonique {
         } else {
             item.path.parent().map(Path::to_path_buf)
         };
-        let mut menu = Menu::new(&self.theme).submenu(
+        let mut menu = Menu::new(&crate::theme::current(context)).submenu(
             MenuItem::new("Label").icon(icons::TAG),
             label,
             self.browser_submenu_open(label),
@@ -163,7 +163,7 @@ impl Tonique {
     ) -> Option<gpui::Div> {
         let path = self.browser.list(kind).tree.items.get(index)?.path.clone();
         let current = self.browser.item_labels.get(&path).copied();
-        let mut menu = Menu::new_submenu(&self.theme);
+        let mut menu = Menu::new_submenu(&crate::theme::current(context));
         for (label, view) in self.browser.labels.iter().enumerate() {
             let chosen = current == Some(label);
             let item = MenuItem::new(view.name.clone())
@@ -191,7 +191,7 @@ impl Tonique {
     /// Label `index`'s: its name, typed in the menu (Enter renames it), its
     /// colour, and taking it off everything.
     fn section_menu(&self, index: usize, context: &mut Context<Self>) -> gpui::Div {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let current = self.browser.labels.get(index).map(|label| label.color);
         let field = &self.browser.label_name;
         let name = div()

@@ -6,14 +6,31 @@
 mod file;
 mod library;
 
-use std::sync::LazyLock;
+use std::{rc::Rc, sync::LazyLock};
 
 pub use crate::utils::color::Color;
-use gpui::{Font, Hsla, Rgba, font};
+use gpui::{App, Font, Global, Hsla, Rgba, font};
 pub use library::ThemeLibrary;
 
 pub const FONT_UI: &str = "Inter";
 pub const FONT_MONO: &str = "JetBrains Mono NL";
+
+/// The theme in use, app-wide: views read it with [`current`].
+struct ActiveTheme(Rc<Theme>);
+
+impl Global for ActiveTheme {}
+
+/// The theme in use. Cheap to keep: views take it at the start of a render
+/// and lend it out while they use the context.
+pub fn current(app: &App) -> Rc<Theme> {
+    app.global::<ActiveTheme>().0.clone()
+}
+
+/// Uses `theme` everywhere from now on; the windows draw again with it.
+pub fn install(theme: Theme, app: &mut App) {
+    app.set_global(ActiveTheme(Rc::new(theme)));
+    app.refresh_windows();
+}
 
 /// Font sizes, as `ui::theme::font_size`.
 pub mod size {

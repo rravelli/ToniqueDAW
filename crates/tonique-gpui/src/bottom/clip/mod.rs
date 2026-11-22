@@ -297,7 +297,7 @@ struct Marks {
 
 /// What the view's canvas paints, local to the view.
 struct ClipScene {
-    theme: Theme,
+    theme: std::rc::Rc<Theme>,
     color: Color,
     clip: AudioClip,
     layout: Layout,
@@ -352,7 +352,13 @@ impl Tonique {
 
         // As being dragged, here or in the timeline.
         let shown = self.state.shown_clip(clip);
-        let scene = self.clip_scene(&shown, track.color, layout, window);
+        let scene = self.clip_scene(
+            &shown,
+            track.color,
+            layout,
+            crate::theme::current(context),
+            window,
+        );
         let cursor = self.clip_cursor(scene.lit.as_ref(), window);
         let waves = self.waves.clone();
         let slot = self.bottom.clip.view.clone();
@@ -378,7 +384,7 @@ impl Tonique {
         let across_bar = scrollbar(
             Axis::Horizontal,
             &self.bottom.clip.scrollbar,
-            &self.theme,
+            &crate::theme::current(context),
             move |_| Some(span),
             move |offset, _, app| {
                 let _ = this.update(app, |this, context| {
@@ -450,6 +456,7 @@ impl Tonique {
         shown: &AudioClip,
         color: Color,
         layout: Layout,
+        theme: std::rc::Rc<Theme>,
         window: &Window,
     ) -> ClipScene {
         let details = &self.bottom.clip;
@@ -475,7 +482,7 @@ impl Tonique {
             }
         };
         ClipScene {
-            theme: self.theme.clone(),
+            theme,
             color,
             clip: shown.clone(),
             layout,
@@ -607,7 +614,7 @@ impl Tonique {
         let (_, clip) = self.state.clip_with_track(id)?;
         let offset = clip.offset;
         Some(
-            Menu::new(&self.theme)
+            Menu::new(&crate::theme::current(context))
                 .item(MenuItem::new("Bar 1 here"), context, move |this, _, _| {
                     this.state.set_clip_origin(id, at)
                 })

@@ -64,7 +64,7 @@ impl Tonique {
         window: &Window,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let state = &self.state;
         let export = &mut self.export;
         // Tracks deleted since are no longer chosen.

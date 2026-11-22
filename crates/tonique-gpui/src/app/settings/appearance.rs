@@ -6,7 +6,7 @@
 //! Unlike egui, gpui has no colour picker: a colour is edited by typing
 //! its hex value.
 
-use gpui::{Context, MouseButton, Window, div, prelude::*, px};
+use gpui::{App, Context, MouseButton, Window, div, prelude::*, px};
 
 use crate::{
     app::{
@@ -89,42 +89,42 @@ impl AppearanceForm {
 impl Tonique {
     /// Uses `theme` everywhere, new tracks taking their colours from its
     /// palette.
-    pub fn install_theme(&mut self, theme: Theme) {
+    pub fn install_theme(&mut self, theme: Theme, context: &mut App) {
         self.state.set_track_palette(&theme.palette);
-        self.theme = theme;
+        crate::theme::install(theme, context);
     }
 
     /// Uses theme `id` and saves it as the chosen one.
-    fn select_theme(&mut self, id: &str) {
+    fn select_theme(&mut self, id: &str, context: &mut App) {
         let form = &mut self.settings.appearance;
         let (theme, warnings) = form.themes.resolve(id);
         form.warnings = warnings;
         form.open(id);
-        self.install_theme(theme);
+        self.install_theme(theme, context);
         let mut settings = self.state.settings().clone();
         settings.theme = id.to_string();
         self.settings.draft.theme = settings.theme.clone();
         self.state.apply_settings(settings);
     }
 
-    fn duplicate_theme(&mut self) {
+    fn duplicate_theme(&mut self, context: &mut App) {
         let current = self.state.settings().theme.clone();
         match self.settings.appearance.themes.duplicate(&current) {
-            Ok(id) => self.select_theme(&id),
+            Ok(id) => self.select_theme(&id, context),
             Err(error) => self.settings.appearance.error = Some(error),
         }
     }
 
     /// Reads the theme files again, picking up edits made to the current
     /// one's.
-    fn reload_themes(&mut self) {
+    fn reload_themes(&mut self, context: &mut App) {
         self.settings.appearance.themes = ThemeLibrary::load();
         let current = self.state.settings().theme.clone();
-        self.select_theme(&current);
+        self.select_theme(&current, context);
     }
 
     /// Changes the theme being edited, shows it and saves it.
-    fn edit_theme(&mut self, change: impl FnOnce(&mut Draft)) {
+    fn edit_theme(&mut self, change: impl FnOnce(&mut Draft), context: &mut App) {
         let form = &mut self.settings.appearance;
         let Some(draft) = form.draft.as_mut().filter(|draft| draft.editable) else {
             return;
@@ -132,7 +132,7 @@ impl Tonique {
         change(draft);
         let theme = draft.theme.clone();
         form.error = form.themes.save(&draft.id, &theme).err();
-        self.install_theme(theme);
+        self.install_theme(theme, context);
     }
 
     /// Starts typing `typed`, from `text`.
@@ -165,7 +165,7 @@ impl Tonique {
         if typed == Typed::Name {
             if !text.is_empty() {
                 let name = text.to_string();
-                self.edit_theme(|draft| draft.theme.name = name);
+                self.edit_theme(|draft| draft.theme.name = name, context);
             }
             return;
         }
@@ -178,21 +178,24 @@ impl Tonique {
             self.settings.appearance.error = Some(format!("“{text}” isn't a #rrggbb colour"));
             return;
         };
-        self.edit_theme(|draft| match typed {
-            Typed::Color(key) => {
-                if let Some(slot) = draft.theme.color_mut(key) {
-                    *slot = color;
+        self.edit_theme(
+            |draft| match typed {
+                Typed::Color(key) => {
+                    if let Some(slot) = draft.theme.color_mut(key) {
+                        *slot = color;
+                    }
                 }
-            }
-            Typed::Palette(index) => {
-                // The palette has no transparent colours.
-                let opaque = Color { a: 255, ..color };
-                if let Some(slot) = draft.theme.palette.get_mut(index) {
-                    *slot = opaque;
+                Typed::Palette(index) => {
+                    // The palette has no transparent colours.
+                    let opaque = Color { a: 255, ..color };
+                    if let Some(slot) = draft.theme.palette.get_mut(index) {
+                        *slot = opaque;
+                    }
                 }
-            }
-            Typed::Name => {}
-        });
+                Typed::Name => {}
+            },
+            context,
+        );
     }
 
     /// The themes to choose from, the one in use ticked.
@@ -213,14 +216,17 @@ impl Tonique {
             })
             .chain(missing);
         options
-            .fold(Menu::new(&self.theme), |menu, (id, label)| {
-                let checked = id == *current;
-                menu.item(
-                    MenuItem::new(label).checked(checked),
-                    context,
-                    move |this, _, _| this.select_theme(&id),
-                )
-            })
+            .fold(
+                Menu::new(&crate::theme::current(context)),
+                |menu, (id, label)| {
+                    let checked = id == *current;
+                    menu.item(
+                        MenuItem::new(label).checked(checked),
+                        context,
+                        move |this, _, context| this.select_theme(&id, context),
+                    )
+                },
+            )
             .into_element()
     }
 
@@ -268,7 +274,7 @@ impl Tonique {
                         glyph(icons::COPY, ICON_SIZE, false),
                         theme,
                         context,
-                        |this, _| this.duplicate_theme(),
+                        |this, context| this.duplicate_theme(context),
                     ),
             )
             .child(
@@ -278,7 +284,7 @@ impl Tonique {
                         glyph(icons::ARROWS_CLOCKWISE, ICON_SIZE, false),
                         theme,
                         context,
-                        |this, _| this.reload_themes(),
+                        |this, context| this.reload_themes(context),
                     ),
             );
 
@@ -432,12 +438,15 @@ impl Tonique {
                         glyph(icons::ARROW_COUNTER_CLOCKWISE, ICON_SIZE, false),
                         theme,
                         context,
-                        move |this, _| {
-                            this.edit_theme(|draft| {
-                                if let Some(slot) = draft.theme.color_mut(key) {
-                                    *slot = base;
-                                }
-                            })
+                        move |this, context| {
+                            this.edit_theme(
+                                |draft| {
+                                    if let Some(slot) = draft.theme.color_mut(key) {
+                                        *slot = base;
+                                    }
+                                },
+                                context,
+                            )
                         },
                     ),
             );
@@ -488,11 +497,14 @@ impl Tonique {
                         MouseButton::Right,
                         context.listener(move |this, _, _, context| {
                             context.stop_propagation();
-                            this.edit_theme(|draft| {
-                                if index < draft.theme.palette.len() {
-                                    draft.theme.palette.remove(index);
-                                }
-                            });
+                            this.edit_theme(
+                                |draft| {
+                                    if index < draft.theme.palette.len() {
+                                        draft.theme.palette.remove(index);
+                                    }
+                                },
+                                context,
+                            );
                             context.notify();
                         }),
                     );
@@ -509,11 +521,14 @@ impl Tonique {
                     glyph(icons::PLUS, ICON_SIZE, false),
                     theme,
                     context,
-                    |this, _| {
-                        this.edit_theme(|draft| {
-                            let accent = draft.theme.accent;
-                            draft.theme.palette.push(accent)
-                        })
+                    |this, context| {
+                        this.edit_theme(
+                            |draft| {
+                                let accent = draft.theme.accent;
+                                draft.theme.palette.push(accent)
+                            },
+                            context,
+                        )
                     },
                 ),
         );
@@ -525,10 +540,11 @@ impl Tonique {
                         glyph(icons::ARROW_COUNTER_CLOCKWISE, ICON_SIZE, false),
                         theme,
                         context,
-                        |this, _| {
-                            this.edit_theme(|draft| {
-                                draft.theme.palette.clone_from(&draft.base.palette)
-                            })
+                        |this, context| {
+                            this.edit_theme(
+                                |draft| draft.theme.palette.clone_from(&draft.base.palette),
+                                context,
+                            )
                         },
                     ),
             );

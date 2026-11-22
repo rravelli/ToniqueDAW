@@ -54,12 +54,11 @@ pub struct DraggedAudio {
 /// What follows the pointer while a file is dragged.
 struct DragGhost {
     name: SharedString,
-    theme: Theme,
 }
 
 impl Render for DragGhost {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.theme;
+    fn render(&mut self, _: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
+        let theme = &*crate::theme::current(context);
         div()
             .px_2()
             .py_1()
@@ -220,7 +219,7 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let mut sources = vec![
             (BrowserSource::Files, icons::FOLDER_SIMPLE, "Files"),
             (BrowserSource::Labels, icons::TAG, "Labels"),
@@ -243,7 +242,7 @@ impl Tonique {
         let content = match self.browser.source {
             BrowserSource::Effects => panel
                 .child(self.effect_search_bar(&theme, window, context))
-                .child(self.effects_list())
+                .child(self.effects_list(context))
                 .into_any_element(),
             BrowserSource::Missing => panel
                 .child(self.missing_view(window, context))

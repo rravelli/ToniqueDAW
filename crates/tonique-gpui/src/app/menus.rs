@@ -47,7 +47,7 @@ impl Tonique {
             0 | 1 => "Missing files…".to_string(),
             count => format!("{count} missing files…"),
         };
-        Menu::new(&self.theme)
+        Menu::new(&crate::theme::current(context))
             .item(
                 self.action_item("New", Action::NewProject),
                 context,
@@ -100,7 +100,7 @@ impl Tonique {
     /// apart projects named alike; those not found are shown, disabled.
     pub(super) fn recent_projects_menu(&self, context: &mut Context<Self>) -> gpui::Div {
         let recent = self.project.recent();
-        let mut menu = Menu::new_submenu(&self.theme);
+        let mut menu = Menu::new_submenu(&crate::theme::current(context));
         if recent.is_empty() {
             let none = MenuItem::new("No recent projects").enabled(false);
             return menu.item(none, context, |_, _, _| {}).into_element();
@@ -133,7 +133,7 @@ impl Tonique {
 
     fn edit_menu(&self, context: &mut Context<Self>) -> Menu {
         let state = &self.state;
-        Menu::new(&self.theme)
+        Menu::new(&crate::theme::current(context))
             .item(
                 self.action_item("Undo", Action::Undo)
                     .enabled(state.can_undo()),
@@ -158,7 +158,7 @@ impl Tonique {
 
     fn view_menu(&self, context: &mut Context<Self>) -> Menu {
         let graph = self.graph.is_open();
-        let menu = Menu::new(&self.theme);
+        let menu = Menu::new(&crate::theme::current(context));
         // The audio graph is a development tool.
         let menu = if !Action::ToggleGraphView.is_available() {
             menu
@@ -209,8 +209,10 @@ impl Tonique {
     }
 
     fn help_menu(&self, context: &mut Context<Self>) -> Menu {
-        Menu::new(&self.theme).item(MenuItem::new("About Tonique"), context, |this, _, _| {
-            this.dialog = Some(Dialog::About)
-        })
+        Menu::new(&crate::theme::current(context)).item(
+            MenuItem::new("About Tonique"),
+            context,
+            |this, _, _| this.dialog = Some(Dialog::About),
+        )
     }
 }

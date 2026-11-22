@@ -70,7 +70,7 @@ pub struct Marks {
 }
 
 pub struct Scene {
-    pub theme: Theme,
+    pub theme: std::rc::Rc<Theme>,
     pub pixels_per_beat: f32,
     pub bpm: f32,
     pub rows: Vec<SceneRow>,
@@ -130,26 +130,31 @@ fn label(line: GridLine) -> String {
 impl Tonique {
     /// What the timeline paints: the clips of the rows overlapping
     /// `in_view`, a span of the scrolled content.
-    pub(super) fn scene(&self, rows: &[Row], in_view: (f32, f32)) -> Scene {
+    pub(super) fn scene(
+        &self,
+        rows: &[Row],
+        in_view: (f32, f32),
+        theme: std::rc::Rc<Theme>,
+    ) -> Scene {
         let state = &self.state;
         let screen_x = |beat: BeatPos| state.grid.beats_to_x(beat, self.viewport());
         let (loop_start, loop_end) = state.loop_range();
-        let (scene_rows, mut clips) = self.scene_clips(rows, in_view);
+        let (scene_rows, mut clips) = self.scene_clips(rows, in_view, &theme);
         let overviews = rows
             .iter()
             .filter(|row| row.is_group() && row.overlaps(in_view))
             .flat_map(|row| self.group_overview(row))
             .collect();
-        clips.extend(self.scene_dragged(rows));
+        clips.extend(self.scene_dragged(rows, &theme));
         let dragged = self.dragged_clips();
         Scene {
-            theme: self.theme.clone(),
+            theme: theme.clone(),
             pixels_per_beat: state.grid.pixels_per_beat(),
             bpm: state.bpm(),
             rows: scene_rows,
             overviews,
             clips,
-            drop: self.scene_drop(rows),
+            drop: self.scene_drop(rows, &theme),
             new_lanes: self.scene_new_lanes(rows),
             zone: self.scene_zone(rows),
             snap_line: dragged.and_then(|dragged| dragged.snapped_to).map(screen_x),
@@ -230,7 +235,12 @@ impl Tonique {
     }
 
     /// The rows, and their clips: one being trimmed over its neighbours.
-    fn scene_clips(&self, rows: &[Row], in_view: (f32, f32)) -> (Vec<SceneRow>, Vec<SceneClip>) {
+    fn scene_clips(
+        &self,
+        rows: &[Row],
+        in_view: (f32, f32),
+        theme: &Theme,
+    ) -> (Vec<SceneRow>, Vec<SceneClip>) {
         let state = &self.state;
         let left_behind: HashSet<ClipId> = self
             .dragged_clips()
@@ -264,7 +274,7 @@ impl Tonique {
                     lit: lit == Some(clip.id) && !behind,
                     rect: self.clip_rect(&clip, row),
                     color: if behind {
-                        self.theme.hover_overlay
+                        theme.hover_overlay
                     } else {
                         track.color
                     },
@@ -335,7 +345,7 @@ impl Tonique {
 
     /// The dragged clips where they'd land, selected, over everything; on
     /// the tracks a drop would add, in the colours they'll get.
-    fn scene_dragged(&self, rows: &[Row]) -> Vec<SceneClip> {
+    fn scene_dragged(&self, rows: &[Row], theme: &Theme) -> Vec<SceneClip> {
         let Some(dragged) = self.dragged_clips() else {
             return Vec::new();
         };
@@ -355,7 +365,7 @@ impl Tonique {
                         colors
                             .get(index - tracks.len())
                             .copied()
-                            .unwrap_or(self.theme.text_muted)
+                            .unwrap_or(theme.text_muted)
                     },
                     |track| track.color,
                 );
@@ -484,7 +494,7 @@ impl Tonique {
     }
 
     /// The clip a drop would add.
-    fn scene_drop(&self, rows: &[Row]) -> Option<SceneClip> {
+    fn scene_drop(&self, rows: &[Row], theme: &Theme) -> Option<SceneClip> {
         let target = self.timeline.drop_target.as_ref()?;
         let state = &self.state;
         let track = target
@@ -502,7 +512,7 @@ impl Tonique {
                     .new_track_colors(1)
                     .first()
                     .copied()
-                    .unwrap_or(self.theme.text_muted),
+                    .unwrap_or(theme.text_muted),
             ),
         };
         let clip = AudioClip::placed(

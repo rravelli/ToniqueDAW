@@ -458,7 +458,7 @@ impl Tonique {
     pub fn clip_warp_menu(&self, id: ClipId, context: &mut Context<Self>) -> Option<gpui::Div> {
         let (_, clip) = self.state.clip_with_track(id)?;
         Some(
-            Menu::new(&self.theme)
+            Menu::new(&crate::theme::current(context))
                 .item(
                     MenuItem::new("Tonal").checked(clip.warp == WarpMode::Spectral),
                     context,
@@ -481,7 +481,7 @@ impl Tonique {
     /// The stretch's windows.
     pub fn clip_window_menu(&self, id: ClipId, context: &mut Context<Self>) -> Option<gpui::Div> {
         let (_, clip) = self.state.clip_with_track(id)?;
-        let mut menu = Menu::new(&self.theme);
+        let mut menu = Menu::new(&crate::theme::current(context));
         for window in StretchWindow::ALL {
             menu = menu.item(
                 MenuItem::new(window_name(window)).checked(clip.stretch.window == window),

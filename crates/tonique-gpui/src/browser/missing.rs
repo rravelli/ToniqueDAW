@@ -9,8 +9,8 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, Context, KeyDownEvent, MouseButton, PathPromptOptions, ScrollHandle, Window, div,
-    prelude::*, px,
+    AnyElement, App, Context, KeyDownEvent, MouseButton, PathPromptOptions, ScrollHandle, Window,
+    div, prelude::*, px,
 };
 use tonique_engine::edit::SourceId;
 
@@ -121,7 +121,7 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let folders = self.browser.folders();
         let view = &mut self.browser.missing;
         view.index.update(&folders);
@@ -182,7 +182,7 @@ impl Tonique {
             .child(heading(&format!("Missing ({})", missing.len()), &theme))
             .children(self.missing_rows(&missing, context))
             .child(self.missing_buttons(&missing, context))
-            .children(self.missing_status())
+            .children(self.missing_status(context))
             .children(self.missing_matches(&missing, &folders, context));
         div()
             .flex_1()
@@ -233,7 +233,7 @@ impl Tonique {
         missing: &[(SourceId, String, PathBuf)],
         context: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         missing
             .iter()
             .map(|(id, name, path)| {
@@ -267,7 +267,7 @@ impl Tonique {
         missing: &[(SourceId, String, PathBuf)],
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let exact = exact_matches(missing, self.browser.missing.index.files());
         let found_some = !exact.is_empty();
         div()
@@ -350,8 +350,8 @@ impl Tonique {
         });
     }
 
-    fn missing_status(&self) -> Option<impl IntoElement> {
-        let theme = &self.theme;
+    fn missing_status(&self, context: &App) -> Option<impl IntoElement> {
+        let theme = &*crate::theme::current(context);
         let (text, color) = match self.browser.missing.status.as_ref()? {
             Status::Located(0) => ("No file found.".to_string(), theme.warning),
             Status::Located(1) => ("Found 1 file.".to_string(), theme.text_muted),
@@ -369,7 +369,7 @@ impl Tonique {
         folders: &[PathBuf],
         context: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let view = &self.browser.missing;
         let Some((selected, name, path)) = missing
             .iter()

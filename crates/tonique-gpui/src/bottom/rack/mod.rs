@@ -181,7 +181,7 @@ impl Tonique {
         }
         rack.animating = animating;
 
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let mut frames = Vec::with_capacity(effects.len());
         for (index, effect) in effects.iter().enumerate() {
             let selected = self.bottom.rack.selected.contains(&index);

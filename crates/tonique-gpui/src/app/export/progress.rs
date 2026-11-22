@@ -36,7 +36,7 @@ impl Tonique {
         running: &Export,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let files = running.files();
         let count = files.len();
         let current = running.current().min(count.saturating_sub(1));
@@ -114,7 +114,7 @@ impl Tonique {
         seconds: f64,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let folder = files
             .first()
             .and_then(|file| file.path.parent())
@@ -177,7 +177,7 @@ impl Tonique {
         detail: &str,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         dialog_frame(NARROW_WIDTH, theme)
             .flex()
             .flex_col()

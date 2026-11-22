@@ -130,7 +130,11 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let scene = self.scene(rows, self.rows_in_view(window));
+        let scene = self.scene(
+            rows,
+            self.rows_in_view(window),
+            crate::theme::current(context),
+        );
         let waves = self.waves.clone();
         let slot = self.timeline.bounds.clone();
         let span = self.across_span();
@@ -139,7 +143,7 @@ impl Tonique {
         let across_bar = scrollbar(
             Axis::Horizontal,
             &self.timeline.scroll.across_bar,
-            &self.theme,
+            &crate::theme::current(context),
             move |_| Some(span),
             move |offset, _, app| {
                 let _ = this.update(app, |this, context| {
@@ -195,7 +199,7 @@ impl Tonique {
         scrollbar(
             Axis::Vertical,
             &self.timeline.scroll.rows_bar,
-            &self.theme,
+            &crate::theme::current(context),
             move |_| Some(span),
             move |offset, _, app| {
                 let _ = this.update(app, |this, context| {

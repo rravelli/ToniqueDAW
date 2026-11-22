@@ -161,7 +161,7 @@ impl Tonique {
     /// The options of `choice`'s dropdown, the chosen one ticked.
     pub fn audio_choice_menu(&self, choice: AudioChoice, context: &mut Context<Self>) -> gpui::Div {
         let draft = &self.settings.draft;
-        let menu = Menu::new(&self.theme);
+        let menu = Menu::new(&crate::theme::current(context));
         match choice {
             AudioChoice::Device => {
                 let options = std::iter::once((None, "System default".to_string())).chain(

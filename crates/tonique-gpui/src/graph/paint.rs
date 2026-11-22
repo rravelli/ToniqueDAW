@@ -26,7 +26,7 @@ const HINT: &str = "Drag to pan · Ctrl+scroll to zoom · Double-click to fit";
 
 /// What's shown, taken out of the app for one frame.
 pub struct GraphScene {
-    pub theme: Theme,
+    pub theme: std::rc::Rc<Theme>,
     /// `None` until the engine publishes its graph.
     pub topology: Option<Arc<GraphTopology>>,
     pub positions: Positions,
@@ -42,7 +42,7 @@ pub struct GraphScene {
 }
 
 impl GraphScene {
-    pub fn empty(theme: Theme) -> Self {
+    pub fn empty(theme: std::rc::Rc<Theme>) -> Self {
         Self {
             theme,
             topology: None,

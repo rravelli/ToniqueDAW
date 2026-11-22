@@ -16,7 +16,7 @@ impl Tonique {
     /// ones ticked, as `grid_menu` in the egui app.
     pub fn grid_menu(&self, context: &mut Context<Self>) -> gpui::Div {
         let settings = &self.state.grid.settings;
-        let mut menu = Menu::new(&self.theme).label("Adaptive");
+        let mut menu = Menu::new(&crate::theme::current(context)).label("Adaptive");
         for density in GridDensity::ALL {
             let checked = settings.adaptive && settings.density == density;
             menu = menu.item(
@@ -63,7 +63,7 @@ impl Tonique {
     /// A clip's menu, while it exists.
     pub fn clip_menu(&self, id: ClipId, context: &mut Context<Self>) -> Option<gpui::Div> {
         let (_, clip) = self.state.clip_with_track(id)?;
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let mut menu = Menu::new(theme).label(clip.audio.name.clone());
         if clip.audio.missing {
             let path = clip.audio.path.clone();

@@ -87,7 +87,7 @@ impl Tonique {
         panel: gpui::Div,
         context: &mut Context<Self>,
     ) -> Stateful<gpui::Div> {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         panel
             .id("browser-drop")
             .relative()
@@ -126,7 +126,7 @@ impl Tonique {
 
     /// No folder yet: what the browser is for, and a button to add one.
     pub(super) fn no_folders_view(&self, context: &mut Context<Self>) -> AnyElement {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         div()
             .pt(px(24.))
             .flex()

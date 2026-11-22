@@ -185,7 +185,7 @@ impl Tonique {
         width: f32,
         context: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let panels = self.bottom.clip.panels;
         let rail = div()
             .flex()
