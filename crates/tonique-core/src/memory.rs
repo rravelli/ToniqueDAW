@@ -2,7 +2,7 @@
 
 use crate::analysis::AudioData;
 
-/// Audio files' decoded samples and waveform peaks.
+/// Audio files' decoded samples, and their waveform peaks and onsets.
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct AudioMemory {
     pub files: usize,
@@ -16,6 +16,9 @@ impl AudioMemory {
     pub fn add(&mut self, data: &AudioData) {
         self.files += 1;
         self.peak_bytes += data.peaks().byte_size();
+        if let Some(rhythm) = data.rhythm() {
+            self.peak_bytes += rhythm.onsets.byte_size();
+        }
         if let Some(samples) = data.samples() {
             self.decoded_files += 1;
             self.sample_bytes += samples.byte_size();

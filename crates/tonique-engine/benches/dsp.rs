@@ -1,14 +1,17 @@
-//! Offline and UI-side processing: resampling, waveform peaks, spectrum.
+//! Offline and UI-side processing: resampling, waveform peaks, spectrum,
+//! onsets and tempo.
 
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tonique_engine::audio::AudioBuffer;
 use tonique_engine::meter::ChannelMeter;
+use tonique_engine::onset::OnsetCurve;
 use tonique_engine::peaks::WaveformPeaks;
 use tonique_engine::resample::resample_offline;
 use tonique_engine::sample::SampleBuffer;
 use tonique_engine::spectrum::Spectrum;
+use tonique_engine::tempo;
 
 fn sine(len: usize, rate: f64) -> Vec<f32> {
     (0..len)
@@ -92,5 +95,30 @@ fn spectrum(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, resample, peaks, spectrum);
+/// Analysing a minute of stereo audio for its tempo, as a file loads:
+/// its onset curve, then the estimate from it. Browsing analyses every
+/// file shown, so this is the time per minute of audio it adds.
+fn rhythm(c: &mut Criterion) {
+    const RATE: f64 = 48000.0;
+    const BEAT: usize = RATE as usize / 2;
+    // A sine with a hit every beat (120 BPM).
+    let channel: Vec<f32> = sine(RATE as usize * 60, RATE)
+        .iter()
+        .enumerate()
+        .map(|(i, s)| if i % BEAT < 400 { s + 0.5 } else { s * 0.2 })
+        .collect();
+    let buffer = SampleBuffer::new(vec![channel.clone(), channel], RATE);
+    let mut group = c.benchmark_group("rhythm/1min_stereo");
+    group.throughput(Throughput::Elements(buffer.len() as u64));
+    group.bench_function("onset_curve", |b| {
+        b.iter(|| OnsetCurve::from_buffer(black_box(&buffer)))
+    });
+    let curve = OnsetCurve::from_buffer(&buffer);
+    group.bench_function("tempo_estimate", |b| {
+        b.iter(|| tempo::estimate(black_box(&curve)))
+    });
+    group.finish();
+}
+
+criterion_group!(benches, resample, peaks, spectrum, rhythm);
 criterion_main!(benches);
