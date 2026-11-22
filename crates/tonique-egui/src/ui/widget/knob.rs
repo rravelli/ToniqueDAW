@@ -1,7 +1,10 @@
 //! A knob: drag up or down to change a value, on a linear or log scale.
+//! Clicked, the arrow keys step it 1% of its travel (10% with Shift).
 
 use crate::ui::theme::ThemeExt;
 use crate::ui::theme::font_size;
+use crate::ui::widget::arrow_keys::arrow_presses;
+use crate::utils::steps::step_ratio;
 use egui::{
     Align2, CursorIcon, FontId, Pos2, Response, Sense, Shape, Stroke, Ui, Vec2, Widget, vec2,
 };
@@ -22,6 +25,8 @@ const SWEEP: f32 = 1.5 * PI;
 
 /// Knob with its name above and its value below. The response is marked
 /// changed when the value is. Double-click resets it to its default.
+/// Changed and not dragged, it was reset or stepped by a key: an undo step
+/// of its own.
 pub struct Knob<'a> {
     value: &'a mut f32,
     range: RangeInclusive<f32>,
@@ -127,6 +132,16 @@ impl Widget for Knob<'_> {
             ratio = self.ratio(default);
             response.mark_changed();
         }
+        let presses = arrow_presses(ui, &response);
+        if !presses.is_empty() && !response.dragged() {
+            let stepped = step_ratio(ratio, presses);
+            if stepped != ratio {
+                ratio = stepped;
+                *self.value = self.value(ratio);
+                response.mark_changed();
+            }
+        }
+        let focused = response.has_focus();
         let response = response.on_hover_and_drag_cursor(CursorIcon::ResizeVertical);
 
         let theme = ui.app_theme();
@@ -164,12 +179,13 @@ impl Widget for Knob<'_> {
         } else {
             theme.bg_control
         };
-        painter.circle(
-            center,
-            RADIUS - 3.,
-            fill,
-            Stroke::new(1., theme.control_border),
-        );
+        // Taking the arrow keys: outlined in the accent.
+        let border = if focused {
+            theme.accent
+        } else {
+            theme.control_border
+        };
+        painter.circle(center, RADIUS - 3., fill, Stroke::new(1., border));
         let pointer = Vec2::angled(START_ANGLE + ratio * SWEEP);
         painter.line_segment(
             [center + pointer * 2., center + pointer * (RADIUS - 3.)],

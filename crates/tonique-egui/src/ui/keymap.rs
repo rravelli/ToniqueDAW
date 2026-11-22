@@ -4,7 +4,10 @@
 
 use egui::{Context, Event, InputState, KeyboardShortcut, Modifiers};
 
-use crate::config::keymap::{Action, Key, Keymap, Mods, Shortcut};
+use crate::{
+    config::keymap::{Action, Key, Keymap, Mods, Shortcut},
+    ui::widget::arrow_keys::is_arrow,
+};
 
 /// egui's key with the same name: every key has one (egui's names are the
 /// keymap's).
@@ -73,8 +76,10 @@ pub trait KeymapExt {
     /// `text` followed by the first binding of `action`, for tooltips and
     /// menu labels: `Loop (Ctrl+L)`.
     fn with_shortcut(&self, ctx: &Context, text: &str, action: Action) -> String;
-    /// Actions triggered by this frame's key presses, in the order pressed.
-    fn triggered(&self, input: &InputState) -> Vec<Action>;
+    /// Actions triggered by this frame's key presses, in the order pressed;
+    /// those of the arrow keys only with `arrows` (not while a value control
+    /// takes them).
+    fn triggered(&self, input: &InputState, arrows: bool) -> Vec<Action>;
 }
 
 impl KeymapExt for Keymap {
@@ -92,7 +97,7 @@ impl KeymapExt for Keymap {
         }
     }
 
-    fn triggered(&self, input: &InputState) -> Vec<Action> {
+    fn triggered(&self, input: &InputState, arrows: bool) -> Vec<Action> {
         input
             .events
             .iter()
@@ -103,7 +108,7 @@ impl KeymapExt for Keymap {
                     repeat,
                     modifiers,
                     ..
-                } => self
+                } if arrows || !is_arrow(*key, *modifiers) => self
                     .action_for(from_egui_key(*key)?, mods_of(*modifiers))
                     .filter(|action| !repeat || action.repeats()),
                 _ => None,

@@ -1,6 +1,7 @@
 use tonique_engine::time::{BeatPos, TimeSignature};
 
 pub mod color;
+pub mod steps;
 #[cfg(test)]
 mod tests;
 

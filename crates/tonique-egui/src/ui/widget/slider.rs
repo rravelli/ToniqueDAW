@@ -1,7 +1,11 @@
 use crate::ui::theme::font_size;
 use egui::{Align2, CursorIcon, FontId, Response, Sense, Ui, Widget, emath::Numeric, pos2, vec2};
 
-use crate::ui::theme::ThemeExt;
+use crate::ui::{
+    theme::ThemeExt,
+    widget::arrow_keys::{arrow_presses, paint_outline},
+};
+use crate::utils::steps::KeyStep;
 
 const HEIGHT: f32 = 18.;
 const TRACK_HEIGHT: f32 = 4.;
@@ -10,7 +14,9 @@ const VALUE_WIDTH: f32 = 52.;
 
 /// Horizontal slider with its value printed on the right. Clicking or
 /// dragging sets the value under the pointer; double-clicking restores the
-/// default, if any. Check `drag_stopped` to apply costly changes once.
+/// default, if any. Clicked, the arrow keys move it a step (ten with
+/// Shift). Check `drag_stopped` to apply costly changes once: a change
+/// while not dragged (a click, a key) is done at once.
 pub struct ValueSlider<'a, N: Numeric> {
     value: &'a mut N,
     min: f64,
@@ -109,6 +115,20 @@ impl<N: Numeric> Widget for ValueSlider<'_, N> {
         {
             self.set_ratio((pointer.x - track.left()) / track.width());
         }
+        let presses = arrow_presses(ui, &response);
+        if !presses.is_empty() && !response.dragged() {
+            // A hundredth of the range when it has no step.
+            let step = self.step.unwrap_or((self.max - self.min) / 100.);
+            let value = presses.apply(
+                self.value.to_f64(),
+                KeyStep::new(step, 10. * step),
+                self.min,
+                self.max,
+            );
+            // On the step grid, not to drift.
+            let ratio = (value - self.min) / (self.max - self.min).max(f64::EPSILON);
+            self.set_ratio(ratio as f32);
+        }
         if *self.value != before {
             response.mark_changed();
         }
@@ -137,6 +157,10 @@ impl<N: Numeric> Widget for ValueSlider<'_, N> {
                 theme.text_disabled
             },
         );
+        if response.has_focus() {
+            paint_outline(ui, rect.with_max_x(rect.right() - VALUE_WIDTH), HEIGHT / 2.);
+        }
+        let painter = ui.painter();
         painter.text(
             rect.right_center(),
             Align2::RIGHT_CENTER,

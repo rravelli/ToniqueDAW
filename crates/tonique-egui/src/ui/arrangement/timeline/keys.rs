@@ -6,6 +6,7 @@ use crate::{
     ui::{
         arrangement::timeline::{Timeline, scroll::reveal},
         commands::Commands,
+        widget::arrow_keys::holds_arrows,
     },
 };
 
@@ -23,7 +24,7 @@ impl Timeline {
             self.run_action(action, ui, state, viewport);
         }
         // Not while typing into a widget.
-        if ui.memory(|m| m.focused().is_none()) {
+        if ui.memory(|m| m.focused().is_none()) || holds_arrows(ui.ctx()) {
             self.handle_clipboard(ui, state, viewport);
         }
     }

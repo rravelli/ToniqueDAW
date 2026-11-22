@@ -5,7 +5,8 @@ use egui::{
 };
 use egui_phosphor::fill::{CARET_DOWN, CARET_UP};
 
-use crate::ui::theme::ThemeExt;
+use crate::ui::{theme::ThemeExt, widget::arrow_keys::arrow_presses};
+use crate::utils::steps;
 
 const BUTTON_SIZE: Vec2 = Vec2::new(14., 8.0);
 
@@ -264,9 +265,6 @@ impl NumberInput {
             self.buffer = self.format_value(self.value);
             text_edit.request_focus();
         }
-        if res.clicked() {
-            res.request_focus();
-        }
         if res.drag_started() {
             self.drag_rest = 0.;
         }
@@ -287,19 +285,10 @@ impl NumberInput {
                 self.value = value.clamp(self.range.min, self.range.max);
             }
         }
-        if focused && !self.edit_mode {
-            let delta = ui.input_mut(|i| {
-                if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
-                    1.0
-                } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-                    -1.0
-                } else {
-                    0.0
-                }
-            });
-            if delta != 0. {
-                self.step(delta);
-            }
+        // Clicked, the arrow keys step it, ten steps with Shift.
+        let presses = arrow_presses(ui, &res);
+        if !self.edit_mode && !presses.is_empty() {
+            self.step(presses.amount(steps::NUMBER) as f32);
         }
         ui.allocate_rect(res.rect, Sense::empty());
         res.on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
@@ -377,5 +366,67 @@ mod tests {
             assert_eq!(input.value, value, "at {to:?}");
         }
         frame(&mut input, vec![button(pos2(-10., 10.), false)]);
+    }
+
+    #[test]
+    fn clicked_it_steps_by_the_arrow_keys() {
+        let ctx = egui::Context::default();
+        let mut input = NumberInput::new(vec2(80., 20.))
+            .range(Rangef::new(10., 1000.))
+            .draggable();
+        input.value = 120.;
+        let frame = |input: &mut NumberInput, events: Vec<Event>| {
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400., 400.))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(raw, |ui| {
+                input.ui(ui);
+            });
+            output.textures_delta.clear();
+        };
+        let key = |key, modifiers| Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let at = pos2(20., 10.);
+        let button = |pressed| Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(
+            &mut input,
+            vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+        );
+        assert_eq!(input.value, 120., "not before it's clicked");
+        frame(
+            &mut input,
+            vec![Event::PointerMoved(at), button(true), button(false)],
+        );
+        frame(
+            &mut input,
+            vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+        );
+        assert_eq!(input.value, 121.);
+        frame(
+            &mut input,
+            vec![key(egui::Key::ArrowUp, egui::Modifiers::SHIFT)],
+        );
+        assert_eq!(input.value, 131.);
+        frame(
+            &mut input,
+            vec![key(egui::Key::ArrowDown, egui::Modifiers::SHIFT)],
+        );
+        frame(
+            &mut input,
+            vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+        );
+        assert_eq!(input.value, 120.);
     }
 }

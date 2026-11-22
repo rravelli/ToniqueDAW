@@ -2,16 +2,23 @@
 //! bar, as in track headers: filled in a colour from the left (gain) or
 //! from the centre (pan, steps) to show the level, the value printed on
 //! top. Dragging moves it from where it was grabbed
-//! (Shift for fine steps), double-clicking resets it. Steps also move by
-//! the arrow keys once it's clicked (Shift for big steps).
+//! (Shift for fine steps), double-clicking resets it. Clicked, the arrow
+//! keys step it: 0.5 dB (6 with Shift), a fiftieth of a side (ten), or a
+//! step (a big one).
 
 use crate::{
-    ui::theme::{ThemeExt, font_size},
-    utils::{format_pan, snap_to_centre},
+    ui::{
+        theme::{ThemeExt, font_size},
+        widget::arrow_keys::{arrow_presses, paint_outline},
+    },
+    utils::{
+        format_pan, snap_to_centre,
+        steps::{KeyStep, Presses, step_gain, step_pan},
+    },
 };
 use egui::{
-    Align2, Color32, CursorIcon, EventFilter, FontId, Key, Modifiers, Rect, Response, Sense,
-    Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
+    Align2, Color32, CursorIcon, FontId, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, pos2,
+    vec2,
 };
 use std::ops::RangeInclusive;
 
@@ -182,9 +189,9 @@ impl ParamSlider {
             };
             response.mark_changed();
         }
-        if let Scale::Steps { big, .. } = self.scale
-            && let Some(to) = self.keyed(ui, &response, big)
-            && drag.is_none()
+        let presses = arrow_presses(ui, &response);
+        if drag.is_none()
+            && let Some(to) = self.stepped(presses)
         {
             shown = self.slider_value(to);
             edit = SliderEdit::Set {
@@ -268,54 +275,25 @@ impl ParamSlider {
             painter
                 .with_clip_rect(clip.intersect(fill))
                 .galley_with_override_text_color(pos, galley, theme.text_on(self.color));
+            if response.has_focus() {
+                paint_outline(ui, rect, 1.);
+            }
         }
         (response, edit)
     }
 
-    /// Clicked, it takes the arrow keys: up and right a step, down and left
-    /// one back, `big` ones with Shift. Where they move it, if they do.
-    fn keyed(&self, ui: &Ui, response: &Response, big: f32) -> Option<f32> {
-        if response.clicked() || response.drag_started() {
-            response.request_focus();
-        }
-        if !response.has_focus() {
+    /// Where `presses` of the arrow keys move it, if they do.
+    fn stepped(&self, presses: Presses) -> Option<f32> {
+        if presses.is_empty() {
             return None;
         }
-        // Not to move the focus to another widget.
-        ui.memory_mut(|m| {
-            m.set_focus_lock_filter(
-                response.id,
-                EventFilter {
-                    horizontal_arrows: true,
-                    vertical_arrows: true,
-                    ..Default::default()
-                },
-            )
-        });
-        let steps: f32 = ui.input_mut(|i| {
-            let mut steps = 0.;
-            for (key, way) in [
-                (Key::ArrowUp, 1.),
-                (Key::ArrowRight, 1.),
-                (Key::ArrowDown, -1.),
-                (Key::ArrowLeft, -1.),
-            ] {
-                // Shifted first: without, a key matches with Shift too.
-                while i.consume_key(Modifiers::SHIFT, key) {
-                    steps += way * big;
-                }
-                while i.consume_key(Modifiers::NONE, key) {
-                    steps += way;
-                }
+        let to = match &self.scale {
+            Scale::Gain(db) => step_gain(self.value, presses, *db.start(), *db.end()),
+            Scale::Pan => step_pan(self.value, presses),
+            Scale::Steps { min, max, big, .. } => {
+                let to = self.value + presses.amount(KeyStep::new(1., *big as f64)) as f32;
+                if self.carry { to } else { to.clamp(*min, *max) }
             }
-            steps
-        });
-        let range = self.range();
-        let to = self.value + steps;
-        let to = if self.carry {
-            to
-        } else {
-            to.clamp(*range.start(), *range.end())
         };
         (to != self.value).then_some(to)
     }
@@ -632,13 +610,47 @@ mod tests {
             ]
         );
         assert_eq!(value, 24., "no further than its end");
+    }
 
-        let mut gain = 0.5;
-        run(
-            |g| ParamSlider::gain(g, GAIN),
+    #[test]
+    fn gains_and_pans_step_by_the_arrow_keys() {
+        use egui::Key::{ArrowDown, ArrowRight, ArrowUp};
+        let at = egui::pos2(50., 10.);
+        let click = vec![
+            egui::Event::PointerMoved(at),
+            button(at, true),
+            button(at, false),
+        ];
+        let db = |gain: f32| (20. * gain.log10() * 10.).round() / 10.;
+        let mut gain = 1.;
+        let edits = run(
+            |value| ParamSlider::gain(value, GAIN),
             &mut gain,
-            vec![click, vec![key(ArrowUp, false)]],
+            vec![vec![], click.clone(), vec![key(ArrowUp, false)]],
         );
-        assert_eq!(gain, 0.5, "a gain doesn't step");
+        assert!(
+            matches!(edits[2], SliderEdit::Set { from, .. } if from == 1.),
+            "an undo step"
+        );
+        assert_eq!(db(gain), 0.5);
+        run(
+            |value| ParamSlider::gain(value, GAIN),
+            &mut gain,
+            vec![vec![], click.clone(), vec![key(ArrowDown, true)]],
+        );
+        assert_eq!(db(gain), -5.5);
+
+        let mut pan = 0.;
+        run(
+            ParamSlider::pan,
+            &mut pan,
+            vec![
+                vec![],
+                click,
+                vec![key(ArrowRight, false)],
+                vec![key(ArrowRight, true)],
+            ],
+        );
+        assert_eq!(pan, 0.22);
     }
 }
