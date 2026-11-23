@@ -67,7 +67,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> Option<AnyElement> {
         // A running export stays in sight until it ends.
-        if self.export.is_running() {
+        if self.export_running(context) {
             self.dialog = Some(Dialog::Export);
         }
         let dialog = self.dialog?;
@@ -75,7 +75,7 @@ impl Tonique {
         let content = match dialog {
             Dialog::About => about(&theme, context),
             Dialog::Settings => div().child(self.settings.clone()),
-            Dialog::Export => self.export_dialog(window, context),
+            Dialog::Export => div().child(self.export.clone()),
             Dialog::Unsaved => self.unsaved_dialog(context),
         };
         let size = window.viewport_size();
@@ -110,7 +110,7 @@ impl Tonique {
     /// Closes the open dialog, the keyboard going back to the app; not an
     /// export while it runs.
     pub(super) fn close_dialog(&mut self, window: &mut Window, context: &mut Context<Self>) {
-        if self.dialog == Some(Dialog::Export) && !self.export_closes() {
+        if self.dialog == Some(Dialog::Export) && self.export_running(context) {
             return;
         }
         self.dialog = None;

@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use gpui::{Context, MouseButton, PathBuilder, canvas, div, point, prelude::*, px};
 
 use crate::{
-    app::Tonique,
+    app::export::ExportDialog,
     core::export::{
         Export, ExportFile, Waveform,
         format::{duration, file_name, peak},
@@ -30,12 +30,8 @@ const THUMBNAIL_HEIGHT: f32 = 26.;
 const FILE_LABEL_WIDTH: f32 = 150.;
 const PROGRESS_HEIGHT: f32 = 4.;
 
-impl Tonique {
-    pub(super) fn export_running(
-        &self,
-        running: &Export,
-        context: &mut Context<Self>,
-    ) -> gpui::Div {
+impl ExportDialog {
+    pub(super) fn running_view(&self, running: &Export, context: &mut Context<Self>) -> gpui::Div {
         let theme = &*crate::theme::current(context);
         let files = running.files();
         let count = files.len();
@@ -80,7 +76,7 @@ impl Tonique {
             MouseButton::Left,
             context.listener(|this, _, _, context| {
                 context.stop_propagation();
-                if let super::Step::Running(running) = &this.export.step {
+                if let super::Step::Running(running) = &this.step {
                     running.cancel();
                 }
                 context.notify();
@@ -107,7 +103,7 @@ impl Tonique {
             )
     }
 
-    pub(super) fn export_done(
+    pub(super) fn done_view(
         &self,
         files: &[ExportFile],
         waveforms: &[Waveform],
@@ -168,10 +164,10 @@ impl Tonique {
                 theme.text_muted,
             ));
         }
-        dialog.child(self.export_ok(theme, context))
+        dialog.child(self.ok_button(theme, context))
     }
 
-    pub(super) fn export_failed(
+    pub(super) fn failed_view(
         &self,
         title: &str,
         detail: &str,
@@ -188,16 +184,16 @@ impl Tonique {
                     .text_color(hsla(theme.text_muted))
                     .child(detail.to_string()),
             )
-            .child(self.export_ok(theme, context))
+            .child(self.ok_button(theme, context))
     }
 
     /// The button closing the result, on the right.
-    fn export_ok(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
+    fn ok_button(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
         let ok = dialog_button("export-ok", "OK", true, theme).on_mouse_down(
             MouseButton::Left,
             context.listener(|this, _, window, context| {
                 context.stop_propagation();
-                this.close_export(window, context);
+                this.close(window, context);
                 context.notify();
             }),
         );

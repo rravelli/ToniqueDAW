@@ -26,7 +26,7 @@ use tonique_engine::{engine::Engine, time::BeatPos};
 
 pub use arrows::ArrowHolder;
 use dialog::Dialog;
-use export::ExportUi;
+use export::{ExportDialog, ExportEvent};
 use menu_bar::MenuBarUi;
 pub use popup::PopupKind;
 use project::ProjectFiles;
@@ -76,7 +76,7 @@ pub struct Tonique {
     dialog: Option<Dialog>,
     settings: Entity<SettingsDialog>,
     /// Exporting audio: what's chosen, and the export running.
-    export: ExportUi,
+    export: Entity<ExportDialog>,
     /// The menus' layer, over everything.
     popups: Entity<PopupLayer>,
     /// `TONIQUE_BENCH`: steers the view and measures frames.
@@ -151,6 +151,9 @@ impl Tonique {
             .new(|context| SettingsDialog::new(project.clone(), themes, theme_warnings, context));
         let settings_events = context.subscribe_in(&settings, window, Self::on_settings);
         let arrangement_events = context.subscribe(&arrangement, Self::on_arrangement);
+        let export =
+            context.new(|context| ExportDialog::new(project.clone(), waves.clone(), context));
+        let export_events = context.subscribe_in(&export, window, Self::on_export);
         Self {
             browser,
             graph: context.new(|_| GraphView::new(project.clone())),
@@ -165,12 +168,17 @@ impl Tonique {
             menu_bar: MenuBarUi::default(),
             dialog: None,
             settings,
-            export: ExportUi::new(context),
+            export,
             files,
             popups: crate::popup::init(context),
             bench,
             _ticker: ticker,
-            _subscriptions: vec![transport_events, arrangement_events, settings_events],
+            _subscriptions: vec![
+                transport_events,
+                arrangement_events,
+                settings_events,
+                export_events,
+            ],
         }
     }
 
@@ -250,6 +258,37 @@ impl Tonique {
         context.notify();
     }
 
+    fn on_export(
+        &mut self,
+        _: &Entity<ExportDialog>,
+        ExportEvent::Close: &ExportEvent,
+        window: &mut Window,
+        context: &mut Context<Self>,
+    ) {
+        self.close_dialog(window, context);
+        context.notify();
+    }
+
+    /// Asks what to export. Ignored while an export runs.
+    pub fn open_export(&mut self, window: &mut Window, context: &mut Context<Self>) {
+        if self.export_running(context) {
+            return;
+        }
+        let name = self.files.name();
+        let dir = self.files.dir().map(PathBuf::from);
+        self.export.update(context, |export, context| {
+            export.open(name, dir.as_deref());
+            context.notify();
+        });
+        crate::popup::close(context);
+        self.dialog = Some(Dialog::Export);
+        window.focus(&self.focus, context);
+    }
+
+    fn export_running(&self, context: &App) -> bool {
+        self.export.read(context).is_running()
+    }
+
     /// Opens the settings on `tab`, from the settings in use.
     pub fn open_settings(&mut self, tab: SettingsTab, context: &mut App) {
         self.settings
@@ -275,16 +314,14 @@ impl Tonique {
         toggle_play(&mut self.state_mut(context));
     }
 
-    /// Drags follow the pointer anywhere in the window, over a dialog too:
+    /// The browser's edge follows the pointer anywhere in the window:
     /// heard before any element, whatever is under the pointer.
-    fn follow_drags(&mut self, event: &MouseMoveEvent, window: &Window, context: &mut App) -> bool {
+    fn follow_drags(&mut self, event: &MouseMoveEvent, window: &Window) -> bool {
         let width = f32::from(window.viewport_size().width);
         // The timeline keeps at least as much room as either panel.
-        let browser = self
-            .browser_width
+        self.browser_width
             .drag_to(f32::from(event.position.x), width / 2.)
-            .is_some();
-        self.export_drag_move(event, context) | browser
+            .is_some()
     }
 
     /// Hears every pointer move, before the elements do: an element only
@@ -302,7 +339,7 @@ impl Tonique {
                         return;
                     }
                     let _ = this.update(app, |this, context| {
-                        if this.follow_drags(event, window, context) {
+                        if this.follow_drags(event, window) {
                             context.notify();
                         }
                     });
@@ -326,12 +363,11 @@ impl Tonique {
 
     fn on_up(&mut self, _: &MouseUpEvent, _window: &mut Window, context: &mut Context<Self>) {
         self.browser_width.end();
-        self.export_drag_end();
         context.notify();
     }
 
     fn is_dragging(&self) -> bool {
-        self.browser_width.is_dragging() || self.export.is_dragging()
+        self.browser_width.is_dragging()
     }
 
     /// The browser, resizable from its right edge.
@@ -390,7 +426,6 @@ impl Render for Tonique {
             || self.state(context).preview_playback_state() == PlaybackState::Playing
             || context.has_active_drag()
             || self.is_dragging()
-            || self.export.is_running()
             // Meters falling back after playback.
             || self.state(context).metrics.tracks.values().any(crate::meter::is_live);
         if animating {

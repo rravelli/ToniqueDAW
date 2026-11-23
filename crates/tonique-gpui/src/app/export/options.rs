@@ -10,7 +10,7 @@ use gpui::{
 use tonique_engine::{sample::WavFormat, time::BeatPos};
 
 use crate::{
-    app::{Tonique, settings::section_header},
+    app::{export::ExportDialog, settings::section_header},
     core::{
         export::{
             ExportFile, ExportRange,
@@ -59,40 +59,39 @@ enum RangeChoice {
     Custom,
 }
 
-impl Tonique {
-    pub(super) fn export_options(
+impl ExportDialog {
+    pub(super) fn options_view(
         &mut self,
         window: &Window,
         context: &mut Context<Self>,
     ) -> gpui::Div {
         let theme = crate::theme::current(context);
         let state = self.state(context);
-        let export = &mut self.export;
         // Tracks deleted since are no longer chosen.
         let rows = state.all_rows();
-        export.selection.retain(&rows);
+        self.selection.retain(&rows);
         // Seeded once only: an end typed before the start stays, with the
         // problem shown, until the start or end is corrected.
-        export.custom.get_or_insert_with(|| {
+        self.custom.get_or_insert_with(|| {
             state.export_span(ExportRange::Project).unwrap_or((
                 BeatPos::ZERO,
                 BeatPos(state.time_signature().beats_per_bar() * 4.),
             ))
         });
-        let sources = export.selection.sources(state);
-        let dir = PathBuf::from(export.folder.text.trim());
-        let files = state.export_files(&dir, &export.name.text, &sources);
+        let sources = self.selection.sources(state);
+        let dir = PathBuf::from(self.folder.text.trim());
+        let files = state.export_files(&dir, &self.name.text, &sources);
         let paths: Vec<PathBuf> = files.iter().map(|file| file.path.clone()).collect();
-        if export
+        if self
             .existing
             .as_ref()
             .is_none_or(|(checked, _)| *checked != paths)
         {
             let existing = paths.iter().filter(|path| path.exists()).cloned().collect();
-            export.existing = Some((paths, existing));
+            self.existing = Some((paths, existing));
         }
         let problem = state
-            .export_span(export.options.range)
+            .export_span(self.options.range)
             .err()
             .or_else(|| {
                 sources
@@ -100,24 +99,23 @@ impl Tonique {
                     .then(|| "Choose the mix or a track to export.".into())
             })
             .or_else(|| {
-                if export.folder.text.trim().is_empty() {
+                if self.folder.text.trim().is_empty() {
                     Some("Choose a folder to export into.".into())
                 } else {
                     (!dir.is_dir()).then(|| "The folder doesn't exist.".into())
                 }
             });
 
-        let export = &self.export;
-        let subtitle = match state.export_seconds(export.options.range) {
+        let subtitle = match state.export_seconds(self.options.range) {
             Ok(seconds) => format!(
                 "{}  ·  {}  ·  {}",
-                export.name.text,
-                duration(seconds + export.options.tail_seconds as f64),
+                self.name.text,
+                duration(seconds + self.options.tail_seconds as f64),
                 audio_format(state)
             ),
-            Err(_) => export.name.text.clone(),
+            Err(_) => self.name.text.clone(),
         };
-        let existing = export
+        let existing = self
             .existing
             .as_ref()
             .map(|(_, existing)| existing.clone())
@@ -134,7 +132,7 @@ impl Tonique {
                     .flex()
                     .flex_col()
                     .gap(px(ROW_GAP))
-                    .children(self.export_sources(&rows, &theme, context)),
+                    .children(self.sources(&rows, &theme, context)),
             )
             .child(
                 div()
@@ -143,8 +141,8 @@ impl Tonique {
                     .flex()
                     .flex_col()
                     .gap(px(ROW_GAP))
-                    .children(self.export_settings(files.len(), &theme, context))
-                    .children(self.export_destination(&files, &existing, &theme, window, context)),
+                    .children(self.settings(files.len(), &theme, context))
+                    .children(self.destination(&files, &existing, &theme, window, context)),
             );
 
         let label = match files.len() {
@@ -157,7 +155,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(|this, _, window, context| {
                     context.stop_propagation();
-                    this.start_export(window, context);
+                    this.start(window, context);
                     context.notify();
                 }),
             )
@@ -168,7 +166,7 @@ impl Tonique {
             MouseButton::Left,
             context.listener(|this, _, window, context| {
                 context.stop_propagation();
-                this.close_export(window, context);
+                this.close(window, context);
                 context.notify();
             }),
         );
@@ -191,19 +189,19 @@ impl Tonique {
             .flex_col()
             .gap(px(ROW_GAP))
             .child(header("Export audio", subtitle, &theme))
-            .child(self.export_preview(&rows, &theme, context))
+            .child(self.preview(&rows, &theme, context))
             .child(columns)
             .child(footer)
     }
 
     /// The mix, then every track and group, indented under their group.
-    fn export_sources(
+    fn sources(
         &self,
         rows: &[TrackRow],
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> Vec<gpui::AnyElement> {
-        let selection = &self.export.selection;
+        let selection = &self.selection;
         let mix = on_press(
             source_row(
                 "export-mix",
@@ -215,7 +213,7 @@ impl Tonique {
                 theme,
             ),
             context,
-            |this, _| this.export.selection.mix ^= true,
+            |this, _| this.selection.mix ^= true,
         );
         let small_button =
             |id: &'static str| Flat::ghost(id, 18.).fit(6.).enabled(!rows.is_empty());
@@ -234,7 +232,7 @@ impl Tonique {
                         div().text_size(px(size::LABEL)).child("None"),
                         theme,
                         context,
-                        |this, _| this.export.selection.tracks.clear(),
+                        |this, _| this.selection.tracks.clear(),
                     )
                     .rounded(px(3.)),
             )
@@ -244,7 +242,7 @@ impl Tonique {
                         div().text_size(px(size::LABEL)).child("All"),
                         theme,
                         context,
-                        move |this, _| this.export.selection.tracks = all.clone(),
+                        move |this, _| this.selection.tracks = all.clone(),
                     )
                     .rounded(px(3.)),
             );
@@ -285,7 +283,7 @@ impl Tonique {
                     theme,
                 );
                 on_press(element, context, move |this, _| {
-                    let tracks = &mut this.export.selection.tracks;
+                    let tracks = &mut this.selection.tracks;
                     if !tracks.remove(&id) {
                         tracks.insert(id);
                     }
@@ -301,14 +299,14 @@ impl Tonique {
     }
 
     /// Range, tail and format, with what the files will be like.
-    fn export_settings(
+    fn settings(
         &self,
         files: usize,
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> Vec<gpui::AnyElement> {
         let state = self.state(context);
-        let options = self.export.options;
+        let options = self.options;
         let length = |range| {
             state
                 .export_seconds(range)
@@ -351,12 +349,11 @@ impl Tonique {
             theme,
             context,
             |this, choice| {
-                let export = &mut this.export;
-                export.options.range = match choice {
+                this.options.range = match choice {
                     RangeChoice::Project => ExportRange::Project,
                     RangeChoice::Loop => ExportRange::Loop,
                     RangeChoice::Custom => {
-                        let (start, end) = export.custom.unwrap_or_default();
+                        let (start, end) = this.custom.unwrap_or_default();
                         ExportRange::Custom(start, end)
                     }
                 };
@@ -377,7 +374,7 @@ impl Tonique {
                 .collect(),
             theme,
             context,
-            |this, seconds| this.export.options.tail_seconds = seconds,
+            |this, seconds| this.options.tail_seconds = seconds,
         );
         let formats = choices(
             "export-format",
@@ -389,7 +386,7 @@ impl Tonique {
             ],
             theme,
             context,
-            |this, format| this.export.options.format = format,
+            |this, format| this.options.format = format,
         );
 
         let mut elements = vec![
@@ -412,7 +409,7 @@ impl Tonique {
     /// The custom range's start and end, as `bar.beat.sixteenth`, and how
     /// long it is.
     fn custom_range(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
-        let (start, end) = self.export.custom.unwrap_or_default();
+        let (start, end) = self.custom.unwrap_or_default();
         let seconds = self
             .state(context)
             .export_seconds(ExportRange::Custom(start, end))
@@ -440,18 +437,13 @@ impl Tonique {
             Bound::Start => "export-start-bound",
             Bound::End => "export-end-bound",
         };
-        if let Some((_, field)) = self
-            .export
-            .typing
-            .as_ref()
-            .filter(|(typed, _)| *typed == bound)
-        {
+        if let Some((_, field)) = self.typing.as_ref().filter(|(typed, _)| *typed == bound) {
             return typing_view(
                 id,
                 field,
                 theme,
                 context,
-                |this| this.export.typing.as_mut().map(|(_, field)| field),
+                |this| this.typing.as_mut().map(|(_, field)| field),
                 Self::finish_bound_typing,
             )
             .flex_none()
@@ -480,7 +472,7 @@ impl Tonique {
                     context.stop_propagation();
                     let mut field = TextField::new(context);
                     field.start(typed.clone(), window, context);
-                    this.export.typing = Some((bound, field));
+                    this.typing = Some((bound, field));
                     context.notify();
                 }),
             )
@@ -495,18 +487,18 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        let Some((bound, field)) = self.export.typing.take() else {
+        let Some((bound, field)) = self.typing.take() else {
             return;
         };
-        window.focus(&self.focus, context);
+        crate::app::focus_main(window, context);
         let signature = self.state(context).time_signature();
         let Some(beats) = parse_bars(&field.text, signature).filter(|_| keep) else {
             return;
         };
         let beats =
             BeatPos(((beats * 4.).round() / 4.).clamp(0., MAX_BARS * signature.beats_per_bar()));
-        let (start, end) = self.export.custom.unwrap_or_default();
-        self.export.set_custom(match bound {
+        let (start, end) = self.custom.unwrap_or_default();
+        self.set_custom(match bound {
             Bound::Start => (beats, end),
             Bound::End => (start, beats),
         });
@@ -514,7 +506,7 @@ impl Tonique {
 
     /// The folder and the name the files are named after, and the files
     /// that gives.
-    fn export_destination(
+    fn destination(
         &self,
         files: &[ExportFile],
         existing: &HashSet<PathBuf>,
@@ -533,7 +525,7 @@ impl Tonique {
                     .child("Browse…"),
                 theme,
                 context,
-                |this, context| this.pick_export_folder(context),
+                |this, context| this.pick_folder(context),
             )
             .rounded(px(3.));
         let folder = div()
@@ -543,12 +535,12 @@ impl Tonique {
             .child(field_label("Folder", theme))
             .child(input(
                 "export-folder",
-                &self.export.folder,
+                &self.folder,
                 "Choose a folder…",
                 theme,
                 window,
                 context,
-                |this| &mut this.export.folder,
+                |this| &mut this.folder,
             ))
             .child(browse);
         let name = div()
@@ -558,12 +550,12 @@ impl Tonique {
             .child(field_label("Name", theme))
             .child(input(
                 "export-name",
-                &self.export.name,
+                &self.name,
                 "Untitled",
                 theme,
                 window,
                 context,
-                |this| &mut this.export.name,
+                |this| &mut this.name,
             ));
 
         // What gets written, and what that replaces.
@@ -606,7 +598,7 @@ impl Tonique {
     }
 
     /// Lets the user pick the folder to export into.
-    fn pick_export_folder(&mut self, context: &mut Context<Self>) {
+    fn pick_folder(&mut self, context: &mut Context<Self>) {
         let picked = context.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -622,7 +614,7 @@ impl Tonique {
                     return;
                 };
                 this.update(context, |this, context| {
-                    this.export.folder.text = folder.display().to_string();
+                    this.folder.text = folder.display().to_string();
                     context.notify();
                 })
                 .ok();
@@ -690,8 +682,8 @@ fn input(
     placeholder: &str,
     theme: &Theme,
     window: &Window,
-    context: &mut Context<Tonique>,
-    get: fn(&mut Tonique) -> &mut TextField,
+    context: &mut Context<ExportDialog>,
+    get: fn(&mut ExportDialog) -> &mut TextField,
 ) -> Stateful<gpui::Div> {
     let border = if field.focus.is_focused(window) {
         theme.accent
@@ -725,7 +717,7 @@ fn input(
             context.listener(move |this, event: &KeyDownEvent, window, context| {
                 match get(this).key(event) {
                     FieldKey::Edited => {}
-                    FieldKey::Submit | FieldKey::Cancel => window.focus(&this.focus, context),
+                    FieldKey::Submit | FieldKey::Cancel => crate::app::focus_main(window, context),
                     // Shortcuts go on to the app; other keys stay in the field.
                     FieldKey::Ignored => {
                         let modifiers = &event.keystroke.modifiers;
