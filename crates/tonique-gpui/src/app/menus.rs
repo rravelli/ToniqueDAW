@@ -7,7 +7,7 @@ use gpui::{App, Context};
 
 use crate::{
     app::{
-        PopupKind, Tonique, dialog::Dialog, menu_bar::BarMenu, project::ProjectAction,
+        PopupKind, Workspace, dialog::Dialog, menu_bar::BarMenu, project::ProjectAction,
         settings::SettingsTab,
     },
     config::keymap::Action,
@@ -15,7 +15,7 @@ use crate::{
     widgets::{Menu, MenuItem},
 };
 
-impl Tonique {
+impl Workspace {
     pub(super) fn bar_menu(&self, menu: BarMenu, context: &mut Context<Self>) -> gpui::Div {
         match menu {
             BarMenu::File => self.file_menu(context),

@@ -14,7 +14,7 @@ use gpui::{
 };
 
 use crate::{
-    app::{Tonique, dialog::Dialog},
+    app::{Workspace, dialog::Dialog},
     config::recent::RecentProjects,
     core::{
         project::{EXTENSION, ProjectFile, project_name},
@@ -125,7 +125,7 @@ fn start_dir(files: &ProjectFiles) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-impl Tonique {
+impl Workspace {
     pub fn project_action(
         &mut self,
         action: ProjectAction,

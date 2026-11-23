@@ -84,8 +84,9 @@ fn main() {
                     }
                 },
                 move |window, context| {
-                    context
-                        .new(|context| app::Tonique::new(engine, audio, settings, window, context))
+                    context.new(|context| {
+                        app::Workspace::new(engine, audio, settings, window, context)
+                    })
                 },
             )
             .expect("the window opens");

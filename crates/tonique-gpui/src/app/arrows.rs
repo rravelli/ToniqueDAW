@@ -9,7 +9,7 @@ use gpui::{App, Context, Global, Keystroke, WeakEntity, Window};
 use tonique_engine::edit::TrackId;
 
 use crate::{
-    app::Tonique,
+    app::Workspace,
     bottom::{ClipArrows, KnobArrows},
     headers::Param,
     utils::steps::Presses,
@@ -102,7 +102,7 @@ fn held_with_stepper(context: &App) -> Option<&(ArrowHolder, Stepper)> {
         .and_then(|held| held.0.as_ref())
 }
 
-impl Tonique {
+impl Workspace {
     /// Steps the control holding the arrow keys by `keystroke`, when it's
     /// an arrow and the keyboard is the app's. Returns whether it did.
     pub(super) fn arrow_key(

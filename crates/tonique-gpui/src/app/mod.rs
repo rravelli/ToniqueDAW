@@ -1,7 +1,9 @@
 //! The window: the menu bar and the transport bar on top, the browser on
 //! the left, the timeline and the track list on its right (or the audio
-//! graph in their place), the bottom panel under them. One view
-//! owns Tonique's `ProjectState`, as `ToniqueApp` does in the egui app.
+//! graph in their place), the bottom panel under them. The workspace
+//! lays out those views, each an entity of its own sharing the `Project`
+//! model, and shows the menus and dialogs over them; it passes on what one
+//! panel asks of another, and hears the app-wide shortcuts.
 
 pub mod arrows;
 pub mod command;
@@ -54,7 +56,7 @@ const BROWSER_WIDTH: f32 = 220.;
 const BROWSER_MIN: f32 = 100.;
 const BROWSER_MAX: f32 = 400.;
 
-pub struct Tonique {
+pub struct Workspace {
     pub project: Entity<Project>,
     pub focus: FocusHandle,
     /// The timeline and the track list.
@@ -86,13 +88,13 @@ pub struct Tonique {
     _subscriptions: Vec<Subscription>,
 }
 
-impl HoldsProject for Tonique {
+impl HoldsProject for Workspace {
     fn project(&self) -> &Entity<Project> {
         &self.project
     }
 }
 
-impl Tonique {
+impl Workspace {
     pub fn new(
         engine: Engine,
         audio: Result<AudioHost, String>,
@@ -410,7 +412,7 @@ fn divider(theme: &Theme) -> gpui::Div {
         .bg(hsla(theme.separator))
 }
 
-impl Render for Tonique {
+impl Render for Workspace {
     fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
         if let Some(bench) = &mut self.bench {
             bench.frame(&mut self.project.as_mut(context).state);

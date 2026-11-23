@@ -11,7 +11,7 @@ use gpui::{
 };
 
 use crate::{
-    app::{PopupKind, Tonique, memory},
+    app::{PopupKind, Workspace, memory},
     theme::{Theme, hsla, size},
 };
 
@@ -109,7 +109,7 @@ impl MenuBarUi {
     }
 }
 
-impl Tonique {
+impl Workspace {
     /// Opens `menu` below its title; pressed again, closes it.
     fn open_bar_menu(&mut self, menu: BarMenu, toggle: bool, context: &mut Context<Self>) {
         let Some(title) = self.menu_bar.titles.borrow().get(&menu).copied() else {

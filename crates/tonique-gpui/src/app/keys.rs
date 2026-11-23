@@ -7,7 +7,7 @@ use tonique_engine::time::BeatPos;
 
 use crate::{
     app::{
-        Tonique,
+        Workspace,
         command::{self, Command},
         dialog::Dialog,
         project::ProjectAction,
@@ -38,7 +38,7 @@ fn is_clipboard(keystroke: &Keystroke) -> bool {
     (modifiers.control || modifiers.platform) && !modifiers.alt && !modifiers.shift
 }
 
-impl Tonique {
+impl Workspace {
     /// `action`'s first shortcut, as written in settings (`Ctrl+S`), for
     /// menus; empty when it has none.
     pub(super) fn shortcut_text(&self, action: Action, context: &App) -> String {

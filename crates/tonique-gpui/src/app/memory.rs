@@ -7,7 +7,7 @@ use gpui::{Context, SharedString, div, prelude::*, px};
 use tonique_core::memory::AudioMemory;
 
 use crate::{
-    app::Tonique,
+    app::Workspace,
     cache::AUDIO_ANALYSIS_CACHE,
     theme::{Theme, hsla},
     widgets::Menu,
@@ -72,7 +72,7 @@ fn audio_rows(menu: Menu, theme: &Theme, memory: &AudioMemory) -> Menu {
         ))
 }
 
-impl Tonique {
+impl Workspace {
     pub(super) fn memory_popup(&self, context: &mut Context<Self>) -> gpui::Div {
         let theme = &*crate::theme::current(context);
         let sources = self.state(context).source_memory();

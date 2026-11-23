@@ -10,7 +10,7 @@ use gpui::{
 };
 
 use crate::{
-    app::Tonique,
+    app::Workspace,
     theme::{Theme, hsla, size},
     widgets::{dialog_body, dialog_button, dialog_frame, dialog_title},
 };
@@ -59,7 +59,7 @@ static LOGO: LazyLock<Arc<Image>> = LazyLock::new(|| {
     Arc::new(Image::from_bytes(ImageFormat::Svg, svg.to_vec()))
 });
 
-impl Tonique {
+impl Workspace {
     /// The open dialog over the dimmed window.
     pub(super) fn dialog_view(
         &mut self,
@@ -106,7 +106,7 @@ impl Tonique {
     }
 }
 
-impl Tonique {
+impl Workspace {
     /// Closes the open dialog, the keyboard going back to the app; not an
     /// export while it runs.
     pub(super) fn close_dialog(&mut self, window: &mut Window, context: &mut Context<Self>) {
@@ -119,7 +119,7 @@ impl Tonique {
 }
 
 /// The logo, the app's name and version, and the credits.
-fn about(theme: &Theme, context: &mut Context<Tonique>) -> gpui::Div {
+fn about(theme: &Theme, context: &mut Context<Workspace>) -> gpui::Div {
     let version = format!("gpui-fast prototype, version {}", env!("CARGO_PKG_VERSION"));
     let credits = CREDITS.iter().map(|(work, credit)| {
         div()

@@ -5,7 +5,7 @@ use gpui::{Anchor, Context, Pixels, Point};
 use tonique_engine::edit::{ClipId, PluginId, TrackId};
 
 use crate::{
-    app::{Tonique, menu_bar::BarMenu, settings::AudioChoice},
+    app::{Workspace, menu_bar::BarMenu, settings::AudioChoice},
     browser::ListKind,
     popup::{self, MenuBuilder},
 };
@@ -47,7 +47,7 @@ impl PopupKind {
     }
 }
 
-impl Tonique {
+impl Workspace {
     /// Builds `kind`'s menu, one of the window's, each frame.
     pub fn menu_builder(&self, kind: PopupKind, context: &Context<Self>) -> MenuBuilder {
         popup::builder(context.weak_entity(), move |this, _, context| {

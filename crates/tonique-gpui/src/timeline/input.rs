@@ -1,7 +1,8 @@
 //! The pointer on the timeline: pressing starts a drag (scrubbing, a loop,
 //! a selection zone, moving or trimming clips) or places the edit cursor;
-//! the root view follows the drag; a right-click opens a menu. The wheel
-//! is [`super::scroll`]'s, moving clips [`super::moving`]'s.
+//! the arrangement follows the drag across the window; a right-click opens
+//! a menu. The wheel is [`super::scroll`]'s, moving clips
+//! [`super::moving`]'s.
 
 use crate::model::HoldsProject;
 use crate::timeline::{Arrangement, ArrangementEvent};
