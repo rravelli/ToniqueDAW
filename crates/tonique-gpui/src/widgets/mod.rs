@@ -10,6 +10,7 @@ mod icon_rail;
 mod menu;
 mod number_field;
 mod param_slider;
+mod recheck;
 mod scrollbar;
 mod select;
 mod slider;
@@ -27,6 +28,7 @@ pub use icon_rail::icon_rail;
 pub use menu::{Menu, MenuItem};
 pub use number_field::{NumberField, NumberSpec};
 pub use param_slider::{Scale, SliderDrag, paint_param_slider};
+pub use recheck::Recheck;
 pub use scrollbar::{
     Axis, SCROLLBAR_WIDTH, ScrollSpan, ScrollbarGrab, handle_scrollbar, scrollbar,
 };

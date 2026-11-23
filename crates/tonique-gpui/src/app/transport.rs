@@ -169,6 +169,9 @@ impl TransportBar {
 
 impl Render for TransportBar {
     fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
+        // The playhead's time and the processor's load.
+        self.watch_playback(context);
+        self.watch_load(context);
         let theme = crate::theme::current(context);
         let dragging = self.is_dragging();
         div()

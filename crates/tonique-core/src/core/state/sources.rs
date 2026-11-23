@@ -108,6 +108,11 @@ impl SourceRegistry {
         });
     }
 
+    /// Whether a file clips use is still decoding.
+    pub fn loading(&self) -> bool {
+        self.info.values().any(|audio| audio.data.is_loading())
+    }
+
     pub fn info(&self, id: SourceId) -> Option<&AudioInfo> {
         self.info.get(&id)
     }

@@ -137,6 +137,16 @@ impl AudioData {
         !self.peaks_complete() && !self.failed.load(Ordering::Acquire)
     }
 
+    /// Whether a decode is still under way: the waveform, the rhythm or
+    /// the samples asked for are to come, and no decode failed.
+    pub fn is_loading(&self) -> bool {
+        let started = self.samples_requested() || self.peaks_requested.load(Ordering::Acquire);
+        let samples_pending = self.samples_requested() && !self.is_ready();
+        started
+            && (self.analysis_pending() || samples_pending)
+            && !self.failed.load(Ordering::Acquire)
+    }
+
     /// Whether a decode that keeps the samples has been started.
     pub fn samples_requested(&self) -> bool {
         self.samples_requested.load(Ordering::Acquire)

@@ -41,7 +41,7 @@ use crate::{
     bottom::{BottomPanel, BottomView},
     browser::BrowserPanel,
     config::settings::Settings,
-    core::state::{PlaybackState, ProjectState},
+    core::state::ProjectState,
     graph::GraphView,
     model::{HoldsProject, Project, toggle_play},
     popup::PopupLayer,
@@ -55,6 +55,10 @@ use crate::{
 const BROWSER_WIDTH: f32 = 220.;
 const BROWSER_MIN: f32 = 100.;
 const BROWSER_MAX: f32 = 400.;
+/// Between ticks while something plays: a frame at 120 Hz.
+const FRAME: Duration = Duration::from_micros(8_333);
+/// Between ticks while nothing plays.
+const IDLE_TICK: Duration = Duration::from_millis(100);
 
 pub struct Workspace {
     pub project: Entity<Project>,
@@ -64,7 +68,8 @@ pub struct Workspace {
     /// The audio graph, shown instead of the timeline when open.
     pub graph: Entity<GraphView>,
     pub browser: Entity<BrowserPanel>,
-    pub waves: Rc<RefCell<WaveCache>>,
+    /// Each view's waveforms, for the memory they take.
+    waves: Vec<Rc<RefCell<WaveCache>>>,
     /// Whether the browser shows, as Tonique's left panel, and how wide.
     pub browser_open: bool,
     pub browser_width: Splitter,
@@ -118,17 +123,19 @@ impl Workspace {
             }
         }
 
-        // Tonique's state polls the engine and the file loaders each frame;
-        // when nothing animates, ten times a second is enough.
-        let ticker = context.spawn(async move |this, context| {
+        // Tonique's state polls the engine and the file loaders each frame
+        // while something plays; else ten times a second is enough.
+        let ticker = context.spawn_in(window, async move |this, context| {
             loop {
-                context
-                    .background_executor()
-                    .timer(Duration::from_millis(100))
-                    .await;
-                if this.update(context, |_, context| context.notify()).is_err() {
+                let Ok(playing) = this.update_in(context, |this, window, context| {
+                    let playing = crate::model::tick(&this.project, context);
+                    this.update_title(window, context);
+                    playing
+                }) else {
                     break;
-                }
+                };
+                let wait = if playing { FRAME } else { IDLE_TICK };
+                context.background_executor().timer(wait).await;
             }
         });
 
@@ -142,24 +149,33 @@ impl Workspace {
                 .unwrap_or(true)
         });
         let files = ProjectFiles::new(&state);
-        let project = context.new(|_| Project::new(state));
-        let waves: Rc<RefCell<WaveCache>> = Rc::default();
+        let project = context.new(|context| Project::new(state, context));
+        // A cache per view: each lets go of the tiles it no longer draws
+        // as it renders, and a view not rendered keeps showing its own.
+        let mut waves = Vec::new();
+        let mut new_cache = || {
+            let cache: Rc<RefCell<WaveCache>> = Rc::default();
+            waves.push(cache.clone());
+            cache
+        };
+        let (browser_waves, arrangement_waves, export_waves, bottom_waves) =
+            (new_cache(), new_cache(), new_cache(), new_cache());
         let browser = context
-            .new(|context| BrowserPanel::new(project.clone(), waves.clone(), window, context));
+            .new(|context| BrowserPanel::new(project.clone(), browser_waves, window, context));
         let transport = context.new(|_| TransportBar::new(project.clone()));
         let transport_events = context.subscribe(&transport, Self::on_transport);
-        let arrangement = context.new(|_| Arrangement::new(project.clone(), waves.clone()));
+        let arrangement = context.new(|_| Arrangement::new(project.clone(), arrangement_waves));
         let settings = context
             .new(|context| SettingsDialog::new(project.clone(), themes, theme_warnings, context));
         let settings_events = context.subscribe_in(&settings, window, Self::on_settings);
         let arrangement_events = context.subscribe(&arrangement, Self::on_arrangement);
         let export =
-            context.new(|context| ExportDialog::new(project.clone(), waves.clone(), context));
+            context.new(|context| ExportDialog::new(project.clone(), export_waves, context));
         let export_events = context.subscribe_in(&export, window, Self::on_export);
         Self {
             browser,
             graph: context.new(|_| GraphView::new(project.clone())),
-            bottom: context.new(|_| BottomPanel::new(project.clone(), waves.clone())),
+            bottom: context.new(|_| BottomPanel::new(project.clone(), bottom_waves)),
             arrangement,
             project,
             focus,
@@ -421,16 +437,9 @@ impl Render for Workspace {
         }
         crate::profile::frame();
         self.menu_bar.frame();
-        crate::profile::time("state.update", || self.state_mut(context).update());
-        self.update_title(window, context);
-        self.waves.borrow_mut().start_frame(window);
-        let animating = self.state(context).playback_state() == PlaybackState::Playing
-            || self.state(context).preview_playback_state() == PlaybackState::Playing
-            || context.has_active_drag()
-            || self.is_dragging()
-            // Meters falling back after playback.
-            || self.state(context).metrics.tracks.values().any(crate::meter::is_live);
-        if animating {
+        // The window's own drags; the views follow theirs, and the ticker
+        // what plays.
+        if context.has_active_drag() || self.is_dragging() {
             window.request_animation_frame();
         }
         let shows = Shows {

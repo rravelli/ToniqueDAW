@@ -251,10 +251,13 @@ impl BottomPanel {
 impl Render for BottomPanel {
     /// The panel, while open; the window shows it only then.
     fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
+        self.waves.borrow_mut().start_frame(window);
         if !self.shown.open {
             self.focused = false;
             return div().into_any_element();
         }
+        // The meters, the analysers and the clip's playhead.
+        self.watch_playback(context);
         self.window_height = f32::from(window.viewport_size().height);
         if self.is_animating() {
             window.request_animation_frame();

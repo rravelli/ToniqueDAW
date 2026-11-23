@@ -10,6 +10,7 @@ use crate::{
     app::Workspace,
     cache::AUDIO_ANALYSIS_CACHE,
     theme::{Theme, hsla},
+    wave::WaveMemory,
     widgets::Menu,
 };
 
@@ -77,7 +78,11 @@ impl Workspace {
         let theme = &*crate::theme::current(context);
         let sources = self.state(context).source_memory();
         let cache = AUDIO_ANALYSIS_CACHE.memory();
-        let waves = self.waves.borrow().memory();
+        let waves = self
+            .waves
+            .iter()
+            .map(|cache| cache.borrow().memory())
+            .fold(WaveMemory::default(), WaveMemory::add);
         let resident = self
             .menu_bar
             .resident_bytes()

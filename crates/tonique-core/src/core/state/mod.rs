@@ -204,11 +204,19 @@ impl ProjectState {
         }
     }
 
-    /// Update each frame the state
-    pub fn update(&mut self) {
+    /// Update each frame the state. Returns whether the project changed
+    /// besides what plays (the playhead, the preview, the meters): an
+    /// action handled, a file loaded, the audio lost or back. A UI drawing
+    /// only what changed redraws the project then.
+    pub fn update(&mut self) -> bool {
+        let handled = !self.pending_actions.is_empty();
         self.handle_pending_actions();
+        let audio = (self.audio_lost(), self.audio_error.clone());
         self.watch_audio();
-        for (id, data) in self.sources.poll_loaded() {
+        let audio_changed = audio != (self.audio_lost(), self.audio_error.clone());
+        let loaded = self.sources.poll_loaded();
+        let any_loaded = !loaded.is_empty();
+        for (id, data) in loaded {
             let result = self.session.set_source(id, data);
             report(result);
         }
@@ -227,6 +235,7 @@ impl ProjectState {
         self.update_metrics();
         self.graph
             .update(self.session.engine_mut(), self.monitor_graph);
+        handled || audio_changed || any_loaded
     }
     /// Measure the engine's graph (for the graph view) from the next update.
     pub fn set_monitor_graph(&mut self, on: bool) {
@@ -547,6 +556,12 @@ impl ProjectState {
         self.prune_clip_selection();
     }
     /// What the audio files clips use take, and the engine's copies.
+    /// Whether a file clips use is still decoding: its waveform grows,
+    /// its rhythm and samples are to come.
+    pub fn sources_loading(&self) -> bool {
+        self.sources.loading()
+    }
+
     pub fn source_memory(&self) -> crate::memory::SourceMemory {
         self.sources.memory()
     }

@@ -38,11 +38,12 @@ use missing::MissingView;
 use crate::{
     analysis::AudioInfo,
     config::Config,
+    core::state::PlaybackState,
     icons,
     model::{HoldsProject, Project},
     theme::{Color, FONT_UI, Theme, hsla, icon, size},
     wave::WaveCache,
-    widgets::{TextField, follow_drag, icon_rail},
+    widgets::{Recheck, TextField, follow_drag, icon_rail},
 };
 
 /// Side of the rail's buttons, and so its width.
@@ -141,6 +142,8 @@ pub struct BrowserPanel {
     volume_bounds: Rc<Cell<Bounds<Pixels>>>,
     pub drag: BrowserDrag,
     pub source: BrowserSource,
+    /// Looks again while the selected file decodes or the folders are read.
+    recheck: Recheck,
 }
 
 impl HoldsProject for BrowserPanel {
@@ -194,6 +197,7 @@ impl BrowserPanel {
             volume_bounds: Rc::default(),
             drag: BrowserDrag::None,
             source: BrowserSource::Files,
+            recheck: Recheck::default(),
             config,
         };
         browser.refresh_labels();
@@ -250,6 +254,21 @@ impl BrowserPanel {
 
 impl Render for BrowserPanel {
     fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
+        self.waves.borrow_mut().start_frame(window);
+        // The preview's playhead, while it plays.
+        if self.state(context).preview_playback_state() == PlaybackState::Playing {
+            self.watch_playback(context);
+        }
+        // The selected file's waveform and tempo, the files found for the
+        // missing ones, as they come.
+        let decoding = self
+            .audio
+            .as_ref()
+            .is_some_and(|audio| audio.data.is_loading());
+        let scanning = self.source == BrowserSource::Missing && self.missing.index.is_scanning();
+        if decoding || scanning {
+            self.recheck.soon(context);
+        }
         if !context.has_active_drag() {
             self.folders_over = false;
         }

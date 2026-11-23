@@ -251,6 +251,7 @@ impl ExportDialog {
 
 impl Render for ExportDialog {
     fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
+        self.waves.borrow_mut().start_frame(window);
         self.poll();
         // The files draw themselves as they render.
         if self.is_running() {

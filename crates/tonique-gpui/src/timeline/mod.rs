@@ -324,6 +324,9 @@ impl Arrangement {
 
 impl Render for Arrangement {
     fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
+        self.waves.borrow_mut().start_frame(window);
+        // The playhead, the meters in the track list.
+        self.watch_playback(context);
         self.window_width = f32::from(window.viewport_size().width);
         let scrolling = self.step_scrolling(context) | self.autoscroll(context);
         let dragging = context.has_active_drag() || self.is_dragging();

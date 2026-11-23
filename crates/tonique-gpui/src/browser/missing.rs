@@ -40,7 +40,7 @@ pub struct MissingView {
     scroll: ScrollHandle,
     scrollbar: ScrollbarGrab,
     search: TextField,
-    index: FileIndex,
+    pub(super) index: FileIndex,
     status: Option<Status>,
 }
 
