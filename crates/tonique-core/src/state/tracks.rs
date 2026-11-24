@@ -37,14 +37,14 @@ impl ProjectState {
     /// Add a track at `index`, directly inside `parent` (or at the top
     /// level).
     fn add_track_in(&mut self, index: usize, parent: Option<TrackId>) -> TrackId {
-        let mut track = self.session.create(|e| Track::new(e, TRACK_NAME));
+        let mut track = self.edit_session.create(|e| Track::new(e, TRACK_NAME));
         if let Some(group) = parent {
             track.output = Output::Bus(BusId(group.0));
         }
         let id = track.id;
         let mut view = TrackView::new();
         view.color = self.next_track_color();
-        self.views.insert(id, view);
+        self.view.tracks.insert(id, view);
         self.perform(AddTrack::at(track, index));
         id
     }
@@ -64,7 +64,8 @@ impl ProjectState {
             .track_palette
             .iter()
             .map(|color| {
-                self.views
+                self.view
+                    .tracks
                     .iter()
                     .filter(|(id, view)| **id != MASTER_TRACK_ID && view.color == *color)
                     .count()
@@ -95,10 +96,10 @@ impl ProjectState {
             return;
         };
         let index = self.track_index(*id).unwrap_or(self.track_count());
-        let copy = self.session.create(|e| original.duplicate(e));
+        let copy = self.edit_session.create(|e| original.duplicate(e));
         let copy_id = copy.id;
-        if let Some(view) = self.views.get(id).cloned() {
-            self.views.insert(copy_id, view);
+        if let Some(view) = self.view.tracks.get(id).cloned() {
+            self.view.tracks.insert(copy_id, view);
         }
         self.perform(AddTrack::at(copy, index + 1));
         self.select_track(&copy_id);
@@ -110,7 +111,7 @@ impl ProjectState {
     }
     /// Collapse or expand every row.
     pub fn set_all_collapsed(&mut self, collapsed: bool) {
-        let ids: Vec<TrackId> = self.views.keys().copied().collect();
+        let ids: Vec<TrackId> = self.view.tracks.keys().copied().collect();
         for id in ids {
             self.set_collapsed(&id, collapsed);
         }

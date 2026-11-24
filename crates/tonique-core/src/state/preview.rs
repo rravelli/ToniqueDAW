@@ -52,7 +52,7 @@ impl Preview {
 impl ProjectState {
     pub fn pause_preview(&mut self) {
         self.preview.playback = PlaybackState::Paused;
-        let result = self.session.engine_mut().preview_stop();
+        let result = self.edit_session.engine_mut().preview_stop();
         report(result.map_err(EditError::from));
     }
 
@@ -67,7 +67,7 @@ impl ProjectState {
         self.preview.position = 0;
         self.preview.path = Some(path);
         self.preview.playback = PlaybackState::Playing;
-        let engine = self.session.engine_mut();
+        let engine = self.edit_session.engine_mut();
         engine.preview_set_gain(self.preview.gain);
         let result = engine.preview_play(Box::new(source), 0);
         report(result.map_err(EditError::from));
@@ -76,7 +76,7 @@ impl ProjectState {
     /// How loud the preview plays (linear), now and next time.
     pub fn set_preview_gain(&mut self, gain: f32) {
         self.preview.gain = gain;
-        self.session.engine_mut().preview_set_gain(gain);
+        self.edit_session.engine_mut().preview_set_gain(gain);
     }
 
     /// Continue the last previewed file from `position` (in frames of the
@@ -84,7 +84,7 @@ impl ProjectState {
     pub fn seek_preview(&mut self, position: usize) {
         self.preview.position = position;
         self.preview.playback = PlaybackState::Playing;
-        let result = self.session.engine_mut().preview_seek(position);
+        let result = self.edit_session.engine_mut().preview_seek(position);
         report(result.map_err(EditError::from));
     }
 

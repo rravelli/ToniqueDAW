@@ -27,7 +27,7 @@ impl ProjectState {
         index: usize,
     ) {
         let plugin_kind = setting.map_or(kind.plugin_kind(), |s| s.apply(kind.plugin_kind()));
-        let plugin = self.session.create(|e| Plugin::new(e, plugin_kind));
+        let plugin = self.edit_session.create(|e| Plugin::new(e, plugin_kind));
         for (name, value) in kind.initial_params() {
             if let Some(param) = plugin.param(name) {
                 param.set(*value);
@@ -137,11 +137,11 @@ impl ProjectState {
         self.transaction("Duplicate effects", |s| {
             for (shift, index) in indexes.into_iter().enumerate() {
                 let original = &effects[index].plugin;
-                let mut copy = s.session.create(|e| Plugin::new(e, original.kind));
+                let mut copy = s.edit_session.create(|e| Plugin::new(e, original.kind));
                 copy.bypassed = original.bypassed;
                 copy.name.clone_from(&original.name);
                 if effects[index].collapsed {
-                    s.collapsed_effects.insert(copy.id);
+                    s.view.collapsed_effects.insert(copy.id);
                 }
                 for param in &mut copy.params {
                     if let Some(from) = original.param(param.name) {
@@ -183,7 +183,7 @@ impl ProjectState {
                         Some(Effect {
                             kind: EffectKind::of(&plugin.kind)?,
                             plugin: plugin.clone(),
-                            collapsed: self.collapsed_effects.contains(&plugin.id),
+                            collapsed: self.view.collapsed_effects.contains(&plugin.id),
                         })
                     })
                     .collect()
@@ -205,9 +205,9 @@ impl ProjectState {
     /// Fold an effect to a strip, or unfold it.
     pub fn set_effect_collapsed(&mut self, plugin: PluginId, collapsed: bool) {
         if collapsed {
-            self.collapsed_effects.insert(plugin);
+            self.view.collapsed_effects.insert(plugin);
         } else {
-            self.collapsed_effects.remove(&plugin);
+            self.view.collapsed_effects.remove(&plugin);
         }
     }
     /// Power button: bypass the effect or not, as an undo step.

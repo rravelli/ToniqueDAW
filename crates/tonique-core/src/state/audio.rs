@@ -140,10 +140,10 @@ impl ProjectState {
     /// The engine running now (its settings may differ from the saved ones
     /// until an audio restart).
     pub fn engine_config(&self) -> tonique_engine::engine::EngineConfig {
-        *self.session.engine().config()
+        *self.edit_session.engine().config()
     }
     pub fn cpu_load(&self) -> f32 {
-        self.session.engine().cpu_load()
+        self.edit_session.engine().cpu_load()
     }
     /// Save and apply `settings`, restarting audio if device or engine
     /// settings changed. If the new audio settings don't work, the previous
@@ -186,9 +186,9 @@ impl ProjectState {
         self.output.host = None;
         let (audio, engine) = start_audio(&self.settings).map_err(|e| e.to_string())?;
         let rate = engine.config().sample_rate;
-        let rate_changed = rate != self.session.engine().config().sample_rate;
+        let rate_changed = rate != self.edit_session.engine().config().sample_rate;
         let old_engine = self
-            .session
+            .edit_session
             .replace_engine(engine)
             .map_err(|e| e.to_string())?;
         drop(old_engine);

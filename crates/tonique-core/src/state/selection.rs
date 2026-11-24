@@ -38,31 +38,31 @@ impl SelectionBounds {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClipSelection {
-    clips: Vec<ClipId>,
-    bounds: Option<SelectionBounds>,
+    pub(super) clips: Vec<ClipId>,
+    pub(super) bounds: Option<SelectionBounds>,
 }
 
 impl ProjectState {
     pub fn selected_clips(&self) -> &[ClipId] {
-        &self.clip_selection.clips
+        &self.session.clip_selection.clips
     }
     pub fn is_clip_selected(&self, id: ClipId) -> bool {
-        self.clip_selection.clips.contains(&id)
+        self.session.clip_selection.clips.contains(&id)
     }
     /// The zone the clips were selected with, if any.
     pub fn selection_bounds(&self) -> Option<SelectionBounds> {
-        self.clip_selection.bounds
+        self.session.clip_selection.bounds
     }
     /// Select exactly these clips.
     pub fn select_clips(&mut self, ids: Vec<ClipId>) {
-        self.clip_selection = ClipSelection {
+        self.session.clip_selection = ClipSelection {
             clips: ids,
             bounds: None,
         };
     }
     /// Add the clip to the selection, or remove it if it's already in.
     pub fn toggle_clip_selected(&mut self, id: ClipId) {
-        let selection = &mut self.clip_selection;
+        let selection = &mut self.session.clip_selection;
         selection.bounds = None;
         if let Some(i) = selection.clips.iter().position(|c| *c == id) {
             selection.clips.remove(i);
@@ -75,7 +75,7 @@ impl ProjectState {
         self.select_clips(clips);
     }
     pub fn clear_clip_selection(&mut self) {
-        self.clip_selection = ClipSelection::default();
+        self.session.clip_selection = ClipSelection::default();
     }
     /// Select the clips overlapping `bounds`, and keep the zone.
     pub fn select_in_bounds(&mut self, bounds: SelectionBounds) {
@@ -89,7 +89,7 @@ impl ProjectState {
             .filter(|c| bounds.overlaps(c, bpm))
             .map(|c| c.id)
             .collect();
-        self.clip_selection = ClipSelection {
+        self.session.clip_selection = ClipSelection {
             clips,
             bounds: Some(bounds),
         };
@@ -97,11 +97,12 @@ impl ProjectState {
     /// The time range covered by the selection: its zone, or else the span
     /// of the selected clips.
     pub fn selection_range(&self) -> Option<(BeatPos, BeatPos)> {
-        if let Some(b) = self.clip_selection.bounds {
+        if let Some(b) = self.session.clip_selection.bounds {
             return Some((b.start_pos, b.end_pos));
         }
         let bpm = self.bpm();
-        self.clip_selection
+        self.session
+            .clip_selection
             .clips
             .iter()
             .filter_map(|id| self.find_clip(*id))
@@ -113,13 +114,13 @@ impl ProjectState {
         self.selection_step(|s| s.delete_selected_clips_edit());
     }
     fn delete_selected_clips_edit(&mut self) {
-        if self.clip_selection.bounds.is_none() {
-            let ids = std::mem::take(&mut self.clip_selection).clips;
+        if self.session.clip_selection.bounds.is_none() {
+            let ids = std::mem::take(&mut self.session.clip_selection).clips;
             return self.delete_clips(&ids);
         }
         self.begin_batch();
         self.split_at_zone();
-        let ids = std::mem::take(&mut self.clip_selection).clips;
+        let ids = std::mem::take(&mut self.session.clip_selection).clips;
         self.delete_clips(&ids);
         self.commit_batch();
     }
@@ -128,19 +129,20 @@ impl ProjectState {
     /// selected; the parts outside become new clips. Does nothing without a
     /// zone. Joins the open batch, if any.
     pub fn split_at_zone(&mut self) {
-        let Some(bounds) = self.clip_selection.bounds else {
+        let Some(bounds) = self.session.clip_selection.bounds else {
             return;
         };
         let (start, end) = (bounds.start_pos, bounds.end_pos);
         let bpm = self.bpm();
         let clips: Vec<_> = self
+            .session
             .clip_selection
             .clips
             .iter()
             .filter_map(|id| self.find_clip(*id))
             .filter(|(_, clip)| bounds.overlaps(clip, bpm))
             .collect();
-        self.clip_selection.clips = clips.iter().map(|(_, c)| c.id).collect();
+        self.session.clip_selection.clips = clips.iter().map(|(_, c)| c.id).collect();
         self.clip_ops("Split clips", |s, ops| {
             for (track, clip) in clips {
                 let before = clip.position < start - EDGE;
@@ -170,12 +172,12 @@ impl ProjectState {
         self.selection_step(|s| s.duplicate_selected_clips_edit());
     }
     fn duplicate_selected_clips_edit(&mut self) {
-        let bounds = self.clip_selection.bounds;
+        let bounds = self.session.clip_selection.bounds;
         let copies = self.duplicate_clips(
-            &self.clip_selection.clips.clone(),
+            &self.session.clip_selection.clips.clone(),
             bounds.map(|b| (b.start_pos, b.end_pos)),
         );
-        self.clip_selection = ClipSelection {
+        self.session.clip_selection = ClipSelection {
             clips: copies,
             bounds: bounds.map(|b| SelectionBounds {
                 start_pos: b.end_pos,
@@ -233,22 +235,22 @@ impl ProjectState {
             self.move_clip(&clip.id, &to, clip.position, &ids);
         }
         self.commit_batch();
-        if let Some(b) = &mut self.clip_selection.bounds {
+        if let Some(b) = &mut self.session.clip_selection.bounds {
             b.start_track_index = (b.start_track_index as i32 + delta) as usize;
             b.end_track_index = (b.end_track_index as i32 + delta) as usize;
         }
     }
     /// Move the selection zone along with nudged clips.
     pub(super) fn shift_selection_bounds(&mut self, delta: f64) {
-        if let Some(b) = &mut self.clip_selection.bounds {
+        if let Some(b) = &mut self.session.clip_selection.bounds {
             b.start_pos += delta;
             b.end_pos += delta;
         }
     }
     /// Forget selected clips that no longer exist (e.g. after an undo).
     pub(super) fn prune_clip_selection(&mut self) {
-        let mut clips = std::mem::take(&mut self.clip_selection.clips);
+        let mut clips = std::mem::take(&mut self.session.clip_selection.clips);
         clips.retain(|id| self.find_clip(*id).is_some());
-        self.clip_selection.clips = clips;
+        self.session.clip_selection.clips = clips;
     }
 }

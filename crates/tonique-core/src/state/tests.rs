@@ -472,7 +472,7 @@ fn clips_play_through_the_engine_once_loaded() {
     let mut peak = 0.0f32;
     for _ in 0..200 {
         state.update();
-        state.session.engine().collect_garbage(); // hand over pending graphs
+        state.edit_session.engine().collect_garbage(); // hand over pending graphs
         let out = render_offline(&mut processor, 256, 2);
         peak = out.iter().fold(peak, |m, s| m.max(s.abs()));
         if peak > 0. {
@@ -1466,7 +1466,7 @@ mod projects {
         assert!(tracks[0].clips.iter().all(|clip| clip.audio.missing));
         assert!(tracks[0].clips[1].active_loop().is_some());
         // Silent: exporting doesn't wait for them.
-        assert!(state.sources_ready(state.session.engine().config().sample_rate));
+        assert!(state.sources_ready(state.edit_session.engine().config().sample_rate));
 
         // Older clips are saved as clips of today's projects, and every
         // clip with its file's tempo: the project's, none being saved.

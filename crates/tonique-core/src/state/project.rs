@@ -15,7 +15,10 @@ use tonique_engine::{
     time::BeatPos,
 };
 
-use super::{DEFAULT_BPM, MASTER_TRACK_ID, ProjectState, report, sources::SourceRegistry};
+use super::{
+    DEFAULT_BPM, DocumentView, MASTER_TRACK_ID, ProjectState, Session, report,
+    sources::SourceRegistry,
+};
 use crate::{
     arrangement::clip::{AudioClip, MIN_LENGTH, split_pitch},
     arrangement::grid::Offset,
@@ -37,19 +40,14 @@ impl ProjectState {
     pub fn new_project(&mut self) {
         self.stop();
         self.pause_preview();
-        report(self.session.reset(Edit::new(DEFAULT_BPM)));
+        report(self.edit_session.reset(Edit::new(DEFAULT_BPM)));
 
-        let mut master = TrackView::new();
-        master.name = "Master".into();
-        self.views = HashMap::from([(MASTER_TRACK_ID, master)]);
-        self.collapsed_effects.clear();
-        self.sources = SourceRegistry::new(self.session.engine().config().sample_rate);
-        self.selected_tracks.clear();
-        self.clip_selection = Default::default();
-        self.clear_selection_history();
+        self.view = DocumentView::new();
+        self.sources = SourceRegistry::new(self.edit_session.engine().config().sample_rate);
+        self.session = Session::default();
+        self.history.clear();
         self.pending_actions.clear();
         self.batching = false;
-        self.resized_clip = None;
         self.grid.offset = Offset::ZERO;
         self.grid.settings = Default::default();
         self.sync_time_signature();
@@ -83,7 +81,12 @@ impl ProjectState {
             .filter_map(|bus| edit.bus(*bus).ok())
             .map(|group| {
                 let id = TrackId(group.id.0);
-                let view = self.views.get(&id).cloned().unwrap_or_else(TrackView::new);
+                let view = self
+                    .view
+                    .tracks
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_else(TrackView::new);
                 GroupFile {
                     name: group.name.clone(),
                     color: format_color(view.color),
@@ -100,7 +103,8 @@ impl ProjectState {
             .iter()
             .map(|track| {
                 let view = self
-                    .views
+                    .view
+                    .tracks
                     .get(&track.id)
                     .cloned()
                     .unwrap_or_else(TrackView::new);
@@ -175,7 +179,7 @@ impl ProjectState {
                         kind: EffectKind::of(&plugin.kind)?,
                         name: plugin.name.clone(),
                         enabled: !plugin.bypassed,
-                        collapsed: self.collapsed_effects.contains(&plugin.id),
+                        collapsed: self.view.collapsed_effects.contains(&plugin.id),
                         params: plugin
                             .params
                             .iter()
@@ -214,7 +218,9 @@ impl ProjectState {
         // Parents come first, so each group can go straight into its parent.
         let mut groups: Vec<TrackId> = Vec::new();
         for group in &project.groups {
-            let mut bus = self.session.create(|e| Bus::new(e, group.name.clone()));
+            let mut bus = self
+                .edit_session
+                .create(|e| Bus::new(e, group.name.clone()));
             let parent = group.parent.and_then(|i| groups.get(i)).copied();
             if let Some(parent) = parent {
                 bus.output = Output::Bus(BusId(parent.0));
@@ -228,7 +234,7 @@ impl ProjectState {
             if let Some(color) = parse_color(&group.color) {
                 view.color = color;
             }
-            self.views.insert(id, view);
+            self.view.tracks.insert(id, view);
             if group.soloed {
                 self.perform(SetSolo::bus(BusId(id.0), true));
             }
@@ -267,8 +273,8 @@ impl ProjectState {
         // Whatever the file said, keep groups together and never empty.
         self.normalize();
         self.remove_empty_groups();
-        self.session.clear_history();
-        self.clear_selection_history();
+        self.edit_session.clear_history();
+        self.history.clear();
         problems
     }
 

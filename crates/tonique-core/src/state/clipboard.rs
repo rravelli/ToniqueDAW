@@ -22,7 +22,7 @@ pub struct Clipboard {
 
 impl ProjectState {
     pub fn can_paste(&self) -> bool {
-        !self.clipboard.clips.is_empty()
+        !self.session.clipboard.clips.is_empty()
     }
 
     /// Copy the selected clips (cropped to the selection zone, if any).
@@ -52,7 +52,7 @@ impl ProjectState {
         let Some(top_track) = clips.iter().map(|(t, _)| *t).min() else {
             return false;
         };
-        self.clipboard = Clipboard {
+        self.session.clipboard = Clipboard {
             clips: clips.into_iter().map(|(t, c)| (t - top_track, c)).collect(),
             length: end - start,
             top_track,
@@ -102,13 +102,14 @@ impl ProjectState {
             return;
         }
         let top_track = self
+            .session
             .selected_tracks
             .first()
             .filter(|id| **id != MASTER_TRACK_ID)
             .and_then(|id| self.track_index(*id))
-            .unwrap_or(self.clipboard.top_track);
+            .unwrap_or(self.session.clipboard.top_track);
         let at = self.transport.edit_cursor;
-        let clipboard = self.clipboard.clone();
+        let clipboard = self.session.clipboard.clone();
         let bpm = self.bpm();
         let mut pasted = Vec::new();
         // One undo step; each add sees the previous ones.

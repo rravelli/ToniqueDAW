@@ -127,12 +127,12 @@ impl ProjectState {
     /// Show a clip trimmed (or moved) as `resized` while dragging, without
     /// touching the edit. Use `commit_resize_clip` to apply it.
     pub fn resize_clip(&mut self, resized: AudioClip) {
-        self.resized_clip = Some(resized);
+        self.session.resized_clip = Some(resized);
     }
     /// Apply a trim as one undo step, trimming the clips it now overlaps.
     /// Nothing changes (and no step is recorded) when it's as in the edit.
     pub fn commit_resize_clip(&mut self, resized: AudioClip) {
-        self.resized_clip = None;
+        self.session.resized_clip = None;
         let Some((track, clip)) = self.find_clip(resized.id) else {
             return;
         };
@@ -211,11 +211,15 @@ impl ProjectState {
     }
     /// Whether clip `id` is being trimmed (see [`Self::resize_clip`]).
     pub fn is_resizing(&self, id: ClipId) -> bool {
-        self.resized_clip.as_ref().is_some_and(|r| r.id == id)
+        self.session
+            .resized_clip
+            .as_ref()
+            .is_some_and(|r| r.id == id)
     }
     /// `clip` as shown: as being trimmed, if it is.
     pub fn shown_clip(&self, clip: &AudioClip) -> AudioClip {
-        self.resized_clip
+        self.session
+            .resized_clip
             .as_ref()
             .filter(|r| r.id == clip.id)
             .unwrap_or(clip)
@@ -279,12 +283,12 @@ impl ProjectState {
 
     /// The engine clip for a UI clip, registering its audio file if needed.
     fn engine_clip(&mut self, clip: &AudioClip) -> Clip {
-        let session = &mut self.session;
+        let session = &mut self.edit_session;
         let source = self
             .sources
             .get_or_insert(&clip.audio, || session.create(|e| e.new_source()));
         let mut engine_clip = self
-            .session
+            .edit_session
             .create(|e| Clip::audio(e, clip.position, clip.length, source));
         engine_clip.id = clip.id;
         if let ClipContent::Audio {

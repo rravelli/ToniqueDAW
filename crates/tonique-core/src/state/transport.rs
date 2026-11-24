@@ -163,7 +163,7 @@ impl ProjectState {
     }
     fn seek_playhead(&mut self, beats: BeatPos) {
         self.transport.playhead = beats;
-        let result = self.session.seek(beats);
+        let result = self.edit_session.seek(beats);
         report(result);
     }
     pub fn playhead(&self) -> BeatPos {
@@ -182,14 +182,14 @@ impl ProjectState {
     /// Stop playback and return the playhead to the edit cursor.
     pub fn stop(&mut self) {
         self.transport.playback = PlaybackState::Paused;
-        let result = self.session.stop();
+        let result = self.edit_session.stop();
         report(result);
         self.seek_playhead(self.transport.edit_cursor);
     }
     pub fn play(&mut self) {
         self.transport.playback = PlaybackState::Playing;
         self.pause_preview();
-        let result = self.session.play();
+        let result = self.edit_session.play();
         report(result);
     }
     // Loop
@@ -212,7 +212,7 @@ impl ProjectState {
     /// Hand the loop to the engine, in beats: it keeps it on them through
     /// tempo changes, as it does the playhead.
     pub(super) fn sync_loop(&mut self) {
-        report(self.session.set_loop(self.transport.engine_loop()));
+        report(self.edit_session.set_loop(self.transport.engine_loop()));
     }
     pub fn toggle_metronome(&mut self) {
         self.transport.metronome = !self.transport.metronome;

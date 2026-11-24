@@ -84,7 +84,7 @@ impl ProjectState {
     pub fn is_hidden(&self, id: TrackId) -> bool {
         self.ancestors(id)
             .iter()
-            .any(|g| self.views.get(g).is_some_and(|v| v.collapsed))
+            .any(|g| self.view.tracks.get(g).is_some_and(|v| v.collapsed))
     }
 
     /// The tracks inside `id` however deep, in order; a track is its own.
@@ -233,7 +233,12 @@ impl ProjectState {
     fn group_ref(&self, bus: BusId, depth: usize) -> Option<TrackRow> {
         let group = self.edit().bus(bus).ok()?;
         let id = TrackId(bus.0);
-        let view = self.views.get(&id).cloned().unwrap_or_else(TrackView::new);
+        let view = self
+            .view
+            .tracks
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(TrackView::new);
         let tracks = self.tracks_in(id);
         // Everything inside, for the lane's overview.
         let clips = tracks
@@ -253,7 +258,7 @@ impl ProjectState {
             height: view.height,
             collapsed: view.collapsed,
             color: view.color,
-            selected: self.selected_tracks.contains(&id),
+            selected: self.session.selected_tracks.contains(&id),
             solo: if group.soloed {
                 TrackSoloState::Solo
             } else {
@@ -336,7 +341,7 @@ impl ProjectState {
                 break;
             };
             self.perform(RemoveBus::new(bus));
-            self.selected_tracks.retain(|t| t.0 != bus.0);
+            self.session.selected_tracks.retain(|t| t.0 != bus.0);
         }
     }
 
@@ -399,13 +404,13 @@ impl ProjectState {
         let parent = self.common_parent(&items);
         let number = self.edit().buses.len() + 1;
         let bus = self
-            .session
+            .edit_session
             .create(|e| Bus::new(e, format!("Group {number}")));
         let id = TrackId(bus.id.0);
         let mut view = TrackView::new();
         view.name.clone_from(&bus.name);
         view.color = self.next_track_color();
-        self.views.insert(id, view);
+        self.view.tracks.insert(id, view);
 
         self.transaction("Group", |s| {
             s.perform(AddBus::new(bus));
@@ -434,7 +439,7 @@ impl ProjectState {
             s.perform(RemoveBus::new(BusId(id.0)));
             s.normalize();
         });
-        self.selected_tracks.retain(|t| *t != id);
+        self.session.selected_tracks.retain(|t| *t != id);
     }
 
     /// Delete group `id` with everything inside, as one undo step.
@@ -456,7 +461,8 @@ impl ProjectState {
             }
             s.remove_empty_groups();
         });
-        self.selected_tracks
+        self.session
+            .selected_tracks
             .retain(|t| !tracks.contains(t) && !groups.contains(t));
     }
 
