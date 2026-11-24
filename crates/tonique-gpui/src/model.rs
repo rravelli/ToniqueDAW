@@ -20,10 +20,7 @@ use std::{
 
 use gpui::{App, AppContext, Entity, GpuiBorrow};
 
-use crate::core::{
-    row_layout::RowLayout,
-    state::{PlaybackState, ProjectState},
-};
+use crate::core::{row_layout::RowLayout, state::ProjectState};
 
 pub struct Project {
     /// Read with [`HoldsProject::state`], changed with
@@ -63,10 +60,15 @@ impl Project {
     /// Whether something plays or moves: the playhead, the preview, the
     /// meters falling back after playback.
     pub fn is_playing(&self) -> bool {
-        let state = &self.state;
-        state.playback_state() == PlaybackState::Playing
-            || state.preview_playback_state() == PlaybackState::Playing
-            || state.metrics().tracks.values().any(crate::meter::is_live)
+        self.state.is_playing() || self.meters_live()
+    }
+
+    fn meters_live(&self) -> bool {
+        self.state
+            .metrics()
+            .tracks
+            .values()
+            .any(crate::meter::is_live)
     }
 }
 
@@ -81,9 +83,8 @@ fn tell(signal: &Entity<Signal>, context: &mut App) {
 /// plays, to tick again soon.
 pub fn tick(project: &Entity<Project>, context: &mut App) -> bool {
     project.update(context, |project, context| {
-        let preview = project.state.preview_playback_state();
-        let was_playing = project.is_playing();
-        let changed = crate::profile::time("state.update", || project.state.update());
+        let meters_were_live = project.meters_live();
+        let updated = crate::profile::time("state.update", || project.state.update());
         let now = Instant::now();
         let loading = project.state.sources_loading()
             && project
@@ -94,14 +95,13 @@ pub fn tick(project: &Entity<Project>, context: &mut App) -> bool {
         }
         let playing = project.is_playing();
         // While playing, automation moves the faders the rows show.
-        if changed || loading || playing {
+        if updated.project || loading || playing {
             project.rows.take();
         }
-        if changed || loading {
+        if updated.project || loading {
             context.notify();
         }
-        // Once more as it stops, for the views to show it stopped.
-        if playing || was_playing || preview != project.state.preview_playback_state() {
+        if updated.playback || meters_were_live || playing {
             tell(&project.playback, context);
         }
         let load = (project.state.metrics().latency * 100.).round() as i32;

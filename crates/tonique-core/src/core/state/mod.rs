@@ -77,6 +77,16 @@ pub enum ClipParam {
     Pan,
 }
 
+/// What [`ProjectState::update`] changed.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Updated {
+    /// The project, besides what plays: an action handled, a file loaded,
+    /// the audio lost or back.
+    pub project: bool,
+    /// What plays: the playhead or the preview moved, or one stopped.
+    pub playback: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlaybackState {
     Paused,
@@ -168,11 +178,11 @@ impl ProjectState {
         }
     }
 
-    /// Update each frame the state. Returns whether the project changed
-    /// besides what plays (the playhead, the preview, the meters): an
-    /// action handled, a file loaded, the audio lost or back. A UI drawing
-    /// only what changed redraws the project then.
-    pub fn update(&mut self) -> bool {
+    /// Update each frame the state: follow the engine and the file loaders,
+    /// run what was put off. Says what changed, for a UI drawing only that.
+    pub fn update(&mut self) -> Updated {
+        let was_playing = self.is_playing();
+        let preview = self.preview.playback;
         let handled = !self.pending_actions.is_empty();
         self.handle_pending_actions();
         let audio = (self.audio_lost(), self.output.error.clone());
@@ -192,8 +202,18 @@ impl ProjectState {
         self.preview
             .follow(engine.preview_position(), engine.is_previewing());
         self.diagnostics.update(&mut self.session);
-        handled || audio_changed || any_loaded
+        Updated {
+            project: handled || audio_changed || any_loaded,
+            // Once more as it stops, for the UI to show it stopped.
+            playback: was_playing || self.is_playing() || preview != self.preview.playback,
+        }
     }
+
+    /// Whether the transport or the preview plays.
+    pub fn is_playing(&self) -> bool {
+        self.transport.is_playing() || self.preview.playback == PlaybackState::Playing
+    }
+
     // Engine plumbing
     fn edit(&self) -> &Edit {
         self.session.edit()

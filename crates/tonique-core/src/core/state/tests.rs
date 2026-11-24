@@ -2492,3 +2492,18 @@ fn effects_move_between_tracks() {
     state.undo();
     assert_eq!(ids(&state, &to), [there]);
 }
+
+#[test]
+fn updates_tell_what_changed() {
+    let mut state = setup_state();
+    state.update();
+    assert_eq!(state.update(), super::Updated::default(), "nothing to tell");
+    let track = state.add_track();
+    state.delete_track(&track);
+    assert!(state.update().project, "the deletion put off, run");
+    state.play();
+    assert!(state.update().playback);
+    // Stopped from the UI, which knows: nothing plays at the next update.
+    state.stop();
+    assert!(!state.update().playback);
+}
