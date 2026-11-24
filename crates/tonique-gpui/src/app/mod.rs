@@ -427,7 +427,7 @@ fn divider(theme: &Theme) -> gpui::Div {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
         if let Some(bench) = &mut self.bench {
-            bench.frame(&mut self.project.as_mut(context).state);
+            bench.frame(&mut self.project.state_mut(context));
             // Every frame, as the egui app draws.
             window.request_animation_frame();
         }

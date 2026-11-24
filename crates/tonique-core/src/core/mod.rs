@@ -6,5 +6,6 @@ pub mod graph_monitor;
 pub mod grid;
 pub mod metrics;
 pub mod project;
+pub mod row_layout;
 pub mod state;
 pub mod track;

@@ -321,17 +321,17 @@ impl BottomPanel {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> AnyElement {
-        let bpm = self.state(context).bpm();
+        let state = self.state(context);
+        let (bpm, time_signature, grid_settings) =
+            (state.bpm(), state.time_signature(), state.grid.settings);
         let details = &mut self.clip;
         if details.clip != Some(clip.id) {
             details.typing = None;
             details.clip = Some(clip.id);
         }
-        details
-            .grid
-            .set_time_signature(self.project.read(context).state.time_signature());
+        details.grid.set_time_signature(time_signature);
         // The arrangement's grid settings, at this view's zoom.
-        details.grid.settings = self.project.read(context).state.grid.settings;
+        details.grid.settings = grid_settings;
         // Played faster or slower: the file spans fewer or more beats, the
         // view kept as it was.
         details.speed = clip.speed(bpm);

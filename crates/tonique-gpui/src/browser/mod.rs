@@ -163,8 +163,7 @@ impl BrowserPanel {
         let mut files = FileList::new(context);
         files.set_roots(config.list_dirs(), config.collapsed_dirs());
         project
-            .as_mut(context)
-            .state
+            .state_mut(context)
             .set_preview_gain(preview::preview_gain(config.preview_volume()));
         // The folders are read again when the window gets the focus back.
         context
@@ -239,7 +238,7 @@ impl BrowserPanel {
     pub fn show_missing_files(&mut self, path: Option<PathBuf>, context: &mut App) {
         self.set_browser_source(BrowserSource::Missing);
         if let Some(path) = path {
-            let state = &self.project.read(context).state;
+            let state = self.state(context);
             self.missing.select_path(state, &path);
         }
     }

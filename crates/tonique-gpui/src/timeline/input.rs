@@ -15,12 +15,7 @@ use tonique_engine::time::BeatPos;
 use crate::{
     app::{PopupKind, focus_main},
     core::{clip::AudioClip, state::SelectionBounds},
-    timeline::{
-        LOOP_HEIGHT, RULER_HEIGHT,
-        moving::ClipMove,
-        rows::{ClipPart, rows},
-        ruler::LoopGrab,
-    },
+    timeline::{LOOP_HEIGHT, RULER_HEIGHT, moving::ClipMove, rows::ClipPart, ruler::LoopGrab},
 };
 
 /// Pixels the pointer moves before a press on a lane draws a zone.
@@ -108,7 +103,7 @@ impl Arrangement {
         local_y: f32,
         context: &mut Context<Self>,
     ) -> TimelineDrag {
-        let rows = rows(self.state(context));
+        let rows = self.rows(context);
         let hit = self.clip_at(&rows, local_x, local_y, context);
         // A double-click on a clip shows its details in the bottom panel.
         if event.click_count >= 2
@@ -175,7 +170,7 @@ impl Arrangement {
         if self.in_footer(local_y, context) {
             return;
         }
-        let kind = match self.clip_at(&rows(self.state(context)), local_x, local_y, context) {
+        let kind = match self.clip_at(&self.rows(context), local_x, local_y, context) {
             Some((_, clip, _)) => {
                 if !self.state(context).is_clip_selected(clip.id) {
                     self.state_mut(context).select_clips(vec![clip.id]);
@@ -268,7 +263,7 @@ impl Arrangement {
         if track_count == 0 {
             return;
         }
-        let rows = rows(self.state(context));
+        let rows = self.rows(context);
         let track = self
             .pointer_track(&rows, local_y, context)
             .min(track_count - 1);

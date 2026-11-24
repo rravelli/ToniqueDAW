@@ -45,7 +45,7 @@ const SLIDER_HEIGHT: f32 = 16.;
 const PAN_WIDTH: f32 = 34.;
 /// Wide enough for the volume to show its unit.
 const VOLUME_UNIT_WIDTH: f32 = 64.;
-pub const ROW_GAP: f32 = 3.0;
+pub use crate::core::row_layout::ROW_GAP;
 /// Indentation per level of groups, up to [`MAX_INDENT_LEVELS`] (deeper
 /// rows line up with the deepest shown level).
 const INDENT: f32 = 8.;

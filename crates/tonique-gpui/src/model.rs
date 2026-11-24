@@ -6,18 +6,31 @@
 //! notified when it's edited, or when an update changed it (a file loaded,
 //! the audio lost); what plays, and the processor's load, have signals of
 //! their own, which only the views showing them watch.
+//!
+//! The rows of the arrangement are laid out once each time the project
+//! changes, for every view to share: every change goes through
+//! [`StateMut`], or the ticker.
 
 use std::{
+    cell::RefCell,
     ops::{Deref, DerefMut},
+    rc::Rc,
     time::{Duration, Instant},
 };
 
 use gpui::{App, AppContext, Entity, GpuiBorrow};
 
-use crate::core::state::{PlaybackState, ProjectState};
+use crate::core::{
+    row_layout::RowLayout,
+    state::{PlaybackState, ProjectState},
+};
 
 pub struct Project {
-    pub state: ProjectState,
+    /// Read with [`HoldsProject::state`], changed with
+    /// [`HoldsProject::state_mut`].
+    state: ProjectState,
+    /// The rows laid out, until the project changes.
+    rows: RefCell<Option<Rc<RowLayout>>>,
     /// Notified as the playhead, the preview and the meters move.
     playback: Entity<Signal>,
     /// Notified as the processor's load shown changes.
@@ -39,6 +52,7 @@ impl Project {
     pub fn new(state: ProjectState, context: &mut App) -> Self {
         Self {
             state,
+            rows: RefCell::default(),
             playback: context.new(|_| Signal),
             load: context.new(|_| Signal),
             load_shown: 0,
@@ -78,10 +92,14 @@ pub fn tick(project: &Entity<Project>, context: &mut App) -> bool {
         if loading {
             project.loading_told = Some(now);
         }
+        let playing = project.is_playing();
+        // While playing, automation moves the faders the rows show.
+        if changed || loading || playing {
+            project.rows.take();
+        }
         if changed || loading {
             context.notify();
         }
-        let playing = project.is_playing();
         // Once more as it stops, for the views to show it stopped.
         if playing || was_playing || preview != project.state.preview_playback_state() {
             tell(&project.playback, context);
@@ -109,6 +127,7 @@ impl Deref for StateMut<'_> {
 
 impl DerefMut for StateMut<'_> {
     fn deref_mut(&mut self) -> &mut ProjectState {
+        self.0.rows.get_mut().take();
         &mut self.0.state
     }
 }
@@ -119,6 +138,17 @@ pub trait HoldsProject {
 
     fn state<'app>(&self, app: &'app App) -> &'app ProjectState {
         &self.project().read(app).state
+    }
+
+    /// The rows of the arrangement, laid out from 0 down; again only once
+    /// the project changed.
+    fn rows(&self, app: &App) -> Rc<RowLayout> {
+        let project = self.project().read(app);
+        project
+            .rows
+            .borrow_mut()
+            .get_or_insert_with(|| Rc::new(project.state.row_layout()))
+            .clone()
     }
 
     fn state_mut<'app>(&self, app: &'app mut App) -> StateMut<'app> {
@@ -134,5 +164,12 @@ pub trait HoldsProject {
     /// Renders the view again as the processor's load shown changes.
     fn watch_load(&self, app: &App) {
         self.project().read(app).load.read(app);
+    }
+}
+
+/// Wherever the project's entity is at hand.
+impl HoldsProject for Entity<Project> {
+    fn project(&self) -> &Entity<Project> {
+        self
     }
 }

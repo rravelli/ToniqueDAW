@@ -164,7 +164,7 @@ impl ExportDialog {
     }
 
     fn start(&mut self, window: &mut Window, context: &mut Context<Self>) {
-        let state = &self.project.read(context).state;
+        let state = self.state(context);
         let sources = self.selection.sources(state);
         let dir = PathBuf::from(self.folder.text.trim());
         let started = state.export(&dir, &self.name.text, &sources, self.options);

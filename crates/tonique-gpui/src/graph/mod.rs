@@ -211,7 +211,7 @@ impl GraphView {
     /// changed or was just shown.
     fn scene(&mut self, window: &Window, context: &App) -> GraphScene {
         let theme = crate::theme::current(context);
-        let state = &self.project.read(context).state;
+        let state = self.state(context);
         let Some(topology) = state.graph.topology().cloned() else {
             return GraphScene::empty(theme);
         };

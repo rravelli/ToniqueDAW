@@ -36,8 +36,9 @@ use gpui::{
     MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, Window, canvas, div, prelude::*, px,
 };
 
+pub use crate::core::row_layout::{ROW_GAP, Row, RowLayout};
 pub use drop::DropTarget;
-pub use rows::{FOOTER_PADDING, Row, footer_height, rows, rows_height};
+pub use rows::{FOOTER_PADDING, footer_height};
 
 use tonique_engine::edit::{ClipId, TrackId};
 
@@ -58,8 +59,6 @@ pub const LOOP_HEIGHT: f32 = 12.;
 pub const BARS_HEIGHT: f32 = 20.;
 pub const TIME_HEIGHT: f32 = 16.;
 pub const RULER_HEIGHT: f32 = LOOP_HEIGHT + BARS_HEIGHT + TIME_HEIGHT;
-/// Between rows, as `ROW_GAP` in Tonique's track headers.
-pub const ROW_GAP: f32 = 3.;
 /// How opaque a row an effect would be dropped on is lit, its lane and
 /// its header, and how thick its outline is.
 pub const DROP_FILL_ALPHA: u8 = 40;
@@ -196,7 +195,7 @@ impl Arrangement {
         popup::toggle(kind, at, anchor, build, context);
     }
 
-    fn cursor(&self, rows: &[Row], context: &App) -> CursorStyle {
+    fn cursor(&self, rows: &RowLayout, context: &App) -> CursorStyle {
         match &self.timeline.drag {
             TimelineDrag::Move(press) if press.dragged.is_some() => return CursorStyle::ClosedHand,
             TimelineDrag::Zone { moved: true, .. } => return CursorStyle::IBeam,
@@ -235,7 +234,7 @@ impl Arrangement {
     /// The ruler and the lanes of `rows`, the rows this frame shows.
     pub fn timeline_view(
         &mut self,
-        rows: &[Row],
+        rows: &RowLayout,
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -299,7 +298,11 @@ impl Arrangement {
 
     /// Down the track list's far side, along the lanes: the rows scroll
     /// with them.
-    pub fn rows_scrollbar(&self, rows: &[Row], context: &mut Context<Self>) -> impl IntoElement {
+    pub fn rows_scrollbar(
+        &self,
+        rows: &RowLayout,
+        context: &mut Context<Self>,
+    ) -> impl IntoElement {
         let span = self.rows_span(rows, context);
         let this = context.weak_entity();
         scrollbar(
@@ -338,9 +341,9 @@ impl Render for Arrangement {
             self.timeline.drop_target = None;
             self.timeline.effect_target = None;
         }
-        // The rows as this frame shows them, for both: building them clones
-        // every track's clips.
-        let rows = rows(self.state(context));
+        // The rows as this frame shows them, for both: laid out once each
+        // time the project changes.
+        let rows = self.rows(context);
         let theme = crate::theme::current(context);
         let following = self.is_dragging();
         div()

@@ -18,10 +18,10 @@ use crate::{
     geometry::Rect,
     theme::{Color, Theme, with_alpha},
     timeline::{
-        FOOTER_PADDING, RULER_HEIGHT, footer_height,
+        FOOTER_PADDING, RULER_HEIGHT, RowLayout, footer_height,
         input::TimelineDrag,
         moving::{ClipMove, DraggedClips},
-        rows::{ClipPart, HEADER_HEIGHT, Row, Span, handle_rect, rows_height},
+        rows::{ClipPart, HEADER_HEIGHT, Span, handle_rect},
         ruler::LoopGrab,
     },
     utils::format_time,
@@ -134,7 +134,7 @@ impl Arrangement {
     /// `in_view`, a span of the scrolled content.
     pub(super) fn scene(
         &self,
-        rows: &[Row],
+        rows: &RowLayout,
         in_view: (f32, f32),
         theme: std::rc::Rc<Theme>,
         context: &App,
@@ -240,7 +240,7 @@ impl Arrangement {
     /// The rows, and their clips: one being trimmed over its neighbours.
     fn scene_clips(
         &self,
-        rows: &[Row],
+        rows: &RowLayout,
         in_view: (f32, f32),
         theme: &Theme,
         context: &App,
@@ -254,7 +254,7 @@ impl Arrangement {
         let lit = self.lit_header(rows, context);
         let mut scene_rows = Vec::new();
         let mut clips = Vec::new();
-        for row in rows {
+        for row in rows.iter() {
             let track = &row.track;
             scene_rows.push(SceneRow {
                 top: self.row_top(row, context),
@@ -298,7 +298,7 @@ impl Arrangement {
     /// What's inside a group, in a band as tall as a collapsed row at the
     /// top of its lane: a strip per track in it, in order, with that
     /// track's clips in its colour, faint so they don't pass for clips.
-    fn group_overview(&self, row: &Row, context: &App) -> Vec<(Rect, Color)> {
+    fn group_overview(&self, row: &crate::timeline::Row, context: &App) -> Vec<(Rect, Color)> {
         let state = self.state(context);
         let tracks = state.group_tracks(row.track.id);
         if tracks.is_empty() {
@@ -349,7 +349,7 @@ impl Arrangement {
 
     /// The dragged clips where they'd land, selected, over everything; on
     /// the tracks a drop would add, in the colours they'll get.
-    fn scene_dragged(&self, rows: &[Row], theme: &Theme, context: &App) -> Vec<SceneClip> {
+    fn scene_dragged(&self, rows: &RowLayout, theme: &Theme, context: &App) -> Vec<SceneClip> {
         let Some(dragged) = self.dragged_clips() else {
             return Vec::new();
         };
@@ -390,7 +390,7 @@ impl Arrangement {
     }
 
     /// The lanes of the tracks a drag of clips or audio would add.
-    fn scene_new_lanes(&self, rows: &[Row], context: &App) -> Vec<(f32, Color)> {
+    fn scene_new_lanes(&self, rows: &RowLayout, context: &App) -> Vec<(f32, Color)> {
         let track_count = self.state(context).track_count();
         let count = match (self.dragged_clips(), &self.timeline.drop_target) {
             (Some(dragged), _) => dragged.added_tracks(track_count),
@@ -407,7 +407,7 @@ impl Arrangement {
 
     /// The selection zone: from the top of its first track's row to the
     /// bottom of its last's (a collapsed group's, for a hidden track).
-    fn scene_zone(&self, rows: &[Row], context: &App) -> Option<Rect> {
+    fn scene_zone(&self, rows: &RowLayout, context: &App) -> Option<Rect> {
         let zone = self.state(context).selection_bounds()?;
         let (top, _) = self.track_span(rows, zone.start_track_index, context);
         let (last_top, last_height) = self.track_span(rows, zone.end_track_index, context);
@@ -427,7 +427,7 @@ impl Arrangement {
 
     /// Over a clip's body while not dragging: where a click would place
     /// the edit cursor (snapped as it would be), and the body.
-    fn cursor_hint(&self, rows: &[Row], context: &App) -> Option<(f32, Rect)> {
+    fn cursor_hint(&self, rows: &RowLayout, context: &App) -> Option<(f32, Rect)> {
         let (TimelineDrag::None, Some((local_x, local_y))) =
             (&self.timeline.drag, self.timeline.hover)
         else {
@@ -455,7 +455,7 @@ impl Arrangement {
     }
 
     /// The trim handle being dragged, or else under the pointer.
-    fn lit_handle(&self, rows: &[Row], context: &App) -> Option<Rect> {
+    fn lit_handle(&self, rows: &RowLayout, context: &App) -> Option<Rect> {
         if let TimelineDrag::Trim {
             original,
             start_edge,
@@ -485,7 +485,7 @@ impl Arrangement {
     }
 
     /// The clip whose header the pointer is over, while not dragging.
-    fn lit_header(&self, rows: &[Row], context: &App) -> Option<ClipId> {
+    fn lit_header(&self, rows: &RowLayout, context: &App) -> Option<ClipId> {
         let (TimelineDrag::None, Some((local_x, local_y))) =
             (&self.timeline.drag, self.timeline.hover)
         else {
@@ -499,7 +499,7 @@ impl Arrangement {
 
     /// The lane an effect would be dropped on: a track's, or the master's
     /// in the footer, as high as its header.
-    fn scene_effect_drop(&self, rows: &[Row], context: &App) -> Option<(f32, f32)> {
+    fn scene_effect_drop(&self, rows: &RowLayout, context: &App) -> Option<(f32, f32)> {
         let target = self.timeline.effect_target?;
         if target == MASTER_TRACK_ID {
             let master = self.state(context).master_track();
@@ -510,7 +510,7 @@ impl Arrangement {
     }
 
     /// The clip a drop would add.
-    fn scene_drop(&self, rows: &[Row], theme: &Theme, context: &App) -> Option<SceneClip> {
+    fn scene_drop(&self, rows: &RowLayout, theme: &Theme, context: &App) -> Option<SceneClip> {
         let target = self.timeline.drop_target.as_ref()?;
         let state = self.state(context);
         let track = target
@@ -522,7 +522,7 @@ impl Arrangement {
                 (top, height, track.color)
             }
             _ => (
-                RULER_HEIGHT + rows_height(rows) - state.grid.offset.y,
+                RULER_HEIGHT + rows.height() - state.grid.offset.y,
                 DEFAULT_TRACK_HEIGHT,
                 state
                     .new_track_colors(1)

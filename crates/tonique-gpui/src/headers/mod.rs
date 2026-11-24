@@ -37,7 +37,7 @@ use crate::{
     meter::paint_meter,
     smooth_scroll::WheelDelta,
     theme::{Theme, hsla, size},
-    timeline::{FOOTER_PADDING, RULER_HEIGHT, Row, footer_height, rows_height},
+    timeline::{FOOTER_PADDING, RULER_HEIGHT, RowLayout, footer_height},
     widgets::{Edge, Flat, SCROLLBAR_WIDTH, Splitter, TextField, glyph, splitter_handle},
 };
 use drag::{HeaderDrag, RowMarker};
@@ -140,7 +140,7 @@ impl Arrangement {
     /// The headers of `rows`, the rows this frame shows.
     pub fn headers_view(
         &mut self,
-        rows: &[Row],
+        rows: &RowLayout,
         window: &Window,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -359,7 +359,7 @@ impl Arrangement {
     /// their space.
     fn header_list(
         &self,
-        rows: &[Row],
+        rows: &RowLayout,
         in_view: (f32, f32),
         theme: &Theme,
         context: &mut Context<Self>,
@@ -369,12 +369,8 @@ impl Arrangement {
         // Each header at its row's top, as the timeline places its lanes:
         // stacked in a flex column, each height would round to device
         // pixels on its own, and the rounding would add up down the list.
-        let mut placed = div()
-            .relative()
-            .flex_none()
-            .w_full()
-            .h(px(rows_height(rows)));
-        for row in rows {
+        let mut placed = div().relative().flex_none().w_full().h(px(rows.height()));
+        for row in rows.iter() {
             if !row.overlaps(in_view) && self.rename_field(row.track.id).is_none() {
                 continue;
             }
@@ -455,7 +451,7 @@ impl Arrangement {
     /// `in_view`.
     fn collapsed_list(
         &self,
-        rows: &[Row],
+        rows: &RowLayout,
         in_view: (f32, f32),
         theme: &Theme,
         context: &mut Context<Self>,
@@ -465,7 +461,7 @@ impl Arrangement {
             .top(px(RULER_HEIGHT - self.state(context).grid.offset.y))
             .left_0()
             .right_0()
-            .h(px(rows_height(rows)));
+            .h(px(rows.height()));
         for row in rows.iter().filter(|row| row.overlaps(in_view)) {
             list = list.child(
                 div()
@@ -551,7 +547,7 @@ impl Arrangement {
 
 /// Each expanded group's colour bar, extended down to its last row so its
 /// scope shows: local to the list, and in its colour.
-fn group_scopes(rows: &[Row], theme: &Theme) -> Vec<(Rect, crate::theme::Color)> {
+fn group_scopes(rows: &RowLayout, theme: &Theme) -> Vec<(Rect, crate::theme::Color)> {
     rows.iter()
         .filter(|row| {
             let group = &row.track;

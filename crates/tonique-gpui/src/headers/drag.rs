@@ -15,7 +15,7 @@ use crate::{
         track::{TrackKind, TrackRow},
     },
     headers::{COLLAPSE_PAST, MAX_ROW_HEIGHT},
-    timeline::{ROW_GAP, RULER_HEIGHT, rows},
+    timeline::{ROW_GAP, RULER_HEIGHT},
     utils::steps::Presses,
     widgets::{Scale, SliderDrag},
 };
@@ -240,7 +240,8 @@ impl Arrangement {
             return None;
         };
         let offset = self.state(context).grid.offset.y;
-        let rows: Vec<ListRow> = rows(self.state(context))
+        let rows: Vec<ListRow> = self
+            .rows(context)
             .iter()
             .map(|row| ListRow {
                 track: row.track.id,

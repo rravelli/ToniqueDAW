@@ -12,7 +12,7 @@ use crate::{
     ui::{
         arrangement::clip::ClipView,
         arrangement::{
-            row_layout::RowLayout,
+            row_layout::{RowLayout, RowSpans},
             timeline::{drag::ClipDrag, selection::RubberBand},
             track_header::ROW_GAP,
         },
@@ -166,7 +166,7 @@ impl Timeline {
         if dragging && let Some(p) = pointer.filter(|p| viewport.contains(*p)) {
             for row in layout.rows() {
                 let track = &row.track;
-                if track.kind == TrackKind::Group && track.collapsed && row.y.contains(p.y) {
+                if track.kind == TrackKind::Group && track.collapsed && row.y().contains(p.y) {
                     state.set_collapsed(&track.id, false);
                     self.hover_expanded.push(track.id);
                     changed = true;
@@ -176,7 +176,7 @@ impl Timeline {
         // A group's span runs to the end of its last row.
         let scope = |id: TrackId| {
             let row = layout.rows().iter().find(|r| r.track.id == id)?;
-            Some(Rangef::new(row.scope.min, row.scope.max + ROW_GAP))
+            Some(Rangef::new(row.scope().min, row.scope().max + ROW_GAP))
         };
         self.hover_expanded.retain(|group| {
             let inside = pointer
@@ -216,11 +216,11 @@ impl Timeline {
         for row in layout.rows() {
             let track = &row.track;
             // Skip if track is entirely outside the visible vertical range
-            if row.y.max < viewport.top() || row.y.min > viewport.bottom() {
+            if row.y().max < viewport.top() || row.y().min > viewport.bottom() {
                 continue;
             }
 
-            let track_rect = Rect::from_x_y_ranges(viewport.x_range(), row.y);
+            let track_rect = Rect::from_x_y_ranges(viewport.x_range(), row.y());
 
             if ui.input(|i| {
                 i.pointer.primary_pressed()
@@ -258,7 +258,7 @@ impl Timeline {
                     state,
                     workspace,
                     viewport,
-                    row.y.min,
+                    row.y().min,
                     dragged_ids.contains(&clip.id),
                 );
                 if dragged_clip.is_none() && dragged {
@@ -271,7 +271,7 @@ impl Timeline {
                 paint_start_line(ui, state, track_rect);
             }
             self.handle_track_hover(ui, state, workspace, track, track_rect);
-            self.paint_track_separator(ui, viewport, row.y.max);
+            self.paint_track_separator(ui, viewport, row.y().max);
         }
 
         self.handle_dragged_clips(

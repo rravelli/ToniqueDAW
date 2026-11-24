@@ -12,7 +12,7 @@ use tonique_engine::{
     time::BeatPos,
 };
 
-use crate::{core::clip::AudioClip, timeline::rows::rows};
+use crate::core::clip::AudioClip;
 
 /// Pixels the pointer moves before a press on a clip becomes a move.
 const MOVE_THRESHOLD: f64 = 3.;
@@ -153,8 +153,8 @@ impl Arrangement {
         alt: bool,
         context: &App,
     ) {
+        let rows = self.rows(context);
         let state = self.state(context);
-        let rows = rows(state);
         // Below the rows: on new tracks; the topmost clip not above the first.
         let lowest_offset = dragged
             .clips

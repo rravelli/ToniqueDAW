@@ -16,7 +16,7 @@ use crate::{
     browser::DraggedAudio,
     cache::AUDIO_ANALYSIS_CACHE,
     core::{clip::AudioClip, state::MASTER_TRACK_ID},
-    timeline::{RULER_HEIGHT, rows::rows},
+    timeline::RULER_HEIGHT,
 };
 
 /// Where audio dragged over the timeline would land.
@@ -46,7 +46,7 @@ impl Arrangement {
         if self.in_footer(local_y, context) {
             return None;
         }
-        let rows = rows(self.state(context));
+        let rows = self.rows(context);
         Some(DropTarget {
             audio,
             track_index: self.track_at(&rows, local_y.max(RULER_HEIGHT), context),
@@ -120,7 +120,7 @@ impl Arrangement {
         if self.in_footer(local_y, context) {
             return Some(MASTER_TRACK_ID);
         }
-        let rows = rows(self.state(context));
+        let rows = self.rows(context);
         self.row_at(&rows, local_y, context)
             .map(|row| rows[row].track.id)
     }

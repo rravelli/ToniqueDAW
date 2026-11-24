@@ -17,10 +17,7 @@ use gpui::{App, Context, ScrollEvent, Window};
 use crate::{
     core::{state::PlaybackState, track::DEFAULT_TRACK_HEIGHT},
     smooth_scroll::{SmoothScroll, WheelDelta},
-    timeline::{
-        RULER_HEIGHT,
-        rows::{Row, rows, rows_height},
-    },
+    timeline::{RULER_HEIGHT, RowLayout},
     widgets::{ScrollSpan, ScrollbarGrab},
 };
 
@@ -121,9 +118,9 @@ impl Arrangement {
         if delta_y == 0. {
             return;
         }
-        let rows = rows(self.state(context));
+        let rows = self.rows(context);
         let lanes_height = self.lanes_bottom(context) - RULER_HEIGHT;
-        let max = (rows_height(&rows) + DEFAULT_TRACK_HEIGHT - lanes_height).max(0.);
+        let max = (rows.height() + DEFAULT_TRACK_HEIGHT - lanes_height).max(0.);
         let offset = &mut self.state_mut(context).grid.offset.y;
         let to = (*offset - delta_y).clamp(0., max);
         if to == *offset {
@@ -133,9 +130,9 @@ impl Arrangement {
     }
 
     /// The rows' scroll, as far as [`Self::scroll_rows`] goes.
-    pub fn rows_span(&self, rows: &[Row], context: &App) -> ScrollSpan {
+    pub fn rows_span(&self, rows: &RowLayout, context: &App) -> ScrollSpan {
         let view = self.lanes_bottom(context) - RULER_HEIGHT;
-        let content = rows_height(rows) + DEFAULT_TRACK_HEIGHT;
+        let content = rows.height() + DEFAULT_TRACK_HEIGHT;
         ScrollSpan {
             offset: self.state(context).grid.offset.y,
             max: (content - view).max(0.),
@@ -237,16 +234,13 @@ impl Arrangement {
     /// again.
     pub fn follow_playhead(&mut self, dragging: bool, context: &mut App) {
         let playing = self.state(context).playback_state() == PlaybackState::Playing;
+        let follow = self.state(context).follow_playhead();
         let scroll = &mut self.timeline.scroll;
         if playing && !scroll.was_playing {
             scroll.follow_paused = false;
         }
         scroll.was_playing = playing;
-        if !playing
-            || !self.project.read(context).state.follow_playhead()
-            || scroll.follow_paused
-            || dragging
-        {
+        if !playing || !follow || scroll.follow_paused || dragging {
             return;
         }
         let playhead_x = self

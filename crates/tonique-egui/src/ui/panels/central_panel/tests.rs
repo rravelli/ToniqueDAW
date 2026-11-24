@@ -1,5 +1,6 @@
 use super::*;
 use crate::ui::RectSpan;
+use crate::ui::arrangement::row_layout::RowSpans;
 
 #[test]
 fn the_edit_cursor_points_down_at_the_timeline() {
@@ -638,7 +639,7 @@ fn effects_are_moved_to_other_tracks() {
     };
     frame(&mut state, Vec::new()); // lay out once
     let layout = RowLayout::new(&state, RULER_HEIGHT, 0.);
-    let on = |index: usize, x: f32| Pos2::new(x, layout.rows()[index].y.center());
+    let on = |index: usize, x: f32| Pos2::new(x, layout.rows()[index].y().center());
     let (first_lane, first_header) = (on(0, 300.), on(0, 1100.));
     let (second_lane, second_header) = (on(1, 300.), on(1, 1100.));
     let mut drop_at = |state: &mut ProjectState, from: tonique_engine::edit::TrackId, at: Pos2| {

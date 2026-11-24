@@ -2,7 +2,10 @@ use crate::ui::RectSpan;
 use crate::{
     core::state::{ProjectState, SelectionBounds},
     ui::{
-        arrangement::{row_layout::RowLayout, timeline::Timeline},
+        arrangement::{
+            row_layout::{RowLayout, RowSpans},
+            timeline::Timeline,
+        },
         theme::ThemeExt,
     },
 };
@@ -115,7 +118,7 @@ fn zone_rect(state: &ProjectState, layout: &RowLayout, viewport: Rect) -> Option
     // group's, if hidden).
     let bottom = layout
         .track_row(bounds.end_track_index)
-        .map_or(layout.track_top(bounds.end_track_index), |r| r.y.max);
+        .map_or(layout.track_top(bounds.end_track_index), |r| r.y().max);
     let max_point = Pos2::new(
         state.grid.beats_to_x(bounds.end_pos, viewport.span()),
         bottom,

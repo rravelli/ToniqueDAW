@@ -8,7 +8,7 @@ use crate::timeline::Arrangement;
 use gpui::App;
 use tonique_engine::edit::TrackId;
 
-use crate::timeline::{ROW_GAP, RULER_HEIGHT, rows::rows};
+use crate::timeline::{ROW_GAP, RULER_HEIGHT};
 
 impl Arrangement {
     /// Follows a drag with the pointer at `local_y` over the lanes (`None`
@@ -21,8 +21,8 @@ impl Arrangement {
     ) {
         let local_y = local_y.filter(|&y| y >= RULER_HEIGHT && !self.in_footer(y, context));
         if dragging && let Some(pointer) = local_y {
-            for row in rows(self.state(context)) {
-                let top = self.row_top(&row, context);
+            for row in self.rows(context).iter() {
+                let top = self.row_top(row, context);
                 let track = &row.track;
                 if row.is_group()
                     && track.collapsed
@@ -34,7 +34,7 @@ impl Arrangement {
                 }
             }
         }
-        let rows = rows(self.state(context));
+        let rows = self.rows(context);
         // A group's span runs to the end of its last row.
         let inside = |group: TrackId| {
             rows.iter()

@@ -110,7 +110,7 @@ impl SettingsDialog {
     /// Shows `tab`, from the settings in use.
     pub fn open(&mut self, tab: SettingsTab, context: &mut App) {
         self.tab = tab;
-        self.draft = self.project.read(context).state.settings().clone();
+        self.draft = self.state(context).settings().clone();
         self.appearance.open(&self.draft.theme);
         self.shortcuts.cancel();
         // Probing the hardware is slow: once, on opening.
