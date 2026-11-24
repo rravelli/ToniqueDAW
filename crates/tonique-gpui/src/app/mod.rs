@@ -43,7 +43,7 @@ use crate::{
     config::settings::Settings,
     core::state::ProjectState,
     graph::GraphView,
-    model::{HoldsProject, Project, toggle_play},
+    model::{HoldsProject, Project},
     popup::PopupLayer,
     theme::{FONT_UI, Theme, ThemeLibrary, hsla, size},
     timeline::{Arrangement, ArrangementEvent},
@@ -326,10 +326,6 @@ impl Workspace {
     /// Between the timeline and the audio graph.
     fn toggle_graph(&mut self, context: &mut Context<Self>) {
         self.graph.update(context, GraphView::toggle);
-    }
-
-    fn toggle_play(&mut self, context: &mut App) {
-        toggle_play(&mut self.state_mut(context));
     }
 
     /// The browser's edge follows the pointer anywhere in the window:

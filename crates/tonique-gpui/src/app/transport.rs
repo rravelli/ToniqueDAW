@@ -13,7 +13,7 @@ use crate::{
     config::keymap::Action,
     core::state::PlaybackState,
     icons,
-    model::{HoldsProject, Project, toggle_play},
+    model::{HoldsProject, Project},
     theme::{Theme, hsla, icon, size, with_alpha},
     utils::{format_bars, format_time},
     widgets::{Flat, NumberField, NumberSpec, follow_drag, glyph},
@@ -280,7 +280,7 @@ impl TransportBar {
                 glyph(if playing { icons::STOP } else { icons::PLAY }, 12., true),
                 theme,
                 context,
-                |this, context| toggle_play(&mut this.state_mut(context)),
+                |this, context| this.state_mut(context).toggle_play(),
             ))
             .child(Flat::new("loop", BUTTON).selected(looping).show(
                 glyph(icons::REPEAT, 14., looping),

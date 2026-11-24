@@ -230,13 +230,6 @@ impl Arrangement {
         self.state_mut(context).grid.offset.x = target.max(0.);
     }
 
-    /// Scrolls to what an edit just selected: copies, pasted or moved clips.
-    pub fn reveal_selection(&mut self, context: &mut App) {
-        if let Some(range) = self.state(context).selection_range() {
-            self.reveal(range, context);
-        }
-    }
-
     /// Keeps the playhead in the middle of the view during playback, when
     /// following it. Near the start of the arrangement the view stays put
     /// and the playhead moves towards the middle. Not under a drag

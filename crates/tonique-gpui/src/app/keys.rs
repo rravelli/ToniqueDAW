@@ -1,5 +1,5 @@
 //! Keyboard shortcuts: Tonique's keymap (the user's, from its settings)
-//! turned into actions, run as the egui app runs them.
+//! turned into actions, run by the core when they only change the project.
 
 use crate::model::HoldsProject;
 use gpui::{App, Context, KeyDownEvent, Keystroke, Window};
@@ -13,6 +13,7 @@ use crate::{
         project::ProjectAction,
     },
     config::keymap::{Action, Key, Mods, format_shortcut},
+    core::state::ActionOutcome,
 };
 
 /// The keymap's key and modifiers for a keystroke.
@@ -102,12 +103,13 @@ impl Workspace {
             }
             "x" => state.cut_selection(),
             _ => {
-                state.paste();
-                drop(state);
-                self.arrangement.update(context, |arrangement, context| {
-                    arrangement.reveal_selection(context);
-                    context.notify();
-                });
+                if let ActionOutcome::Reveal(start, end) = state.paste_and_reveal() {
+                    drop(state);
+                    self.arrangement.update(context, |arrangement, context| {
+                        arrangement.reveal((start, end), context);
+                        context.notify();
+                    });
+                }
             }
         }
     }
@@ -128,54 +130,26 @@ impl Workspace {
         context.notify();
     }
 
-    /// Runs `action`, as the egui app's `dispatch` and its timeline do.
+    /// Runs `action`: the project's part in the core, the rest here.
     fn run(&mut self, action: Action, window: &mut Window, context: &mut Context<Self>) {
-        if self.run_on_state(action, context) {
-            return;
+        let outcome = self.state_mut(context).run_action(action);
+        match outcome {
+            ActionOutcome::Done => return,
+            ActionOutcome::Reveal(start, end) => {
+                self.arrangement.update(context, |arrangement, context| {
+                    arrangement.reveal((start, end), context);
+                    context.notify();
+                });
+                return;
+            }
+            ActionOutcome::Unhandled => {}
         }
         match action {
-            Action::PlayStop => self.toggle_play(context),
             Action::ToggleBrowser => self.browser_open = !self.browser_open,
             Action::ToggleTrackList => self.arrangement.update(context, |arrangement, context| {
                 arrangement.headers.toggle_list();
                 context.notify();
             }),
-            // Nudge the selected clips by a grid step, or move the edit
-            // cursor when nothing is selected.
-            Action::NudgeLeft | Action::NudgeRight => {
-                let direction = if action == Action::NudgeLeft { -1. } else { 1. };
-                let mut state = self.state_mut(context);
-                let step = direction * state.grid.snap_step();
-                if state.selected_clips().is_empty() {
-                    let cursor = state.grid.snap_to_step(state.edit_cursor() + step);
-                    state.set_edit_cursor(cursor);
-                    drop(state);
-                    self.arrangement.update(context, |arrangement, context| {
-                        arrangement.reveal((cursor, cursor), context);
-                        context.notify();
-                    });
-                } else {
-                    state.nudge_selection(step);
-                    drop(state);
-                    self.arrangement.update(context, |arrangement, context| {
-                        arrangement.reveal_selection(context);
-                        context.notify();
-                    });
-                }
-            }
-            Action::Duplicate => {
-                let mut state = self.state_mut(context);
-                if !state.selected_clips().is_empty() {
-                    state.duplicate_selected_clips();
-                    drop(state);
-                    self.arrangement.update(context, |arrangement, context| {
-                        arrangement.reveal_selection(context);
-                        context.notify();
-                    });
-                } else if let Some(selected) = state.selected_track() {
-                    state.duplicate_track(&selected.id);
-                }
-            }
             Action::Rename => {
                 if let Some(track) = self.state(context).selected_track() {
                     self.arrangement.update(context, |arrangement, context| {
@@ -196,57 +170,6 @@ impl Workspace {
             Action::ToggleGraphView => self.toggle_graph(context),
             _ => {}
         }
-    }
-
-    /// Runs `action` when it only changes the project; whether it did.
-    fn run_on_state(&mut self, action: Action, context: &mut App) -> bool {
-        let mut state = self.state_mut(context);
-        match action {
-            // Loop the selection, or toggle looping.
-            Action::Loop => {
-                if !state.loop_selection() {
-                    let looping = state.looping();
-                    state.set_looping(!looping);
-                }
-            }
-            Action::ToggleMetronome => state.toggle_metronome(),
-            Action::ToggleFollowPlayhead => {
-                let follow = state.follow_playhead();
-                state.set_follow_playhead(!follow);
-            }
-            Action::NarrowGrid => state.grid.narrow(),
-            Action::WidenGrid => state.grid.widen(),
-            Action::ToggleTripletGrid => state.grid.settings.triplet ^= true,
-            Action::ToggleAdaptiveGrid => state.grid.toggle_adaptive(),
-            Action::ToggleSnap => state.grid.settings.snap ^= true,
-            Action::Undo => state.undo(),
-            Action::Redo => state.redo(),
-            Action::AddTrack => {
-                state.add_track_below_selection();
-            }
-            Action::SelectAll => state.select_all_clips(),
-            Action::MoveTrackUp => state.move_selection_tracks(-1),
-            Action::MoveTrackDown => state.move_selection_tracks(1),
-            Action::Delete => {
-                if !state.selected_clips().is_empty() {
-                    state.delete_selected_clips();
-                } else if let Some(selected) = state.selected_track() {
-                    state.delete_track(&selected.id);
-                }
-            }
-            Action::SplitAtCursor => {
-                let cursor = state.edit_cursor();
-                for id in state.selected_tracks().clone() {
-                    state.cut_clip_at(&id, cursor);
-                }
-            }
-            Action::GroupTracks => {
-                let selected = state.selected_tracks().clone();
-                state.group(&selected);
-            }
-            _ => return false,
-        }
-        true
     }
 }
 

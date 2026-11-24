@@ -1,3 +1,4 @@
+mod actions;
 mod audio;
 mod clip_ops;
 mod clipboard;
@@ -34,6 +35,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub use actions::ActionOutcome;
 pub use export::{ExportSelection, ExportSource};
 pub use groups::RowTarget;
 pub use selection::SelectionBounds;

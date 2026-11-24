@@ -5,7 +5,7 @@ use crate::ui::widget::arrow_keys::holds_arrows;
 use crate::{
     audio::host::AudioHost,
     config::{keymap::Action, settings::Settings},
-    core::state::{PlaybackState, ProjectState},
+    core::state::{ActionOutcome, ProjectState},
     ui::{
         commands::Commands,
         export::ExportWindow,
@@ -166,37 +166,11 @@ impl ToniqueApp {
     /// selection ([`Action::is_timeline`]) do nothing while it's hidden.
     fn dispatch(&mut self, action: Action) {
         let state = &mut self.state;
+        if action.is_timeline() || state.run_action(action) != ActionOutcome::Unhandled {
+            return;
+        }
         let workspace = &mut self.workspace;
         match action {
-            Action::PlayStop => {
-                if state.playback_state() == PlaybackState::Playing {
-                    state.stop();
-                } else {
-                    state.play();
-                }
-            }
-            // Loop the selection, or toggle looping
-            Action::Loop => {
-                if !state.loop_selection() {
-                    state.set_looping(!state.looping());
-                }
-            }
-            Action::ToggleMetronome => state.toggle_metronome(),
-            Action::ToggleFollowPlayhead => state.set_follow_playhead(!state.follow_playhead()),
-            Action::NarrowGrid => state.grid.narrow(),
-            Action::WidenGrid => state.grid.widen(),
-            Action::ToggleTripletGrid => state.grid.settings.triplet ^= true,
-            Action::ToggleAdaptiveGrid => state.grid.toggle_adaptive(),
-            Action::ToggleSnap => state.grid.settings.snap ^= true,
-            Action::Undo => state.undo(),
-            Action::Redo => state.redo(),
-            Action::AddTrack => {
-                state.add_track_below_selection();
-            }
-            Action::GroupTracks => {
-                let selected = state.selected_tracks().clone();
-                state.group(&selected);
-            }
             Action::ToggleBrowser => workspace.left_panel_open = !workspace.left_panel_open,
             Action::ToggleEffectsPanel => {
                 workspace.bottom_panel_open = !workspace.bottom_panel_open
@@ -209,15 +183,8 @@ impl ToniqueApp {
             Action::SaveProject => self.project.request(ProjectAction::Save, state),
             Action::SaveProjectAs => self.project.request(ProjectAction::SaveAs, state),
             Action::ExportAudio => self.export_window.open(&self.project),
-            Action::SelectAll
-            | Action::Duplicate
-            | Action::Rename
-            | Action::Delete
-            | Action::SplitAtCursor
-            | Action::NudgeLeft
-            | Action::NudgeRight
-            | Action::MoveTrackUp
-            | Action::MoveTrackDown => {}
+            // Renaming in place is the track list's.
+            _ => {}
         }
     }
 }

@@ -95,15 +95,6 @@ pub fn tick(project: &Entity<Project>, context: &mut App) -> bool {
     })
 }
 
-/// Plays from the playhead, or stops.
-pub fn toggle_play(state: &mut ProjectState) {
-    if state.playback_state() == PlaybackState::Playing {
-        state.stop();
-    } else {
-        state.play();
-    }
-}
-
 /// The project's state, borrowed for changes; its views hear of them when
 /// it's let go.
 pub struct StateMut<'app>(GpuiBorrow<'app, Project>);
