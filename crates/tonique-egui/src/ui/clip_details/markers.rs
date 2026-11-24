@@ -3,12 +3,10 @@
 use egui::{Color32, CursorIcon, Rect, Sense, Shape, Stroke, Ui, pos2};
 use tonique_engine::{edit::ClipLoop, time::BeatPos};
 
-use crate::{
-    core::{
-        clip::{AudioClip, MIN_LENGTH},
-        state::ProjectState,
-    },
-    ui::theme::{Theme, ThemeExt, with_alpha},
+use crate::ui::theme::{Theme, ThemeExt, with_alpha};
+use tonique_core::{
+    arrangement::clip::{AudioClip, MIN_LENGTH},
+    state::ProjectState,
 };
 
 use super::{ClipDetails, LOOP_BAR_HEIGHT};

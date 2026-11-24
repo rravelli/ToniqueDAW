@@ -12,7 +12,7 @@ use crate::{
     },
     widgets::{Menu, MenuItem},
 };
-use tonique_core::{config::keymap::Action, core::project::project_name};
+use tonique_core::{config::keymap::Action, project::project_name};
 
 impl Workspace {
     pub(super) fn bar_menu(&self, menu: BarMenu, context: &mut Context<Self>) -> gpui::Div {

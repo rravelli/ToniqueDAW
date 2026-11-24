@@ -10,7 +10,7 @@ use crate::{
     geometry::Rect,
     theme::{Color, Theme, hsla, mix},
 };
-use tonique_core::core::metrics::AudioMetrics;
+use tonique_core::diagnostics::metrics::AudioMetrics;
 
 const CHANNEL_GAP: f32 = 1.;
 const LAMP_HEIGHT: f32 = 3.;

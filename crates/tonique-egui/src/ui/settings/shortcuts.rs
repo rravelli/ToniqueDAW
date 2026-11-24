@@ -1,18 +1,18 @@
 use crate::ui::theme::font_size;
-use crate::{
-    config::keymap::{self as keys, Action, FIXED_SHORTCUTS, Keymap, Mods, Shortcut, reserved_by},
-    core::state::ProjectState,
-    ui::{
-        font::PHOSPHOR_REGULAR,
-        keymap::{format, shortcut_from_press},
-        theme::ThemeExt,
-        widget::{flat_button::FlatButton, section::SectionHeader},
-    },
+use crate::ui::{
+    font::PHOSPHOR_REGULAR,
+    keymap::{format, shortcut_from_press},
+    theme::ThemeExt,
+    widget::{flat_button::FlatButton, section::SectionHeader},
 };
 use egui::{
     EventFilter, FontFamily, FontId, Grid, Id, Layout, RichText, ScrollArea, Sense, Ui, vec2,
 };
 use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, PLUS};
+use tonique_core::{
+    config::keymap::{self as keys, Action, FIXED_SHORTCUTS, Keymap, Mods, Shortcut, reserved_by},
+    state::ProjectState,
+};
 
 const GROUPS: [&str; 5] = ["File", "Transport", "Edit", "Grid", "View"];
 const LABEL_WIDTH: f32 = 200.;

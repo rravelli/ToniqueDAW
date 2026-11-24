@@ -14,11 +14,11 @@ use crate::{
     wave::paint_waveform,
     widgets::{paint_line, shape},
 };
-use tonique_core::core::{
-    clip::AudioClip,
+use tonique_core::{
+    arrangement::clip::AudioClip,
+    arrangement::track::{TrackKind, TrackRow},
     export::{ExportRange, format::duration},
     state::ProjectState,
-    track::{TrackKind, TrackRow},
 };
 
 use super::{LANE_PADDING, parts::card};

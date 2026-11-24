@@ -5,19 +5,17 @@
 use egui::{Color32, FontId, Rect, Ui, UiBuilder, pos2, vec2};
 use tonique_engine::edit::{MAX_TRANSPOSE, StretchSettings, StretchWindow, WarpMode};
 
-use crate::{
-    core::{
-        clip::{AudioClip, MAX_DETUNE, MIN_DETUNE, carried},
-        state::{ClipParam, ProjectState},
+use crate::ui::{
+    theme::font_size,
+    widget::{
+        flat_button::FlatButton,
+        param_slider::{ParamSlider, SliderEdit},
+        select::Select,
     },
-    ui::{
-        theme::font_size,
-        widget::{
-            flat_button::FlatButton,
-            param_slider::{ParamSlider, SliderEdit},
-            select::Select,
-        },
-    },
+};
+use tonique_core::{
+    arrangement::clip::{AudioClip, MAX_DETUNE, MIN_DETUNE, carried},
+    state::{ClipParam, ProjectState},
 };
 
 use super::inspector::{

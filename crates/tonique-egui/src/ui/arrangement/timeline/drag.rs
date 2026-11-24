@@ -1,17 +1,17 @@
 use crate::ui::RectSpan;
 use crate::ui::theme::ToEgui;
-use crate::{
-    core::{clip::AudioClip, state::ProjectState, track::DEFAULT_TRACK_HEIGHT},
-    ui::{
-        arrangement::clip::ClipView,
-        arrangement::{
-            row_layout::RowLayout,
-            timeline::{Timeline, scroll::autoscroll},
-        },
-        theme::ThemeExt,
+use crate::ui::{
+    arrangement::clip::ClipView,
+    arrangement::{
+        row_layout::RowLayout,
+        timeline::{Timeline, scroll::autoscroll},
     },
+    theme::ThemeExt,
 };
 use egui::{Rect, Stroke, Ui, pos2, vec2};
+use tonique_core::{
+    arrangement::clip::AudioClip, arrangement::track::DEFAULT_TRACK_HEIGHT, state::ProjectState,
+};
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 #[derive(Clone)]

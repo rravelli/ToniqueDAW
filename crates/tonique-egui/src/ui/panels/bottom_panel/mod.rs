@@ -3,22 +3,19 @@ mod header;
 mod tests;
 
 use crate::ui::theme::font_size;
-use crate::{
-    config::keymap::Action,
-    core::{state::ProjectState, track::TrackRow},
-    ui::{
-        clip_details::ClipDetails,
-        commands::Commands,
-        dnd::DragPayload,
-        effects::{EffectEdit, EffectRack},
-        theme::ThemeExt,
-        workspace::{BottomView, Workspace},
-    },
+use crate::ui::{
+    clip_details::ClipDetails,
+    commands::Commands,
+    dnd::DragPayload,
+    effects::{EffectEdit, EffectRack},
+    theme::ThemeExt,
+    workspace::{BottomView, Workspace},
 };
 use egui::{
     Align, Align2, CursorIcon, DragAndDrop, FontId, Frame, Layout, Margin, Pos2, Rangef, Rect,
     ScrollArea, Stroke, Ui, vec2,
 };
+use tonique_core::{arrangement::track::TrackRow, config::keymap::Action, state::ProjectState};
 use tonique_engine::edit::TrackId;
 
 /// Height of the header's row: the track's name, and tabs.

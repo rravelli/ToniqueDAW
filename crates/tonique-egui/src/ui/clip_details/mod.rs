@@ -11,14 +11,15 @@ mod tests;
 use egui::{CursorIcon, Rect, Response, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
-use crate::{
-    core::{clip::AudioClip, grid::GridService, state::ProjectState, track::TrackRow},
-    ui::{
-        arrangement::grid::PaintGrid,
-        theme::{Theme, ThemeExt, with_alpha},
-        waveform::paint_waveform,
-        widget::scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
-    },
+use crate::ui::{
+    arrangement::grid::PaintGrid,
+    theme::{Theme, ThemeExt, with_alpha},
+    waveform::paint_waveform,
+    widget::scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
+};
+use tonique_core::{
+    arrangement::clip::AudioClip, arrangement::grid::GridService, arrangement::track::TrackRow,
+    state::ProjectState,
 };
 
 use inspector::{Panels, RAIL_WIDTH, inspector_ui};

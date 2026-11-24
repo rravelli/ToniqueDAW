@@ -12,10 +12,7 @@ use crate::{
     theme::{Color, Theme, hsla},
     widgets::{FieldKey, Menu, MenuItem, TextField},
 };
-use tonique_core::{
-    core::{state::MASTER_TRACK_ID, track::TrackKind},
-    utils::display_name,
-};
+use tonique_core::{arrangement::track::TrackKind, state::MASTER_TRACK_ID, utils::display_name};
 
 /// A track's name when it's left empty, as in the egui app.
 const DEFAULT_NAME: &str = "Audio Track";

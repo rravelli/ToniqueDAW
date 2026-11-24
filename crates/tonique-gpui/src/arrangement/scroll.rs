@@ -19,7 +19,7 @@ use crate::{
     smooth_scroll::{SmoothScroll, WheelDelta},
     widgets::{ScrollSpan, ScrollbarGrab},
 };
-use tonique_core::core::{state::PlaybackState, track::DEFAULT_TRACK_HEIGHT};
+use tonique_core::{arrangement::track::DEFAULT_TRACK_HEIGHT, state::PlaybackState};
 
 /// How close to the left and right edges a drag starts scrolling, in
 /// pixels.

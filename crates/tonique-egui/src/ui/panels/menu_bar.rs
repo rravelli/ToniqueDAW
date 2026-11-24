@@ -1,19 +1,19 @@
 use crate::ui::keymap::KeymapExt;
-use crate::{
-    config::{keymap::Action, settings::UI_SCALE_RANGE},
-    core::project::project_name,
-    core::state::ProjectState,
-    ui::{
-        about::AboutWindow,
-        commands::Commands,
-        missing_files,
-        project::ProjectAction,
-        theme::ThemeExt,
-        workspace::{MainView, Workspace},
-    },
+use crate::ui::{
+    about::AboutWindow,
+    commands::Commands,
+    missing_files,
+    project::ProjectAction,
+    theme::ThemeExt,
+    workspace::{MainView, Workspace},
 };
 use egui::{Align, Button, Context, Frame, Layout, Margin, MenuBar, RichText, Ui};
 use std::path::PathBuf;
+use tonique_core::{
+    config::{keymap::Action, settings::UI_SCALE_RANGE},
+    project::project_name,
+    state::ProjectState,
+};
 
 const ZOOM_STEP: f32 = 0.1;
 

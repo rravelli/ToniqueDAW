@@ -8,7 +8,7 @@ use super::{
     Theme,
     file::{ThemeSource, to_toml},
 };
-use crate::config::config_dir;
+use tonique_core::config::config_dir;
 
 const BASE: &str = "dark";
 /// Dark first: it's the base of every theme.

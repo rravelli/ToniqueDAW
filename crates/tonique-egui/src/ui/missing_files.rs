@@ -13,16 +13,16 @@ use egui_phosphor::regular::{CHECK_CIRCLE, WARNING, WAVEFORM};
 use rfd::FileDialog;
 use tonique_engine::edit::SourceId;
 
-use crate::{
-    core::state::ProjectState,
-    file_match::{
+use crate::ui::{
+    theme::{ThemeExt, font_size},
+    widget::{dialog, list_row::ListRow, search_bar::SearchBar},
+};
+use tonique_core::{
+    browser::file_match::{
         AUDIO_EXTENSIONS, FileIndex, exact_matches, file_name, folder_name, folder_of, query_for,
         rank,
     },
-    ui::{
-        theme::{ThemeExt, font_size},
-        widget::{dialog, list_row::ListRow, search_bar::SearchBar},
-    },
+    state::ProjectState,
 };
 
 /// Asks the view to show, from anywhere (a clip's menu, the transport

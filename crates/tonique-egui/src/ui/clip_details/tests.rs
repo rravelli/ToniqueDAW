@@ -5,12 +5,10 @@ use tonique_engine::{
 };
 
 use super::{inspector::*, markers::*, *};
-use crate::{
-    analysis::AudioInfo,
-    core::{
-        clip::{AudioClip, MAX_DETUNE, MIN_LENGTH},
-        state::ProjectState,
-    },
+use tonique_core::{
+    arrangement::clip::{AudioClip, MAX_DETUNE, MIN_LENGTH},
+    audio_files::analysis::AudioInfo,
+    state::ProjectState,
     utils::{format_bars, parse_bars},
 };
 

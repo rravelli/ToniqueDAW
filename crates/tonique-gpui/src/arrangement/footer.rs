@@ -10,7 +10,7 @@ use crate::{
     theme::{Color, FONT_UI, Theme, hsla, size},
     widgets::paint_text,
 };
-use tonique_core::core::metrics::SCOPE_COLUMNS;
+use tonique_core::diagnostics::metrics::SCOPE_COLUMNS;
 
 /// The master's output scope.
 const SCOPE_WIDTH: f32 = 180.;

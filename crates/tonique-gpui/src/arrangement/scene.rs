@@ -20,12 +20,10 @@ use crate::{
     theme::{Color, Theme, with_alpha},
 };
 use tonique_core::{
-    core::{
-        clip::AudioClip,
-        grid::GridLine,
-        state::MASTER_TRACK_ID,
-        track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackRow},
-    },
+    arrangement::clip::AudioClip,
+    arrangement::grid::GridLine,
+    arrangement::track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackRow},
+    state::MASTER_TRACK_ID,
     utils::format_time,
 };
 

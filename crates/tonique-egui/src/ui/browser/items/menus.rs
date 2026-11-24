@@ -1,15 +1,13 @@
 //! What can be done with a folder, a label or a file, from its menu.
 
-use crate::{
-    config::labels as label_colors,
-    ui::{
-        theme::ThemeExt,
-        widget::{context_menu::ContextMenuButton, text_edit::select_all},
-    },
+use crate::ui::{
+    theme::ThemeExt,
+    widget::{context_menu::ContextMenuButton, text_edit::select_all},
 };
 use egui::{Key, Sense, Stroke, Ui, vec2};
 use egui_phosphor::regular::{ARROW_SQUARE_OUT, ARROWS_IN_LINE_VERTICAL, MAGNIFYING_GLASS};
 use std::path::Path;
+use tonique_core::config::labels as label_colors;
 
 use super::{FileList, FolderAction, LABEL_MENU_WIDTH};
 

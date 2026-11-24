@@ -4,7 +4,8 @@
 
 use egui::{Context, EventFilter, Id, Key, Modifiers, Rect, Response, Stroke, StrokeKind, Ui};
 
-use crate::{ui::theme::ThemeExt, utils::steps::Presses};
+use crate::ui::theme::ThemeExt;
+use tonique_core::utils::steps::Presses;
 
 /// Where the control holding the arrows says it is, each frame it does.
 fn holder_id() -> Id {

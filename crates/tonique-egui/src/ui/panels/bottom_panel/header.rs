@@ -3,19 +3,16 @@
 use crate::ui::font::semibold;
 use crate::ui::theme::ToEgui;
 use crate::ui::theme::font_size;
-use crate::{
-    core::track::TrackRow,
-    ui::{
-        theme::{ThemeExt, with_alpha},
-        workspace::BottomView,
-    },
-    utils::display_name,
+use crate::ui::{
+    theme::{ThemeExt, with_alpha},
+    workspace::BottomView,
 };
 use egui::{
     Align, Color32, CursorIcon, FontId, Frame, Galley, Label, Layout, Margin, Mesh, Painter, Pos2,
     Rangef, Rect, RichText, Sense, Shape, Stroke, Ui, pos2, vec2,
 };
 use std::sync::Arc;
+use tonique_core::{arrangement::track::TrackRow, utils::display_name};
 use tonique_engine::edit::ClipId;
 
 use super::{BottomPanel, HEADER_ROW, TAB_PADDING, TAB_RADIUS};

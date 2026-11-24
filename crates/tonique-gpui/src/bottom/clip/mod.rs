@@ -38,10 +38,10 @@ use crate::{
 };
 use inspector::{Field, Panels, RAIL_WIDTH};
 use markers::{Area, Handle, TrimEdge};
-use tonique_core::core::{
-    clip::AudioClip,
-    grid::{GridLine, GridService, Span},
-    track::TrackRow,
+use tonique_core::{
+    arrangement::clip::AudioClip,
+    arrangement::grid::{GridLine, GridService, Span},
+    arrangement::track::TrackRow,
 };
 
 const PADDING: f32 = 8.;

@@ -6,32 +6,30 @@ mod tests;
 use crate::ui::font::semibold;
 use crate::ui::keymap::KeymapExt;
 
-use crate::{
-    config::keymap::Action,
-    core::{
-        grid::Offset,
-        state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+use crate::ui::{
+    arrangement::{
+        row_layout::RowLayout,
+        ruler::Ruler,
+        timeline::Timeline,
+        track_headers::{FOOTER_PADDING, TrackHeaders, content_height, paint_drop_target},
     },
-    ui::{
-        arrangement::{
-            row_layout::RowLayout,
-            ruler::Ruler,
-            timeline::Timeline,
-            track_headers::{FOOTER_PADDING, TrackHeaders, content_height, paint_drop_target},
-        },
-        commands::Commands,
-        graph::GraphView,
-        theme::{ThemeExt, font_size, with_alpha},
-        widget::{
-            logo::logo,
-            scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
-        },
-        workspace::{MainView, Workspace},
+    commands::Commands,
+    graph::GraphView,
+    theme::{ThemeExt, font_size, with_alpha},
+    widget::{
+        logo::logo,
+        scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
     },
+    workspace::{MainView, Workspace},
 };
 use egui::{
     Align2, Color32, FontId, Frame, Margin, Pos2, Rangef, Rect, Sense, Shape, Stroke, Ui, Vec2,
     pos2, vec2,
+};
+use tonique_core::{
+    arrangement::grid::Offset,
+    config::keymap::Action,
+    state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
 };
 
 use master_lane::master_lane_ui;

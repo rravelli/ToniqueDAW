@@ -7,12 +7,12 @@ use gpui::{App, Pixels, Point, Window};
 use tonique_engine::time::BeatPos;
 
 use crate::{arrangement::RULER_HEIGHT, geometry::Rect};
-use tonique_core::core::{
-    clip::AudioClip,
-    grid::Viewport,
-    row_layout::{Row, RowLayout},
+use tonique_core::{
+    arrangement::clip::AudioClip,
+    arrangement::grid::Viewport,
+    arrangement::row_layout::{Row, RowLayout},
+    arrangement::track::DEFAULT_TRACK_HEIGHT,
     state::ProjectState,
-    track::DEFAULT_TRACK_HEIGHT,
 };
 
 /// A clip's header: dragged to move it.

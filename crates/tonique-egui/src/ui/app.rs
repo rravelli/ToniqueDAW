@@ -1,27 +1,27 @@
-use crate::bench::Bench;
 use crate::ui::keymap::KeymapExt;
 use crate::ui::theme::ToColor;
 use crate::ui::widget::arrow_keys::holds_arrows;
-use crate::{
-    config::keymap::Action,
-    core::state::{ActionOutcome, ProjectState},
-    ui::{
-        commands::Commands,
-        export::ExportWindow,
-        panels::{
-            bottom_panel::BottomPanel,
-            central_panel::CentralPanel,
-            left_panel::LeftPanel,
-            menu_bar::{AppMenuBar, set_ui_scale},
-            transport_bar::TransportBar,
-        },
-        project::{ProjectAction, ProjectManager},
-        settings::SettingsWindow,
-        theme::{ThemeExt, ThemeLibrary},
-        workspace::{BottomView, MainView, Workspace},
+use crate::ui::{
+    commands::Commands,
+    export::ExportWindow,
+    panels::{
+        bottom_panel::BottomPanel,
+        central_panel::CentralPanel,
+        left_panel::LeftPanel,
+        menu_bar::{AppMenuBar, set_ui_scale},
+        transport_bar::TransportBar,
     },
+    project::{ProjectAction, ProjectManager},
+    settings::SettingsWindow,
+    theme::{ThemeExt, ThemeLibrary},
+    workspace::{BottomView, MainView, Workspace},
 };
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use tonique_core::bench::Bench;
+use tonique_core::{
+    config::keymap::Action,
+    state::{ActionOutcome, ProjectState},
+};
 
 pub struct ToniqueApp {
     state: ProjectState,
@@ -183,6 +183,6 @@ impl ToniqueApp {
 mod tests;
 
 /// The theme's palette, as the project gives it to new tracks.
-fn project_palette(palette: &[egui::Color32]) -> Vec<crate::utils::color::Color> {
+fn project_palette(palette: &[egui::Color32]) -> Vec<tonique_core::utils::color::Color> {
     palette.iter().map(|&c| c.to_color()).collect()
 }

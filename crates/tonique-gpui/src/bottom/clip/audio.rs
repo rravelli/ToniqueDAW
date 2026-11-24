@@ -25,10 +25,8 @@ use crate::{
     widgets::{Flat, Menu, MenuItem, Scale, SliderDrag, paint_param_slider, select, typing_view},
 };
 use tonique_core::{
-    core::{
-        clip::{AudioClip, MAX_DETUNE, MIN_DETUNE, carried},
-        state::ClipParam,
-    },
+    arrangement::clip::{AudioClip, MAX_DETUNE, MIN_DETUNE, carried},
+    state::ClipParam,
     utils::steps::Presses,
 };
 

@@ -10,19 +10,19 @@ use egui_phosphor::{
 };
 use tonique_engine::time::TimeSignature;
 
-use crate::{
+use crate::ui::{
+    RECORDING,
+    arrangement::grid_menu::grid_menu,
+    commands::Commands,
+    font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
+    missing_files,
+    theme::{Theme, ThemeExt, with_alpha},
+    widget::{flat_button::FlatButton, input::NumberInput},
+    workspace::{MainView, Workspace},
+};
+use tonique_core::{
     config::keymap::Action,
-    core::state::{PlaybackState, ProjectState},
-    ui::{
-        RECORDING,
-        arrangement::grid_menu::grid_menu,
-        commands::Commands,
-        font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
-        missing_files,
-        theme::{Theme, ThemeExt, with_alpha},
-        widget::{flat_button::FlatButton, input::NumberInput},
-        workspace::{MainView, Workspace},
-    },
+    state::{PlaybackState, ProjectState},
     utils::{format_bars, format_time},
 };
 const BUTTON_SIZE: f32 = 22.;

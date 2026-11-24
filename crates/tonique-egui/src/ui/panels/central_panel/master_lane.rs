@@ -1,17 +1,15 @@
 //! The footer, along the master's header: its output scope.
 
-use crate::{
-    core::{
-        metrics::SCOPE_COLUMNS,
-        state::{MASTER_TRACK_ID, ProjectState},
-    },
-    ui::{
-        arrangement::track_headers::FOOTER_PADDING,
-        theme::{ThemeExt, font_size},
-    },
+use crate::ui::{
+    arrangement::track_headers::FOOTER_PADDING,
+    theme::{ThemeExt, font_size},
 };
 use egui::{Align2, Color32, FontId, Rect, Stroke, Ui, pos2, vec2};
 use std::collections::VecDeque;
+use tonique_core::{
+    diagnostics::metrics::SCOPE_COLUMNS,
+    state::{MASTER_TRACK_ID, ProjectState},
+};
 
 use super::SCOPE_WIDTH;
 

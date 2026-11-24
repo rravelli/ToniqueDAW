@@ -1,15 +1,13 @@
-//! Editor of [`EffectKind::Echo`](crate::core::effect::EffectKind::Echo):
+//! Editor of [`EffectKind::Echo`](tonique_core::effect::EffectKind::Echo):
 //! its repeats fading out, and time, feedback and mix knobs.
 
 use crate::ui::theme::font_size;
-use crate::{
-    core::effect::{ECHO_TIME, ECHO_TIMES, Setting},
-    ui::{
-        effects::{EditorContext, EffectEdit, EffectEditor, format_ms, format_percent, graph_rect},
-        theme::ThemeExt,
-    },
+use crate::ui::{
+    effects::{EditorContext, EffectEdit, EffectEditor, format_ms, format_percent, graph_rect},
+    theme::ThemeExt,
 };
 use egui::{Align2, FontId, Sense, Stroke, Ui, pos2};
+use tonique_core::effect::{ECHO_TIME, ECHO_TIMES, Setting};
 use tonique_engine::edit::PluginKind;
 
 /// Repeats drawn, at most.

@@ -13,7 +13,7 @@ use crate::app::{
 };
 use tonique_core::{
     config::keymap::{Action, Key, Mods, format_shortcut},
-    core::state::ActionOutcome,
+    state::ActionOutcome,
 };
 
 /// The keymap's key and modifiers for a keystroke.

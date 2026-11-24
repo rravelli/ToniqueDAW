@@ -1,7 +1,6 @@
 use crate::ui::RectSpan;
 use crate::ui::theme::font_size;
 use crate::{
-    core::{clip::AudioClip, state::ProjectState},
     ui::arrangement::grid::PaintGrid,
     ui::{
         font::PHOSPHOR_REGULAR,
@@ -20,6 +19,7 @@ use egui_phosphor::{
     regular::WARNING,
 };
 use std::{ops::Range, time::Duration};
+use tonique_core::{arrangement::clip::AudioClip, state::ProjectState};
 use tonique_engine::time::BeatPos;
 
 const PADDING_TEXT: f32 = 4.;
@@ -470,7 +470,7 @@ pub fn paint_clip_waveform(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::AudioInfo;
+    use tonique_core::audio_files::analysis::AudioInfo;
     use tonique_engine::{
         edit::ClipId,
         engine::{Engine, EngineConfig},

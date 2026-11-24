@@ -5,9 +5,9 @@ use crate::ui::theme::font_size;
 use egui::{Align2, Color32, FontId, Painter, Rect, Stroke, pos2};
 use tonique_engine::time::BeatPos;
 
-use crate::{
-    core::grid::{GridLine, GridService},
-    ui::theme::{Theme, with_alpha},
+use crate::ui::theme::{Theme, with_alpha};
+use tonique_core::{
+    arrangement::grid::{GridLine, GridService},
     utils::format_time,
 };
 

@@ -11,7 +11,7 @@ use crate::{
     theme::{Color, Theme, hsla, size},
     widgets::{dialog_button, dialog_frame, glyph},
 };
-use tonique_core::core::export::{
+use tonique_core::export::{
     Export, ExportFile, Waveform,
     format::{duration, file_name, peak},
 };

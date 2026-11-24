@@ -16,7 +16,7 @@ use tonique_engine::{
 };
 
 use crate::geometry::Rect;
-use tonique_core::{analysis::AudioData, core::clip::AudioClip};
+use tonique_core::{arrangement::clip::AudioClip, audio_files::analysis::AudioData};
 
 /// Columns per cached tile.
 const TILE: usize = 256;

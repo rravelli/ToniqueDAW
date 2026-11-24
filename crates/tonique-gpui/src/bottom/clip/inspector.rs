@@ -23,7 +23,7 @@ use crate::{
     widgets::{Flat, TextField, glyph, typing_view},
 };
 use tonique_core::{
-    core::clip::{AudioClip, MIN_LENGTH},
+    arrangement::clip::{AudioClip, MIN_LENGTH},
     utils::{
         format_bars, format_time, parse_bars, parse_parts,
         steps::{self, KeyStep, Presses},

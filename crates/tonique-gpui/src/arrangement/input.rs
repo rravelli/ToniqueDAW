@@ -16,7 +16,7 @@ use crate::{
     app::{PopupKind, focus_main},
     arrangement::{LOOP_HEIGHT, RULER_HEIGHT, moving::ClipMove, rows::ClipPart, ruler::LoopGrab},
 };
-use tonique_core::core::{clip::AudioClip, state::SelectionBounds};
+use tonique_core::{arrangement::clip::AudioClip, state::SelectionBounds};
 
 /// Pixels the pointer moves before a press on a lane draws a zone.
 const ZONE_THRESHOLD: f64 = 3.;

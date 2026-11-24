@@ -1,15 +1,13 @@
 use crate::ui::RectSpan;
-use crate::{
-    core::state::{ProjectState, SelectionBounds},
-    ui::{
-        arrangement::{
-            row_layout::{RowLayout, RowSpans},
-            timeline::Timeline,
-        },
-        theme::ThemeExt,
+use crate::ui::{
+    arrangement::{
+        row_layout::{RowLayout, RowSpans},
+        timeline::Timeline,
     },
+    theme::ThemeExt,
 };
 use egui::{Pos2, Rect, Response, Shape, Stroke, Ui};
+use tonique_core::state::{ProjectState, SelectionBounds};
 use tonique_engine::time::BeatPos;
 
 /// A rubber-band selection being drawn, from where it started.

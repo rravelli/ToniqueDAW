@@ -1,13 +1,13 @@
 use egui::{Event, Rect, Ui};
 
-use crate::{
+use crate::ui::{
+    arrangement::timeline::{Timeline, scroll::reveal},
+    commands::Commands,
+    widget::arrow_keys::holds_arrows,
+};
+use tonique_core::{
     config::keymap::Action,
-    core::state::{ActionOutcome, ProjectState},
-    ui::{
-        arrangement::timeline::{Timeline, scroll::reveal},
-        commands::Commands,
-        widget::arrow_keys::holds_arrows,
-    },
+    state::{ActionOutcome, ProjectState},
 };
 
 impl Timeline {

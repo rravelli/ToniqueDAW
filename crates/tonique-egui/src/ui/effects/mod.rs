@@ -5,24 +5,17 @@
 
 use crate::ui::font::semibold;
 use crate::ui::theme::font_size;
-use crate::{
-    core::{
-        effect::{Effect, EffectKind, Setting},
-        metrics::AudioMetrics,
+use crate::ui::{
+    effects::{
+        echo::EchoEditor, filter::FilterEditor, spectrum::SpectrumEditor, utility::UtilityEditor,
     },
-    ui::{
-        effects::{
-            echo::EchoEditor, filter::FilterEditor, spectrum::SpectrumEditor,
-            utility::UtilityEditor,
-        },
-        font::PHOSPHOR_REGULAR,
-        theme::ThemeExt,
-        widget::{
-            context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
-            flat_button::FlatButton,
-            knob::Knob,
-            meter::LevelMeter,
-        },
+    font::PHOSPHOR_REGULAR,
+    theme::ThemeExt,
+    widget::{
+        context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
+        flat_button::FlatButton,
+        knob::Knob,
+        meter::LevelMeter,
     },
 };
 use egui::{
@@ -35,6 +28,10 @@ use egui_phosphor::{
 };
 use std::f32::consts::FRAC_PI_2;
 use std::{collections::HashMap, ops::RangeInclusive};
+use tonique_core::{
+    diagnostics::metrics::AudioMetrics,
+    effect::{Effect, EffectKind, Setting},
+};
 use tonique_engine::{
     edit::{Parameter, PluginId},
     param::ParamId,

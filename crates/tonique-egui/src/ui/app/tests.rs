@@ -15,13 +15,7 @@
 //! `target/ui-screenshots`.
 
 use super::ToniqueApp;
-use crate::{
-    analysis::AudioInfo,
-    audio::host::Startup,
-    config::{config_dir, settings::Settings},
-    core::{clip::AudioClip, effect::EffectKind, state::ProjectState},
-    ui::font::fonts,
-};
+use crate::ui::font::fonts;
 use egui::{Event, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, Vec2, pos2, vec2};
 use egui_kittest::{
     Harness,
@@ -34,6 +28,14 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     path::{Path, PathBuf},
     sync::Arc,
+};
+use tonique_core::{
+    arrangement::clip::AudioClip,
+    audio::host::Startup,
+    audio_files::analysis::AudioInfo,
+    config::{config_dir, settings::Settings},
+    effect::EffectKind,
+    state::ProjectState,
 };
 use tonique_engine::{
     edit::{MAX_SPEED, MIN_SPEED, WarpMode},
@@ -485,7 +487,7 @@ fn check(harness: &mut Harness<'_, ToniqueApp>) {
     let project = state.project(None);
     let path = config_dir().unwrap().join("check.tonique");
     project.write(&path).expect("the project saves");
-    let read = crate::core::project::ProjectFile::read(&path).expect("the project opens");
+    let read = tonique_core::project::ProjectFile::read(&path).expect("the project opens");
     assert_eq!(read, project, "the project opens as it was saved");
 
     // Redone as many as were undone: the user may have undone some already.
@@ -624,7 +626,7 @@ fn screenshots() {
 /// The window's position of the name of track `index`, in its header.
 fn track_name_pos(harness: &Harness<'_, ToniqueApp>, index: usize) -> Pos2 {
     let row = &harness.state().state.rows()[index];
-    let name = crate::utils::display_name(&row.name, row.first_track_index);
+    let name = tonique_core::utils::display_name(&row.name, row.first_track_index);
     harness.get_by_label(&name).rect().center()
 }
 

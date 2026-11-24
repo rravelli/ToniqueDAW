@@ -4,10 +4,8 @@
 
 use egui::{Context, Event, InputState, KeyboardShortcut, Modifiers};
 
-use crate::{
-    config::keymap::{Action, Key, Keymap, Mods, Shortcut},
-    ui::widget::arrow_keys::is_arrow,
-};
+use crate::ui::widget::arrow_keys::is_arrow;
+use tonique_core::config::keymap::{Action, Key, Keymap, Mods, Shortcut};
 
 /// egui's key with the same name: every key has one (egui's names are the
 /// keymap's).
@@ -43,7 +41,7 @@ pub fn to_egui(shortcut: &Shortcut) -> Option<KeyboardShortcut> {
 pub fn format(ctx: &Context, shortcut: &Shortcut) -> String {
     match to_egui(shortcut) {
         Some(shortcut) => ctx.format_shortcut(&shortcut),
-        None => crate::config::keymap::format_shortcut(shortcut),
+        None => tonique_core::config::keymap::format_shortcut(shortcut),
     }
 }
 
@@ -120,7 +118,7 @@ impl KeymapExt for Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::keymap::reserved_by;
+    use tonique_core::config::keymap::reserved_by;
 
     #[test]
     fn every_key_has_an_egui_key() {
@@ -157,7 +155,7 @@ mod tests {
                 let egui = to_egui(&shortcut).unwrap();
                 assert_eq!(
                     egui.format(&egui::ModifierNames::NAMES, false),
-                    crate::config::keymap::format_shortcut(&shortcut)
+                    tonique_core::config::keymap::format_shortcut(&shortcut)
                 );
             }
         }

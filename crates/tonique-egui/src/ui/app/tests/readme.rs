@@ -4,10 +4,7 @@
 //! apart from the folder's other images).
 
 use super::new_app;
-use crate::{
-    config::{config_dir, settings::Settings},
-    ui::{app::ToniqueApp, project::ProjectAction},
-};
+use crate::ui::{app::ToniqueApp, project::ProjectAction};
 use egui::{Event, Vec2, vec2};
 use egui_kittest::{Harness, kittest::Queryable};
 use std::{
@@ -15,6 +12,7 @@ use std::{
     process::Command,
     time::{Duration, Instant},
 };
+use tonique_core::config::{config_dir, settings::Settings};
 use tonique_engine::time::BeatPos;
 
 /// The window, in points: at [`PIXELS_PER_POINT`], the images are

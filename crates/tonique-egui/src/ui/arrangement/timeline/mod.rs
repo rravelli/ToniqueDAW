@@ -1,13 +1,6 @@
 use crate::ui::RectSpan;
 use crate::ui::theme::ToEgui;
 use crate::{
-    analysis::AudioInfo,
-    cache::AUDIO_ANALYSIS_CACHE,
-    core::{
-        clip::AudioClip,
-        state::ProjectState,
-        track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow},
-    },
     ui::arrangement::{grid::PaintGrid, grid_menu::grid_menu},
     ui::{
         arrangement::clip::ClipView,
@@ -23,6 +16,13 @@ use crate::{
     },
 };
 use egui::{Color32, DragAndDrop, Rangef, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use tonique_core::{
+    arrangement::clip::AudioClip,
+    arrangement::track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow},
+    audio_files::analysis::AudioInfo,
+    audio_files::cache::AUDIO_ANALYSIS_CACHE,
+    state::ProjectState,
+};
 use tonique_engine::edit::{ClipId, TrackId};
 mod drag;
 mod keys;

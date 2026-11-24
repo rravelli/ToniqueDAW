@@ -30,7 +30,7 @@ use crate::{
     wave::WaveCache,
     widgets::{TextField, follow_drag},
 };
-use tonique_core::core::{
+use tonique_core::{
     export::{Export, ExportFile, ExportOptions, ExportOutcome, ExportRange, Waveform},
     state::ExportSelection,
 };

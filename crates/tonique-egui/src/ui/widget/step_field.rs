@@ -9,13 +9,11 @@ use egui::{
     Align, Align2, CursorIcon, FontId, Key, Response, Sense, TextEdit, Ui, UiBuilder, Widget,
 };
 
-use crate::{
-    ui::{
-        theme::font_size,
-        widget::arrow_keys::{arrow_presses, paint_outline},
-    },
-    utils::steps::KeyStep,
+use crate::ui::{
+    theme::font_size,
+    widget::arrow_keys::{arrow_presses, paint_outline},
 };
+use tonique_core::utils::steps::KeyStep;
 
 /// Shift-dragging moves this much slower.
 const FINE_DRAG: f64 = 0.1;

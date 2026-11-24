@@ -19,8 +19,8 @@ use std::{
 
 use tonique_engine::time::BeatPos;
 
-use crate::core::{
-    grid::Offset,
+use crate::{
+    arrangement::grid::Offset,
     project::ProjectFile,
     state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
 };

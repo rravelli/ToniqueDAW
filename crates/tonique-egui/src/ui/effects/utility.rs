@@ -1,4 +1,4 @@
-//! Editor of [`EffectKind::Utility`](crate::core::effect::EffectKind::Utility):
+//! Editor of [`EffectKind::Utility`](tonique_core::effect::EffectKind::Utility):
 //! gain, balance and width knobs, and mono and phase switches. Its level
 //! shows on the meter every effect has.
 

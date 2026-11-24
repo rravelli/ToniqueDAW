@@ -4,25 +4,25 @@
 mod appearance;
 mod shortcuts;
 
-use crate::audio::host::{open_output, output_devices};
 use crate::ui::theme::font_size;
-use crate::{
-    config::settings::{Settings, UI_SCALE_RANGE},
-    core::state::ProjectState,
-    ui::{
-        font::PHOSPHOR_REGULAR,
-        panels::menu_bar::set_ui_scale,
-        theme::{ThemeExt, ThemeLibrary},
-        widget::{
-            dialog, flat_button::FlatButton, input::NumberInput, section::SectionHeader,
-            select::Select, slider::ValueSlider, tab_bar::TabBar,
-        },
+use crate::ui::{
+    font::PHOSPHOR_REGULAR,
+    panels::menu_bar::set_ui_scale,
+    theme::{ThemeExt, ThemeLibrary},
+    widget::{
+        dialog, flat_button::FlatButton, input::NumberInput, section::SectionHeader,
+        select::Select, slider::ValueSlider, tab_bar::TabBar,
     },
 };
 use appearance::AppearanceTab;
 use egui::{Align, Align2, FontFamily, FontId, Grid, Layout, Rangef, RichText, Ui, Vec2, vec2};
 use egui_phosphor::regular::{ARROWS_CLOCKWISE, X};
 use shortcuts::ShortcutsTab;
+use tonique_core::audio::host::{open_output, output_devices};
+use tonique_core::{
+    config::settings::{Settings, UI_SCALE_RANGE},
+    state::ProjectState,
+};
 use tonique_engine::device::{DeviceInfo, DeviceOptions};
 
 const BUFFER_SIZES: [u32; 8] = [32, 64, 128, 256, 512, 1024, 2048, 4096];

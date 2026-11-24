@@ -17,7 +17,7 @@ use crate::{
 };
 use tonique_core::{
     config::keymap::Action,
-    core::state::PlaybackState,
+    state::PlaybackState,
     utils::{format_bars, format_time},
 };
 

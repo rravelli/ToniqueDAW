@@ -3,12 +3,10 @@
 
 use egui::Ui;
 
-use crate::{
-    core::{
-        grid::{GridDensity, GridStep},
-        state::ProjectState,
-    },
-    ui::widget::context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
+use crate::ui::widget::context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator};
+use tonique_core::{
+    arrangement::grid::{GridDensity, GridStep},
+    state::ProjectState,
 };
 
 /// Adaptive densities, fixed steps, triplets and snapping; the chosen ones

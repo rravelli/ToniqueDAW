@@ -12,7 +12,7 @@ use tonique_engine::{
     sample::SampleBuffer,
 };
 
-use crate::analysis::AudioData;
+use tonique_core::audio_files::analysis::AudioData;
 
 /// Columns per cached tile.
 const TILE: usize = 256;
@@ -555,7 +555,7 @@ mod tests {
     /// pass of a looped clip doesn't spill over the next.
     #[test]
     fn nothing_is_drawn_outside_the_visible_part() {
-        let audio = crate::analysis::AudioInfo::silent(1.);
+        let audio = tonique_core::audio_files::analysis::AudioInfo::silent(1.);
         let ctx = egui::Context::default();
         // A few samples a column: meshed, in tiles wider than shown.
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(100., 100.));

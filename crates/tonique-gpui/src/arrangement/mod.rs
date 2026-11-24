@@ -39,7 +39,7 @@ use gpui::{
 
 pub use drop::DropTarget;
 pub use rows::{FOOTER_PADDING, footer_height};
-pub use tonique_core::core::row_layout::{ROW_GAP, Row, RowLayout};
+pub use tonique_core::arrangement::row_layout::{ROW_GAP, Row, RowLayout};
 
 use tonique_engine::edit::{ClipId, TrackId};
 

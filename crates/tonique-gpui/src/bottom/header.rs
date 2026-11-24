@@ -12,8 +12,7 @@ use crate::{
     theme::{Color, hsla, size, with_alpha},
 };
 use tonique_core::{
-    core::{clip::AudioClip, track::TrackRow},
-    utils::display_name,
+    arrangement::clip::AudioClip, arrangement::track::TrackRow, utils::display_name,
 };
 
 /// Height of the header's row: the track's name, and tabs.

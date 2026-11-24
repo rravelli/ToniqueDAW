@@ -12,7 +12,7 @@ use crate::{
     theme::{Theme, hsla, icon, mix},
     widgets::FieldKey,
 };
-use tonique_core::core::effect::EffectKind;
+use tonique_core::effect::EffectKind;
 
 const ROW_HEIGHT: f32 = 22.;
 /// How much a row lightens when hovered.

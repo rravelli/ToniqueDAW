@@ -1,25 +1,23 @@
-//! Editor of [`EffectKind::Filter`](crate::core::effect::EffectKind::Filter):
+//! Editor of [`EffectKind::Filter`](tonique_core::effect::EffectKind::Filter):
 //! its response over the live spectrum, with a handle for cutoff and
 //! resonance, the mode, and cutoff and Q knobs.
 
 use crate::ui::theme::font_size;
-use crate::{
-    core::effect::Setting,
-    ui::{
-        effects::{
-            EditorContext, EffectEdit, EffectEditor, format_hz,
-            graph::{freq_x, paint_curve, paint_freq_grid, spectrum_points, x_freq},
-            graph_rect, track_drag,
-        },
-        theme::{Theme, ThemeExt},
-        widget::flat_button::FlatButton,
+use crate::ui::{
+    effects::{
+        EditorContext, EffectEdit, EffectEditor, format_hz,
+        graph::{freq_x, paint_curve, paint_freq_grid, spectrum_points, x_freq},
+        graph_rect, track_drag,
     },
+    theme::{Theme, ThemeExt},
+    widget::flat_button::FlatButton,
 };
 use egui::{
     Align, Align2, CursorIcon, FontId, Layout, Painter, Pos2, Rect, Sense, Stroke, Ui, UiBuilder,
     pos2, vec2,
 };
 use std::{f32::consts::PI, ops::RangeInclusive};
+use tonique_core::effect::Setting;
 use tonique_engine::{edit::PluginKind, nodes::FilterMode, spectrum::Spectrum};
 
 /// Gain range of the graph, in dB.

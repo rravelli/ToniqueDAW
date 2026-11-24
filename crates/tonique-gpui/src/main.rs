@@ -19,7 +19,7 @@ mod widgets;
 
 use gpui::{App, Bounds, WindowBounds, WindowOptions, prelude::*, px, size};
 
-use tonique_core::{audio::host::Startup, config::settings::Settings, core::state::ProjectState};
+use tonique_core::{audio::host::Startup, config::settings::Settings, state::ProjectState};
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();

@@ -1,5 +1,5 @@
-use crate::core::state::ProjectState;
 use crate::ui::{app::ToniqueApp, font::fonts, window::native_options};
+use tonique_core::state::ProjectState;
 mod about;
 mod app;
 mod arrangement;
@@ -24,14 +24,14 @@ mod window;
 mod workspace;
 
 /// The grid maps beats onto a view's left and right edges: an egui
-/// rectangle's, as the core's [`Span`](crate::core::grid::Span).
+/// rectangle's, as the core's [`Span`](tonique_core::arrangement::grid::Span).
 pub trait RectSpan {
-    fn span(&self) -> crate::core::grid::Span;
+    fn span(&self) -> tonique_core::arrangement::grid::Span;
 }
 
 impl RectSpan for egui::Rect {
-    fn span(&self) -> crate::core::grid::Span {
-        crate::core::grid::Span {
+    fn span(&self) -> tonique_core::arrangement::grid::Span {
+        tonique_core::arrangement::grid::Span {
             left: self.min.x,
             right: self.max.x,
         }

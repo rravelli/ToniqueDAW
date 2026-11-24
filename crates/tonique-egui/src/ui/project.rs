@@ -7,14 +7,12 @@ use std::path::{Path, PathBuf};
 use egui::{Align, Key, Layout, Ui, ViewportCommand, vec2};
 use rfd::FileDialog;
 
-pub use crate::core::project_files::ProjectAction;
-use crate::{
-    core::{
-        project::EXTENSION,
-        project_files::{Ask, FileOutcome, Notice, ProjectFiles},
-        state::ProjectState,
-    },
-    ui::{missing_files, widget::dialog},
+use crate::ui::{missing_files, widget::dialog};
+pub use tonique_core::project::files::ProjectAction;
+use tonique_core::{
+    project::EXTENSION,
+    project::files::{Ask, FileOutcome, Notice, ProjectFiles},
+    state::ProjectState,
 };
 
 pub struct ProjectManager {

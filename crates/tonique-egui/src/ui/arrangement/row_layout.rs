@@ -1,11 +1,11 @@
 //! Where each row of the track list is on screen: the core's layout
-//! (`crate::core::row_layout`) placed in the viewport, once a frame, and
+//! (`tonique_core::arrangement::row_layout`) placed in the viewport, once a frame, and
 //! shared by the track headers and the timeline, so they agree.
 
 use egui::Rangef;
 
-pub use crate::core::row_layout::Row;
-use crate::core::{row_layout, state::ProjectState};
+pub use tonique_core::arrangement::row_layout::Row;
+use tonique_core::{arrangement::row_layout, state::ProjectState};
 
 pub struct RowLayout {
     /// From the top of the viewport, scrolled.
@@ -88,7 +88,9 @@ impl RowSpans for Row {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{row_layout::ROW_GAP, track::DEFAULT_TRACK_HEIGHT};
+    use tonique_core::{
+        arrangement::row_layout::ROW_GAP, arrangement::track::DEFAULT_TRACK_HEIGHT,
+    };
     use tonique_engine::engine::{Engine, EngineConfig};
 
     fn state_with_group(collapsed: bool) -> ProjectState {

@@ -1,17 +1,18 @@
 //! Tonique without its UI: the project state, its commands and undo, the
-//! grid, clips, audio sources and their analysis, the audio host, the
-//! configuration and the browser's file tree. No UI toolkit: the app draws
-//! it with egui, `tonique-gpui` with gpui.
+//! arrangement and its grid, effects, project files, export, audio files
+//! and their analysis, the audio output, the configuration and the
+//! browser's model. No UI toolkit: the app draws it with egui,
+//! `tonique-gpui` with gpui.
 
-pub mod analysis;
+pub mod arrangement;
 pub mod audio;
+pub mod audio_files;
 pub mod bench;
-pub mod cache;
+pub mod browser;
 pub mod config;
-pub mod core;
-pub mod file_match;
-pub mod file_tempo;
-pub mod file_tree;
-pub mod memory;
+pub mod diagnostics;
+pub mod effect;
+pub mod export;
+pub mod project;
+pub mod state;
 pub mod utils;
-pub mod waveform;

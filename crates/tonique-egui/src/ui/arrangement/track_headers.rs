@@ -10,11 +10,6 @@ use egui_phosphor::regular::{
 use tonique_engine::edit::TrackId;
 
 use crate::{
-    config::keymap::Action,
-    core::{
-        state::{ProjectState, RowTarget, TRACK_NAME},
-        track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackRow, TrackSoloState},
-    },
     ui::theme::{ThemeExt, font_size, with_alpha},
     ui::{
         arrangement::track_header::{
@@ -32,6 +27,11 @@ use crate::{
         },
         workspace::{BottomView, Workspace},
     },
+};
+use tonique_core::{
+    arrangement::track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackRow, TrackSoloState},
+    config::keymap::Action,
+    state::{ProjectState, RowTarget, TRACK_NAME},
     utils::display_name,
 };
 
