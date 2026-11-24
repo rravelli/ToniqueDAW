@@ -7,8 +7,7 @@ use crate::ui::{
 use egui::{Align2, Color32, FontId, Rect, Stroke, Ui, pos2, vec2};
 use std::collections::VecDeque;
 use tonique_core::{
-    diagnostics::metrics::SCOPE_COLUMNS,
-    state::{MASTER_TRACK_ID, ProjectState},
+    monitor::metrics::SCOPE_COLUMNS, project::MASTER_TRACK_ID, project::ProjectState,
 };
 
 use super::SCOPE_WIDTH;

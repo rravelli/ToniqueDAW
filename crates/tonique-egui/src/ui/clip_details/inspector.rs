@@ -16,8 +16,9 @@ use crate::ui::{
     widget::{flat_button::FlatButton, param_slider::SliderEdit, step_field::StepField},
 };
 use tonique_core::{
-    arrangement::clip::{AudioClip, MIN_LENGTH},
-    state::{ClipParam, ProjectState},
+    document::clip::{AudioClip, MIN_LENGTH},
+    project::ClipParam,
+    project::ProjectState,
     utils::{format_bars, format_time, parse_bars, parse_parts, steps},
 };
 

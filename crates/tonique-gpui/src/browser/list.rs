@@ -20,8 +20,8 @@ use crate::{
     widgets::{FieldKey, HANDLE_WIDTH, ScrollbarGrab, TextField, handle_scrollbar},
 };
 use tonique_core::{
-    audio_files::cache::AUDIO_ANALYSIS_CACHE,
-    browser::file_tree::{FileTree, is_audio_file, pinned},
+    library::cache::AUDIO_ANALYSIS_CACHE,
+    library::file_tree::{FileTree, is_audio_file, pinned},
 };
 
 use super::rows::ROW_HEIGHT;

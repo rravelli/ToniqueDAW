@@ -15,8 +15,9 @@ use crate::{
     widgets::{Scale, SliderDrag},
 };
 use tonique_core::{
-    arrangement::track::{TrackKind, TrackRow},
-    state::{MIN_EXPANDED_HEIGHT, RowTarget},
+    document::track::{TrackKind, TrackRow},
+    project::MIN_EXPANDED_HEIGHT,
+    project::RowTarget,
     utils::steps::Presses,
 };
 

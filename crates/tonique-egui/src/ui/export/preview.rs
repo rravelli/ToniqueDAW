@@ -9,9 +9,10 @@ use crate::ui::{
     waveform::paint_waveform,
 };
 use tonique_core::{
-    arrangement::track::{TrackKind, TrackRow},
-    export::ExportRange,
-    state::{ExportSelection, ProjectState},
+    document::track::{TrackKind, TrackRow},
+    files::export::ExportRange,
+    project::ExportSelection,
+    project::ProjectState,
 };
 
 use super::{LANE_PADDING, format::duration, widgets::card};

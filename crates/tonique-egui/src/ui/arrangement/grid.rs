@@ -7,7 +7,7 @@ use tonique_engine::time::BeatPos;
 
 use crate::ui::theme::{Theme, with_alpha};
 use tonique_core::{
-    arrangement::grid::{GridLine, GridService},
+    session::grid::{GridLine, GridService},
     utils::format_time,
 };
 

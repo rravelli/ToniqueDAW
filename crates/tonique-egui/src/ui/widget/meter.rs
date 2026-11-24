@@ -6,7 +6,7 @@
 
 use crate::ui::theme::{Theme, ThemeExt, font_size};
 use egui::{Color32, Mesh, Rect, Response, RichText, Sense, Vec2, Widget};
-use tonique_core::diagnostics::metrics::AudioMetrics;
+use tonique_core::monitor::metrics::AudioMetrics;
 
 /// Between the two channels' bars.
 const CHANNEL_GAP: f32 = 1.;

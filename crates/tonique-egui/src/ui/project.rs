@@ -8,11 +8,11 @@ use egui::{Align, Key, Layout, Ui, ViewportCommand, vec2};
 use rfd::FileDialog;
 
 use crate::ui::{missing_files, widget::dialog};
-pub use tonique_core::project::files::ProjectAction;
+pub use tonique_core::files::ProjectAction;
 use tonique_core::{
-    project::EXTENSION,
-    project::files::{Ask, FileOutcome, Notice, ProjectFiles},
-    state::ProjectState,
+    document::file::EXTENSION,
+    files::{Ask, FileOutcome, Notice, ProjectFiles},
+    project::ProjectState,
 };
 
 pub struct ProjectManager {

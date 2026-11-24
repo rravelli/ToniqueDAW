@@ -22,7 +22,8 @@ use crate::ui::{
 };
 use tonique_core::{
     config::keymap::Action,
-    state::{PlaybackState, ProjectState},
+    project::PlaybackState,
+    project::ProjectState,
     utils::{format_bars, format_time},
 };
 const BUTTON_SIZE: f32 = 22.;

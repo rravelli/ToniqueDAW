@@ -11,7 +11,7 @@ use egui::{
 use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, PLUS};
 use tonique_core::{
     config::keymap::{self as keys, Action, FIXED_SHORTCUTS, Keymap, Mods, Shortcut, reserved_by},
-    state::ProjectState,
+    project::ProjectState,
 };
 
 const GROUPS: [&str; 5] = ["File", "Transport", "Edit", "Grid", "View"];

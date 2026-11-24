@@ -6,9 +6,9 @@ use tonique_engine::{
 
 use super::{inspector::*, markers::*, *};
 use tonique_core::{
-    arrangement::clip::{AudioClip, MAX_DETUNE, MIN_LENGTH},
-    audio_files::analysis::AudioInfo,
-    state::ProjectState,
+    document::clip::{AudioClip, MAX_DETUNE, MIN_LENGTH},
+    library::analysis::AudioInfo,
+    project::ProjectState,
     utils::{format_bars, parse_bars},
 };
 

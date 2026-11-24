@@ -26,7 +26,7 @@ use crate::{
 use paint::GraphScene;
 use tonique_core::{
     config::keymap::Action,
-    diagnostics::graph_layout::{
+    monitor::graph_layout::{
         NODE_HEIGHT, NODE_WIDTH, bounds, layout, node_title, stats_line, track_names,
     },
 };

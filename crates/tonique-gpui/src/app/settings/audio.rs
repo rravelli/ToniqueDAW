@@ -19,8 +19,8 @@ use crate::{
     widgets::{Flat, Menu, MenuItem, NumberField, NumberSpec, dialog_button, glyph, select},
 };
 use tonique_core::{
-    audio::host::{open_output, output_devices},
     config::settings::Settings,
+    device::host::{open_output, output_devices},
 };
 use tonique_engine::device::{DeviceInfo, DeviceOptions};
 

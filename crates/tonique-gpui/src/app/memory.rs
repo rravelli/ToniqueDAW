@@ -4,7 +4,7 @@
 
 use crate::model::HoldsProject;
 use gpui::{Context, SharedString, div, prelude::*, px};
-use tonique_core::audio_files::memory::AudioMemory;
+use tonique_core::dev::memory::AudioMemory;
 
 use crate::{
     app::Workspace,
@@ -12,7 +12,7 @@ use crate::{
     wave::WaveMemory,
     widgets::Menu,
 };
-use tonique_core::audio_files::cache::AUDIO_ANALYSIS_CACHE;
+use tonique_core::library::cache::AUDIO_ANALYSIS_CACHE;
 
 /// Between a row's name and its value.
 const VALUE_GAP: f32 = 24.;

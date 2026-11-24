@@ -17,7 +17,7 @@ use crate::{
     wave::paint_waveform,
     widgets::{on_press, paint_slider, toggle_button},
 };
-use tonique_core::{audio_files::analysis::AudioInfo, state::PlaybackState, utils::format_time};
+use tonique_core::{library::analysis::AudioInfo, project::PlaybackState, utils::format_time};
 
 const PREVIEW_HEIGHT: f32 = 118.;
 const WAVE_HEIGHT: f32 = 52.;

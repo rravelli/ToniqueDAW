@@ -20,9 +20,10 @@ use crate::ui::{
     widget::{flat_button::FlatButton, section::SectionHeader},
 };
 use tonique_core::{
-    arrangement::track::{TrackKind, TrackRow},
-    export::{ExportFile, ExportOptions, ExportRange},
-    state::{ExportSelection, ProjectState},
+    document::track::{TrackKind, TrackRow},
+    files::export::{ExportFile, ExportOptions, ExportRange},
+    project::ExportSelection,
+    project::ProjectState,
     utils::{display_name, format_bars, parse_bars},
 };
 

@@ -15,7 +15,7 @@ use egui::{
     Align, Align2, CursorIcon, DragAndDrop, FontId, Frame, Layout, Margin, Pos2, Rangef, Rect,
     ScrollArea, Stroke, Ui, vec2,
 };
-use tonique_core::{arrangement::track::TrackRow, config::keymap::Action, state::ProjectState};
+use tonique_core::{config::keymap::Action, document::track::TrackRow, project::ProjectState};
 use tonique_engine::edit::TrackId;
 
 /// Height of the header's row: the track's name, and tabs.

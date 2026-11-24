@@ -5,8 +5,8 @@ use tonique_engine::{edit::ClipLoop, time::BeatPos};
 
 use crate::ui::theme::{Theme, ThemeExt, with_alpha};
 use tonique_core::{
-    arrangement::clip::{AudioClip, MIN_LENGTH},
-    state::ProjectState,
+    document::clip::{AudioClip, MIN_LENGTH},
+    project::ProjectState,
 };
 
 use super::{ClipDetails, LOOP_BAR_HEIGHT};

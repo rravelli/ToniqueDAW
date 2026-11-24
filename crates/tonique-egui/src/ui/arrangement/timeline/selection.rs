@@ -7,7 +7,7 @@ use crate::ui::{
     theme::ThemeExt,
 };
 use egui::{Pos2, Rect, Response, Shape, Stroke, Ui};
-use tonique_core::state::{ProjectState, SelectionBounds};
+use tonique_core::{project::ProjectState, project::SelectionBounds};
 use tonique_engine::time::BeatPos;
 
 /// A rubber-band selection being drawn, from where it started.

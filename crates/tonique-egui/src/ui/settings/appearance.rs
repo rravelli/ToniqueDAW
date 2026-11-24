@@ -10,7 +10,7 @@ use egui::{
     vec2,
 };
 use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, ARROWS_CLOCKWISE, COPY, PLUS, WARNING};
-use tonique_core::{state::ProjectState, utils::color::format_color};
+use tonique_core::{project::ProjectState, utils::color::format_color};
 
 const LABEL_WIDTH: f32 = 110.;
 const CONTROL_WIDTH: f32 = 240.;

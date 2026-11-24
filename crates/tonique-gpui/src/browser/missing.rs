@@ -23,8 +23,8 @@ use crate::{
     widgets::{FieldKey, Flat, HANDLE_WIDTH, ScrollbarGrab, TextField, handle_scrollbar},
 };
 use tonique_core::{
-    browser::file_match::{FileIndex, exact_matches, file_name, folder_name, query_for, rank},
-    state::ProjectState,
+    library::file_match::{FileIndex, exact_matches, file_name, folder_name, query_for, rank},
+    project::ProjectState,
 };
 
 const ROW_HEIGHT: f32 = 22.;

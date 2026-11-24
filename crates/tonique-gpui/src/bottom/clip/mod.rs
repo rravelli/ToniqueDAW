@@ -39,9 +39,9 @@ use crate::{
 use inspector::{Field, Panels, RAIL_WIDTH};
 use markers::{Area, Handle, TrimEdge};
 use tonique_core::{
-    arrangement::clip::AudioClip,
-    arrangement::grid::{GridLine, GridService, Span},
-    arrangement::track::TrackRow,
+    document::clip::AudioClip,
+    document::track::TrackRow,
+    session::grid::{GridLine, GridService, Span},
 };
 
 const PADDING: f32 = 8.;

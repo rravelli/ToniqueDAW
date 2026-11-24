@@ -10,7 +10,7 @@ use crate::ui::{
 };
 use egui::{Rect, Stroke, Ui, pos2, vec2};
 use tonique_core::{
-    arrangement::clip::AudioClip, arrangement::track::DEFAULT_TRACK_HEIGHT, state::ProjectState,
+    document::clip::AudioClip, document::track::DEFAULT_TRACK_HEIGHT, project::ProjectState,
 };
 use tonique_engine::{edit::ClipId, time::BeatPos};
 

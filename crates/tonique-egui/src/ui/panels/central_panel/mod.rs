@@ -27,9 +27,8 @@ use egui::{
     pos2, vec2,
 };
 use tonique_core::{
-    arrangement::grid::Offset,
-    config::keymap::Action,
-    state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+    config::keymap::Action, project::MASTER_TRACK_ID, project::PlaybackState,
+    project::ProjectState, session::grid::Offset,
 };
 
 use master_lane::master_lane_ui;

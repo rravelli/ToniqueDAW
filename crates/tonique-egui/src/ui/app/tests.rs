@@ -30,12 +30,12 @@ use std::{
     sync::Arc,
 };
 use tonique_core::{
-    arrangement::clip::AudioClip,
-    audio::host::Startup,
-    audio_files::analysis::AudioInfo,
     config::{config_dir, settings::Settings},
-    effect::EffectKind,
-    state::ProjectState,
+    device::host::Startup,
+    document::clip::AudioClip,
+    document::effect::EffectKind,
+    library::analysis::AudioInfo,
+    project::ProjectState,
 };
 use tonique_engine::{
     edit::{MAX_SPEED, MIN_SPEED, WarpMode},
@@ -487,7 +487,7 @@ fn check(harness: &mut Harness<'_, ToniqueApp>) {
     let project = state.project(None);
     let path = config_dir().unwrap().join("check.tonique");
     project.write(&path).expect("the project saves");
-    let read = tonique_core::project::ProjectFile::read(&path).expect("the project opens");
+    let read = tonique_core::document::file::ProjectFile::read(&path).expect("the project opens");
     assert_eq!(read, project, "the project opens as it was saved");
 
     // Redone as many as were undone: the user may have undone some already.

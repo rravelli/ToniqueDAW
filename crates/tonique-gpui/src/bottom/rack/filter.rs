@@ -31,7 +31,7 @@ use crate::{
     theme::{Theme, size, with_alpha},
     widgets::Flat,
 };
-use tonique_core::effect::Setting;
+use tonique_core::document::effect::Setting;
 
 /// Gain range of the graph, in dB.
 const TOP_DB: f32 = 24.;

@@ -133,7 +133,7 @@ fn the_wheel_scrolls_tracks_vertically() {
 #[test]
 fn the_wheel_scrolls_to_the_end_of_a_long_clip() {
     use egui::{Event, MouseWheelUnit, Pos2, TouchPhase};
-    use tonique_core::{arrangement::clip::AudioClip, audio_files::analysis::AudioInfo};
+    use tonique_core::{document::clip::AudioClip, library::analysis::AudioInfo};
     use tonique_engine::time::BeatPos;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
@@ -202,7 +202,7 @@ fn collapsed_groups_expand_while_dragging_over_them() {
     use crate::ui::arrangement::ruler::RULER_HEIGHT;
     use crate::ui::dnd::DragPayload;
     use egui::{Event, PointerButton, Pos2};
-    use tonique_core::audio_files::analysis::AudioInfo;
+    use tonique_core::library::analysis::AudioInfo;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
@@ -282,7 +282,7 @@ fn collapsed_groups_expand_while_dragging_over_them() {
 fn dragging_past_the_last_track_shows_a_ghost_track() {
     use crate::ui::dnd::DragPayload;
     use egui::{Event, Pos2};
-    use tonique_core::audio_files::analysis::AudioInfo;
+    use tonique_core::library::analysis::AudioInfo;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
@@ -336,7 +336,7 @@ fn dragging_past_the_last_track_shows_a_ghost_track() {
 fn dropping_past_the_last_track_shows_its_header_at_once() {
     use crate::ui::dnd::DragPayload;
     use egui::{Event, PointerButton, Pos2};
-    use tonique_core::audio_files::analysis::AudioInfo;
+    use tonique_core::library::analysis::AudioInfo;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
@@ -456,7 +456,7 @@ fn rubber_bands_start_where_pressed() {
 fn effects_drop_on_the_master() {
     use crate::ui::dnd::DragPayload;
     use egui::{Event, PointerButton, Pos2};
-    use tonique_core::effect::EffectKind;
+    use tonique_core::document::effect::EffectKind;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
@@ -560,7 +560,7 @@ fn rename_shortcut_renames_the_selected_track() {
 fn ctrl_wheel_zooms_over_clip_headers() {
     use crate::ui::arrangement::ruler::RULER_HEIGHT;
     use egui::{Event, Modifiers, MouseWheelUnit, Pos2, TouchPhase};
-    use tonique_core::{arrangement::clip::AudioClip, audio_files::analysis::AudioInfo};
+    use tonique_core::{document::clip::AudioClip, library::analysis::AudioInfo};
     use tonique_engine::time::BeatPos;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
@@ -617,7 +617,7 @@ fn effects_are_moved_to_other_tracks() {
     use crate::ui::arrangement::ruler::RULER_HEIGHT;
     use crate::ui::dnd::DragPayload;
     use egui::{Event, PointerButton, Pos2};
-    use tonique_core::effect::EffectKind;
+    use tonique_core::document::effect::EffectKind;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);

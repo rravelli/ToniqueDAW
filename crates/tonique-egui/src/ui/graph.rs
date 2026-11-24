@@ -7,12 +7,12 @@ use egui::{
 };
 use std::{sync::Arc, time::Duration};
 use tonique_core::{
-    diagnostics::graph_layout::{
+    monitor::graph_layout::{
         self, NODE_HEIGHT, NODE_WIDTH, elide, meter_unit, node_details, node_palette_slot,
         node_title, stats_line, track_names,
     },
-    diagnostics::graph_monitor::GraphMonitor,
-    state::ProjectState,
+    monitor::graph_monitor::GraphMonitor,
+    project::ProjectState,
 };
 use tonique_engine::graph::{GraphTopology, TopologyNode};
 
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn draws_the_live_graph_headless() {
         use crate::ui::theme::Theme;
-        use tonique_core::state::ProjectState;
+        use tonique_core::project::ProjectState;
 
         let (engine, _p) = Engine::new(EngineConfig::default());
         let mut state = ProjectState::new(engine);

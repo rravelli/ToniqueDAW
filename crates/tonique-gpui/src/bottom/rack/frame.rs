@@ -21,7 +21,7 @@ use crate::{
     theme::{Theme, hsla, size},
     widgets::{Flat, Menu, MenuItem, TextField, glyph, typing_view},
 };
-use tonique_core::{diagnostics::metrics::AudioMetrics, effect::Effect};
+use tonique_core::{document::effect::Effect, monitor::metrics::AudioMetrics};
 
 const HEADER_HEIGHT: f32 = 20.;
 /// The output meter outside the frame, low at its right, and the space

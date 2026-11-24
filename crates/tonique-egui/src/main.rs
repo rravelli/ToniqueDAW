@@ -2,7 +2,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use crate::ui::run;
-use tonique_core::{audio::host::Startup, config::settings::Settings, state::ProjectState};
+use tonique_core::{config::settings::Settings, device::host::Startup, project::ProjectState};
 
 mod ui;
 

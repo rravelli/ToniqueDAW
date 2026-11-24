@@ -18,8 +18,8 @@ use crate::{
     },
 };
 use tonique_core::{
-    arrangement::track::{TrackKind, TrackRow},
-    export::{
+    document::track::{TrackKind, TrackRow},
+    files::export::{
         ExportFile, ExportRange,
         format::{audio_format, duration, file_name, file_size, sample_bytes},
     },

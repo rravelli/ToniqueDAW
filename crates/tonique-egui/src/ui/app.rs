@@ -17,11 +17,8 @@ use crate::ui::{
     workspace::{BottomView, MainView, Workspace},
 };
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-use tonique_core::bench::Bench;
-use tonique_core::{
-    config::keymap::Action,
-    state::{ActionOutcome, ProjectState},
-};
+use tonique_core::dev::bench::Bench;
+use tonique_core::{config::keymap::Action, project::ActionOutcome, project::ProjectState};
 
 pub struct ToniqueApp {
     state: ProjectState,

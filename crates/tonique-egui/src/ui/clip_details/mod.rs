@@ -18,8 +18,8 @@ use crate::ui::{
     widget::scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
 };
 use tonique_core::{
-    arrangement::clip::AudioClip, arrangement::grid::GridService, arrangement::track::TrackRow,
-    state::ProjectState,
+    document::clip::AudioClip, document::track::TrackRow, project::ProjectState,
+    session::grid::GridService,
 };
 
 use inspector::{Panels, RAIL_WIDTH, inspector_ui};

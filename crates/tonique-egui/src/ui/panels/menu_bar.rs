@@ -11,8 +11,8 @@ use egui::{Align, Button, Context, Frame, Layout, Margin, MenuBar, RichText, Ui}
 use std::path::PathBuf;
 use tonique_core::{
     config::{keymap::Action, settings::UI_SCALE_RANGE},
-    project::project_name,
-    state::ProjectState,
+    document::file::project_name,
+    project::ProjectState,
 };
 
 const ZOOM_STEP: f32 = 0.1;

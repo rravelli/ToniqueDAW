@@ -29,8 +29,8 @@ use egui_phosphor::{
 use std::f32::consts::FRAC_PI_2;
 use std::{collections::HashMap, ops::RangeInclusive};
 use tonique_core::{
-    diagnostics::metrics::AudioMetrics,
-    effect::{Effect, EffectKind, Setting},
+    document::effect::{Effect, EffectKind, Setting},
+    monitor::metrics::AudioMetrics,
 };
 use tonique_engine::{
     edit::{Parameter, PluginId},

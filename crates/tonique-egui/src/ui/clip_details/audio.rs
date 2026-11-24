@@ -14,8 +14,9 @@ use crate::ui::{
     },
 };
 use tonique_core::{
-    arrangement::clip::{AudioClip, MAX_DETUNE, MIN_DETUNE, carried},
-    state::{ClipParam, ProjectState},
+    document::clip::{AudioClip, MAX_DETUNE, MIN_DETUNE, carried},
+    project::ClipParam,
+    project::ProjectState,
 };
 
 use super::inspector::{

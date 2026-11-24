@@ -42,7 +42,7 @@ use crate::{
     wave::WaveCache,
     widgets::{Recheck, TextField, follow_drag, icon_rail},
 };
-use tonique_core::{audio_files::analysis::AudioInfo, config::Config, state::PlaybackState};
+use tonique_core::{config::Config, library::analysis::AudioInfo, project::PlaybackState};
 
 /// Side of the rail's buttons, and so its width.
 const RAIL_WIDTH: f32 = 28.;

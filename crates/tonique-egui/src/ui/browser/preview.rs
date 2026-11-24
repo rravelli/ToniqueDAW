@@ -19,10 +19,7 @@ use crate::ui::{
     waveform::paint_waveform,
     widget::flat_button::FlatButton,
 };
-use tonique_core::{
-    audio_files::analysis::AudioInfo,
-    state::{PlaybackState, ProjectState},
-};
+use tonique_core::{library::analysis::AudioInfo, project::PlaybackState, project::ProjectState};
 
 /// Height of the preview.
 pub const PREVIEW_HEIGHT: f32 = 102.;

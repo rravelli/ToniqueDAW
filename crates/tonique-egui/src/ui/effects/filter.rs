@@ -1,4 +1,4 @@
-//! Editor of [`EffectKind::Filter`](tonique_core::effect::EffectKind::Filter):
+//! Editor of [`EffectKind::Filter`](tonique_core::document::effect::EffectKind::Filter):
 //! its response over the live spectrum, with a handle for cutoff and
 //! resonance, the mode, and cutoff and Q knobs.
 
@@ -17,7 +17,7 @@ use egui::{
     pos2, vec2,
 };
 use std::{f32::consts::PI, ops::RangeInclusive};
-use tonique_core::effect::Setting;
+use tonique_core::document::effect::Setting;
 use tonique_engine::{edit::PluginKind, nodes::FilterMode, spectrum::Spectrum};
 
 /// Gain range of the graph, in dB.

@@ -19,7 +19,7 @@ use egui_phosphor::{
     regular::WARNING,
 };
 use std::{ops::Range, time::Duration};
-use tonique_core::{arrangement::clip::AudioClip, state::ProjectState};
+use tonique_core::{document::clip::AudioClip, project::ProjectState};
 use tonique_engine::time::BeatPos;
 
 const PADDING_TEXT: f32 = 4.;
@@ -470,7 +470,7 @@ pub fn paint_clip_waveform(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonique_core::audio_files::analysis::AudioInfo;
+    use tonique_core::library::analysis::AudioInfo;
     use tonique_engine::{
         edit::ClipId,
         engine::{Engine, EngineConfig},

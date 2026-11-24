@@ -13,7 +13,7 @@ use crate::{
     geometry::Rect,
     theme::with_alpha,
 };
-use tonique_core::arrangement::clip::{AudioClip, MIN_LENGTH};
+use tonique_core::document::clip::{AudioClip, MIN_LENGTH};
 
 /// Half the width of the area grabbing a marker or a loop edge.
 const HANDLE_REACH: f32 = 4.;

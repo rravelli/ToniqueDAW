@@ -10,7 +10,7 @@ use crate::{
     icons,
     widgets::{Menu, MenuItem},
 };
-use tonique_core::arrangement::grid::{GridDensity, GridStep};
+use tonique_core::session::grid::{GridDensity, GridStep};
 
 impl Arrangement {
     /// Adaptive densities, fixed steps, triplets and snapping; the chosen

@@ -30,8 +30,8 @@ use filter::GraphDrag;
 pub use knob::KnobArrows;
 use knob::KnobDrag;
 use tonique_core::{
-    arrangement::track::TrackRow, config::keymap::Action, diagnostics::metrics::AudioMetrics,
-    effect::EffectKind,
+    config::keymap::Action, document::effect::EffectKind, document::track::TrackRow,
+    monitor::metrics::AudioMetrics,
 };
 
 /// Between effects, and around them.

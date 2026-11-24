@@ -1,6 +1,8 @@
 //! What can be dragged across panels.
 
-use tonique_core::{audio_files::analysis::AudioInfo, effect::EffectKind, state::ProjectState};
+use tonique_core::{
+    document::effect::EffectKind, library::analysis::AudioInfo, project::ProjectState,
+};
 use tonique_engine::edit::{PluginId, TrackId};
 
 /// Dragged from the browser onto the timeline, a track or the effects

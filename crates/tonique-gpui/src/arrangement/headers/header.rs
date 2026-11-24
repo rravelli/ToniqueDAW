@@ -23,8 +23,8 @@ use crate::{
     widgets::paint_param_slider,
 };
 use tonique_core::{
-    arrangement::track::{TrackRow, TrackSoloState},
-    state::MASTER_TRACK_ID,
+    document::track::{TrackRow, TrackSoloState},
+    project::MASTER_TRACK_ID,
     utils::display_name,
 };
 

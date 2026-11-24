@@ -17,11 +17,11 @@ use egui_phosphor::regular::PLUS;
 
 use crate::ui::{theme::ThemeExt, widget::flat_button::FlatButton};
 use tonique_core::{
-    audio_files::analysis::AudioInfo,
-    audio_files::cache::AUDIO_ANALYSIS_CACHE,
-    browser::file_tree::{FileNode, FileTree, is_audio_file, pinned},
     config::keymap::Action,
-    state::ProjectState,
+    library::analysis::AudioInfo,
+    library::cache::AUDIO_ANALYSIS_CACHE,
+    library::file_tree::{FileNode, FileTree, is_audio_file, pinned},
+    project::ProjectState,
 };
 
 /// Width of a label's menu: its name's field and its colours'.

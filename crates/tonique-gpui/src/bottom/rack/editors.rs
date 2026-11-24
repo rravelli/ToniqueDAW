@@ -28,7 +28,7 @@ use crate::{
     theme::{Theme, size},
     widgets::Flat,
 };
-use tonique_core::effect::{ECHO_TIME, ECHO_TIMES, Effect, EffectKind};
+use tonique_core::document::effect::{ECHO_TIME, ECHO_TIMES, Effect, EffectKind};
 
 /// Size of a parameter's switch.
 const TOGGLE_SIZE: (f32, f32) = (30., 20.);

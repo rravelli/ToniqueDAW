@@ -23,7 +23,7 @@ use crate::{
     theme::{Theme, size},
 };
 use tonique_core::{
-    effect::Setting,
+    document::effect::Setting,
     utils::steps::{Presses, step_ratio},
 };
 
@@ -277,7 +277,7 @@ impl BottomPanel {
                         self.state_mut(context).set_effect_setting(
                             track,
                             *plugin,
-                            tonique_core::effect::Setting::Time(value),
+                            tonique_core::document::effect::Setting::Time(value),
                         );
                     }
                 } else {

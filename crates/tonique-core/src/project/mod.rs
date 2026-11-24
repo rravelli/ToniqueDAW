@@ -1,461 +1,540 @@
-//! Project files: the arrangement, mixer, effects and how tracks look, as
-//! JSON. Audio files are referenced in place, relative to the project when
-//! they're inside its folder, so moving the whole folder keeps working.
+//! [`ProjectState`]: the facade the UIs drive. It holds the engine's edit
+//! session and the parts around it (the document's view and history, the
+//! session, the transport, the preview, the monitor, the audio output),
+//! and runs what involves several of them, one file per subject.
 
-pub mod files;
-
-use std::{
-    collections::BTreeMap,
-    fs,
-    path::{Path, PathBuf},
-};
-
-use serde::{Deserialize, Serialize};
-use tonique_engine::{
-    edit::{StretchWindow, WarpMode},
-    time::TimeSignature,
-};
-
-use crate::{arrangement::grid::GridSettings, effect::EffectKind};
-
-/// Extension of project files.
-pub const EXTENSION: &str = "tonique";
-/// Format version written; files from newer versions are refused.
-/// 2 added groups; 3 the echo, spectrum and utility effects, settings
-/// (filter `mode`, echo `time`) among effect parameters, and effect names;
-/// 4 the time signature; 5 clip gain, pan, loops and bar 1, clips saved by
-/// offset and length rather than by trims; 6 clip warp, tempo and
-/// transposition; 7 the grid settings.
-pub const VERSION: u32 = 7;
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProjectFile {
-    pub version: u32,
-    pub bpm: f32,
-    /// 4/4 in projects from before signatures.
-    #[serde(default)]
-    pub time_signature: TimeSignatureFile,
-    /// Loop region in beats.
-    pub loop_range: (f64, f64),
-    pub looping: bool,
-    /// The defaults in projects from before grid settings.
-    #[serde(default)]
-    pub grid: GridSettings,
-    pub master: ChannelFile,
-    /// Parents before their subgroups.
-    #[serde(default)]
-    pub groups: Vec<GroupFile>,
-    /// In display order.
-    pub tracks: Vec<TrackFile>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TimeSignatureFile {
-    pub numerator: u32,
-    pub denominator: u32,
-}
-
-impl Default for TimeSignatureFile {
-    fn default() -> Self {
-        TimeSignature::default().into()
-    }
-}
-
-impl From<TimeSignature> for TimeSignatureFile {
-    fn from(signature: TimeSignature) -> Self {
-        Self {
-            numerator: signature.numerator,
-            denominator: signature.denominator,
-        }
-    }
-}
-
-impl TimeSignatureFile {
-    /// `None` if the file holds a signature Tonique can't use.
-    pub fn signature(&self) -> Option<TimeSignature> {
-        TimeSignature::new(self.numerator, self.denominator)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct GroupFile {
-    pub name: String,
-    /// `#rrggbb`.
-    pub color: String,
-    pub height: f32,
-    /// Older projects call it `folded`.
-    #[serde(alias = "folded")]
-    pub collapsed: bool,
-    pub soloed: bool,
-    /// Index in `groups` of the group holding it.
-    pub parent: Option<usize>,
-    #[serde(flatten)]
-    pub channel: ChannelFile,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TrackFile {
-    pub name: String,
-    /// `#rrggbb`.
-    pub color: String,
-    pub height: f32,
-    /// Older projects call it `closed`.
-    #[serde(alias = "closed")]
-    pub collapsed: bool,
-    pub soloed: bool,
-    /// Index in `groups` of the group holding it.
-    #[serde(default)]
-    pub group: Option<usize>,
-    #[serde(flatten)]
-    pub channel: ChannelFile,
-    pub clips: Vec<ClipFile>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ChannelFile {
-    /// Linear gain.
-    pub volume: f32,
-    /// -1 (left) to 1 (right).
-    pub pan: f32,
-    pub muted: bool,
-    /// In processing order.
-    #[serde(default)]
-    pub effects: Vec<EffectFile>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ClipFile {
-    /// The audio file: relative to the project's folder, or absolute.
-    pub path: PathBuf,
-    /// Start in the arrangement, in beats.
-    pub position: f64,
-    /// Where in the file playback starts, in seconds.
-    #[serde(default)]
-    pub offset: f64,
-    /// In beats. Older projects have the part of the file played instead,
-    /// in `trim_start` and `trim_end`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub length: Option<f64>,
-    /// The part of the file that loops, in seconds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub looped: Option<LoopFile>,
-    /// Format 4 and before: the part of the file played, as ratios of its
-    /// length.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trim_start: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trim_end: Option<f32>,
-    /// Linear; older projects have none (1).
-    #[serde(default = "unity", skip_serializing_if = "is_unity")]
-    pub gain: f32,
-    /// Balance, -1 (left only) to 1 (right only); older projects have none
-    /// (centred).
-    #[serde(default, skip_serializing_if = "is_centred")]
-    pub pan: f32,
-    /// Where bar 1 of the clip's own grid is in the file, in seconds; the
-    /// file's start (0) when absent.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub origin: f64,
-    /// How it follows the project's tempo; older projects' clips don't.
-    #[serde(default, skip_serializing_if = "WarpFile::is_off")]
-    pub warp: WarpFile,
-    /// The file's tempo; the project's when absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bpm: Option<f64>,
-    /// In semitones, fractions being cents.
-    #[serde(default, skip_serializing_if = "is_centred")]
-    pub transpose: f32,
-    /// Stretched, the window it's stretched with; normal when absent.
-    #[serde(default, skip_serializing_if = "WindowFile::is_normal")]
-    pub window: WindowFile,
-    /// Stretched and transposed, whether its formants stay where they are.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub formants: bool,
-}
-
-/// See [`WarpMode`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum WarpFile {
-    #[default]
-    Off,
-    Spectral,
-}
-
-impl WarpFile {
-    fn is_off(&self) -> bool {
-        *self == Self::Off
-    }
-}
-
-impl From<WarpMode> for WarpFile {
-    fn from(mode: WarpMode) -> Self {
-        match mode {
-            WarpMode::Off => Self::Off,
-            WarpMode::Spectral => Self::Spectral,
-        }
-    }
-}
-
-impl From<WarpFile> for WarpMode {
-    fn from(file: WarpFile) -> Self {
-        match file {
-            WarpFile::Off => Self::Off,
-            WarpFile::Spectral => Self::Spectral,
-        }
-    }
-}
-
-/// See [`StretchWindow`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum WindowFile {
-    Short,
-    #[default]
-    Normal,
-    Long,
-}
-
-impl WindowFile {
-    fn is_normal(&self) -> bool {
-        *self == Self::Normal
-    }
-}
-
-impl From<StretchWindow> for WindowFile {
-    fn from(window: StretchWindow) -> Self {
-        match window {
-            StretchWindow::Short => Self::Short,
-            StretchWindow::Normal => Self::Normal,
-            StretchWindow::Long => Self::Long,
-        }
-    }
-}
-
-impl From<WindowFile> for StretchWindow {
-    fn from(file: WindowFile) -> Self {
-        match file {
-            WindowFile::Short => Self::Short,
-            WindowFile::Normal => Self::Normal,
-            WindowFile::Long => Self::Long,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct LoopFile {
-    /// In the file, in seconds.
-    pub start: f64,
-    pub end: f64,
-}
-
-fn unity() -> f32 {
-    1.
-}
-
-fn is_unity(gain: &f32) -> bool {
-    *gain == 1.
-}
-
-fn is_centred(pan: &f32) -> bool {
-    *pan == 0.
-}
-
-fn is_zero(seconds: &f64) -> bool {
-    *seconds == 0.
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct EffectFile {
-    pub kind: EffectKind,
-    /// Given by the user; none to go by the kind.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    pub enabled: bool,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub collapsed: bool,
-    /// Parameter values by name.
-    pub params: BTreeMap<String, f32>,
-}
-
-impl ProjectFile {
-    pub fn read(path: &Path) -> Result<Self, String> {
-        let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
-        let project: Self = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-        if project.version > VERSION {
-            return Err(format!(
-                "made by a newer version of Tonique (format {}, this one reads up to {VERSION})",
-                project.version
-            ));
-        }
-        Ok(project)
-    }
-
-    /// Write to a temporary file first, so a failed save never leaves a
-    /// half-written project behind.
-    pub fn write(&self, path: &Path) -> Result<(), String> {
-        let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        let temporary = path.with_extension(format!("{EXTENSION}.saving"));
-        fs::write(&temporary, text).map_err(|e| e.to_string())?;
-        fs::rename(&temporary, path).map_err(|e| e.to_string())
-    }
-}
-
-/// How an audio file is stored in a project in `dir`: relative when it's
-/// inside the folder, absolute otherwise.
-pub fn store_path(path: &Path, dir: Option<&Path>) -> PathBuf {
-    dir.and_then(|dir| path.strip_prefix(dir).ok())
-        .map_or_else(|| path.to_path_buf(), Path::to_path_buf)
-}
-
-/// Where a stored audio file is now: as stored (relative to the project's
-/// folder), or else next to the project, where a moved set of files often
-/// ends up.
-pub fn resolve_path(stored: &Path, dir: &Path) -> PathBuf {
-    let path = dir.join(stored);
-    if path.exists() {
-        return path;
-    }
-    stored
-        .file_name()
-        .map(|name| dir.join(name))
-        .filter(|beside| beside.exists())
-        .unwrap_or(path)
-}
-
-/// The project's name: its file name without the extension.
-pub fn project_name(path: &Path) -> String {
-    path.file_stem()
-        .map_or_else(|| "Untitled".into(), |s| s.to_string_lossy().into_owned())
-}
-
+mod actions;
+mod clipboard;
+mod clips;
+mod device;
+mod effects;
+mod export;
+mod groups;
+mod load;
+mod mixer;
+mod monitor;
+mod preview;
+mod selection;
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod tests;
+mod tracks;
+mod transport;
+use crate::{
+    config::settings::Settings,
+    document::track::{TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow, TrackSoloState, TrackView},
+    library::sources::SourceRegistry,
+    session::grid::GridService,
+    utils::color::Color,
+};
+use std::mem::take;
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("tonique-project-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+use crate::device::output::AudioOutput;
+use crate::document::history::History;
+use crate::document::view::DocumentView;
+use crate::monitor::Monitor;
+use crate::session::Session;
+pub use crate::session::selection::SelectionBounds;
+use crate::transport::Transport;
+use crate::transport::preview::Preview;
+pub use actions::ActionOutcome;
+pub use export::{ExportSelection, ExportSource};
+pub use groups::RowTarget;
+use tonique_engine::{
+    edit::{
+        BusId, ChannelRef, ClipId, Edit, EditError, EditSession, TrackId,
+        commands::{EditCommand, RenameBus, RenameTrack},
+    },
+    engine::Engine,
+    time::BeatPos,
+};
+
+pub use crate::document::track::MASTER_TRACK_ID;
+
+const DEFAULT_BPM: f64 = 120.;
+/// A new track's name; `#` is its number.
+pub const TRACK_NAME: &str = "# Audio Track";
+/// Smallest height of an expanded row (its controls must fit).
+pub const MIN_EXPANDED_HEIGHT: f32 = TRACK_COLLAPSED_HEIGHT + 25.;
+
+#[derive(Clone, Debug)]
+enum ProjectStatePendingAction {
+    DeleteTrack { id: TrackId },
+}
+
+/// An audio clip's parameter: heard as it's set, like a fader's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipParam {
+    /// Linear.
+    Gain,
+    /// Balance, -1 (left only) to 1 (right only).
+    Pan,
+}
+
+/// What [`ProjectState::update`] changed.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Updated {
+    /// The project, besides what plays: an action handled, a file loaded,
+    /// the audio lost or back.
+    pub project: bool,
+    /// What plays: the playhead or the preview moved, or one stopped.
+    pub playback: bool,
+}
+
+pub use crate::transport::PlaybackState;
+
+/// The project as the UI sees it. The engine's [`EditSession`] owns the
+/// document and its undo history; the parts around it keep their own
+/// rules: how the document looks, the selections of its history, the
+/// session, the transport, the preview, the monitor and the audio output.
+/// This runs what needs several of them (deleting the selected clips
+/// edits the document, the selection and the history; restarting the
+/// audio stops, seeks and plays again).
+pub struct ProjectState {
+    /// The engine's document, its undo history, and the engine.
+    edit_session: EditSession,
+    sources: SourceRegistry,
+    /// The audio device, and reopening it when lost.
+    output: AudioOutput,
+    /// Applied preferences; change them with `apply_settings`.
+    settings: Settings,
+    /// The playhead, the edit cursor, the loop and the metronome.
+    transport: Transport,
+    /// The browser's file preview.
+    preview: Preview,
+    /// The meters, and the graph view's measures.
+    monitor: Monitor,
+
+    /// How the document looks, saved with it but not undoable.
+    view: DocumentView,
+    /// What the user is working on, never saved: the selection, the
+    /// clipboard, a trim under way.
+    session: Session,
+    /// The selections of the undo history, in step with the engine's.
+    history: History,
+    pending_actions: Vec<ProjectStatePendingAction>,
+    batching: bool,
+
+    pub grid: GridService,
+    /// An undo step was opened for a clip edit heard as it's made (see
+    /// [`Self::edit_clip_live`]), to close when it's done.
+    live_edit: bool,
+    /// Colours given to new tracks: the UI sets its theme's palette (grey
+    /// until then).
+    track_palette: Vec<Color>,
+}
+
+impl ProjectState {
+    pub fn new(engine: Engine) -> Self {
+        let sample_rate = engine.config().sample_rate;
+        let edit_session = EditSession::new(Edit::new(DEFAULT_BPM), engine)
+            .expect("an empty edit always compiles");
+        Self {
+            edit_session,
+            sources: SourceRegistry::new(sample_rate),
+            output: AudioOutput::default(),
+            settings: Settings::default(),
+            transport: Transport::new(),
+            preview: Preview::default(),
+            monitor: Monitor::default(),
+            view: DocumentView::new(),
+            session: Session::default(),
+            history: History::default(),
+            pending_actions: Vec::new(),
+            batching: false,
+            grid: GridService::new(),
+            live_edit: false,
+            track_palette: Vec::new(),
+        }
     }
 
-    #[test]
-    fn paths_are_relative_inside_the_project_folder() {
-        let dir = Path::new("/music/song");
-        assert_eq!(
-            store_path(Path::new("/music/song/drums/kick.wav"), Some(dir)),
-            Path::new("drums/kick.wav")
-        );
-        assert_eq!(
-            store_path(Path::new("/samples/kick.wav"), Some(dir)),
-            Path::new("/samples/kick.wav")
-        );
-        assert_eq!(
-            store_path(Path::new("/samples/kick.wav"), None),
-            Path::new("/samples/kick.wav")
-        );
+    /// Update each frame the state: follow the engine and the file loaders,
+    /// run what was put off. Says what changed, for a UI drawing only that.
+    pub fn update(&mut self) -> Updated {
+        let was_playing = self.is_playing();
+        let preview = self.preview.playback;
+        let handled = !self.pending_actions.is_empty();
+        self.handle_pending_actions();
+        let audio = (self.audio_lost(), self.output.error.clone());
+        self.watch_audio();
+        let audio_changed = audio != (self.audio_lost(), self.output.error.clone());
+        let loaded = self.sources.poll_loaded();
+        let any_loaded = !loaded.is_empty();
+        for (id, data) in loaded {
+            let result = self.edit_session.set_source(id, data);
+            report(result);
+        }
+        self.sync_time_signature();
+        if self.transport.is_playing() {
+            self.transport.playhead = self.edit_session.position();
+        }
+        let engine = self.edit_session.engine();
+        self.preview
+            .follow(engine.preview_position(), engine.is_previewing());
+        self.monitor.update(&mut self.edit_session);
+        Updated {
+            project: handled || audio_changed || any_loaded,
+            // Once more as it stops, for the UI to show it stopped.
+            playback: was_playing || self.is_playing() || preview != self.preview.playback,
+        }
     }
 
-    #[test]
-    fn missing_files_are_looked_for_next_to_the_project() {
-        let dir = temp_dir("resolve");
-        fs::write(dir.join("kick.wav"), b"").unwrap();
-        assert_eq!(
-            resolve_path(Path::new("kick.wav"), &dir),
-            dir.join("kick.wav")
-        );
-        // Moved from elsewhere, now next to the project.
-        assert_eq!(
-            resolve_path(Path::new("/gone/kick.wav"), &dir),
-            dir.join("kick.wav")
-        );
-        // Nowhere: reported as stored.
-        assert_eq!(
-            resolve_path(Path::new("/gone/snare.wav"), &dir),
-            Path::new("/gone/snare.wav")
-        );
-        let _ = fs::remove_dir_all(&dir);
+    /// Whether the transport or the preview plays.
+    pub fn is_playing(&self) -> bool {
+        self.transport.is_playing() || self.preview.playback == PlaybackState::Playing
     }
 
-    #[test]
-    fn files_round_trip_and_newer_versions_are_refused() {
-        let dir = temp_dir("file");
-        let path = dir.join("song.tonique");
-        let mut project = ProjectFile {
-            version: VERSION,
-            bpm: 128.,
-            time_signature: TimeSignatureFile {
-                numerator: 7,
-                denominator: 8,
-            },
-            loop_range: (4., 12.),
-            looping: true,
-            grid: GridSettings {
-                step: crate::arrangement::grid::GridStep::Quarter,
-                ..Default::default()
-            },
-            master: ChannelFile {
-                volume: 0.8,
-                pan: 0.,
-                muted: false,
-                effects: Vec::new(),
-            },
-            groups: Vec::new(),
-            tracks: vec![TrackFile {
-                name: "Drums".into(),
-                color: "#e5736b".into(),
-                height: 60.,
-                collapsed: false,
-                soloed: true,
-                group: None,
-                channel: ChannelFile {
-                    volume: 0.5,
-                    pan: -0.25,
-                    muted: true,
-                    effects: vec![EffectFile {
-                        kind: EffectKind::Filter,
-                        name: Some("Tops".into()),
-                        enabled: false,
-                        collapsed: true,
-                        params: BTreeMap::from([("cutoff".into(), 800.)]),
-                    }],
-                },
-                clips: vec![ClipFile {
-                    path: "kick.wav".into(),
-                    position: 2.,
-                    offset: 0.1,
-                    length: Some(4.),
-                    looped: Some(LoopFile {
-                        start: 0.5,
-                        end: 1.,
-                    }),
-                    trim_start: None,
-                    trim_end: None,
-                    gain: 0.5,
-                    pan: -0.25,
-                    origin: 0.75,
-                    warp: WarpFile::Spectral,
-                    bpm: Some(96.),
-                    transpose: -2.5,
-                    window: WindowFile::Short,
-                    formants: true,
-                }],
-            }],
+    // Engine plumbing
+    fn edit(&self) -> &Edit {
+        self.edit_session.edit()
+    }
+
+    fn perform(&mut self, cmd: impl EditCommand + 'static) {
+        let steps = self.steps_recorded();
+        let result = self.edit_session.perform(cmd);
+        report(result);
+        self.track_steps(steps);
+    }
+
+    /// Run `f` as one undo step (or as part of the open batch), its
+    /// changes reaching the engine at once.
+    fn transaction(&mut self, label: &'static str, f: impl FnOnce(&mut Self)) {
+        self.edit_session.hold_effects();
+        if self.batching {
+            f(self);
+        } else {
+            let steps = self.steps_recorded();
+            self.edit_session.begin_transaction(label);
+            f(self);
+            self.edit_session.commit_transaction();
+            self.track_steps(steps);
+        }
+        report(self.edit_session.release_effects());
+    }
+
+    fn steps_recorded(&self) -> u64 {
+        self.edit_session.undo_manager().steps_recorded()
+    }
+
+    /// If a step was recorded since `steps` were, keep `selection_undo` in
+    /// step with it (see [`Self::selection_step`]).
+    fn track_steps(&mut self, steps: u64) {
+        if self.steps_recorded() == steps {
+            return;
+        }
+        let depth = self.edit_session.undo_manager().undo_len();
+        self.history.recorded(depth);
+    }
+
+    /// Run `f`, an edit that moves the clip selection: undoing it brings the
+    /// selection from before it back (redoing, the one it left).
+    pub(super) fn selection_step(&mut self, f: impl FnOnce(&mut Self)) {
+        let (before, steps) = (self.session.clip_selection.clone(), self.steps_recorded());
+        f(self);
+        if self.steps_recorded() != steps && self.session.clip_selection != before {
+            self.history.moved_selection(before);
+        }
+    }
+
+    /// The channel of a track, a group (addressed by its bus's ID) or the
+    /// master.
+    fn channel_ref(&self, id: TrackId) -> ChannelRef {
+        if id == MASTER_TRACK_ID {
+            ChannelRef::Master
+        } else if self.is_group(id) {
+            ChannelRef::Bus(BusId(id.0))
+        } else {
+            ChannelRef::Track(id)
+        }
+    }
+
+    pub fn new_clip_id(&mut self) -> ClipId {
+        self.edit_session.create(|e| ClipId(e.next_id()))
+    }
+
+    // Selection and views
+    /// Set track selected
+    pub fn select_track(&mut self, id: &TrackId) {
+        self.session.selected_tracks = vec![*id];
+    }
+    pub fn clear_track_selection(&mut self) {
+        self.session.selected_tracks.clear();
+    }
+    pub fn selected_track(&self) -> Option<TrackRow> {
+        let id = *self.session.selected_tracks.first()?;
+        if id == MASTER_TRACK_ID {
+            return Some(self.master_track());
+        }
+        if self.is_group(id) {
+            return self.group_row(id);
+        }
+        self.track_index(id).and_then(|i| self.track_from_index(i))
+    }
+    /// Add the row to the selection, or take it out.
+    pub fn toggle_track_selected(&mut self, id: TrackId) {
+        if let Some(i) = self.session.selected_tracks.iter().position(|t| *t == id) {
+            self.session.selected_tracks.remove(i);
+        } else {
+            self.session.selected_tracks.push(id);
+        }
+    }
+    /// Select the rows from the last selected one to `id`, in display order.
+    pub fn select_rows_to(&mut self, id: TrackId) {
+        let rows: Vec<TrackId> = self.rows().iter().map(|r| r.id).collect();
+        let anchor = self
+            .session
+            .selected_tracks
+            .last()
+            .and_then(|a| rows.iter().position(|r| r == a));
+        let Some((from, to)) = anchor.zip(rows.iter().position(|r| *r == id)) else {
+            return self.select_track(&id);
         };
-        project.write(&path).unwrap();
-        assert_eq!(ProjectFile::read(&path).unwrap(), project);
-        assert!(!dir.join("song.tonique.saving").exists());
+        let range = if from <= to { from..=to } else { to..=from };
+        self.session.selected_tracks = rows[range].to_vec();
+    }
+    /// Get all tracks
+    pub fn tracks(&self) -> impl Iterator<Item = TrackRow> + use<> {
+        let refs: Vec<_> = (0..self.track_count())
+            .filter_map(|i| self.track_from_index(i))
+            .collect();
+        refs.into_iter()
+    }
+    pub fn master_track(&self) -> TrackRow {
+        let view = &self.view.tracks[&MASTER_TRACK_ID];
+        let master = &self.edit().master;
+        TrackRow {
+            id: MASTER_TRACK_ID,
+            clips: Vec::new(),
+            muted: master.muted,
+            volume: master.volume.get(),
+            pan: master.pan.get(),
+            armed: false,
+            name: view.name.clone(),
+            height: view.height,
+            collapsed: view.collapsed,
+            color: view.color,
+            selected: self.session.selected_tracks.contains(&MASTER_TRACK_ID),
+            solo: TrackSoloState::NotSoloing,
+            silenced: master.muted,
+            first_track_index: 0,
+            kind: TrackKind::Audio,
+            depth: 0,
+        }
+    }
+    pub fn selected_tracks(&self) -> &Vec<TrackId> {
+        &self.session.selected_tracks
+    }
+    /// Positions (in beats) edits snap to besides the grid: the edges of the
+    /// clips not in `exclude`, the loop edges and the edit cursor.
+    pub fn snap_targets(&self, exclude: &[ClipId]) -> Vec<BeatPos> {
+        let bpm = self.bpm();
+        let (loop_start, loop_end) = self.transport.loop_range;
+        self.tracks()
+            .flat_map(|t| t.clips)
+            .filter(|c| !exclude.contains(&c.id))
+            .flat_map(|c| [c.position, c.end(bpm)])
+            .chain([loop_start, loop_end, self.transport.edit_cursor])
+            .collect()
+    }
+    /// Where the arrangement's content ends, in beats: the last clip end,
+    /// the loop end while looping, or the playhead, whichever is furthest.
+    pub fn arrangement_end(&self) -> BeatPos {
+        let loop_end = if self.transport.looping {
+            self.transport.loop_range.1
+        } else {
+            BeatPos::ZERO
+        };
+        // From the edit's clips, those shown: building the tracks' rows
+        // would copy them all.
+        self.edit()
+            .tracks
+            .iter()
+            .flat_map(|track| &track.clips)
+            .filter(|clip| self.has_clip_view(clip))
+            .map(|clip| clip.start + clip.length)
+            .fold(self.transport.playhead.max(loop_end), BeatPos::max)
+    }
+    pub fn track_count(&self) -> usize {
+        self.edit().tracks.len()
+    }
+    fn track_index(&self, id: TrackId) -> Option<usize> {
+        self.edit().tracks.iter().position(|t| t.id == id)
+    }
+    /// Get mutable fields from track to be changed in place. Use `self.commit_track_view` to update the undo stack.
+    pub fn track_view_mut(&mut self, id: &TrackId) -> &mut TrackView {
+        self.view.tracks.entry(*id).or_default()
+    }
+    /// Commit changes made to the track mutable fields. Only the name is
+    /// part of the undo history.
+    pub fn commit_track_view(&mut self, id: &TrackId) {
+        let Some(view) = self.view.tracks.get(id) else {
+            return;
+        };
+        let name = view.name.clone();
+        if let Ok(track) = self.edit().track(*id)
+            && track.name != name
+        {
+            self.perform(RenameTrack::new(*id, name));
+        } else if let Ok(group) = self.edit().bus(BusId(id.0))
+            && group.name != name
+        {
+            self.perform(RenameBus::new(BusId(id.0), name));
+        }
+    }
+    pub fn track_from_index(&self, index: usize) -> Option<TrackRow> {
+        let track = self.edit().tracks.get(index)?;
+        let any_solo = self.any_solo();
+        let view = self
+            .view
+            .tracks
+            .get(&track.id)
+            .cloned()
+            .unwrap_or_else(TrackView::new);
+        Some(TrackRow {
+            id: track.id,
+            clips: track
+                .clips
+                .iter()
+                .filter_map(|c| self.clip_view(c))
+                .collect(),
+            muted: track.channel.muted,
+            volume: track.channel.volume.get(),
+            pan: track.channel.pan.get(),
+            armed: view.armed,
+            name: track.name.clone(),
+            height: view.height,
+            collapsed: view.collapsed,
+            color: view.color,
+            selected: self.session.selected_tracks.contains(&track.id),
+            solo: if !any_solo {
+                TrackSoloState::NotSoloing
+            } else if track.soloed {
+                TrackSoloState::Solo
+            } else if !track.channel.muted && !track.channel.audible() {
+                // Silenced by another solo (a soloed group lets it through).
+                TrackSoloState::Soloing
+            } else {
+                TrackSoloState::NotSoloing
+            },
+            silenced: !self.track_heard(track),
+            first_track_index: index,
+            kind: TrackKind::Audio,
+            depth: self.edit().buses_along(track.output).len(),
+        })
+    }
 
-        project.version = VERSION + 1;
-        project.write(&path).unwrap();
-        assert!(
-            ProjectFile::read(&path)
-                .unwrap_err()
-                .contains("newer version")
-        );
-        assert_eq!(project_name(&path), "song");
-        let _ = fs::remove_dir_all(&dir);
+    // History management
+    /// Group the following changes into one undo step, until `commit_batch`,
+    /// reaching the engine then (but for a live edit's, heard as made).
+    pub fn begin_batch(&mut self) {
+        if !self.live_edit {
+            self.edit_session.hold_effects();
+        }
+        self.batching = true;
+        self.history.batch_start = Some(self.steps_recorded());
+        self.edit_session.begin_transaction("Edit");
+    }
+    /// Close the undo step opened by `begin_batch`.
+    pub fn commit_batch(&mut self) {
+        self.batching = false;
+        self.edit_session.commit_transaction();
+        if let Some(steps) = self.history.batch_start.take() {
+            self.track_steps(steps);
+        }
+        if !self.live_edit {
+            report(self.edit_session.release_effects());
+        }
+    }
+    /// Undo last action, and bring back the clip selection from before it.
+    /// Does nothing if there is no action.
+    pub fn undo(&mut self) {
+        let result = self.edit_session.undo();
+        if matches!(result, Ok(true)) {
+            self.history.undone(&mut self.session.clip_selection);
+        }
+        report(result);
+        self.after_history_change();
+    }
+    /// Redo last action, and its clip selection. Does nothing if there is no
+    /// action.
+    pub fn redo(&mut self) {
+        let result = self.edit_session.redo();
+        if matches!(result, Ok(true)) {
+            self.history.redone(&mut self.session.clip_selection);
+        }
+        report(result);
+        self.after_history_change();
+    }
+    fn after_history_change(&mut self) {
+        self.sync_time_signature();
+        // Renames may have been undone: show the engine's names.
+        for track in &self.edit_session.edit().tracks {
+            if let Some(view) = self.view.tracks.get_mut(&track.id) {
+                view.name = track.name.clone();
+            }
+        }
+        self.session
+            .selected_tracks
+            .retain(|id| *id == MASTER_TRACK_ID || self.edit_session.edit().track(*id).is_ok());
+        self.prune_clip_selection();
+    }
+    /// What the audio files clips use take, and the engine's copies.
+    /// Whether a file clips use is still decoding: its waveform grows,
+    /// its rhythm and samples are to come.
+    pub fn sources_loading(&self) -> bool {
+        self.sources.loading()
+    }
+
+    pub fn source_memory(&self) -> crate::dev::memory::SourceMemory {
+        self.sources.memory()
+    }
+
+    /// Whether there is still actions to undo
+    pub fn can_undo(&self) -> bool {
+        self.edit_session.undo_manager().can_undo()
+    }
+    /// Whether there is still actions to redo
+    pub fn can_redo(&self) -> bool {
+        self.edit_session.undo_manager().can_redo()
+    }
+    /// Steps there are to undo, and the last one's name.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn undo_history(&self) -> (usize, Option<&'static str>) {
+        let undo = self.edit_session.undo_manager();
+        (undo.undo_len(), undo.undo_label())
+    }
+
+    /// To make sure some action do not conflict, pending actions are handled during state updates
+    fn handle_pending_actions(&mut self) {
+        for pending in take(&mut self.pending_actions) {
+            match pending {
+                ProjectStatePendingAction::DeleteTrack { id } => {
+                    // A group goes with everything inside.
+                    if self.is_group(id) {
+                        self.delete_group(id);
+                        continue;
+                    }
+                    let Some(pos) = self.track_index(id) else {
+                        continue;
+                    };
+                    if self.session.selected_tracks.contains(&id) {
+                        self.session.selected_tracks.clear();
+                        if let Some(prev) = self.edit().tracks.get(pos.saturating_sub(1))
+                            && prev.id != id
+                        {
+                            self.session.selected_tracks.push(prev.id);
+                        }
+                    }
+                    self.remove_track(id);
+                }
+            }
+        }
+    }
+}
+
+/// Edit errors mean the UI asked for something stale (e.g. a clip that was
+/// just deleted). Nothing to recover; make them visible in debug builds.
+fn report<T>(result: Result<T, EditError>) {
+    if let Err(e) = result {
+        eprintln!("Edit failed: {e}");
     }
 }

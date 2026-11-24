@@ -15,9 +15,9 @@ use egui::{Align2, FontId, Key, Popup, Rect, RichText, Sense, Stroke, Ui, pos2, 
 use egui_phosphor::regular::{ARROW_SQUARE_OUT, DOTS_THREE, MAGNIFYING_GLASS, X};
 use std::ffi::OsStr;
 use tonique_core::{
-    audio_files::cache::AUDIO_ANALYSIS_CACHE,
-    browser::file_tree::{FileKind, FileNode, file_kind},
-    state::ProjectState,
+    library::cache::AUDIO_ANALYSIS_CACHE,
+    library::file_tree::{FileKind, FileNode, file_kind},
+    project::ProjectState,
 };
 
 use super::{FileList, FolderAction, ROW_HEIGHT};

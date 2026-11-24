@@ -5,8 +5,8 @@ use egui::Ui;
 
 use crate::ui::widget::context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator};
 use tonique_core::{
-    arrangement::grid::{GridDensity, GridStep},
-    state::ProjectState,
+    project::ProjectState,
+    session::grid::{GridDensity, GridStep},
 };
 
 /// Adaptive densities, fixed steps, triplets and snapping; the chosen ones

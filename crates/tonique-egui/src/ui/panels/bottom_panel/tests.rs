@@ -1,6 +1,6 @@
 use super::*;
 use egui::{Rect, vec2};
-use tonique_core::effect::EffectKind;
+use tonique_core::document::effect::EffectKind;
 use tonique_engine::{
     edit::PluginKind,
     engine::{Engine, EngineConfig},
@@ -123,9 +123,9 @@ fn shortcuts_in_the_clip_view_are_for_the_timeline() {
     let clip = state.new_clip_id();
     state.add_clips(
         &track,
-        vec![tonique_core::arrangement::clip::AudioClip::new(
+        vec![tonique_core::document::clip::AudioClip::new(
             clip,
-            tonique_core::audio_files::analysis::AudioInfo::silent(1.),
+            tonique_core::library::analysis::AudioInfo::silent(1.),
             tonique_engine::time::BeatPos(0.),
             120.,
         )],

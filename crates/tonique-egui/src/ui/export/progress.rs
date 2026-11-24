@@ -10,7 +10,7 @@ use crate::ui::{
     theme::{ThemeExt, font_size},
     widget::dialog::{self, button},
 };
-use tonique_core::export::{Export, ExportFile, ExportOutcome, Waveform};
+use tonique_core::files::export::{Export, ExportFile, ExportOutcome, Waveform};
 
 use super::{
     LANE_PADDING, Step,

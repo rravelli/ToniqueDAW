@@ -15,10 +15,10 @@ use crate::{
     widgets::{paint_line, shape},
 };
 use tonique_core::{
-    arrangement::clip::AudioClip,
-    arrangement::track::{TrackKind, TrackRow},
-    export::{ExportRange, format::duration},
-    state::ProjectState,
+    document::clip::AudioClip,
+    document::track::{TrackKind, TrackRow},
+    files::export::{ExportRange, format::duration},
+    project::ProjectState,
 };
 
 use super::{LANE_PADDING, parts::card};

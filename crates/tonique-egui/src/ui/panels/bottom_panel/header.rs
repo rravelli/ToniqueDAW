@@ -12,7 +12,7 @@ use egui::{
     Rangef, Rect, RichText, Sense, Shape, Stroke, Ui, pos2, vec2,
 };
 use std::sync::Arc;
-use tonique_core::{arrangement::track::TrackRow, utils::display_name};
+use tonique_core::{document::track::TrackRow, utils::display_name};
 use tonique_engine::edit::ClipId;
 
 use super::{BottomPanel, HEADER_ROW, TAB_PADDING, TAB_RADIUS};

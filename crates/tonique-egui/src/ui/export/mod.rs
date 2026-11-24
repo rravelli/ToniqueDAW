@@ -23,8 +23,10 @@ use crate::ui::{
     widget::dialog::{self, button},
 };
 use tonique_core::{
-    export::{Export, ExportFile, ExportOptions, ExportRange, Waveform, format},
-    state::{ExportSelection, ExportSource, ProjectState},
+    files::export::{Export, ExportFile, ExportOptions, ExportRange, Waveform, format},
+    project::ExportSelection,
+    project::ExportSource,
+    project::ProjectState,
 };
 
 use format::{audio_format, duration};

@@ -5,7 +5,7 @@ use egui::{Pos2, Rect, Ui, Vec2, vec2};
 use tonique_engine::time::BeatPos;
 
 use crate::ui::arrangement::row_layout::RowLayout;
-use tonique_core::{arrangement::track::DEFAULT_TRACK_HEIGHT, state::ProjectState};
+use tonique_core::{document::track::DEFAULT_TRACK_HEIGHT, project::ProjectState};
 
 /// How close to the left/right edges dragging starts scrolling, in points.
 const EDGE_X: f32 = 16.;

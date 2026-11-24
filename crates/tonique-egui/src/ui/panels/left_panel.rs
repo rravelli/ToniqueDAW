@@ -10,7 +10,7 @@ use crate::ui::{
 };
 use egui::{Frame, Margin, RichText, Stroke, Ui, UiBuilder};
 use egui_phosphor::regular as icons;
-use tonique_core::{effect::EffectKind, state::ProjectState};
+use tonique_core::{document::effect::EffectKind, project::ProjectState};
 
 /// Space around the search bar, and above the rail.
 const HEADER_SPACING: f32 = 4.;

@@ -39,8 +39,8 @@ use crate::{
 use drag::{HeaderDrag, RowMarker};
 use layout::{COLOR_BAR_WIDTH, HEADER_INSET, color_bar_left};
 use tonique_core::{
-    arrangement::track::{TrackKind, TrackRow},
-    state::MASTER_TRACK_ID,
+    document::track::{TrackKind, TrackRow},
+    project::MASTER_TRACK_ID,
 };
 
 const DEFAULT_WIDTH: f32 = 190.;

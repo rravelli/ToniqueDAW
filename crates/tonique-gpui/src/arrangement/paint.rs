@@ -16,7 +16,7 @@ use crate::{
     wave::WaveCache,
     widgets::paint_text,
 };
-use tonique_core::arrangement::track::DEFAULT_TRACK_HEIGHT;
+use tonique_core::document::track::DEFAULT_TRACK_HEIGHT;
 
 /// How strongly a selected track's colour tints its lane.
 const LANE_TINT: f32 = 0.06;

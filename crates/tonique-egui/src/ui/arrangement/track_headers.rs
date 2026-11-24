@@ -29,9 +29,11 @@ use crate::{
     },
 };
 use tonique_core::{
-    arrangement::track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackRow, TrackSoloState},
     config::keymap::Action,
-    state::{ProjectState, RowTarget, TRACK_NAME},
+    document::track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackRow, TrackSoloState},
+    project::ProjectState,
+    project::RowTarget,
+    project::TRACK_NAME,
     utils::display_name,
 };
 

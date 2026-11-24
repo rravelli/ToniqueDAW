@@ -33,7 +33,7 @@ use menu_bar::MenuBarUi;
 pub use popup::PopupKind;
 use project::WindowTitle;
 use settings::{SettingsDialog, SettingsEvent, SettingsTab};
-use tonique_core::project::files::ProjectFiles;
+use tonique_core::files::ProjectFiles;
 use transport::{Shows, TransportBar, TransportEvent};
 
 use crate::{
@@ -46,7 +46,7 @@ use crate::{
     theme::{FONT_UI, Theme, ThemeLibrary, hsla, size},
     widgets::{Edge, Splitter, splitter_handle},
 };
-use tonique_core::{bench::Bench, state::ProjectState};
+use tonique_core::{dev::bench::Bench, project::ProjectState};
 
 /// The browser's width, as the egui app's left panel.
 const BROWSER_WIDTH: f32 = 220.;

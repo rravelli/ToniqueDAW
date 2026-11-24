@@ -15,8 +15,8 @@ use crate::{
     theme::{Theme, hsla, icon, mix, size},
 };
 use tonique_core::{
-    browser::file_tree::{FileKind, FileNode, file_kind},
-    state::PlaybackState,
+    library::file_tree::{FileKind, FileNode, file_kind},
+    project::PlaybackState,
 };
 
 pub(super) const ROW_HEIGHT: f32 = 22.;

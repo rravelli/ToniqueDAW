@@ -3,7 +3,7 @@
 
 use tonique_engine::edit::ClipId;
 
-use tonique_core::{config::keymap::Action, state::ProjectState};
+use tonique_core::{config::keymap::Action, project::ProjectState};
 
 /// What the main area shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,7 +98,7 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonique_core::{arrangement::clip::AudioClip, audio_files::analysis::AudioInfo};
+    use tonique_core::{document::clip::AudioClip, library::analysis::AudioInfo};
     use tonique_engine::{
         engine::{Engine, EngineConfig},
         time::BeatPos,

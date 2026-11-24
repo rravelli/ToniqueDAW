@@ -3,7 +3,7 @@ use egui::{CursorIcon, Painter, Rect, Sense, Stroke, Ui, vec2};
 use tonique_engine::time::BeatPos;
 
 use crate::{ui::arrangement::grid::PaintGrid, ui::theme::ThemeExt};
-use tonique_core::state::ProjectState;
+use tonique_core::project::ProjectState;
 
 /// The loop lane, then the bars, then the time: a row each.
 pub const RULER_HEIGHT: f32 = 3. * ROW_HEIGHT;

@@ -5,10 +5,7 @@ use crate::ui::{
     commands::Commands,
     widget::arrow_keys::holds_arrows,
 };
-use tonique_core::{
-    config::keymap::Action,
-    state::{ActionOutcome, ProjectState},
-};
+use tonique_core::{config::keymap::Action, project::ActionOutcome, project::ProjectState};
 
 impl Timeline {
     /// Run the queued actions acting on the selection or edit cursor, and

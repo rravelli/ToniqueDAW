@@ -14,7 +14,7 @@ use crate::{
     theme::{Color, Theme, hsla, mix, mono, size},
     widgets::{paint_line, shape},
 };
-use tonique_core::diagnostics::graph_layout::{
+use tonique_core::monitor::graph_layout::{
     NODE_HEIGHT, NODE_WIDTH, elide, meter_unit, node_details, node_palette_slot,
 };
 

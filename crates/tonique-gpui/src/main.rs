@@ -19,7 +19,7 @@ mod widgets;
 
 use gpui::{App, Bounds, WindowBounds, WindowOptions, prelude::*, px, size};
 
-use tonique_core::{audio::host::Startup, config::settings::Settings, state::ProjectState};
+use tonique_core::{config::settings::Settings, device::host::Startup, project::ProjectState};
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -33,7 +33,7 @@ fn main() {
             .open_window(
                 WindowOptions {
                     // Benched UIs are compared at the same size: the whole screen.
-                    window_bounds: Some(if tonique_core::bench::Bench::requested() {
+                    window_bounds: Some(if tonique_core::dev::bench::Bench::requested() {
                         WindowBounds::Fullscreen(bounds)
                     } else {
                         WindowBounds::Windowed(bounds)
@@ -47,7 +47,7 @@ fn main() {
                     app_id: Some("Tonique".into()),
                     // gpui-fast caps frames in low-power mode and while inactive;
                     // the egui app doesn't, so a bench lifts the caps.
-                    ..if tonique_core::bench::Bench::requested() {
+                    ..if tonique_core::dev::bench::Bench::requested() {
                         WindowOptions {
                             low_power_frame_interval: None,
                             inactive_frame_interval: None,

@@ -18,10 +18,10 @@ use appearance::AppearanceTab;
 use egui::{Align, Align2, FontFamily, FontId, Grid, Layout, Rangef, RichText, Ui, Vec2, vec2};
 use egui_phosphor::regular::{ARROWS_CLOCKWISE, X};
 use shortcuts::ShortcutsTab;
-use tonique_core::audio::host::{open_output, output_devices};
+use tonique_core::device::host::{open_output, output_devices};
 use tonique_core::{
     config::settings::{Settings, UI_SCALE_RANGE},
-    state::ProjectState,
+    project::ProjectState,
 };
 use tonique_engine::device::{DeviceInfo, DeviceOptions};
 

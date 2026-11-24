@@ -16,7 +16,8 @@ use std::{
 };
 use tonique_core::{
     config::{Config, keymap::Action},
-    state::{PlaybackState, ProjectState},
+    project::PlaybackState,
+    project::ProjectState,
 };
 
 mod items;

@@ -24,8 +24,10 @@ use egui_phosphor::{
 };
 use std::ops::RangeInclusive;
 use tonique_core::{
-    arrangement::track::{TrackKind, TrackRow},
-    state::{MASTER_TRACK_ID, MIN_EXPANDED_HEIGHT, ProjectState},
+    document::track::{TrackKind, TrackRow},
+    project::MASTER_TRACK_ID,
+    project::MIN_EXPANDED_HEIGHT,
+    project::ProjectState,
     utils::display_name,
 };
 
@@ -43,7 +45,7 @@ const SLIDER_HEIGHT: f32 = 16.;
 const PAN_WIDTH: f32 = 34.;
 /// Wide enough for the volume to show its unit.
 const VOLUME_UNIT_WIDTH: f32 = 64.;
-pub use tonique_core::arrangement::row_layout::ROW_GAP;
+pub use tonique_core::session::row_layout::ROW_GAP;
 /// Indentation per level of groups, up to [`MAX_INDENT_LEVELS`] (deeper
 /// rows line up with the deepest shown level).
 const INDENT: f32 = 8.;
@@ -163,7 +165,7 @@ impl TrackHeader {
         let silenced = track.is_silenced();
         let is_solo = matches!(
             track.solo,
-            tonique_core::arrangement::track::TrackSoloState::Solo
+            tonique_core::document::track::TrackSoloState::Solo
         );
         let is_master = track.id == MASTER_TRACK_ID;
         // Groups and the master have no arm button; the master no solo.

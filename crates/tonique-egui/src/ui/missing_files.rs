@@ -18,11 +18,11 @@ use crate::ui::{
     widget::{dialog, list_row::ListRow, search_bar::SearchBar},
 };
 use tonique_core::{
-    browser::file_match::{
+    library::file_match::{
         AUDIO_EXTENSIONS, FileIndex, exact_matches, file_name, folder_name, folder_of, query_for,
         rank,
     },
-    state::ProjectState,
+    project::ProjectState,
 };
 
 /// Asks the view to show, from anywhere (a clip's menu, the transport

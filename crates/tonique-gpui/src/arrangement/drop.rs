@@ -12,8 +12,8 @@ use tonique_engine::{edit::TrackId, time::BeatPos};
 
 use crate::{arrangement::RULER_HEIGHT, bottom::DraggedEffect, browser::DraggedAudio};
 use tonique_core::{
-    arrangement::clip::AudioClip, audio_files::analysis::AudioInfo,
-    audio_files::cache::AUDIO_ANALYSIS_CACHE, state::MASTER_TRACK_ID,
+    document::clip::AudioClip, library::analysis::AudioInfo, library::cache::AUDIO_ANALYSIS_CACHE,
+    project::MASTER_TRACK_ID,
 };
 
 /// Where audio dragged over the timeline would land.

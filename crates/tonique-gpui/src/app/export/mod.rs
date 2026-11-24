@@ -31,8 +31,8 @@ use crate::{
     widgets::{TextField, follow_drag},
 };
 use tonique_core::{
-    export::{Export, ExportFile, ExportOptions, ExportOutcome, ExportRange, Waveform},
-    state::ExportSelection,
+    files::export::{Export, ExportFile, ExportOptions, ExportOutcome, ExportRange, Waveform},
+    project::ExportSelection,
 };
 
 /// Room for a rendered file's waveform, and around the preview's lanes.
