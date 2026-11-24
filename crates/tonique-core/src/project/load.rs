@@ -33,7 +33,6 @@ use crate::{
     document::track::TrackView,
     library::analysis::AudioInfo,
     library::cache::AUDIO_ANALYSIS_CACHE,
-    session::grid::Offset,
     utils::color::{format_color, parse_color},
 };
 
@@ -52,7 +51,6 @@ impl ProjectState {
         self.history.clear();
         self.pending_actions.clear();
         self.batching = false;
-        self.grid.offset = Offset::ZERO;
         self.grid.settings = Default::default();
         self.sync_time_signature();
         self.transport.reset(self.grid.beats_per_bar());

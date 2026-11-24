@@ -121,7 +121,7 @@ impl Arrangement {
         let rows = self.rows(context);
         let lanes_height = self.lanes_bottom(context) - RULER_HEIGHT;
         let max = (rows.height() + DEFAULT_TRACK_HEIGHT - lanes_height).max(0.);
-        let offset = &mut self.state_mut(context).grid.offset.y;
+        let offset = &mut self.timeline_view_mut(context).offset.y;
         let to = (*offset - delta_y).clamp(0., max);
         if to == *offset {
             self.timeline.scroll.rows.stop();
@@ -134,7 +134,7 @@ impl Arrangement {
         let view = self.lanes_bottom(context) - RULER_HEIGHT;
         let content = rows.height() + DEFAULT_TRACK_HEIGHT;
         ScrollSpan {
-            offset: self.state(context).grid.offset.y,
+            offset: self.timeline_view(context).offset.y,
             max: (content - view).max(0.),
             view,
         }
@@ -143,13 +143,16 @@ impl Arrangement {
     /// The scroll across: the arrangement and some room to add more, never
     /// short of what's in view.
     pub fn across_span(&self, context: &App) -> ScrollSpan {
-        let grid = &self.state(context).grid;
-        let end = self.state(context).arrangement_end().0 + SLACK_BARS * grid.beats_per_bar();
+        let state = self.state(context);
+        let end = state.arrangement_end().0 + SLACK_BARS * state.grid().beats_per_bar();
+        let timeline_view = self.timeline_view(context);
         let view = self.viewport().right;
-        let offset = grid.offset.x;
+        let offset = timeline_view.offset.x;
         ScrollSpan {
             offset,
-            max: (grid.beats_to_width(end) - view).max(offset).max(0.),
+            max: (timeline_view.beats_to_width(end) - view)
+                .max(offset)
+                .max(0.),
             view,
         }
     }
@@ -157,13 +160,13 @@ impl Arrangement {
     /// Scrolled across from the scrollbar: following the playhead pauses,
     /// as with the wheel.
     pub fn set_across(&mut self, offset: f32, context: &mut App) {
-        self.state_mut(context).grid.offset.x = offset.max(0.);
+        self.timeline_view_mut(context).offset.x = offset.max(0.);
         self.timeline.scroll.across.stop();
         self.timeline.scroll.follow_paused = true;
     }
 
     pub fn set_rows(&mut self, offset: f32, context: &mut App) {
-        self.state_mut(context).grid.offset.y = offset.max(0.);
+        self.timeline_view_mut(context).offset.y = offset.max(0.);
         self.timeline.scroll.rows.stop();
     }
 
@@ -172,7 +175,7 @@ impl Arrangement {
         if delta_x == 0. {
             return;
         }
-        let offset = &mut self.state_mut(context).grid.offset.x;
+        let offset = &mut self.timeline_view_mut(context).offset.x;
         let to = (*offset - delta_x).max(0.);
         if to == *offset {
             self.timeline.scroll.across.stop();
@@ -213,10 +216,10 @@ impl Arrangement {
     /// Scrolls across so `start..end` is in view; when it doesn't fit, its
     /// start.
     pub fn reveal(&mut self, (start, end): (BeatPos, BeatPos), context: &mut App) {
-        let grid = &self.state(context).grid;
-        let (start, end) = (grid.beats_to_width(start.0), grid.beats_to_width(end.0));
+        let view = self.timeline_view(context);
+        let (start, end) = (view.beats_to_width(start.0), view.beats_to_width(end.0));
         let width = self.viewport().right;
-        let offset = grid.offset.x;
+        let offset = view.offset.x;
         let mut target = offset;
         if end > offset + width - REVEAL_MARGIN {
             target = end + REVEAL_MARGIN - width;
@@ -224,7 +227,7 @@ impl Arrangement {
         if start < target + REVEAL_MARGIN {
             target = start - REVEAL_MARGIN;
         }
-        self.state_mut(context).grid.offset.x = target.max(0.);
+        self.timeline_view_mut(context).offset.x = target.max(0.);
     }
 
     /// Keeps the playhead in the middle of the view during playback, when
@@ -244,11 +247,10 @@ impl Arrangement {
             return;
         }
         let playhead_x = self
-            .state(context)
-            .grid
+            .timeline_view(context)
             .beats_to_width(self.state(context).playhead().0);
         let width = self.viewport().right;
-        self.state_mut(context).grid.offset.x = (playhead_x - width / 2.).max(0.);
+        self.timeline_view_mut(context).offset.x = (playhead_x - width / 2.).max(0.);
     }
 
     /// Zooms by `amount` around where the wheel was turned.
@@ -257,9 +259,9 @@ impl Arrangement {
             return;
         }
         let anchor = self.timeline.scroll.zoom_anchor;
-        self.state_mut(context)
-            .grid
-            .zoom_around(amount, anchor, self.viewport());
+        let viewport = self.viewport();
+        self.timeline_view_mut(context)
+            .zoom_around(amount, anchor, viewport);
     }
 }
 

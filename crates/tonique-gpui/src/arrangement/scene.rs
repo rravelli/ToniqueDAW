@@ -140,7 +140,10 @@ impl Arrangement {
         context: &App,
     ) -> Scene {
         let state = self.state(context);
-        let screen_x = |beat: BeatPos| state.grid.beats_to_x(beat, self.viewport());
+        let screen_x = |beat: BeatPos| {
+            self.timeline_view(context)
+                .beats_to_x(beat, self.viewport())
+        };
         let (loop_start, loop_end) = state.loop_range();
         let (scene_rows, mut clips) = self.scene_clips(rows, in_view, &theme, context);
         let overviews = rows
@@ -152,7 +155,7 @@ impl Arrangement {
         let dragged = self.dragged_clips();
         Scene {
             theme: theme.clone(),
-            pixels_per_beat: state.grid.pixels_per_beat(),
+            pixels_per_beat: self.timeline_view(context).pixels_per_beat(),
             bpm: state.bpm(),
             rows: scene_rows,
             overviews,
@@ -183,28 +186,29 @@ impl Arrangement {
 
     /// The grid's lines, the bars' labels and the times, in view.
     fn marks(&self, context: &App) -> Marks {
-        let grid = &self.state(context).grid;
+        let grid = self.state(context).grid();
+        let view = self.timeline_view(context);
         let viewport = self.viewport();
         let wide = Span {
             right: viewport.right + OVERSCAN,
             ..viewport
         };
-        let (from, to) = grid.visible_beats(wide);
-        let screen_x = |beat: BeatPos| grid.beats_to_x(beat, viewport);
+        let (from, to) = view.visible_beats(wide);
+        let screen_x = |beat: BeatPos| view.beats_to_x(beat, viewport);
         let is_bar = |line: &GridLine| matches!(line, GridLine::Bar(_));
         let lines = grid
-            .lines(from, to, grid.line_step())
+            .lines(from, to, grid.line_step(view))
             .into_iter()
             .map(|(beat, line)| (screen_x(beat), is_bar(&line)))
             .collect();
         let labels = grid
-            .lines(from, to, grid.label_step(from, to))
+            .lines(from, to, grid.label_step(from, to, view))
             .into_iter()
             .map(|(beat, line)| (screen_x(beat), label(line), is_bar(&line)))
             .collect();
 
         let bpm = self.state(context).bpm();
-        let step = grid.time_step(bpm);
+        let step = view.time_step(bpm);
         let seconds_at = |beat: BeatPos| beat.0 * 60. / bpm as f64;
         let first = (seconds_at(from).max(0.) / step).floor() as i64;
         let last = (seconds_at(to) / step).ceil() as i64;
@@ -321,9 +325,12 @@ impl Arrangement {
             for clip in &track.clips {
                 // Only what's on screen: zoomed in, a clip can be millions
                 // of pixels wide.
-                let left = state.grid.beats_to_x(clip.position, viewport).max(-1.);
-                let right = state
-                    .grid
+                let left = self
+                    .timeline_view(context)
+                    .beats_to_x(clip.position, viewport)
+                    .max(-1.);
+                let right = self
+                    .timeline_view(context)
                     .beats_to_x(clip.end(bpm), viewport)
                     .min(viewport.right + 1.);
                 if right > left {
@@ -338,7 +345,10 @@ impl Arrangement {
     /// of it.
     fn selected_span(&self, clip: &AudioClip, context: &App) -> Option<(f32, f32)> {
         let state = self.state(context);
-        let screen_x = |beat: BeatPos| state.grid.beats_to_x(beat, self.viewport());
+        let screen_x = |beat: BeatPos| {
+            self.timeline_view(context)
+                .beats_to_x(beat, self.viewport())
+        };
         let end = clip.end(state.bpm());
         let (start, stop) = match state.selection_bounds() {
             Some(zone) => (zone.start_pos.max(clip.position), zone.end_pos.min(end)),
@@ -413,10 +423,11 @@ impl Arrangement {
         let (last_top, last_height) = self.track_span(rows, zone.end_track_index, context);
         let viewport = self.viewport();
         let left = self
-            .state(context)
-            .grid
+            .timeline_view(context)
             .beats_to_x(zone.start_pos, viewport);
-        let right = self.state(context).grid.beats_to_x(zone.end_pos, viewport);
+        let right = self
+            .timeline_view(context)
+            .beats_to_x(zone.end_pos, viewport);
         Some(Rect::new(
             left,
             top,
@@ -444,12 +455,14 @@ impl Arrangement {
             rect.height - HEADER_HEIGHT,
         );
         let alt = self.timeline.hover_alt;
-        let beat = self
-            .state(context)
-            .grid
-            .snap(self.beats_at(local_x, context), alt);
+        let beat = self.state(context).grid().snap(
+            self.beats_at(local_x, context),
+            alt,
+            self.timeline_view(context),
+        );
         Some((
-            self.state(context).grid.beats_to_x(beat, self.viewport()),
+            self.timeline_view(context)
+                .beats_to_x(beat, self.viewport()),
             body,
         ))
     }
@@ -522,7 +535,7 @@ impl Arrangement {
                 (top, height, track.color)
             }
             _ => (
-                RULER_HEIGHT + rows.height() - state.grid.offset.y,
+                RULER_HEIGHT + rows.height() - self.timeline_view(context).offset.y,
                 DEFAULT_TRACK_HEIGHT,
                 state
                     .new_track_colors(1)
@@ -537,8 +550,15 @@ impl Arrangement {
             target.position,
             state.bpm(),
         );
-        let left = state.grid.beats_to_x(target.position, self.viewport());
-        let rect = Rect::new(left, top, state.grid.beats_to_width(clip.length), height);
+        let left = self
+            .timeline_view(context)
+            .beats_to_x(target.position, self.viewport());
+        let rect = Rect::new(
+            left,
+            top,
+            self.timeline_view(context).beats_to_width(clip.length),
+            height,
+        );
         let ghost = SceneClip {
             clip,
             rect,

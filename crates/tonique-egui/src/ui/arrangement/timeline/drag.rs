@@ -9,6 +9,7 @@ use crate::ui::{
     theme::ThemeExt,
 };
 use egui::{Rect, Stroke, Ui, pos2, vec2};
+use tonique_core::session::timeline_view::TimelineView;
 use tonique_core::{
     document::clip::AudioClip, document::track::DEFAULT_TRACK_HEIGHT, project::ProjectState,
 };
@@ -39,21 +40,20 @@ impl Timeline {
         &mut self,
         ui: &mut Ui,
         layout: &RowLayout,
-        dragged_track_index: Option<usize>,
+        grabbed_clip: Option<(AudioClip, usize)>,
         viewport: Rect,
-        dragged_clip: Option<AudioClip>,
         state: &mut ProjectState,
+        view: &mut TimelineView,
     ) {
         let mouse_pos = ui.ctx().input(|i| i.pointer.hover_pos());
         // Create dragging objects
         if self.clip_drag.is_none()
-            && let Some(clip) = dragged_clip
+            && let Some((clip, old_track)) = grabbed_clip
             && let Some(mouse_pos) = mouse_pos
-            && let Some(old_track) = dragged_track_index
         {
             // Grabbing a clip outside the selection (or outside its zone)
             // drags that clip alone.
-            let grabbed = state.grid.x_to_beats(mouse_pos.x, viewport.span());
+            let grabbed = view.x_to_beats(mouse_pos.x, viewport.span());
             let outside_zone = state
                 .selection_bounds()
                 .is_some_and(|b| grabbed < b.start_pos || grabbed > b.end_pos);
@@ -84,7 +84,7 @@ impl Timeline {
                         new_selected_clips.push(new_clip.clone().id);
                         let track_index_delta = track.first_track_index as i32 - old_track as i32;
                         min_track_delta = min_track_delta.min(track_index_delta);
-                        let x = state.grid.beats_to_x(new_clip.position, viewport.span());
+                        let x = view.beats_to_x(new_clip.position, viewport.span());
                         clips.push(DraggedClip {
                             clip: new_clip,
                             grab_x: mouse_pos.x - x,
@@ -122,17 +122,15 @@ impl Timeline {
             // Only when snapping, which Alt inverts.
             let mut beat_delta = f64::INFINITY;
             let mut snapped_to = None;
-            if state.grid.snaps(ui.input(|i| i.modifiers.alt)) {
+            if state.grid().snaps(ui.input(|i| i.modifiers.alt)) {
                 let targets = state.snap_targets(&clip_drag.dragged_ids());
                 let bpm = state.bpm();
                 for dragged in clip_drag.clips.iter() {
-                    let start = state
-                        .grid
-                        .x_to_beats(mouse_pos.x - dragged.grab_x, viewport.span());
+                    let start = view.x_to_beats(mouse_pos.x - dragged.grab_x, viewport.span());
                     let end = start + (dragged.clip.end(bpm) - dragged.clip.position);
                     let candidates = [
-                        Some((state.grid.snap_to_targets(start, &targets), start)),
-                        Some((state.grid.snap_to_targets(end, &targets), end))
+                        Some((state.grid().snap_to_targets(start, &targets, view), start)),
+                        Some((state.grid().snap_to_targets(end, &targets, view), end))
                             .filter(|((_, target), _)| *target),
                     ];
                     for ((pos, target), edge) in candidates.into_iter().flatten() {
@@ -151,11 +149,7 @@ impl Timeline {
             let first = clip_drag
                 .clips
                 .iter()
-                .map(|e| {
-                    state
-                        .grid
-                        .x_to_beats(mouse_pos.x - e.grab_x, viewport.span())
-                })
+                .map(|e| view.x_to_beats(mouse_pos.x - e.grab_x, viewport.span()))
                 .fold(BeatPos(f64::INFINITY), BeatPos::min);
             if -first.0 > beat_delta {
                 beat_delta = -first.0;
@@ -163,7 +157,7 @@ impl Timeline {
             }
             // Show what the clips snapped to.
             if let Some(beats) = snapped_to {
-                let x = state.grid.beats_to_x(beats, viewport.span());
+                let x = view.beats_to_x(beats, viewport.span());
                 ui.painter_at(viewport).vline(
                     x,
                     viewport.y_range(),
@@ -192,14 +186,12 @@ impl Timeline {
                     // Calculate y pos
                     let y = layout.track_top(track_index);
                     // Calculate width
-                    let width = state.grid.beats_to_width(dragged.clip.length);
+                    let width = view.beats_to_width(dragged.clip.length);
                     // Calculate x pos
-                    let new_position = state
-                        .grid
-                        .x_to_beats(mouse_pos.x - dragged.grab_x, viewport.span())
-                        + beat_delta;
+                    let new_position =
+                        view.x_to_beats(mouse_pos.x - dragged.grab_x, viewport.span()) + beat_delta;
                     dragged.clip.position = new_position;
-                    let x = state.grid.beats_to_x(new_position, viewport.span());
+                    let x = view.beats_to_x(new_position, viewport.span());
 
                     let mut collapsed = false;
                     let mut color = track_index
@@ -221,6 +213,7 @@ impl Timeline {
                         clip: &dragged.clip,
                         rect: Rect::from_min_size(pos, size),
                         viewport,
+                        timeline_view: view,
                         color,
                         selected: true,
                         zone: None,
@@ -237,7 +230,7 @@ impl Timeline {
                 self.commit_drag(state, clip_drag, track_indexes);
             } else if !clip_drag.duplicate || ui.input(|i| i.modifiers.ctrl) {
                 self.clip_drag = Some(clip_drag);
-                autoscroll(ui, state, layout, viewport, mouse_pos);
+                autoscroll(ui, view, layout, viewport, mouse_pos);
             }
         }
     }

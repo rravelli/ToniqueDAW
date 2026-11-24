@@ -24,6 +24,7 @@ use tonique_core::{
     config::keymap::Action,
     project::PlaybackState,
     project::ProjectState,
+    session::timeline_view::TimelineView,
     utils::{format_bars, format_time},
 };
 const BUTTON_SIZE: f32 = 22.;
@@ -147,7 +148,7 @@ impl TransportBar {
             // The right group first: the transport keeps clear of it.
             let right = ui
                 .with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    self.right_ui(ui, state, commands);
+                    self.right_ui(ui, state, &workspace.timeline_view, commands);
                     ui.min_rect().left()
                 })
                 .inner;
@@ -203,7 +204,13 @@ impl TransportBar {
 
     /// The status, the song's tempo and time signature, and the grid, laid
     /// out right to left.
-    fn right_ui(&mut self, ui: &mut Ui, state: &mut ProjectState, commands: &mut Commands) {
+    fn right_ui(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        view: &TimelineView,
+        commands: &mut Commands,
+    ) {
         self.usage_ui(ui, state);
         if state.audio_lost() && self.no_audio_ui(ui, state).clicked() {
             commands.push(Action::OpenSettings);
@@ -216,7 +223,7 @@ impl TransportBar {
         ui.add_space(GROUP_GAP);
         self.song_ui(ui, state);
         ui.add_space(GROUP_GAP);
-        self.grid_ui(ui, state);
+        self.grid_ui(ui, state, view);
     }
 
     /// The tempo and the time signature, in one well like the playhead's
@@ -258,13 +265,13 @@ impl TransportBar {
     /// The grid's step, choosing it (and the rest of the grid's settings)
     /// from a menu. Adaptive, it's the step at the arrangement's zoom,
     /// muted. Dimmed further while edits don't snap.
-    fn grid_ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
-        let grid = &state.grid;
+    fn grid_ui(&mut self, ui: &mut Ui, state: &mut ProjectState, view: &TimelineView) {
+        let grid = state.grid();
         let theme = ui.app_theme();
         let (step, color) = if grid.settings.adaptive {
-            (grid.line_step(), theme.text_muted)
+            (grid.line_step(view), theme.text_muted)
         } else {
-            (grid.snap_step(), theme.text)
+            (grid.snap_step(view), theme.text)
         };
         let color = if grid.settings.snap {
             color

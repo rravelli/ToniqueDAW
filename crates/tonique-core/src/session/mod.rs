@@ -1,13 +1,14 @@
 //! What the user is working on, never saved nor undone: the selected
-//! tracks and clips, the clipboard, a trim under way, the rows' layout,
-//! and the grid. The grid's zoom and scroll are the session's; its
-//! [`grid::GridSettings`] are saved with the project, the grid computing
-//! with them.
+//! tracks and clips, the clipboard, a trim under way ([`Session`]); and
+//! the rules the project's views share: the rows' layout, the musical
+//! [`grid::Grid`] (its settings are saved with the project) and the
+//! [`timeline_view::TimelineView`] each view zooms and scrolls on its own.
 
 pub mod clipboard;
 pub mod grid;
 pub mod row_layout;
 pub mod selection;
+pub mod timeline_view;
 
 use tonique_engine::edit::TrackId;
 

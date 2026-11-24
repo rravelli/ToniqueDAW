@@ -12,7 +12,7 @@ use tonique_core::{
 /// Adaptive densities, fixed steps, triplets and snapping; the chosen ones
 /// ticked.
 pub fn grid_menu(ui: &mut Ui, state: &mut ProjectState) {
-    let settings = &mut state.grid.settings;
+    let settings = &mut state.grid_mut().settings;
     ui.vertical(|ui| {
         ui.add(ContextMenuLabel::new("Adaptive"));
         for density in GridDensity::ALL {

@@ -408,7 +408,7 @@ impl Arrangement {
         );
         let list = div()
             .absolute()
-            .top(px(RULER_HEIGHT - self.state(context).grid.offset.y))
+            .top(px(RULER_HEIGHT - self.timeline_view(context).offset.y))
             .left(px(PANEL_MARGIN))
             .right(px(ROWS_RIGHT))
             .flex()
@@ -458,7 +458,7 @@ impl Arrangement {
     ) -> impl IntoElement {
         let mut list = div()
             .absolute()
-            .top(px(RULER_HEIGHT - self.state(context).grid.offset.y))
+            .top(px(RULER_HEIGHT - self.timeline_view(context).offset.y))
             .left_0()
             .right_0()
             .h(px(rows.height()));

@@ -11,8 +11,8 @@ use tonique_core::{
     document::clip::AudioClip,
     document::track::DEFAULT_TRACK_HEIGHT,
     project::ProjectState,
-    session::grid::Viewport,
     session::row_layout::{Row, RowLayout},
+    session::timeline_view::Viewport,
 };
 
 /// A clip's header: dragged to move it.
@@ -104,13 +104,13 @@ impl Arrangement {
     /// lanes' top down by the window's height, more than the lanes ever
     /// show, so it holds before the panels are laid out at a new size.
     pub fn rows_in_view(&self, window: &Window, context: &App) -> (f32, f32) {
-        let top = self.state(context).grid.offset.y;
+        let top = self.timeline_view(context).offset.y;
         (top, top + f32::from(window.viewport_size().height))
     }
 
     /// A row's top, local to the timeline.
     pub(super) fn row_top(&self, row: &Row, context: &App) -> f32 {
-        RULER_HEIGHT + row.top - self.state(context).grid.offset.y
+        RULER_HEIGHT + row.top - self.timeline_view(context).offset.y
     }
 
     /// The row at `local_y`, if it's on one shown (not under the footer).
@@ -123,7 +123,7 @@ impl Arrangement {
 
     /// A height local to the timeline, in the scrolled content.
     pub(super) fn content_y(&self, local_y: f32, context: &App) -> f32 {
-        local_y - RULER_HEIGHT + self.state(context).grid.offset.y
+        local_y - RULER_HEIGHT + self.timeline_view(context).offset.y
     }
 
     /// The track under `local_y`, in the engine's order: on a group's
@@ -152,7 +152,7 @@ impl Arrangement {
         track_index: usize,
         context: &App,
     ) -> (f32, f32) {
-        let top = RULER_HEIGHT + rows.track_top(track_index) - self.state(context).grid.offset.y;
+        let top = RULER_HEIGHT + rows.track_top(track_index) - self.timeline_view(context).offset.y;
         let height = rows
             .track_row(track_index)
             .map_or(DEFAULT_TRACK_HEIGHT, |row| row.track.height);
@@ -173,10 +173,11 @@ impl Arrangement {
         context: &App,
     ) -> Rect {
         let viewport = self.viewport();
-        let start_x = self.state(context).grid.beats_to_x(clip.position, viewport);
+        let start_x = self
+            .timeline_view(context)
+            .beats_to_x(clip.position, viewport);
         let end_x = self
-            .state(context)
-            .grid
+            .timeline_view(context)
             .beats_to_x(clip.end(self.state(context).bpm()), viewport);
         Rect::new(start_x, top, end_x - start_x, height)
     }
@@ -216,16 +217,19 @@ impl Arrangement {
     }
 
     pub(super) fn beats_at(&self, local_x: f32, context: &App) -> BeatPos {
-        self.state(context)
-            .grid
+        self.timeline_view(context)
             .x_to_beats(local_x, self.viewport())
     }
 
     /// The beat at `local_x` on the grid (unless `alt`), not before the start.
     pub(super) fn snapped(&self, local_x: f32, alt: bool, context: &App) -> BeatPos {
         self.state(context)
-            .grid
-            .snap(self.beats_at(local_x, context), alt)
+            .grid()
+            .snap(
+                self.beats_at(local_x, context),
+                alt,
+                self.timeline_view(context),
+            )
             .max(BeatPos::ZERO)
     }
 }

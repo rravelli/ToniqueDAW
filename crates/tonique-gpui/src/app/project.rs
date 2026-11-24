@@ -19,7 +19,10 @@ use crate::{
     widgets::{dialog_body, dialog_button, dialog_frame, dialog_title},
 };
 pub use tonique_core::files::ProjectAction;
-use tonique_core::files::{Ask, FileOutcome};
+use tonique_core::{
+    files::{Ask, FileOutcome},
+    session::timeline_view::Offset,
+};
 
 /// The window's title, as last set.
 #[derive(Default)]
@@ -237,6 +240,8 @@ impl Workspace {
             .update(context, |arrangement, _| arrangement.forget_project());
         self.bottom
             .update(context, |bottom, _| bottom.forget_project());
+        // Another project: back to its start.
+        self.timeline_view.as_mut(context).offset = Offset::ZERO;
     }
 
     /// The window's title: the project's name, starred while unsaved;

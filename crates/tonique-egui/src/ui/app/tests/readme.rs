@@ -69,9 +69,9 @@ fn open(project: &Path, theme: &str) -> Harness<'static, ToniqueApp> {
 
     let timeline = harness.state().central_panel.timeline_rect();
     assert!(timeline.width() > 0., "the timeline is drawn");
-    let grid = &mut harness.state_mut().state.grid;
-    grid.fit(BeatPos(0.), BeatPos(SHOWN_BEATS), timeline.width());
-    grid.offset.y = 0.;
+    let view = &mut harness.state_mut().workspace.timeline_view;
+    view.fit(BeatPos(0.), BeatPos(SHOWN_BEATS), timeline.width());
+    view.offset.y = 0.;
     harness.run_steps(4);
     harness
 }

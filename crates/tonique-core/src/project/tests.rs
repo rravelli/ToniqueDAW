@@ -1164,25 +1164,26 @@ fn snap_targets_are_other_clips_loop_and_edit_cursor() {
 
 #[test]
 fn snapping_prefers_targets_in_reach_over_the_grid() {
-    use crate::session::grid::{GridService, TARGET_REACH};
+    use crate::session::{grid::TARGET_REACH, timeline_view::TimelineView};
 
-    let mut grid = GridService::new();
-    grid.fit(BeatPos(0.), BeatPos(10.), 200.); // one grid line per beat
-    assert_eq!(grid.snap_step(), 1.);
-    let reach = grid.width_to_beats(TARGET_REACH);
+    let grid = crate::session::grid::Grid::new();
+    let mut view = TimelineView::new();
+    view.fit(BeatPos(0.), BeatPos(10.), 200.); // one grid line per beat
+    assert_eq!(grid.snap_step(&view), 1.);
+    let reach = view.width_to_beats(TARGET_REACH);
     let target = BeatPos(2.1 + reach * 0.9);
     // A target in reach wins over a nearer grid line.
     assert_eq!(
-        grid.snap_to_targets(BeatPos(2.1), &[target]),
+        grid.snap_to_targets(BeatPos(2.1), &[target], &view),
         (target, true)
     );
     // Out of reach: the nearest grid line, however far.
     assert_eq!(
-        grid.snap_to_targets(BeatPos(2.1), &[BeatPos(2.1 + reach * 2.)]),
+        grid.snap_to_targets(BeatPos(2.1), &[BeatPos(2.1 + reach * 2.)], &view),
         (BeatPos(2.), false)
     );
     assert_eq!(
-        grid.snap_to_targets(BeatPos(2.4), &[]),
+        grid.snap_to_targets(BeatPos(2.4), &[], &view),
         (BeatPos(2.), false)
     );
 }

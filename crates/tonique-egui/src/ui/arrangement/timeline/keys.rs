@@ -5,7 +5,10 @@ use crate::ui::{
     commands::Commands,
     widget::arrow_keys::holds_arrows,
 };
-use tonique_core::{config::keymap::Action, project::ActionOutcome, project::ProjectState};
+use tonique_core::{
+    config::keymap::Action, project::ActionOutcome, project::ProjectState,
+    session::timeline_view::TimelineView,
+};
 
 impl Timeline {
     /// Run the queued actions acting on the selection or edit cursor, and
@@ -14,15 +17,16 @@ impl Timeline {
         &mut self,
         ui: &mut Ui,
         state: &mut ProjectState,
+        view: &mut TimelineView,
         commands: &mut Commands,
         viewport: Rect,
     ) {
         for action in commands.take(Action::is_timeline) {
-            self.run_action(action, ui, state, viewport);
+            self.run_action(action, ui, state, view, viewport);
         }
         // Not while typing into a widget.
         if ui.memory(|m| m.focused().is_none()) || holds_arrows(ui.ctx()) {
-            self.handle_clipboard(ui, state, viewport);
+            self.handle_clipboard(ui, state, view, viewport);
         }
     }
 
@@ -31,17 +35,24 @@ impl Timeline {
         action: Action,
         ui: &mut Ui,
         state: &mut ProjectState,
+        view: &mut TimelineView,
         viewport: Rect,
     ) {
-        if let ActionOutcome::Reveal(start, end) = state.run_action(action) {
-            reveal(ui, state, viewport, (start, end));
+        if let ActionOutcome::Reveal(start, end) = state.run_action(action, view) {
+            reveal(ui, view, viewport, (start, end));
         }
     }
 
     /// Ctrl+C/X/V. eframe reports them as clipboard events rather than
     /// keys, and only reports a paste when the system clipboard holds text,
     /// so copying also puts a line of text there.
-    fn handle_clipboard(&mut self, ui: &mut Ui, state: &mut ProjectState, viewport: Rect) {
+    fn handle_clipboard(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        view: &mut TimelineView,
+        viewport: Rect,
+    ) {
         let events = ui.input(|i| i.events.clone());
         for event in events {
             match event {
@@ -60,7 +71,7 @@ impl Timeline {
                 }
                 Event::Paste(_) => {
                     if let ActionOutcome::Reveal(start, end) = state.paste_and_reveal() {
-                        reveal(ui, state, viewport, (start, end));
+                        reveal(ui, view, viewport, (start, end));
                     }
                 }
                 _ => {}

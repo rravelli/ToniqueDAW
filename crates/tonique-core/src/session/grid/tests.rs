@@ -1,34 +1,76 @@
+use std::ops::{Deref, DerefMut};
+
 use super::*;
+use crate::session::timeline_view::Span;
 
-/// A view from `.0` to `.1` across the screen.
-#[derive(Clone, Copy)]
-struct Span(f32, f32);
+/// A grid as a view shows it, at that view's zoom.
+struct Zoomed {
+    grid: Grid,
+    view: TimelineView,
+}
 
-impl Viewport for Span {
-    fn left(&self) -> f32 {
-        self.0
+impl Deref for Zoomed {
+    type Target = Grid;
+    fn deref(&self) -> &Grid {
+        &self.grid
     }
-    fn right(&self) -> f32 {
-        self.1
+}
+
+impl DerefMut for Zoomed {
+    fn deref_mut(&mut self) -> &mut Grid {
+        &mut self.grid
+    }
+}
+
+impl Zoomed {
+    fn zoom(&mut self, pixels_per_beat: f32) {
+        self.view = TimelineView::zoomed(pixels_per_beat);
+    }
+    fn line_step(&self) -> f64 {
+        self.grid.line_step(&self.view)
+    }
+    fn snap_step(&self) -> f64 {
+        self.grid.snap_step(&self.view)
+    }
+    fn snap_to_step(&self, beats: BeatPos) -> BeatPos {
+        self.grid.snap_to_step(beats, &self.view)
+    }
+    fn label_step(&self, from: BeatPos, to: BeatPos) -> f64 {
+        self.grid.label_step(from, to, &self.view)
+    }
+    fn toggle_adaptive(&mut self) {
+        self.grid.toggle_adaptive(&self.view);
+    }
+    fn time_step(&self, bpm: f32) -> f64 {
+        self.view.time_step(bpm)
+    }
+    fn beats_to_width(&self, beats: f64) -> f32 {
+        self.view.beats_to_width(beats)
+    }
+    fn width_to_beats(&self, width: f32) -> f64 {
+        self.view.width_to_beats(width)
     }
 }
 
 #[test]
 fn fitting_shows_exactly_the_range() {
-    let mut grid = GridService::new();
-    let viewport = Span(100., 500.);
-    grid.fit(BeatPos(8.), BeatPos(16.), 400.);
-    assert_eq!(grid.pixels_per_beat(), 50.);
-    assert_eq!(grid.beats_to_x(BeatPos(8.), viewport), 100.);
-    assert_eq!(grid.beats_to_x(BeatPos(16.), viewport), 500.);
-    assert_eq!(grid.line_step(), 0.5); // the lines follow the zoom
+    let mut view = TimelineView::new();
+    let viewport = Span {
+        left: 100.,
+        right: 500.,
+    };
+    view.fit(BeatPos(8.), BeatPos(16.), 400.);
+    assert_eq!(view.pixels_per_beat(), 50.);
+    assert_eq!(view.beats_to_x(BeatPos(8.), viewport), 100.);
+    assert_eq!(view.beats_to_x(BeatPos(16.), viewport), 500.);
+    assert_eq!(Grid::new().line_step(&view), 0.5); // the lines follow the zoom
 
     // Before beat 0 only when allowed.
-    grid.fit(BeatPos(-2.), BeatPos(6.), 400.);
-    assert_eq!(grid.offset.x, 0.);
-    let mut grid = GridService::new().with_negative_offset();
-    grid.fit(BeatPos(-2.), BeatPos(6.), 400.);
-    assert_eq!(grid.beats_to_x(BeatPos(-2.), viewport), 100.);
+    view.fit(BeatPos(-2.), BeatPos(6.), 400.);
+    assert_eq!(view.offset.x, 0.);
+    let mut view = TimelineView::new().with_negative_offset();
+    view.fit(BeatPos(-2.), BeatPos(6.), 400.);
+    assert_eq!(view.beats_to_x(BeatPos(-2.), viewport), 100.);
 }
 
 fn signature(numerator: u32, denominator: u32) -> TimeSignature {
@@ -36,28 +78,30 @@ fn signature(numerator: u32, denominator: u32) -> TimeSignature {
 }
 
 /// A grid in `numerator`/`denominator` at `pixels_per_beat`.
-fn grid(numerator: u32, denominator: u32, pixels_per_beat: f32) -> GridService {
-    let mut grid = GridService::new();
+fn grid(numerator: u32, denominator: u32, pixels_per_beat: f32) -> Zoomed {
+    let mut grid = Grid::new();
     grid.set_time_signature(signature(numerator, denominator));
-    grid.pixels_per_beat = pixels_per_beat;
-    grid
+    Zoomed {
+        grid,
+        view: TimelineView::zoomed(pixels_per_beat),
+    }
 }
 
 /// Fixed to `step`.
-fn fixed(mut grid: GridService, step: GridStep) -> GridService {
+fn fixed(mut grid: Zoomed, step: GridStep) -> Zoomed {
     grid.settings.adaptive = false;
     grid.settings.step = step;
     grid
 }
 
-fn lines(grid: &GridService, to: f64, step: f64) -> Vec<GridLine> {
+fn lines(grid: &Zoomed, to: f64, step: f64) -> Vec<GridLine> {
     grid.lines(BeatPos(0.), BeatPos(to), step)
         .into_iter()
         .map(|(_, line)| line)
         .collect()
 }
 
-fn positions(grid: &GridService, to: f64, step: f64) -> Vec<f64> {
+fn positions(grid: &Zoomed, to: f64, step: f64) -> Vec<f64> {
     grid.lines(BeatPos(0.), BeatPos(to), step)
         .into_iter()
         .map(|(at, _)| at.0)
@@ -91,9 +135,9 @@ fn adaptive_lines_follow_the_zoom_and_density() {
     assert_eq!(steps, [4., 1., 0.5]);
     // Zoomed out, lines span bars; in, thirty-seconds.
     grid.settings.density = GridDensity::Medium;
-    grid.pixels_per_beat = 1.;
+    grid.zoom(1.);
     assert_eq!(grid.line_step(), 32.);
-    grid.pixels_per_beat = 1000.;
+    grid.zoom(1000.);
     assert_eq!(grid.line_step(), 0.125);
     // And the grid snaps to what it shows.
     assert_eq!(grid.snap_step(), 0.125);
@@ -398,13 +442,13 @@ fn time_labels_take_nice_steps() {
     let mut grid = grid(4, 4, 20.);
     // 40 points a second at 120.
     assert_eq!(grid.time_step(120.), 1.);
-    grid.pixels_per_beat = 1.;
+    grid.zoom(1.);
     assert_eq!(grid.time_step(120.), 30.);
-    grid.pixels_per_beat = 2000.;
+    grid.zoom(2000.);
     let step = grid.time_step(120.);
     assert!(step < 1., "{step}: sub-second labels");
     for pixels_per_beat in zooms() {
-        grid.pixels_per_beat = pixels_per_beat;
+        grid.zoom(pixels_per_beat);
         let step = grid.time_step(120.);
         let width = step as f32 * pixels_per_beat * 2.;
         let chars = if step < 1. { 8. } else { 5. };

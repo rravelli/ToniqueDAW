@@ -51,8 +51,7 @@ impl Arrangement {
     /// head: around it, a little wider and taller than it.
     pub(super) fn on_playhead_head(&self, local_x: f32, local_y: f32, context: &App) -> bool {
         let playhead_x = self
-            .state(context)
-            .grid
+            .timeline_view(context)
             .beats_to_x(self.state(context).playhead(), self.viewport());
         let around = Rect::new(
             playhead_x - HEAD_WIDTH,
@@ -91,8 +90,8 @@ impl Arrangement {
         let (start, end) = self.state(context).loop_range();
         let viewport = self.viewport();
         let (start_x, end_x) = (
-            self.state(context).grid.beats_to_x(start, viewport),
-            self.state(context).grid.beats_to_x(end, viewport),
+            self.timeline_view(context).beats_to_x(start, viewport),
+            self.timeline_view(context).beats_to_x(end, viewport),
         );
         let (to_start, to_end) = ((local_x - start_x).abs(), (local_x - end_x).abs());
         if to_start.min(to_end) <= GRIP_WIDTH {
@@ -104,7 +103,7 @@ impl Arrangement {
         } else if start_x < local_x && local_x < end_x {
             Some(LoopGrab::Move {
                 offset: (local_x - start_x) as f64
-                    / self.state(context).grid.pixels_per_beat() as f64,
+                    / self.timeline_view(context).pixels_per_beat() as f64,
             })
         } else {
             None
@@ -115,7 +114,10 @@ impl Arrangement {
     pub(super) fn drag_loop(&mut self, grab: LoopGrab, local_x: f32, alt: bool, context: &mut App) {
         let (start, end) = self.state(context).loop_range();
         let snapped = self.snapped(local_x, alt, context);
-        let step = self.state(context).grid.snap_step();
+        let step = self
+            .state(context)
+            .grid()
+            .snap_step(self.timeline_view(context));
         match grab {
             LoopGrab::Start => self
                 .state_mut(context)
@@ -124,9 +126,14 @@ impl Arrangement {
                 .state_mut(context)
                 .set_loop_range(start, snapped.max(start + step)),
             LoopGrab::Move { offset } => {
-                let grid = &self.state(context).grid;
-                let new_start = grid
-                    .snap(self.beats_at(local_x, context) - offset, alt)
+                let new_start = self
+                    .state(context)
+                    .grid()
+                    .snap(
+                        self.beats_at(local_x, context) - offset,
+                        alt,
+                        self.timeline_view(context),
+                    )
                     .max(BeatPos::ZERO);
                 self.state_mut(context)
                     .set_loop_range(new_start, new_start + (end - start));

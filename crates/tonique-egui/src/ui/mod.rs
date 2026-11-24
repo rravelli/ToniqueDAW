@@ -24,14 +24,14 @@ mod window;
 mod workspace;
 
 /// The grid maps beats onto a view's left and right edges: an egui
-/// rectangle's, as the core's [`Span`](tonique_core::session::grid::Span).
+/// rectangle's, as the core's [`Span`](tonique_core::session::timeline_view::Span).
 pub trait RectSpan {
-    fn span(&self) -> tonique_core::session::grid::Span;
+    fn span(&self) -> tonique_core::session::timeline_view::Span;
 }
 
 impl RectSpan for egui::Rect {
-    fn span(&self) -> tonique_core::session::grid::Span {
-        tonique_core::session::grid::Span {
+    fn span(&self) -> tonique_core::session::timeline_view::Span {
+        tonique_core::session::timeline_view::Span {
             left: self.min.x,
             right: self.max.x,
         }

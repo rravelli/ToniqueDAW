@@ -240,7 +240,7 @@ impl Arrangement {
         else {
             return None;
         };
-        let offset = self.state(context).grid.offset.y;
+        let offset = self.timeline_view(context).offset.y;
         let rows: Vec<ListRow> = self
             .rows(context)
             .iter()

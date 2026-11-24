@@ -3,7 +3,9 @@
 
 use tonique_engine::edit::ClipId;
 
-use tonique_core::{config::keymap::Action, project::ProjectState};
+use tonique_core::{
+    config::keymap::Action, project::ProjectState, session::timeline_view::TimelineView,
+};
 
 /// What the main area shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +35,10 @@ pub struct Workspace {
     pub track_list_open: bool,
     pub bottom_view: BottomView,
     pub main_view: MainView,
+    /// The arrangement's zoom and scroll: the ruler, the timeline and the
+    /// track list follow it, and the grid's step shown in the transport
+    /// bar.
+    pub timeline_view: TimelineView,
 }
 
 impl Default for Workspace {
@@ -43,6 +49,7 @@ impl Default for Workspace {
             track_list_open: true,
             bottom_view: BottomView::Effects,
             main_view: MainView::Timeline,
+            timeline_view: TimelineView::new(),
         }
     }
 }

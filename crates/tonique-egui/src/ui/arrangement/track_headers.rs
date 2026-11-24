@@ -179,7 +179,7 @@ impl TrackHeaders {
         let footer_top = rect.bottom() - footer_height;
         self.rows = Rect::from_x_y_ranges(rect.x_range(), head.bottom()..=footer_top);
         let footer = Rect::from_x_y_ranges(rect.x_range(), footer_top..=rect.bottom());
-        let layout = RowLayout::new(state, self.rows.top(), state.grid.offset.y);
+        let layout = RowLayout::new(state, self.rows.top(), workspace.timeline_view.offset.y);
 
         let theme = ui.app_theme();
         for y in [head.bottom(), footer.top()] {
@@ -216,7 +216,7 @@ impl TrackHeaders {
             UiBuilder::new()
                 .max_rect(Rect::from_x_y_ranges(
                     x.clone(),
-                    self.rows.top() - state.grid.offset.y..=self.rows.bottom(),
+                    self.rows.top() - workspace.timeline_view.offset.y..=self.rows.bottom(),
                 ))
                 .id_salt("track-area"),
         );

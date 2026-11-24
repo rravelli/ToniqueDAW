@@ -1,13 +1,16 @@
 //! The arrangement: the ruler (loop lane, bars, time), a lane per track with
 //! its clips, the grid, the playhead and the edit cursor. Edits go through
-//! Tonique's `ProjectState` and `GridService`, as in the egui app.
+//! Tonique's `ProjectState`, as in the egui app; the zoom and the scroll
+//! are a [`TimelineView`] of the window's, shared with the transport bar
+//! (the grid's step shown there follows the zoom), so scrolling wakes
+//! only the views showing it.
 //!
 //! The [`Arrangement`] is a view of its own: the timeline and, on its
 //! right, the track list ([`headers`]), one per row and scrolled
 //! together, so one view: they share the rows, the scroll, the hover and
 //! drags going from one to the other.
 //!
-//! Each frame, `timeline_view` takes what's shown out of the state into a
+//! Each frame, `render_timeline` takes what's shown out of the state into a
 //! [`scene::Scene`]; the canvas paints it ([`paint`]). Pointer handling is
 //! on the wrapping div ([`input`], [`drop`]); drags are then followed over
 //! the whole window ([`follow_drag`]).
@@ -33,13 +36,15 @@ use std::{
 };
 
 use gpui::{
-    Anchor, App, Bounds, ContentMask, Context, CursorStyle, Entity, EventEmitter, Modifiers,
-    MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, Window, canvas, div, prelude::*, px,
+    Anchor, App, Bounds, ContentMask, Context, CursorStyle, Entity, EventEmitter, GpuiBorrow,
+    Modifiers, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, Window, canvas, div,
+    prelude::*, px,
 };
 
 pub use drop::DropTarget;
 pub use rows::{FOOTER_PADDING, footer_height};
 pub use tonique_core::session::row_layout::{ROW_GAP, Row, RowLayout};
+use tonique_core::session::timeline_view::TimelineView;
 
 use tonique_engine::edit::{ClipId, TrackId};
 
@@ -105,6 +110,8 @@ pub struct Arrangement {
     project: Entity<Project>,
     /// The waveforms drawn, shared with the other views.
     waves: Rc<RefCell<WaveCache>>,
+    /// The zoom and the scroll, the window's.
+    timeline_view: Entity<TimelineView>,
     pub timeline: TimelineUi,
     pub headers: HeadersUi,
     /// The window's width, as last drawn: the list leaves the timeline half
@@ -139,14 +146,27 @@ impl Arrangement {
         self.waves.borrow().memory()
     }
 
-    pub fn new(project: Entity<Project>) -> Self {
+    pub fn new(project: Entity<Project>, timeline_view: Entity<TimelineView>) -> Self {
         Self {
             project,
+            timeline_view,
             waves: Rc::default(),
             timeline: TimelineUi::default(),
             headers: HeadersUi::new(),
             window_width: 0.,
         }
+    }
+
+    /// The zoom and the scroll, read: the arrangement renders again as
+    /// they change.
+    pub fn timeline_view<'app>(&self, app: &'app App) -> &'app TimelineView {
+        self.timeline_view.read(app)
+    }
+
+    /// The zoom and the scroll, borrowed for changes; the views showing
+    /// them hear of them when it's let go.
+    pub fn timeline_view_mut<'app>(&self, app: &'app mut App) -> GpuiBorrow<'app, TimelineView> {
+        self.timeline_view.as_mut(app)
     }
 
     /// What referred to a replaced project's tracks and clips.
@@ -238,7 +258,7 @@ impl Arrangement {
     }
 
     /// The ruler and the lanes of `rows`, the rows this frame shows.
-    pub fn timeline_view(
+    pub fn render_timeline(
         &mut self,
         rows: &RowLayout,
         window: &mut Window,
@@ -367,7 +387,7 @@ impl Render for Arrangement {
                 }),
             )
             .child(crate::profile::time("view.timeline", || {
-                self.timeline_view(&rows, window, context)
+                self.render_timeline(&rows, window, context)
             }))
             .child(
                 div()

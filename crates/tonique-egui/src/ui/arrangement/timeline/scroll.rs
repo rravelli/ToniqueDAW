@@ -5,7 +5,8 @@ use egui::{Pos2, Rect, Ui, Vec2, vec2};
 use tonique_engine::time::BeatPos;
 
 use crate::ui::arrangement::row_layout::RowLayout;
-use tonique_core::{document::track::DEFAULT_TRACK_HEIGHT, project::ProjectState};
+use tonique_core::document::track::DEFAULT_TRACK_HEIGHT;
+use tonique_core::session::timeline_view::TimelineView;
 
 /// How close to the left/right edges dragging starts scrolling, in points.
 const EDGE_X: f32 = 16.;
@@ -25,7 +26,7 @@ const REVEAL_MARGIN: f32 = 40.;
 /// still.
 pub fn autoscroll(
     ui: &Ui,
-    state: &mut ProjectState,
+    view: &mut TimelineView,
     layout: &RowLayout,
     viewport: Rect,
     pointer: Pos2,
@@ -45,9 +46,9 @@ pub fn autoscroll(
     // Allow scrolling one track past the last, where drops create a track.
     let tracks_height = layout.height();
     let max_y = (tracks_height + DEFAULT_TRACK_HEIGHT - viewport.height())
-        .max(state.grid.offset.y)
+        .max(view.offset.y)
         .max(0.);
-    let offset = &mut state.grid.offset;
+    let offset = &mut view.offset;
     offset.x = (offset.x + velocity.x * SPEED * dt).max(0.);
     offset.y = (offset.y + velocity.y * SPEED * dt).clamp(0., max_y);
     ui.ctx().request_repaint();
@@ -55,12 +56,9 @@ pub fn autoscroll(
 
 /// Scroll horizontally so `start..end` (beats) is in view. When it doesn't
 /// fit, show its start.
-pub fn reveal(ui: &Ui, state: &mut ProjectState, viewport: Rect, (start, end): (BeatPos, BeatPos)) {
-    let (start, end) = (
-        state.grid.beats_to_width(start.0),
-        state.grid.beats_to_width(end.0),
-    );
-    let offset = state.grid.offset.x;
+pub fn reveal(ui: &Ui, view: &mut TimelineView, viewport: Rect, (start, end): (BeatPos, BeatPos)) {
+    let (start, end) = (view.beats_to_width(start.0), view.beats_to_width(end.0));
+    let offset = view.offset.x;
     let mut target = offset;
     if end > offset + viewport.width() - REVEAL_MARGIN {
         target = end + REVEAL_MARGIN - viewport.width();
@@ -70,7 +68,7 @@ pub fn reveal(ui: &Ui, state: &mut ProjectState, viewport: Rect, (start, end): (
     }
     let target = target.max(0.);
     if target != offset {
-        state.grid.offset.x = target;
+        view.offset.x = target;
         ui.ctx().request_repaint();
     }
 }

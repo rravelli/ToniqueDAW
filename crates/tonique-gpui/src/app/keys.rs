@@ -132,7 +132,8 @@ impl Workspace {
 
     /// Runs `action`: the project's part in the core, the rest here.
     fn run(&mut self, action: Action, window: &mut Window, context: &mut Context<Self>) {
-        let outcome = self.state_mut(context).run_action(action);
+        let view = *self.timeline_view.read(context);
+        let outcome = self.state_mut(context).run_action(action, &view);
         match outcome {
             ActionOutcome::Done => return,
             ActionOutcome::Reveal(start, end) => {

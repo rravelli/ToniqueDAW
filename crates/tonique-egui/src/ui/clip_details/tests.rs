@@ -319,15 +319,21 @@ fn the_loop_brackets_end_drags_and_the_clip_outgrows_the_file() {
 #[test]
 fn warping_keeps_the_view_as_it_was() {
     let mut h = Harness::new();
-    h.details.grid.offset.x += 40.;
-    let (zoom, offset) = (h.details.grid.beats_to_width(1.), h.details.grid.offset);
+    h.details.timeline_view.offset.x += 40.;
+    let (zoom, offset) = (
+        h.details.timeline_view.beats_to_width(1.),
+        h.details.timeline_view.offset,
+    );
     let mut warped = h.clip();
     warped.set_warp(WarpMode::Spectral, 100., 0, 0., 120.);
     h.state.commit_resize_clip(warped);
     h.frame(Vec::new());
     assert_ne!(h.details.speed, 1., "played faster");
     assert_eq!(
-        (h.details.grid.beats_to_width(1.), h.details.grid.offset),
+        (
+            h.details.timeline_view.beats_to_width(1.),
+            h.details.timeline_view.offset
+        ),
         (zoom, offset)
     );
 }

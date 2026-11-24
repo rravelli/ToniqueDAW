@@ -4,9 +4,7 @@
 
 pub mod preview;
 
-use tonique_engine::time::BeatPos;
-
-use crate::session::grid::GridService;
+use tonique_engine::time::{BeatPos, TimeSignature};
 
 /// Length of the loop region in a new project.
 const DEFAULT_LOOP_BARS: f64 = 4.;
@@ -42,7 +40,7 @@ impl Transport {
             playback: PlaybackState::Paused,
             follow_playhead: false,
             metronome: false,
-            loop_range: Self::default_loop(GridService::new().beats_per_bar()),
+            loop_range: Self::default_loop(TimeSignature::default().beats_per_bar()),
             looping: false,
         }
     }

@@ -18,7 +18,10 @@ use crate::ui::{
 };
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use tonique_core::dev::bench::Bench;
-use tonique_core::{config::keymap::Action, project::ActionOutcome, project::ProjectState};
+use tonique_core::{
+    config::keymap::Action, project::ActionOutcome, project::ProjectState,
+    session::timeline_view::Offset,
+};
 
 pub struct ToniqueApp {
     state: ProjectState,
@@ -94,7 +97,7 @@ impl ToniqueApp {
 
     fn update_state(&mut self, ctx: &egui::Context) {
         if let Some(bench) = &mut self.bench {
-            bench.frame(&mut self.state);
+            bench.frame(&mut self.state, &mut self.workspace.timeline_view);
         }
         // Update state
         self.state
@@ -131,6 +134,8 @@ impl ToniqueApp {
         self.project.ui(ui, &mut self.state);
         if self.project.take_replaced() {
             self.workspace.bottom_view = BottomView::Effects;
+            // Another project: back to its start.
+            self.workspace.timeline_view.offset = Offset::ZERO;
         }
         self.export_window.show(ui, &self.state);
     }
@@ -153,7 +158,8 @@ impl ToniqueApp {
     /// selection ([`Action::is_timeline`]) do nothing while it's hidden.
     fn dispatch(&mut self, action: Action) {
         let state = &mut self.state;
-        if action.is_timeline() || state.run_action(action) != ActionOutcome::Unhandled {
+        let view = &self.workspace.timeline_view;
+        if action.is_timeline() || state.run_action(action, view) != ActionOutcome::Unhandled {
             return;
         }
         let workspace = &mut self.workspace;

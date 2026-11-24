@@ -41,7 +41,10 @@ use markers::{Area, Handle, TrimEdge};
 use tonique_core::{
     document::clip::AudioClip,
     document::track::TrackRow,
-    session::grid::{GridLine, GridService, Span},
+    session::{
+        grid::{Grid, GridLine},
+        timeline_view::{Span, TimelineView},
+    },
 };
 
 const PADDING: f32 = 8.;
@@ -83,7 +86,9 @@ enum ClipDrag {
 
 pub struct ClipDetails {
     /// The view's zoom and scroll, in beats from `origin`.
-    grid: GridService,
+    timeline_view: TimelineView,
+    /// The project's grid, as last drawn, at this view's zoom.
+    grid: Grid,
     /// The clip the view was fitted to: another one refits it.
     fitted: Option<ClipId>,
     clip: Option<ClipId>,
@@ -130,7 +135,8 @@ impl ClipDetails {
     pub fn new() -> Self {
         Self {
             // Shows what's before the start marker, in the file.
-            grid: GridService::new().with_negative_offset(),
+            timeline_view: TimelineView::new().with_negative_offset(),
+            grid: Grid::default(),
             fitted: None,
             clip: None,
             origin: 0.,
@@ -180,14 +186,18 @@ impl ClipDetails {
 
     /// Where `file` seconds into the file are drawn.
     fn x(&self, file: f64, bpm: f32, span: Span) -> f32 {
-        self.grid
+        self.timeline_view
             .beats_to_x(BeatPos(self.beats(file - self.origin, bpm)), span)
     }
 
     /// The time in the file drawn at `x`, snapped to the grid when
     /// snapping, which Alt inverts.
     fn file_at_x(&self, x: f32, bpm: f32, span: Span, alt: bool) -> f64 {
-        let beats = self.grid.snap(self.grid.x_to_beats(x, span), alt);
+        let beats = self.grid.snap(
+            self.timeline_view.x_to_beats(x, span),
+            alt,
+            &self.timeline_view,
+        );
         self.origin + self.seconds(beats.0, bpm)
     }
 
@@ -203,7 +213,7 @@ impl ClipDetails {
     fn fit(&mut self, clip: &AudioClip, bpm: f32, width: f32) {
         let (start, end) = played(clip, bpm);
         let margin = (end - start) * FIT_MARGIN;
-        self.grid.fit(
+        self.timeline_view.fit(
             BeatPos(clip.file_beats(start - self.origin, bpm) - margin),
             BeatPos(clip.file_beats(end - self.origin, bpm) + margin),
             width,
@@ -214,9 +224,9 @@ impl ClipDetails {
     fn scroll_range(&self, clip: &AudioClip, bpm: f32, width: f32) -> (f32, f32) {
         let file_start = clip.file_beats(-self.origin, bpm);
         let half = width / 2.;
-        let min = self.grid.beats_to_width(file_start) - half;
+        let min = self.timeline_view.beats_to_width(file_start) - half;
         let max = self
-            .grid
+            .timeline_view
             .beats_to_width(file_start + clip.source_beats(bpm))
             - half;
         (min, max.max(min))
@@ -224,14 +234,14 @@ impl ClipDetails {
 
     fn clamp_scroll(&mut self, clip: &AudioClip, bpm: f32, width: f32) {
         let (min, max) = self.scroll_range(clip, bpm, width);
-        self.grid.offset.x = self.grid.offset.x.clamp(min, max);
+        self.timeline_view.offset.x = self.timeline_view.offset.x.clamp(min, max);
     }
 
     /// The scroll for the scrollbar, counted from the range's start.
     fn scroll_span(&self, clip: &AudioClip, bpm: f32, width: f32) -> ScrollSpan {
         let (min, max) = self.scroll_range(clip, bpm, width);
         ScrollSpan {
-            offset: self.grid.offset.x - min,
+            offset: self.timeline_view.offset.x - min,
             max: max - min,
             view: width,
         }
@@ -239,21 +249,31 @@ impl ClipDetails {
 
     /// The grid lines and the bar labels in view, inside the file.
     fn marks(&self, clip: &AudioClip, bpm: f32, span: Span) -> Marks {
-        let (from, to) = self.grid.visible_beats(span);
+        let (from, to) = self.timeline_view.visible_beats(span);
         let (file_left, file_right) = self.file_x(clip, bpm, span);
         let inside = |x: f32| x >= file_left - 0.5 && x <= file_right + 0.5;
         let lines = self
             .grid
-            .lines(from, to, self.grid.line_step())
+            .lines(from, to, self.grid.line_step(&self.timeline_view))
             .into_iter()
-            .map(|(beat, line)| (self.grid.beats_to_x(beat, span), is_bar(&line)))
+            .map(|(beat, line)| (self.timeline_view.beats_to_x(beat, span), is_bar(&line)))
             .filter(|(x, _)| inside(*x))
             .collect();
         let labels = self
             .grid
-            .lines(from, to, self.grid.label_step(from, to))
+            .lines(
+                from,
+                to,
+                self.grid.label_step(from, to, &self.timeline_view),
+            )
             .into_iter()
-            .map(|(beat, line)| (self.grid.beats_to_x(beat, span), label(line), is_bar(&line)))
+            .map(|(beat, line)| {
+                (
+                    self.timeline_view.beats_to_x(beat, span),
+                    label(line),
+                    is_bar(&line),
+                )
+            })
             .filter(|(x, ..)| inside(*x))
             .collect();
         Marks { lines, labels }
@@ -322,23 +342,21 @@ impl BottomPanel {
         context: &mut Context<Self>,
     ) -> AnyElement {
         let state = self.state(context);
-        let (bpm, time_signature, grid_settings) =
-            (state.bpm(), state.time_signature(), state.grid.settings);
+        let (bpm, grid) = (state.bpm(), *state.grid());
         let details = &mut self.clip;
         if details.clip != Some(clip.id) {
             details.typing = None;
             details.clip = Some(clip.id);
         }
-        details.grid.set_time_signature(time_signature);
-        // The arrangement's grid settings, at this view's zoom.
-        details.grid.settings = grid_settings;
+        // The project's grid, at this view's zoom.
+        details.grid = grid;
         // Played faster or slower: the file spans fewer or more beats, the
         // view kept as it was.
         details.speed = clip.speed(bpm);
         if details.fitted == Some(clip.id) && clip.origin != details.origin {
             // Bar 1 moved: the grid follows, the audio stays on screen.
-            details.grid.offset.x -= details
-                .grid
+            details.timeline_view.offset.x -= details
+                .timeline_view
                 .beats_to_width(clip.file_beats(clip.origin - details.origin, bpm));
         }
         details.origin = clip.origin;
@@ -393,7 +411,7 @@ impl BottomPanel {
             move |_| Some(span),
             move |offset, _, app| {
                 let _ = this.update(app, |this, context| {
-                    this.clip.grid.offset.x = min + offset;
+                    this.clip.timeline_view.offset.x = min + offset;
                     context.notify();
                 });
             },
@@ -556,7 +574,7 @@ impl BottomPanel {
             }
         } else if pointer_y < layout.lane.1 {
             if event.click_count >= 2 {
-                let beats = details.grid.x_to_beats(pointer_x, layout.span());
+                let beats = details.timeline_view.x_to_beats(pointer_x, layout.span());
                 self.state_mut(context).seek(clip.position + beats.0);
             } else {
                 details.drag = Some(ClipDrag::Pan { last_x: pointer_x });
@@ -572,7 +590,9 @@ impl BottomPanel {
             return;
         }
         // Where the pointer is, not snapped: the grid being moved.
-        let beats = details.grid.x_to_beats(pointer_x, details.layout().span());
+        let beats = details
+            .timeline_view
+            .x_to_beats(pointer_x, details.layout().span());
         let at = details.origin + details.seconds(beats.0, self.state(context).bpm());
         self.toggle_popup(
             PopupKind::ClipRuler(id, at),
@@ -596,11 +616,11 @@ impl BottomPanel {
         let command = event.modifiers.control || event.modifiers.platform;
         if command || pointer_y < RULER_HEIGHT {
             details
-                .grid
+                .timeline_view
                 .zoom_around(-wheel.vertical, pointer_x, layout.span());
         } else {
             // Only across here: the vertical wheel too.
-            details.grid.offset.x -= if wheel.horizontal != 0. {
+            details.timeline_view.offset.x -= if wheel.horizontal != 0. {
                 wheel.horizontal
             } else {
                 wheel.vertical
@@ -657,7 +677,7 @@ impl BottomPanel {
         let layout = details.layout();
         match details.drag.as_mut() {
             Some(ClipDrag::Pan { last_x }) => {
-                details.grid.offset.x -= pointer_x - *last_x;
+                details.timeline_view.offset.x -= pointer_x - *last_x;
                 *last_x = pointer_x;
                 details.clamp_scroll(&clip, bpm, layout.width);
             }

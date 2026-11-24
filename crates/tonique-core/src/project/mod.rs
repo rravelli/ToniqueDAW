@@ -23,7 +23,7 @@ use crate::{
     config::settings::Settings,
     document::track::{TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow, TrackSoloState, TrackView},
     library::sources::SourceRegistry,
-    session::grid::GridService,
+    session::grid::Grid,
     utils::color::Color,
 };
 use std::mem::take;
@@ -114,7 +114,9 @@ pub struct ProjectState {
     pending_actions: Vec<ProjectStatePendingAction>,
     batching: bool,
 
-    pub grid: GridService,
+    /// The musical grid: its settings are saved with the project, its
+    /// time signature follows the edit's.
+    grid: Grid,
     /// An undo step was opened for a clip edit heard as it's made (see
     /// [`Self::edit_clip_live`]), to close when it's done.
     live_edit: bool,
@@ -141,7 +143,7 @@ impl ProjectState {
             history: History::default(),
             pending_actions: Vec::new(),
             batching: false,
-            grid: GridService::new(),
+            grid: Grid::new(),
             live_edit: false,
             track_palette: Vec::new(),
         }
@@ -245,6 +247,16 @@ impl ProjectState {
         } else {
             ChannelRef::Track(id)
         }
+    }
+
+    /// The musical grid, drawn and snapped to at a view's zoom.
+    pub fn grid(&self) -> &Grid {
+        &self.grid
+    }
+    /// The grid's settings, to change them (its time signature follows
+    /// the edit's).
+    pub fn grid_mut(&mut self) -> &mut Grid {
+        &mut self.grid
     }
 
     pub fn new_clip_id(&mut self) -> ClipId {

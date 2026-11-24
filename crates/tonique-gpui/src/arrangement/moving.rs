@@ -167,7 +167,7 @@ impl Arrangement {
 
         let mut delta = f64::INFINITY;
         let mut snapped_to = None;
-        if state.grid.snaps(alt) {
+        if state.grid().snaps(alt) {
             // Copies leave the originals in place: those are targets too.
             let moving = if dragged.duplicate {
                 Vec::new()
@@ -180,8 +180,9 @@ impl Arrangement {
                 let start = BeatPos(clip.origin.0 + offset);
                 let end = start + (clip.clip.end(bpm) - clip.clip.position);
                 // Starts snap to the grid or the targets, ends to targets only.
-                let start_snap = state.grid.snap_to_targets(start, &targets);
-                let end_snap = Some(state.grid.snap_to_targets(end, &targets))
+                let view = self.timeline_view(context);
+                let start_snap = state.grid().snap_to_targets(start, &targets, view);
+                let end_snap = Some(state.grid().snap_to_targets(end, &targets, view))
                     .filter(|(_, on_target)| *on_target);
                 let candidates = [Some((start_snap, start)), end_snap.map(|snap| (snap, end))];
                 for ((to, on_target), edge) in candidates.into_iter().flatten() {

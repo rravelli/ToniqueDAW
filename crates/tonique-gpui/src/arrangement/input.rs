@@ -286,9 +286,12 @@ impl Arrangement {
     ) -> AudioClip {
         let state = self.state(context);
         let beats = self.beats_at(local_x, context);
-        let at = if state.grid.snaps(modifiers.alt) {
+        let at = if state.grid().snaps(modifiers.alt) {
             let targets = state.snap_targets(&[original.id]);
-            state.grid.snap_to_targets(beats, &targets).0
+            state
+                .grid()
+                .snap_to_targets(beats, &targets, self.timeline_view(context))
+                .0
         } else {
             beats
         };

@@ -18,6 +18,7 @@ use crate::{
 use tonique_core::{
     config::keymap::Action,
     project::PlaybackState,
+    session::timeline_view::TimelineView,
     utils::{format_bars, format_time},
 };
 
@@ -45,6 +46,8 @@ const GRID_STEP_WIDTH: f32 = 48.;
 /// The bar, a view of its own.
 pub struct TransportBar {
     project: Entity<Project>,
+    /// The arrangement's zoom, which an adaptive grid's step follows.
+    timeline_view: Entity<TimelineView>,
     /// The song's fields: tempo, and the time signature's two numbers.
     bpm: NumberField,
     numerator: NumberField,
@@ -80,9 +83,10 @@ impl HoldsProject for TransportBar {
 }
 
 impl TransportBar {
-    pub fn new(project: Entity<Project>) -> Self {
+    pub fn new(project: Entity<Project>, timeline_view: Entity<TimelineView>) -> Self {
         Self {
             project,
+            timeline_view,
             shows: Shows::default(),
             bpm: NumberField::new(NumberSpec::range(10., 1000., 1).suffix(" BPM")),
             numerator: NumberField::new(NumberSpec::range(
@@ -385,11 +389,13 @@ impl TransportBar {
     /// The grid's step, muted while adaptive, dimmed further while edits
     /// don't snap; pressed, the grid's menu.
     fn grid_step(&self, theme: &Theme, context: &mut Context<Self>) -> impl IntoElement {
-        let grid = &self.state(context).grid;
+        let grid = self.state(context).grid();
+        // Read here, the bar renders again as the zoom changes the step.
+        let view = self.timeline_view.read(context);
         let (step, color) = if grid.settings.adaptive {
-            (grid.line_step(), theme.text_muted)
+            (grid.line_step(view), theme.text_muted)
         } else {
-            (grid.snap_step(), theme.text)
+            (grid.snap_step(view), theme.text)
         };
         let color = if grid.settings.snap {
             color

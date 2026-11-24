@@ -33,7 +33,7 @@ use menu_bar::MenuBarUi;
 pub use popup::PopupKind;
 use project::WindowTitle;
 use settings::{SettingsDialog, SettingsEvent, SettingsTab};
-use tonique_core::files::ProjectFiles;
+use tonique_core::{files::ProjectFiles, session::timeline_view::TimelineView};
 use transport::{Shows, TransportBar, TransportEvent};
 
 use crate::{
@@ -68,6 +68,9 @@ pub struct Workspace {
     /// Whether the browser shows, as Tonique's left panel, and how wide.
     pub browser_open: bool,
     pub browser_width: Splitter,
+    /// The arrangement's zoom and scroll, which the transport bar's grid
+    /// step and the actions' nudges follow too.
+    timeline_view: Entity<TimelineView>,
     /// The selected track's effects, or a clip's details, at the bottom.
     pub bottom: Entity<BottomPanel>,
     transport: Entity<TransportBar>,
@@ -102,14 +105,16 @@ impl Workspace {
         state.set_track_palette(&theme.palette);
         crate::theme::install(theme, context);
         let mut bench = Bench::from_env("gpui-fast");
+        let mut view = TimelineView::new();
         match &mut bench {
             Some(bench) => bench.setup(&mut state),
             None => {
                 state.add_track();
                 state.add_track();
-                state.grid.fit(BeatPos(0.), BeatPos(64.), 1000.);
+                view.fit(BeatPos(0.), BeatPos(64.), 1000.);
             }
         }
+        let timeline_view = context.new(|_| view);
 
         // Tonique's state polls the engine and the file loaders each frame
         // while something plays; else ten times a second is enough.
@@ -140,9 +145,9 @@ impl Workspace {
         let title = WindowTitle::default();
         let project = context.new(|context| Project::new(state, context));
         let browser = context.new(|context| BrowserPanel::new(project.clone(), window, context));
-        let transport = context.new(|_| TransportBar::new(project.clone()));
+        let transport = context.new(|_| TransportBar::new(project.clone(), timeline_view.clone()));
         let transport_events = context.subscribe(&transport, Self::on_transport);
-        let arrangement = context.new(|_| Arrangement::new(project.clone()));
+        let arrangement = context.new(|_| Arrangement::new(project.clone(), timeline_view.clone()));
         let settings = context
             .new(|context| SettingsDialog::new(project.clone(), themes, theme_warnings, context));
         let settings_events = context.subscribe_in(&settings, window, Self::on_settings);
@@ -150,6 +155,7 @@ impl Workspace {
         let export = context.new(|context| ExportDialog::new(project.clone(), context));
         let export_events = context.subscribe_in(&export, window, Self::on_export);
         Self {
+            timeline_view,
             browser,
             graph: context.new(|_| GraphView::new(project.clone())),
             bottom: context.new(|_| BottomPanel::new(project.clone())),
@@ -404,7 +410,9 @@ fn divider(theme: &Theme) -> gpui::Div {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
         if let Some(bench) = &mut self.bench {
-            bench.frame(&mut self.project.state_mut(context));
+            let mut view = *self.timeline_view.read(context);
+            bench.frame(&mut self.project.state_mut(context), &mut view);
+            *self.timeline_view.as_mut(context) = view;
             // Every frame, as the egui app draws.
             window.request_animation_frame();
         }

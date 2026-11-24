@@ -20,8 +20,11 @@ use std::{
 use tonique_engine::time::BeatPos;
 
 use crate::{
-    document::file::ProjectFile, project::MASTER_TRACK_ID, project::PlaybackState,
-    project::ProjectState, session::grid::Offset,
+    document::file::ProjectFile,
+    project::MASTER_TRACK_ID,
+    project::PlaybackState,
+    project::ProjectState,
+    session::timeline_view::{Offset, TimelineView},
 };
 
 /// Longest wait for the project's audio to decode.
@@ -196,8 +199,9 @@ impl Bench {
     }
 
     /// Call at the start of each frame, before drawing: records the last
-    /// frame and sets the view for this one. Exits the app once done.
-    pub fn frame(&mut self, state: &mut ProjectState) {
+    /// frame and sets the arrangement's `view` for this one. Exits the
+    /// app once done.
+    pub fn frame(&mut self, state: &mut ProjectState, view: &mut TimelineView) {
         let now = Instant::now();
         let cpu = thread_cpu_ms();
         let last = self.last.replace((now, cpu));
@@ -213,10 +217,10 @@ impl Bench {
                     }
                     self.stage = Stage::Warmup { since: now };
                 }
-                self.view_overview(state);
+                self.view_overview(view);
             }
             Stage::Warmup { since } => {
-                self.view_overview(state);
+                self.view_overview(view);
                 if since.elapsed() > WARMUP {
                     self.stage = Stage::Running {
                         since: now,
@@ -241,26 +245,30 @@ impl Bench {
                 };
                 if phase != Some(current) {
                     self.end_phase(now);
-                    self.start_phase(state, current, now);
+                    self.start_phase(state, view, current, now);
                     self.stage = Stage::Running {
                         since,
                         phase: Some(current),
                     };
                 }
-                self.steer(state, current, progress);
+                self.steer(view, current, progress);
             }
         }
     }
 
-    fn view_overview(&self, state: &mut ProjectState) {
-        state
-            .grid
-            .fit(BeatPos::ZERO, BeatPos(self.length), VIEW_WIDTH);
-        state.grid.offset = Offset::ZERO;
+    fn view_overview(&self, view: &mut TimelineView) {
+        view.fit(BeatPos::ZERO, BeatPos(self.length), VIEW_WIDTH);
+        view.offset = Offset::ZERO;
     }
 
-    fn start_phase(&mut self, state: &mut ProjectState, phase: Phase, now: Instant) {
-        self.view_overview(state);
+    fn start_phase(
+        &mut self,
+        state: &mut ProjectState,
+        view: &mut TimelineView,
+        phase: Phase,
+        now: Instant,
+    ) {
+        self.view_overview(view);
         if phase == Phase::Play {
             state.seek(BeatPos::ZERO);
             state.play();
@@ -286,9 +294,8 @@ impl Bench {
     }
 
     /// The view `progress` (0 to 1) into `phase`.
-    fn steer(&self, state: &mut ProjectState, phase: Phase, progress: f32) {
+    fn steer(&self, view: &mut TimelineView, phase: Phase, progress: f32) {
         let fit = VIEW_WIDTH / self.length as f32;
-        let grid = &mut state.grid;
         match phase {
             Phase::Idle | Phase::Play => {}
             Phase::Zoom => {
@@ -296,27 +303,27 @@ impl Bench {
                 let depth = 1. - (2. * progress - 1.).abs();
                 let zoom = fit * (MAX_ZOOM / fit).max(1.).powf(depth);
                 let middle = (self.length / 2.) as f32;
-                grid.fit(
+                view.fit(
                     BeatPos::ZERO,
                     BeatPos((VIEW_WIDTH / zoom) as f64),
                     VIEW_WIDTH,
                 );
-                grid.offset.x = (middle * zoom - VIEW_WIDTH / 2.).max(0.);
+                view.offset.x = (middle * zoom - VIEW_WIDTH / 2.).max(0.);
             }
             Phase::ScrollX => {
                 let zoom = SCROLL_ZOOM.max(fit);
-                grid.fit(
+                view.fit(
                     BeatPos::ZERO,
                     BeatPos((VIEW_WIDTH / zoom) as f64),
                     VIEW_WIDTH,
                 );
                 let span = (self.length as f32 * zoom - VIEW_WIDTH).max(0.);
                 // Across and back.
-                grid.offset.x = span * (1. - (2. * progress - 1.).abs());
+                view.offset.x = span * (1. - (2. * progress - 1.).abs());
             }
             Phase::ScrollY => {
                 let span = (self.rows_height - VIEW_HEIGHT).max(0.);
-                grid.offset.y = span * (1. - (2. * progress - 1.).abs());
+                view.offset.y = span * (1. - (2. * progress - 1.).abs());
             }
         }
     }

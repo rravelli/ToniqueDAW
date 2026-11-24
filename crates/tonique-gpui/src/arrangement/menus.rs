@@ -16,7 +16,7 @@ impl Arrangement {
     /// Adaptive densities, fixed steps, triplets and snapping; the chosen
     /// ones ticked, as `grid_menu` in the egui app.
     pub fn grid_menu(&self, context: &mut Context<Self>) -> gpui::Div {
-        let settings = self.state(context).grid.settings;
+        let settings = self.state(context).grid().settings;
         let mut menu = Menu::new(&crate::theme::current(context)).label("Adaptive");
         for density in GridDensity::ALL {
             let checked = settings.adaptive && settings.density == density;
@@ -24,7 +24,8 @@ impl Arrangement {
                 MenuItem::new(density.name()).checked(checked),
                 context,
                 move |this, _, context| {
-                    let settings = &mut this.state_mut(context).grid.settings;
+                    let mut state = this.state_mut(context);
+                    let settings = &mut state.grid_mut().settings;
                     settings.adaptive = true;
                     settings.density = density;
                 },
@@ -37,7 +38,8 @@ impl Arrangement {
                 MenuItem::new(step.name(settings.triplet)).checked(checked),
                 context,
                 move |this, _, context| {
-                    let settings = &mut this.state_mut(context).grid.settings;
+                    let mut state = this.state_mut(context);
+                    let settings = &mut state.grid_mut().settings;
                     settings.adaptive = false;
                     settings.step = step;
                 },
@@ -49,14 +51,14 @@ impl Arrangement {
                     .checked(settings.triplet)
                     .keep_open(),
                 context,
-                |this, _, context| this.state_mut(context).grid.settings.triplet ^= true,
+                |this, _, context| this.state_mut(context).grid_mut().settings.triplet ^= true,
             )
             .item(
                 MenuItem::new("Snap to grid")
                     .checked(settings.snap)
                     .keep_open(),
                 context,
-                |this, _, context| this.state_mut(context).grid.settings.snap ^= true,
+                |this, _, context| this.state_mut(context).grid_mut().settings.snap ^= true,
             )
             .into_element()
     }

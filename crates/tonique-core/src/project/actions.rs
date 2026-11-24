@@ -5,7 +5,7 @@
 use tonique_engine::time::BeatPos;
 
 use super::{PlaybackState, ProjectState};
-use crate::config::keymap::Action;
+use crate::{config::keymap::Action, session::timeline_view::TimelineView};
 
 /// What a UI has to do after [`ProjectState::run_action`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -21,8 +21,10 @@ pub enum ActionOutcome {
 }
 
 impl ProjectState {
-    /// Runs `action` when it only changes the project.
-    pub fn run_action(&mut self, action: Action) -> ActionOutcome {
+    /// Runs `action` when it only changes the project. `view` is the
+    /// arrangement's: an adaptive grid's step, which nudges go by, follows
+    /// its zoom.
+    pub fn run_action(&mut self, action: Action, view: &TimelineView) -> ActionOutcome {
         match action {
             Action::PlayStop => self.toggle_play(),
             // Loop the selection, or toggle looping.
@@ -36,7 +38,7 @@ impl ProjectState {
             Action::NarrowGrid => self.grid.narrow(),
             Action::WidenGrid => self.grid.widen(),
             Action::ToggleTripletGrid => self.grid.settings.triplet ^= true,
-            Action::ToggleAdaptiveGrid => self.grid.toggle_adaptive(),
+            Action::ToggleAdaptiveGrid => self.grid.toggle_adaptive(view),
             Action::ToggleSnap => self.grid.settings.snap ^= true,
             Action::Undo => self.undo(),
             Action::Redo => self.redo(),
@@ -54,9 +56,9 @@ impl ProjectState {
             // cursor when nothing is selected.
             Action::NudgeLeft | Action::NudgeRight => {
                 let direction = if action == Action::NudgeLeft { -1. } else { 1. };
-                let step = direction * self.grid.snap_step();
+                let step = direction * self.grid.snap_step(view);
                 if self.selected_clips().is_empty() {
-                    let cursor = self.grid.snap_to_step(self.edit_cursor() + step);
+                    let cursor = self.grid.snap_to_step(self.edit_cursor() + step, view);
                     self.set_edit_cursor(cursor);
                     return ActionOutcome::Reveal(cursor, cursor);
                 }
@@ -139,15 +141,19 @@ mod tests {
     fn ui_actions_are_left_to_the_ui() {
         let mut state = state();
         for action in [Action::Rename, Action::OpenSettings, Action::SaveProject] {
-            assert_eq!(state.run_action(action), ActionOutcome::Unhandled);
+            assert_eq!(
+                state.run_action(action, &TimelineView::new()),
+                ActionOutcome::Unhandled
+            );
         }
     }
 
     #[test]
     fn nudging_without_a_selection_moves_the_edit_cursor_into_view() {
         let mut state = state();
-        let step = state.grid.snap_step();
-        let outcome = state.run_action(Action::NudgeRight);
+        let view = TimelineView::new();
+        let step = state.grid.snap_step(&view);
+        let outcome = state.run_action(Action::NudgeRight, &view);
         assert_eq!(state.edit_cursor(), BeatPos(step));
         assert_eq!(outcome, ActionOutcome::Reveal(BeatPos(step), BeatPos(step)));
     }
@@ -158,7 +164,8 @@ mod tests {
         let id = state.add_track();
         state.select_track(&id);
         let tracks = state.track_count();
-        assert_eq!(state.run_action(Action::Delete), ActionOutcome::Done);
+        let outcome = state.run_action(Action::Delete, &TimelineView::new());
+        assert_eq!(outcome, ActionOutcome::Done);
         // Deleting a track waits for the next update.
         state.update();
         assert_eq!(state.track_count(), tracks - 1);

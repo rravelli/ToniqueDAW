@@ -1,7 +1,7 @@
 use crate::ui::RectSpan;
 use crate::ui::theme::font_size;
 use crate::{
-    ui::arrangement::grid::PaintGrid,
+    ui::arrangement::grid::ZoomedGrid,
     ui::{
         font::PHOSPHOR_REGULAR,
         missing_files,
@@ -19,7 +19,9 @@ use egui_phosphor::{
     regular::WARNING,
 };
 use std::{ops::Range, time::Duration};
-use tonique_core::{document::clip::AudioClip, project::ProjectState};
+use tonique_core::{
+    document::clip::AudioClip, project::ProjectState, session::timeline_view::TimelineView,
+};
 use tonique_engine::time::BeatPos;
 
 const PADDING_TEXT: f32 = 4.;
@@ -68,6 +70,8 @@ pub struct ClipView<'a> {
     /// Where the whole clip is on screen; drawn clipped to `viewport`.
     pub rect: Rect,
     pub viewport: Rect,
+    /// The arrangement's zoom and scroll.
+    pub timeline_view: &'a TimelineView,
     /// Its track's.
     pub color: Color32,
     pub selected: bool,
@@ -222,15 +226,18 @@ impl ClipView<'_> {
             } else {
                 ink
             };
-            state
-                .grid
-                .paint_clip_grid(painter, viewport, rect, with_alpha(ink, 30));
+            ZoomedGrid::new(state.grid(), self.timeline_view).paint_clip_grid(
+                painter,
+                viewport,
+                rect,
+                with_alpha(ink, 30),
+            );
             paint_clip_waveform(
                 painter,
                 clip,
                 rect,
                 viewport,
-                state.grid.pixels_per_beat(),
+                self.timeline_view.pixels_per_beat(),
                 state.bpm(),
                 ink,
             );
@@ -239,7 +246,7 @@ impl ClipView<'_> {
         // The selected part: lit, inside the outline, its waveform drawn
         // again over it.
         if let Some((start, stop)) = lit_range {
-            let x = |beats: BeatPos| state.grid.beats_to_x(beats, viewport.span());
+            let x = |beats: BeatPos| self.timeline_view.beats_to_x(beats, viewport.span());
             let lit = Rect::from_x_y_ranges(x(start)..=x(stop), rect.top()..=rect.bottom())
                 .intersect(Rect::from_min_size(pos, size).shrink(1.));
             if lit.is_positive() {
@@ -266,7 +273,7 @@ impl ClipView<'_> {
         // Where the loop starts over: a faint line through the header.
         if clip.active_loop().is_some() {
             let stroke = Stroke::new(1., with_alpha(header_ink, LOOP_LINE_ALPHA));
-            let pixels_per_beat = state.grid.pixels_per_beat();
+            let pixels_per_beat = self.timeline_view.pixels_per_beat();
             let in_view = beats_in_view(pos.x, viewport, pixels_per_beat);
             for segment in clip.segments(in_view, state.bpm()) {
                 if segment.start <= 0. {
@@ -326,11 +333,14 @@ impl ClipView<'_> {
             return;
         }
         ui.ctx().set_cursor_icon(CursorIcon::Text);
-        let beats = state.grid.x_to_beats(pointer.x, self.viewport.span());
+        let beats = self
+            .timeline_view
+            .x_to_beats(pointer.x, self.viewport.span());
         let alt = ui.input(|i| i.modifiers.alt);
-        let x = state
-            .grid
-            .beats_to_x(state.grid.snap(beats, alt), self.viewport.span());
+        let x = self.timeline_view.beats_to_x(
+            state.grid().snap(beats, alt, self.timeline_view),
+            self.viewport.span(),
+        );
         let theme = ui.app_theme();
         ui.painter_at(body).vline(
             x,
@@ -359,10 +369,15 @@ impl ClipView<'_> {
         if response.dragged()
             && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
         {
-            let beats = state.grid.x_to_beats(mouse_pos.x, self.viewport.span());
-            let beats = if state.grid.snaps(ui.input(|i| i.modifiers.alt)) {
+            let beats = self
+                .timeline_view
+                .x_to_beats(mouse_pos.x, self.viewport.span());
+            let beats = if state.grid().snaps(ui.input(|i| i.modifiers.alt)) {
                 let targets = state.snap_targets(&[clip.id]);
-                state.grid.snap_to_targets(beats, &targets).0
+                state
+                    .grid()
+                    .snap_to_targets(beats, &targets, self.timeline_view)
+                    .0
             } else {
                 beats
             };
@@ -496,6 +511,7 @@ mod tests {
                     clip: &clip,
                     rect: Rect::from_min_size(Pos2::ZERO, vec2(400., 60.)),
                     viewport: Rect::from_min_size(Pos2::ZERO, vec2(800., 200.)),
+                    timeline_view: &TimelineView::new(),
                     color: crate::ui::theme::Theme::dark().accent,
                     selected: false,
                     zone: None,
@@ -564,6 +580,7 @@ mod tests {
                     clip: &clip,
                     rect: Rect::from_min_size(Pos2::ZERO, vec2(400., 60.)),
                     viewport: Rect::from_min_size(Pos2::ZERO, vec2(800., 200.)),
+                    timeline_view: &TimelineView::new(),
                     color: crate::ui::theme::Theme::dark().accent,
                     selected: false,
                     zone: None,
@@ -603,10 +620,12 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.set_fonts(crate::ui::font::fonts());
         let viewport = Rect::from_min_size(Pos2::ZERO, vec2(800., 200.));
+        let timeline_view = TimelineView::new();
         let view = |top: f32| ClipView {
             clip: &clip,
             rect: Rect::from_min_size(pos2(0., top), vec2(400., 60.)),
             viewport,
+            timeline_view: &timeline_view,
             color: crate::ui::theme::Theme::dark().accent,
             selected: false,
             zone: None,

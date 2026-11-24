@@ -7,6 +7,7 @@ use crate::ui::{
     theme::ThemeExt,
 };
 use egui::{Pos2, Rect, Response, Shape, Stroke, Ui};
+use tonique_core::session::timeline_view::TimelineView;
 use tonique_core::{project::ProjectState, project::SelectionBounds};
 use tonique_engine::time::BeatPos;
 
@@ -21,19 +22,20 @@ impl Timeline {
         &mut self,
         ui: &mut Ui,
         state: &mut ProjectState,
+        view: &TimelineView,
         layout: &RowLayout,
         response: &Response,
     ) {
         // Snapped to the grid, as trims are.
         let alt = ui.input(|i| i.modifiers.alt);
-        let snap = |beats: BeatPos| state.grid.snap(beats, alt);
+        let snap = |beats: BeatPos| state.grid().snap(beats, alt, view);
         // From where the button went down: egui starts drags a few points
         // later.
         if response.drag_started()
             && let Some(mouse_pos) = ui.input(|i| i.pointer.press_origin())
         {
             let track = layout.track_at(mouse_pos.y).map(|(index, _)| index);
-            let snapped = snap(state.grid.x_to_beats(mouse_pos.x, response.rect.span()));
+            let snapped = snap(view.x_to_beats(mouse_pos.x, response.rect.span()));
 
             if state.track_count() > 0 {
                 let index = track.unwrap_or(state.track_count() - 1);
@@ -52,7 +54,7 @@ impl Timeline {
         {
             let current_track = layout.track_at(mouse_pos.y).map(|(index, _)| index);
 
-            let current_pos = snap(state.grid.x_to_beats(mouse_pos.x, response.rect.span()));
+            let current_pos = snap(view.x_to_beats(mouse_pos.x, response.rect.span()));
             let length = state.track_count();
             let track_index = current_track.unwrap_or(length - 1);
             state.select_in_bounds(SelectionBounds::between(
@@ -62,7 +64,7 @@ impl Timeline {
         }
 
         // The veil, under the clips.
-        if let Some(zone) = zone_rect(state, layout, response.rect) {
+        if let Some(zone) = zone_rect(state, view, layout, response.rect) {
             let theme = ui.app_theme();
             ui.painter_at(response.rect)
                 .rect_filled(zone, 2.0, theme.selection_fill);
@@ -75,10 +77,11 @@ impl Timeline {
         &self,
         ui: &Ui,
         state: &ProjectState,
+        view: &TimelineView,
         layout: &RowLayout,
         viewport: Rect,
     ) {
-        let Some(zone) = zone_rect(state, layout, viewport) else {
+        let Some(zone) = zone_rect(state, view, layout, viewport) else {
             return;
         };
         let theme = ui.app_theme();
@@ -106,10 +109,15 @@ impl Timeline {
 }
 
 /// Where the selection zone is on screen, if there's one.
-fn zone_rect(state: &ProjectState, layout: &RowLayout, viewport: Rect) -> Option<Rect> {
+fn zone_rect(
+    state: &ProjectState,
+    view: &TimelineView,
+    layout: &RowLayout,
+    viewport: Rect,
+) -> Option<Rect> {
     let bounds: SelectionBounds = state.selection_bounds()?;
     let min_point = Pos2::new(
-        state.grid.beats_to_x(bounds.start_pos, viewport.span()),
+        view.beats_to_x(bounds.start_pos, viewport.span()),
         layout.track_top(bounds.start_track_index),
     );
     // Down to the bottom of the row showing the last track (its collapsed
@@ -117,9 +125,6 @@ fn zone_rect(state: &ProjectState, layout: &RowLayout, viewport: Rect) -> Option
     let bottom = layout
         .track_row(bounds.end_track_index)
         .map_or(layout.track_top(bounds.end_track_index), |r| r.y().max);
-    let max_point = Pos2::new(
-        state.grid.beats_to_x(bounds.end_pos, viewport.span()),
-        bottom,
-    );
+    let max_point = Pos2::new(view.beats_to_x(bounds.end_pos, viewport.span()), bottom);
     Some(Rect::from_min_max(min_point, max_point))
 }
