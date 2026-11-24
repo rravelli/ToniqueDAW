@@ -12,7 +12,7 @@ use tonique_engine::{
     time::BeatPos,
 };
 
-use crate::core::clip::AudioClip;
+use tonique_core::core::clip::AudioClip;
 
 /// Pixels the pointer moves before a press on a clip becomes a move.
 const MOVE_THRESHOLD: f64 = 3.;

@@ -15,13 +15,13 @@ use tonique_engine::edit::{PluginId, TrackId};
 use crate::{
     app::{PopupKind, focus_main},
     bottom::rack::{RackDrag, editors::Editor, editors::EditorInput},
-    core::{effect::Effect, metrics::AudioMetrics},
     geometry::Rect,
     icons,
     meter::paint_meter,
     theme::{Theme, hsla, size},
     widgets::{Flat, Menu, MenuItem, TextField, glyph, typing_view},
 };
+use tonique_core::core::{effect::Effect, metrics::AudioMetrics};
 
 const HEADER_HEIGHT: f32 = 20.;
 /// The output meter outside the frame, low at its right, and the space

@@ -10,14 +10,16 @@ use tonique_engine::edit::TrackId;
 
 use crate::{
     app::ArrowHolder,
+    headers::{COLLAPSE_PAST, MAX_ROW_HEIGHT},
+    timeline::{ROW_GAP, RULER_HEIGHT},
+    widgets::{Scale, SliderDrag},
+};
+use tonique_core::{
     core::{
         state::{MIN_EXPANDED_HEIGHT, RowTarget},
         track::{TrackKind, TrackRow},
     },
-    headers::{COLLAPSE_PAST, MAX_ROW_HEIGHT},
-    timeline::{ROW_GAP, RULER_HEIGHT},
     utils::steps::Presses,
-    widgets::{Scale, SliderDrag},
 };
 
 /// A header dragged this far moves its row.

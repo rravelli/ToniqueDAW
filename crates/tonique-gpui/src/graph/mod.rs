@@ -18,16 +18,18 @@ use gpui::{
 use tonique_engine::graph::GraphTopology;
 
 use crate::{
-    config::keymap::Action,
-    core::graph_layout::{
-        NODE_HEIGHT, NODE_WIDTH, bounds, layout, node_title, stats_line, track_names,
-    },
     geometry::Rect,
     model::{HoldsProject, Project},
     smooth_scroll::WheelDelta,
     widgets::follow_drag,
 };
 use paint::GraphScene;
+use tonique_core::{
+    config::keymap::Action,
+    core::graph_layout::{
+        NODE_HEIGHT, NODE_WIDTH, bounds, layout, node_title, stats_line, track_names,
+    },
+};
 
 /// Around the graph when it's fitted.
 const FIT_MARGIN: f32 = 40.;

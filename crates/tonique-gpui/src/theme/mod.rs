@@ -8,9 +8,9 @@ mod library;
 
 use std::{rc::Rc, sync::LazyLock};
 
-pub use crate::utils::color::Color;
 use gpui::{App, Font, Global, Hsla, Rgba, font};
 pub use library::ThemeLibrary;
+pub use tonique_core::utils::color::Color;
 
 pub const FONT_UI: &str = "Inter";
 pub const FONT_MONO: &str = "JetBrains Mono NL";

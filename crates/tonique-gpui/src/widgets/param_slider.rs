@@ -8,14 +8,14 @@ use gpui::{ContentMask, Window, px};
 use crate::{
     geometry::Rect,
     theme::{Color, FONT_UI, Theme, hsla, size},
-    utils::{
-        format_pan, snap_to_centre,
-        steps::{KeyStep, Presses, step_gain, step_pan},
-    },
     widgets::{
         arrow_keys::paint_outline,
         text::{paint_line, shape},
     },
+};
+use tonique_core::utils::{
+    format_pan, snap_to_centre,
+    steps::{KeyStep, Presses, step_gain, step_pan},
 };
 
 /// Shift-dragging moves this much slower.

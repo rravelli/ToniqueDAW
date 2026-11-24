@@ -12,9 +12,9 @@ use crate::{
     app::Workspace,
     bottom::{ClipArrows, KnobArrows},
     headers::Param,
-    utils::steps::Presses,
     widgets::arrow_press,
 };
+use tonique_core::utils::steps::Presses;
 
 /// Steps a control of a view's by some arrow presses.
 pub type Stepper = Rc<dyn Fn(Presses, &mut App)>;

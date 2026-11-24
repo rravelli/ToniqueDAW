@@ -11,10 +11,12 @@ use gpui::{
 use crate::{
     app::PopupKind,
     browser::{DragGhost, DraggedAudio, ListKind},
-    core::state::PlaybackState,
-    file_tree::{FileKind, FileNode, file_kind},
     icons,
     theme::{Theme, hsla, icon, mix, size},
+};
+use tonique_core::{
+    core::state::PlaybackState,
+    file_tree::{FileKind, FileNode, file_kind},
 };
 
 pub(super) const ROW_HEIGHT: f32 = 22.;

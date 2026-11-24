@@ -15,11 +15,11 @@ use tonique_engine::time::BeatPos;
 use gpui::{App, Context, ScrollEvent, Window};
 
 use crate::{
-    core::{state::PlaybackState, track::DEFAULT_TRACK_HEIGHT},
     smooth_scroll::{SmoothScroll, WheelDelta},
     timeline::{RULER_HEIGHT, RowLayout},
     widgets::{ScrollSpan, ScrollbarGrab},
 };
+use tonique_core::core::{state::PlaybackState, track::DEFAULT_TRACK_HEIGHT};
 
 /// How close to the left and right edges a drag starts scrolling, in
 /// pixels.

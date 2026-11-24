@@ -11,7 +11,7 @@
 
 use gpui::{App, Window};
 
-use crate::config::keymap::Action;
+use tonique_core::config::keymap::Action;
 
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = tonique, no_json)]

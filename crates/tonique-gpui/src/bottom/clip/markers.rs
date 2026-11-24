@@ -10,10 +10,10 @@ use crate::{
         clip::{ClipDrag, ClipScene, LOOP_BAR_HEIGHT, Layout, RULER_HEIGHT},
         paint::{fill, polygon},
     },
-    core::clip::{AudioClip, MIN_LENGTH},
     geometry::Rect,
     theme::with_alpha,
 };
+use tonique_core::core::clip::{AudioClip, MIN_LENGTH};
 
 /// Half the width of the area grabbing a marker or a loop edge.
 const HANDLE_REACH: f32 = 4.;

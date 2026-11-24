@@ -18,14 +18,16 @@ use crate::{
         ClipArrows, ClipDrag,
         markers::{default_loop, trimmed_end, with_loop},
     },
-    core::clip::{AudioClip, MIN_LENGTH},
     icons,
     theme::{Color, Theme, hsla, size},
+    widgets::{Flat, TextField, glyph, typing_view},
+};
+use tonique_core::{
+    core::clip::{AudioClip, MIN_LENGTH},
     utils::{
         format_bars, format_time, parse_bars, parse_parts,
         steps::{self, KeyStep, Presses},
     },
-    widgets::{Flat, TextField, glyph, typing_view},
 };
 
 /// Between the inspector's cells, side by side.

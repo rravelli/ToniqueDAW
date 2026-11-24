@@ -17,12 +17,11 @@ use crate::{
             CONTROL_HEIGHT, CONTROL_WIDTH, button_row, section_header, setting_row, setting_rows,
         },
     },
-    config::settings::Settings,
     geometry::Rect,
     theme::Theme,
-    utils::steps::Presses,
     widgets::{Scale, SliderDrag, dialog_button, paint_param_slider},
 };
+use tonique_core::{config::settings::Settings, utils::steps::Presses};
 
 #[derive(Default)]
 pub struct GeneralForm {

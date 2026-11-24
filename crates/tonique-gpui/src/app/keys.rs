@@ -5,13 +5,13 @@ use crate::model::HoldsProject;
 use gpui::{App, Context, KeyDownEvent, Keystroke, Window};
 use tonique_engine::time::BeatPos;
 
-use crate::{
-    app::{
-        Workspace,
-        command::{self, Command},
-        dialog::Dialog,
-        project::ProjectAction,
-    },
+use crate::app::{
+    Workspace,
+    command::{self, Command},
+    dialog::Dialog,
+    project::ProjectAction,
+};
+use tonique_core::{
     config::keymap::{Action, Key, Mods, format_shortcut},
     core::state::ActionOutcome,
 };

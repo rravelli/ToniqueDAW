@@ -9,12 +9,6 @@ use std::collections::HashSet;
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 use crate::{
-    core::{
-        clip::AudioClip,
-        grid::GridLine,
-        state::MASTER_TRACK_ID,
-        track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackRow},
-    },
     geometry::Rect,
     theme::{Color, Theme, with_alpha},
     timeline::{
@@ -23,6 +17,14 @@ use crate::{
         moving::{ClipMove, DraggedClips},
         rows::{ClipPart, HEADER_HEIGHT, Span, handle_rect},
         ruler::LoopGrab,
+    },
+};
+use tonique_core::{
+    core::{
+        clip::AudioClip,
+        grid::GridLine,
+        state::MASTER_TRACK_ID,
+        track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackRow},
     },
     utils::format_time,
 };

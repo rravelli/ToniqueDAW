@@ -10,10 +10,9 @@ use crate::{
         PopupKind, Workspace, dialog::Dialog, menu_bar::BarMenu, project::ProjectAction,
         settings::SettingsTab,
     },
-    config::keymap::Action,
-    core::project::project_name,
     widgets::{Menu, MenuItem},
 };
+use tonique_core::{config::keymap::Action, core::project::project_name};
 
 impl Workspace {
     pub(super) fn bar_menu(&self, menu: BarMenu, context: &mut Context<Self>) -> gpui::Div {

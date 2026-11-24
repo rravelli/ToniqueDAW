@@ -7,10 +7,10 @@ use gpui::Context;
 use tonique_engine::edit::ClipId;
 
 use crate::{
-    core::grid::{GridDensity, GridStep},
     icons,
     widgets::{Menu, MenuItem},
 };
+use tonique_core::core::grid::{GridDensity, GridStep};
 
 impl Arrangement {
     /// Adaptive densities, fixed steps, triplets and snapping; the chosen

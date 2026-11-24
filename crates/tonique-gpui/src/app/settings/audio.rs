@@ -14,11 +14,13 @@ use crate::{
             status,
         },
     },
-    audio::host::{open_output, output_devices},
-    config::settings::Settings,
     icons,
     theme::{Theme, hsla, size},
     widgets::{Flat, Menu, MenuItem, NumberField, NumberSpec, dialog_button, glyph, select},
+};
+use tonique_core::{
+    audio::host::{open_output, output_devices},
+    config::settings::Settings,
 };
 use tonique_engine::device::{DeviceInfo, DeviceOptions};
 

@@ -18,11 +18,13 @@ use tonique_engine::edit::SourceId;
 
 use crate::{
     app::focus_main,
-    core::state::ProjectState,
-    file_match::{FileIndex, exact_matches, file_name, folder_name, query_for, rank},
     icons,
     theme::{Theme, hsla, icon, mix, size},
     widgets::{FieldKey, Flat, HANDLE_WIDTH, ScrollbarGrab, TextField, handle_scrollbar},
+};
+use tonique_core::{
+    core::state::ProjectState,
+    file_match::{FileIndex, exact_matches, file_name, folder_name, query_for, rank},
 };
 
 const ROW_HEIGHT: f32 = 22.;

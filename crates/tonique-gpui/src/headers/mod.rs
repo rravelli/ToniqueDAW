@@ -28,10 +28,6 @@ use tonique_engine::edit::TrackId;
 
 use crate::{
     bottom::DraggedEffect,
-    core::{
-        state::MASTER_TRACK_ID,
-        track::{TrackKind, TrackRow},
-    },
     geometry::Rect,
     icons,
     meter::paint_meter,
@@ -42,6 +38,10 @@ use crate::{
 };
 use drag::{HeaderDrag, RowMarker};
 use layout::{COLOR_BAR_WIDTH, HEADER_INSET, color_bar_left};
+use tonique_core::core::{
+    state::MASTER_TRACK_ID,
+    track::{TrackKind, TrackRow},
+};
 
 const DEFAULT_WIDTH: f32 = 190.;
 const MIN_WIDTH: f32 = 130.;

@@ -215,7 +215,7 @@ impl Menu {
     pub fn command<V: 'static>(
         self,
         item: MenuItem,
-        action: crate::config::keymap::Action,
+        action: tonique_core::config::keymap::Action,
         context: &mut Context<V>,
     ) -> Self {
         self.item(item, context, move |_, window, context| {

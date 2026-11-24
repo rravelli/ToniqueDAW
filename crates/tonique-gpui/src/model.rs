@@ -20,7 +20,7 @@ use std::{
 
 use gpui::{App, AppContext, Entity, GpuiBorrow};
 
-use crate::core::{row_layout::RowLayout, state::ProjectState};
+use tonique_core::core::{row_layout::RowLayout, state::ProjectState};
 
 pub struct Project {
     /// Read with [`HoldsProject::state`], changed with

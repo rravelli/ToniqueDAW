@@ -6,12 +6,10 @@
 //! step.
 
 use crate::bottom::BottomPanel;
+use crate::bottom::clip::{audio::ClipSlider, inspector::Field};
 use crate::model::HoldsProject;
-use crate::{
-    bottom::clip::{audio::ClipSlider, inspector::Field},
-    utils::steps::Presses,
-};
 use gpui::App;
+use tonique_core::utils::steps::Presses;
 
 /// A value of the inspector's holding the arrow keys, of the clip shown.
 #[derive(Clone, Copy, Debug, PartialEq)]

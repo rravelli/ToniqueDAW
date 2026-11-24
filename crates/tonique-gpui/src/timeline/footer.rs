@@ -5,12 +5,12 @@
 use gpui::{Window, px};
 
 use crate::{
-    core::metrics::SCOPE_COLUMNS,
     geometry::Rect,
     theme::{Color, FONT_UI, Theme, hsla, size},
     timeline::FOOTER_PADDING,
     widgets::paint_text,
 };
+use tonique_core::core::metrics::SCOPE_COLUMNS;
 
 /// The master's output scope.
 const SCOPE_WIDTH: f32 = 180.;

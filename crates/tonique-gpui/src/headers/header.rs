@@ -14,18 +14,20 @@ use tonique_engine::edit::TrackId;
 
 use crate::{
     app::{ArrowHolder, PopupKind},
-    core::{
-        state::MASTER_TRACK_ID,
-        track::{TrackRow, TrackSoloState},
-    },
     geometry::Rect,
     headers::{drag::Param, layout::HeaderLayout},
     icons,
     meter::paint_meter,
     theme::{Color, Theme, hsla, icon_fill, size, with_alpha},
     timeline::{DROP_FILL_ALPHA, DROP_OUTLINE, ROW_GAP},
-    utils::display_name,
     widgets::paint_param_slider,
+};
+use tonique_core::{
+    core::{
+        state::MASTER_TRACK_ID,
+        track::{TrackRow, TrackSoloState},
+    },
+    utils::display_name,
 };
 
 /// Wide enough for the volume to show its unit.

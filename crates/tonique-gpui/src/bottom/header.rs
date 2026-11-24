@@ -9,8 +9,10 @@ use tonique_engine::edit::ClipId;
 
 use crate::{
     bottom::{BottomView, paint::polygon},
-    core::{clip::AudioClip, track::TrackRow},
     theme::{Color, hsla, size, with_alpha},
+};
+use tonique_core::{
+    core::{clip::AudioClip, track::TrackRow},
     utils::display_name,
 };
 

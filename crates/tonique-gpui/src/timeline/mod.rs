@@ -36,9 +36,9 @@ use gpui::{
     MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, Window, canvas, div, prelude::*, px,
 };
 
-pub use crate::core::row_layout::{ROW_GAP, Row, RowLayout};
 pub use drop::DropTarget;
 pub use rows::{FOOTER_PADDING, footer_height};
+pub use tonique_core::core::row_layout::{ROW_GAP, Row, RowLayout};
 
 use tonique_engine::edit::{ClipId, TrackId};
 

@@ -10,8 +10,8 @@ use gpui::Context;
 use crate::{
     browser::{LabelView, ListKind},
     theme::Color,
-    utils::color::parse_color,
 };
+use tonique_core::utils::color::parse_color;
 
 /// Shown for a label whose colour can't be read.
 const FALLBACK: Color = Color::rgb(128, 128, 128);
@@ -68,7 +68,7 @@ impl BrowserPanel {
     /// Change the labels in the config, and show them.
     fn edit_labels(
         &mut self,
-        edit: impl FnOnce(&mut crate::config::labels::Labels),
+        edit: impl FnOnce(&mut tonique_core::config::labels::Labels),
         context: &mut Context<Self>,
     ) {
         self.config.edit_labels(edit);
@@ -90,7 +90,7 @@ impl BrowserPanel {
         self.edit_labels(|labels| labels.rename(index, name), context);
     }
 
-    /// To `color`, one of [`crate::config::labels::COLORS`].
+    /// To `color`, one of [`tonique_core::config::labels::COLORS`].
     pub(super) fn recolor_label(&mut self, index: usize, color: &str, context: &mut Context<Self>) {
         let color = color.to_string();
         self.edit_labels(|labels| labels.recolor(index, color), context);

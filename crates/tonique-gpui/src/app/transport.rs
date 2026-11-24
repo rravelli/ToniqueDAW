@@ -10,13 +10,15 @@ use tonique_engine::time::TimeSignature;
 
 use crate::{
     app::menu_bar::MENU_BAR_HEIGHT,
-    config::keymap::Action,
-    core::state::PlaybackState,
     icons,
     model::{HoldsProject, Project},
     theme::{Theme, hsla, icon, size, with_alpha},
-    utils::{format_bars, format_time},
     widgets::{Flat, NumberField, NumberSpec, follow_drag, glyph},
+};
+use tonique_core::{
+    config::keymap::Action,
+    core::state::PlaybackState,
+    utils::{format_bars, format_time},
 };
 
 const BUTTON: f32 = 22.;

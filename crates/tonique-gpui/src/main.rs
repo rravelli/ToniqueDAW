@@ -1,9 +1,6 @@
 //! Tonique's timeline and file browser rebuilt with gpui-fast, on Tonique's
 //! own core, engine and file tree, to compare with the egui UI.
 
-// Tonique's core, without its UI, at the paths it has in Tonique.
-use tonique_core::{analysis, audio, bench, cache, config, core, file_match, file_tree, utils};
-
 mod app;
 mod bottom;
 mod browser;
@@ -23,7 +20,7 @@ mod widgets;
 
 use gpui::{App, Bounds, WindowBounds, WindowOptions, prelude::*, px, size};
 
-use crate::{audio::host::Startup, config::settings::Settings, core::state::ProjectState};
+use tonique_core::{audio::host::Startup, config::settings::Settings, core::state::ProjectState};
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -37,7 +34,7 @@ fn main() {
             .open_window(
                 WindowOptions {
                     // Benched UIs are compared at the same size: the whole screen.
-                    window_bounds: Some(if bench::Bench::requested() {
+                    window_bounds: Some(if tonique_core::bench::Bench::requested() {
                         WindowBounds::Fullscreen(bounds)
                     } else {
                         WindowBounds::Windowed(bounds)
@@ -51,7 +48,7 @@ fn main() {
                     app_id: Some("Tonique".into()),
                     // gpui-fast caps frames in low-power mode and while inactive;
                     // the egui app doesn't, so a bench lifts the caps.
-                    ..if bench::Bench::requested() {
+                    ..if tonique_core::bench::Bench::requested() {
                         WindowOptions {
                             low_power_frame_interval: None,
                             inactive_frame_interval: None,

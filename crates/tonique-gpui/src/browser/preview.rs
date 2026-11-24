@@ -10,16 +10,14 @@ use gpui::{
 };
 
 use crate::{
-    analysis::AudioInfo,
     browser::BrowserDrag,
-    core::state::PlaybackState,
     geometry::Rect,
     icons,
     theme::{Theme, hsla, icon, icon_fill, mono, size},
-    utils::format_time,
     wave::paint_waveform,
     widgets::{on_press, paint_slider, toggle_button},
 };
+use tonique_core::{analysis::AudioInfo, core::state::PlaybackState, utils::format_time};
 
 const PREVIEW_HEIGHT: f32 = 118.;
 const WAVE_HEIGHT: f32 = 52.;

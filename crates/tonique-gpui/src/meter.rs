@@ -7,10 +7,10 @@
 use gpui::{Window, linear_color_stop, linear_gradient};
 
 use crate::{
-    core::metrics::AudioMetrics,
     geometry::Rect,
     theme::{Color, Theme, hsla, mix},
 };
+use tonique_core::core::metrics::AudioMetrics;
 
 const CHANNEL_GAP: f32 = 1.;
 const LAMP_HEIGHT: f32 = 3.;

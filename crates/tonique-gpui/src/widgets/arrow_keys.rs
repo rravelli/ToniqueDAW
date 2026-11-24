@@ -7,8 +7,8 @@ use gpui::{Keystroke, Window, px};
 use crate::{
     geometry::Rect,
     theme::{Color, hsla},
-    utils::steps::Presses,
 };
+use tonique_core::utils::steps::Presses;
 
 /// A press of an arrow key, alone or with Shift (a big step): up and right
 /// step up, down and left back.

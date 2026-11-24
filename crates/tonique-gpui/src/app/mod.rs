@@ -26,7 +26,6 @@ use gpui::{
 };
 use tonique_engine::time::BeatPos;
 
-use crate::core::project_files::ProjectFiles;
 pub use arrows::ArrowHolder;
 use dialog::Dialog;
 use export::{ExportDialog, ExportEvent};
@@ -34,13 +33,12 @@ use menu_bar::MenuBarUi;
 pub use popup::PopupKind;
 use project::WindowTitle;
 use settings::{SettingsDialog, SettingsEvent, SettingsTab};
+use tonique_core::core::project_files::ProjectFiles;
 use transport::{Shows, TransportBar, TransportEvent};
 
 use crate::{
-    bench::Bench,
     bottom::{BottomPanel, BottomView},
     browser::BrowserPanel,
-    core::state::ProjectState,
     graph::GraphView,
     model::{HoldsProject, Project},
     popup::PopupLayer,
@@ -48,6 +46,7 @@ use crate::{
     timeline::{Arrangement, ArrangementEvent},
     widgets::{Edge, Splitter, splitter_handle},
 };
+use tonique_core::{bench::Bench, core::state::ProjectState};
 
 /// The browser's width, as the egui app's left panel.
 const BROWSER_WIDTH: f32 = 220.;

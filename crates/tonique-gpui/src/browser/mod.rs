@@ -36,15 +36,13 @@ pub use list::ListKind;
 use missing::MissingView;
 
 use crate::{
-    analysis::AudioInfo,
-    config::Config,
-    core::state::PlaybackState,
     icons,
     model::{HoldsProject, Project},
     theme::{Color, FONT_UI, Theme, hsla, icon, size},
     wave::WaveCache,
     widgets::{Recheck, TextField, follow_drag, icon_rail},
 };
+use tonique_core::{analysis::AudioInfo, config::Config, core::state::PlaybackState};
 
 /// Side of the rail's buttons, and so its width.
 const RAIL_WIDTH: f32 = 28.;

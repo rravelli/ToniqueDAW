@@ -27,11 +27,11 @@ use crate::{
             knob::KNOB_HEIGHT,
         },
     },
-    core::effect::Setting,
     geometry::Rect,
     theme::{Theme, size, with_alpha},
     widgets::Flat,
 };
+use tonique_core::core::effect::Setting;
 
 /// Gain range of the graph, in dB.
 const TOP_DB: f32 = 24.;

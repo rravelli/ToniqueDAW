@@ -20,7 +20,6 @@ use gpui::{
 
 use crate::{
     app::{PopupKind, keys::shortcut},
-    config::settings::Settings,
     icons,
     model::{HoldsProject, Project},
     popup::{self, MenuBuilder},
@@ -32,6 +31,7 @@ pub use audio::AudioChoice;
 use audio::AudioForm;
 use general::GeneralForm;
 use shortcuts::ShortcutsForm;
+use tonique_core::config::settings::Settings;
 
 const WIDTH: f32 = 440.;
 /// Fits the tallest tab, so switching tabs doesn't resize the dialog.

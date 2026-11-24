@@ -6,14 +6,14 @@ use gpui::{Context, MouseButton, PathBuilder, canvas, div, point, prelude::*, px
 
 use crate::{
     app::export::ExportDialog,
-    core::export::{
-        Export, ExportFile, Waveform,
-        format::{duration, file_name, peak},
-    },
     geometry::Rect,
     icons,
     theme::{Color, Theme, hsla, size},
     widgets::{dialog_button, dialog_frame, glyph},
+};
+use tonique_core::core::export::{
+    Export, ExportFile, Waveform,
+    format::{duration, file_name, peak},
 };
 
 use super::{

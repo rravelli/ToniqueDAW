@@ -8,11 +8,13 @@ use tonique_engine::edit::TrackId;
 
 use crate::{
     app::focus_main,
-    core::{state::MASTER_TRACK_ID, track::TrackKind},
     icons,
     theme::{Color, Theme, hsla},
-    utils::display_name,
     widgets::{FieldKey, Menu, MenuItem, TextField},
+};
+use tonique_core::{
+    core::{state::MASTER_TRACK_ID, track::TrackKind},
+    utils::display_name,
 };
 
 /// A track's name when it's left empty, as in the egui app.

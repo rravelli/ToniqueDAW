@@ -20,14 +20,16 @@ use crate::{
             CELL_GAP, FIELD_HEIGHT, Typed, cell, cells, section, toggle_section, value_box,
         },
     },
+    geometry::Rect,
+    theme::{Color, Theme, hsla, size},
+    widgets::{Flat, Menu, MenuItem, Scale, SliderDrag, paint_param_slider, select, typing_view},
+};
+use tonique_core::{
     core::{
         clip::{AudioClip, MAX_DETUNE, MIN_DETUNE, carried},
         state::ClipParam,
     },
-    geometry::Rect,
-    theme::{Color, Theme, hsla, size},
     utils::steps::Presses,
-    widgets::{Flat, Menu, MenuItem, Scale, SliderDrag, paint_param_slider, select, typing_view},
 };
 
 /// The gain slider's range, in dB: its bottom is silence, its top the

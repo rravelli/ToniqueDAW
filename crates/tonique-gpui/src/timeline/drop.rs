@@ -10,13 +10,11 @@ use std::path::PathBuf;
 use gpui::{App, Context, DragMoveEvent, ExternalPaths, Pixels, Point, Stateful, prelude::*};
 use tonique_engine::{edit::TrackId, time::BeatPos};
 
-use crate::{
+use crate::{bottom::DraggedEffect, browser::DraggedAudio, timeline::RULER_HEIGHT};
+use tonique_core::{
     analysis::AudioInfo,
-    bottom::DraggedEffect,
-    browser::DraggedAudio,
     cache::AUDIO_ANALYSIS_CACHE,
     core::{clip::AudioClip, state::MASTER_TRACK_ID},
-    timeline::RULER_HEIGHT,
 };
 
 /// Where audio dragged over the timeline would land.

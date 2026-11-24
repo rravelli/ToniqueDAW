@@ -14,12 +14,12 @@ use gpui::{
     px,
 };
 
-pub use crate::core::project_files::ProjectAction;
 use crate::{
     app::{Workspace, dialog::Dialog},
-    core::project_files::{Ask, FileOutcome},
     widgets::{dialog_body, dialog_button, dialog_frame, dialog_title},
 };
+pub use tonique_core::core::project_files::ProjectAction;
+use tonique_core::core::project_files::{Ask, FileOutcome};
 
 /// The window's title, as last set.
 #[derive(Default)]
@@ -65,7 +65,7 @@ impl Workspace {
         let missing = outcome.missing_files;
         if missing > 0 {
             self.show_missing_files(None, context);
-            let notice = notice.get_or_insert_with(|| crate::core::project_files::Notice {
+            let notice = notice.get_or_insert_with(|| tonique_core::core::project_files::Notice {
                 title: format!("“{}” opened with problems", self.files.name()),
                 lines: Vec::new(),
             });

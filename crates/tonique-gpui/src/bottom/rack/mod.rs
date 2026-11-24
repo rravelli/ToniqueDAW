@@ -22,8 +22,6 @@ use tonique_engine::edit::{PluginId, TrackId};
 
 use crate::{
     bottom::{hint, paint::fill},
-    config::keymap::Action,
-    core::{effect::EffectKind, metrics::AudioMetrics, track::TrackRow},
     geometry::Rect,
     widgets::TextField,
 };
@@ -31,6 +29,10 @@ use editors::{Editor, EditorInput};
 use filter::GraphDrag;
 pub use knob::KnobArrows;
 use knob::KnobDrag;
+use tonique_core::{
+    config::keymap::Action,
+    core::{effect::EffectKind, metrics::AudioMetrics, track::TrackRow},
+};
 
 /// Between effects, and around them.
 const GAP: f32 = 8.;

@@ -28,11 +28,6 @@ use tonique_engine::{edit::ClipId, time::BeatPos};
 use crate::{
     app::PopupKind,
     bottom::paint::{Align, fill, fill_rounded, text},
-    core::{
-        clip::AudioClip,
-        grid::{GridLine, GridService, Span},
-        track::TrackRow,
-    },
     geometry::Rect,
     smooth_scroll::WheelDelta,
     theme::{Color, Theme, hsla, mono, size, with_alpha},
@@ -43,6 +38,11 @@ use crate::{
 };
 use inspector::{Field, Panels, RAIL_WIDTH};
 use markers::{Area, Handle, TrimEdge};
+use tonique_core::core::{
+    clip::AudioClip,
+    grid::{GridLine, GridService, Span},
+    track::TrackRow,
+};
 
 const PADDING: f32 = 8.;
 /// The least the waveform's view is given, the inspector taking the rest.

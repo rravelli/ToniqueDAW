@@ -9,16 +9,16 @@ use tonique_engine::time::BeatPos;
 
 use crate::{
     app::export::ExportDialog,
-    core::{
-        clip::AudioClip,
-        export::{ExportRange, format::duration},
-        state::ProjectState,
-        track::{TrackKind, TrackRow},
-    },
     geometry::Rect,
     theme::{Color, Theme, hsla, mono, with_alpha},
     wave::paint_waveform,
     widgets::{paint_line, shape},
+};
+use tonique_core::core::{
+    clip::AudioClip,
+    export::{ExportRange, format::duration},
+    state::ProjectState,
+    track::{TrackKind, TrackRow},
 };
 
 use super::{LANE_PADDING, parts::card};

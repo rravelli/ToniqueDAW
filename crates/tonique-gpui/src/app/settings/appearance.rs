@@ -17,9 +17,9 @@ use crate::{
     },
     icons,
     theme::{COLORS, Color, FONT_MONO, Theme, ThemeLibrary, hsla, size},
-    utils::color::{format_color, parse_color},
     widgets::{Flat, Menu, MenuItem, TextField, glyph, select, typing_view},
 };
+use tonique_core::utils::color::{format_color, parse_color};
 
 const ICON_BUTTON: f32 = CONTROL_HEIGHT;
 const ICON_SIZE: f32 = 12.;

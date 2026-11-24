@@ -4,7 +4,6 @@
 use gpui::{Bounds, ContentMask, Pixels, Window, px};
 
 use crate::{
-    core::track::DEFAULT_TRACK_HEIGHT,
     geometry::Rect,
     theme::{Color, hsla, mix, mono, size, with_alpha},
     timeline::{
@@ -17,6 +16,7 @@ use crate::{
     wave::WaveCache,
     widgets::paint_text,
 };
+use tonique_core::core::track::DEFAULT_TRACK_HEIGHT;
 
 /// How strongly a selected track's colour tints its lane.
 const LANE_TINT: f32 = 0.06;

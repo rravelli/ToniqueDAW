@@ -6,7 +6,7 @@ use std::fmt::Write;
 use toml::{Table, Value};
 
 use super::{COLORS, Color, Theme};
-use crate::utils::color::{format_color, parse_color};
+use tonique_core::utils::color::{format_color, parse_color};
 
 /// A parsed theme file, applied on top of the theme it extends.
 #[derive(Clone, Debug, Default)]

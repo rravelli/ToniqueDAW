@@ -19,9 +19,11 @@ use crate::{
         paint::{Align, circle, polyline, text},
         rack::RackDrag,
     },
-    core::effect::Setting,
     geometry::Rect,
     theme::{Theme, size},
+};
+use tonique_core::{
+    core::effect::Setting,
     utils::steps::{Presses, step_ratio},
 };
 
@@ -275,7 +277,7 @@ impl BottomPanel {
                         self.state_mut(context).set_effect_setting(
                             track,
                             *plugin,
-                            crate::core::effect::Setting::Time(value),
+                            tonique_core::core::effect::Setting::Time(value),
                         );
                     }
                 } else {

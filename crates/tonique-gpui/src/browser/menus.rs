@@ -8,13 +8,12 @@ use gpui::{Anchor, Context, MouseButton, Pixels, Point, Window, div, prelude::*,
 use crate::{
     app::PopupKind,
     browser::{BrowserPanel, ListKind, rows::dot},
-    config::labels as label_colors,
     icons,
     popup::{self, MenuBuilder},
     theme::hsla,
-    utils::color::parse_color,
     widgets::{FieldKey, Menu, MenuItem},
 };
+use tonique_core::{config::labels as label_colors, utils::color::parse_color};
 
 /// A colour of a label's menu, and the ring around the one it has.
 const SWATCH: f32 = 12.;

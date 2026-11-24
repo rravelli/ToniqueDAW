@@ -8,11 +8,11 @@ use tonique_core::memory::AudioMemory;
 
 use crate::{
     app::Workspace,
-    cache::AUDIO_ANALYSIS_CACHE,
     theme::{Theme, hsla},
     wave::WaveMemory,
     widgets::Menu,
 };
+use tonique_core::cache::AUDIO_ANALYSIS_CACHE;
 
 /// Between a row's name and its value.
 const VALUE_GAP: f32 = 24.;

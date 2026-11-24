@@ -8,11 +8,11 @@ use crate::{
     app::focus_main,
     bottom::DraggedEffect,
     browser::DragGhost,
-    core::effect::EffectKind,
     icons,
     theme::{Theme, hsla, icon, mix},
     widgets::FieldKey,
 };
+use tonique_core::core::effect::EffectKind;
 
 const ROW_HEIGHT: f32 = 22.;
 /// How much a row lightens when hovered.

@@ -6,16 +6,13 @@ use crate::timeline::Arrangement;
 use gpui::{App, Pixels, Point, Window};
 use tonique_engine::time::BeatPos;
 
-use crate::{
-    core::{
-        clip::AudioClip,
-        grid::Viewport,
-        row_layout::{Row, RowLayout},
-        state::ProjectState,
-        track::DEFAULT_TRACK_HEIGHT,
-    },
-    geometry::Rect,
-    timeline::RULER_HEIGHT,
+use crate::{geometry::Rect, timeline::RULER_HEIGHT};
+use tonique_core::core::{
+    clip::AudioClip,
+    grid::Viewport,
+    row_layout::{Row, RowLayout},
+    state::ProjectState,
+    track::DEFAULT_TRACK_HEIGHT,
 };
 
 /// A clip's header: dragged to move it.

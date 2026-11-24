@@ -13,9 +13,9 @@ use gpui::{
 use crate::{
     app::{ArrowHolder, arrows::stepper, focus_main},
     theme::{Theme, hsla},
-    utils::steps::{self, Presses},
     widgets::text_field::{FieldKey, TextField},
 };
+use tonique_core::utils::steps::{self, Presses};
 
 /// Pixels of sideways drag per step.
 const PIXELS_PER_STEP: f32 = 3.;

@@ -27,7 +27,6 @@ pub use rack::{DraggedEffect, KnobArrows};
 
 use crate::{
     app::PopupKind,
-    config::keymap::Action,
     model::{HoldsProject, Project},
     popup::{self, MenuBuilder},
     theme::{Theme, hsla, size},
@@ -36,6 +35,7 @@ use crate::{
 };
 use clip::ClipDetails;
 use rack::Rack;
+use tonique_core::config::keymap::Action;
 
 /// Shortest the panel gets: the clip inspector's tallest panel shows whole.
 const MIN_HEIGHT: f32 = 220.;

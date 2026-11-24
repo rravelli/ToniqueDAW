@@ -16,10 +16,12 @@ use gpui::{
 };
 
 use crate::{
-    cache::AUDIO_ANALYSIS_CACHE,
-    file_tree::{FileTree, is_audio_file, pinned},
     theme::hsla,
     widgets::{FieldKey, HANDLE_WIDTH, ScrollbarGrab, TextField, handle_scrollbar},
+};
+use tonique_core::{
+    cache::AUDIO_ANALYSIS_CACHE,
+    file_tree::{FileTree, is_audio_file, pinned},
 };
 
 use super::rows::ROW_HEIGHT;

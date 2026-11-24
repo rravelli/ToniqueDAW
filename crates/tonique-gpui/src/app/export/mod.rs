@@ -26,13 +26,13 @@ use gpui::{
 use tonique_engine::time::BeatPos;
 
 use crate::{
-    core::{
-        export::{Export, ExportFile, ExportOptions, ExportOutcome, ExportRange, Waveform},
-        state::ExportSelection,
-    },
     model::{HoldsProject, Project},
     wave::WaveCache,
     widgets::{TextField, follow_drag},
+};
+use tonique_core::core::{
+    export::{Export, ExportFile, ExportOptions, ExportOutcome, ExportRange, Waveform},
+    state::ExportSelection,
 };
 
 /// Room for a rendered file's waveform, and around the preview's lanes.

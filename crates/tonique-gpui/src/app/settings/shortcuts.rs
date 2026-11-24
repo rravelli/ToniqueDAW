@@ -10,12 +10,12 @@ use gpui::{App, Context, MouseButton, ScrollHandle, Window, div, prelude::*, px}
 
 use crate::{
     app::settings::{ROW_GAP, button_row, section_header, status},
-    config::keymap::{
-        Action, FIXED_SHORTCUTS, Key, Keymap, Mods, Shortcut, format_shortcut, reserved_by,
-    },
     icons,
     theme::{Theme, hsla},
     widgets::{Flat, ScrollbarGrab, dialog_button, glyph, handle_scrollbar, tooltip},
+};
+use tonique_core::config::keymap::{
+    Action, FIXED_SHORTCUTS, Key, Keymap, Mods, Shortcut, format_shortcut, reserved_by,
 };
 
 const GROUPS: [&str; 5] = ["File", "Transport", "Edit", "Grid", "View"];

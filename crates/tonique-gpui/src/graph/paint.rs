@@ -10,12 +10,12 @@ use tonique_engine::graph::{GraphTopology, TopologyNode};
 use super::Positions;
 use crate::{
     bottom::paint::{Align, fill, fill_rounded, text},
-    core::graph_layout::{
-        NODE_HEIGHT, NODE_WIDTH, elide, meter_unit, node_details, node_palette_slot,
-    },
     geometry::Rect,
     theme::{Color, Theme, hsla, mix, mono, size},
     widgets::{paint_line, shape},
+};
+use tonique_core::core::graph_layout::{
+    NODE_HEIGHT, NODE_WIDTH, elide, meter_unit, node_details, node_palette_slot,
 };
 
 /// Below this zoom, node text is unreadable: skip it.

@@ -24,11 +24,11 @@ use crate::{
             knob::{KNOB_HEIGHT, Knob, KnobScale, KnobTarget},
         },
     },
-    core::effect::{ECHO_TIME, ECHO_TIMES, Effect, EffectKind},
     geometry::Rect,
     theme::{Theme, size},
     widgets::Flat,
 };
+use tonique_core::core::effect::{ECHO_TIME, ECHO_TIMES, Effect, EffectKind};
 
 /// Size of a parameter's switch.
 const TOGGLE_SIZE: (f32, f32) = (30., 20.);
