@@ -102,14 +102,15 @@ impl HoldsProject for ExportDialog {
 }
 
 impl ExportDialog {
-    pub fn new(
-        project: Entity<Project>,
-        waves: Rc<RefCell<WaveCache>>,
-        context: &mut Context<Self>,
-    ) -> Self {
+    /// What its waveforms take.
+    pub fn wave_memory(&self) -> crate::wave::WaveMemory {
+        self.waves.borrow().memory()
+    }
+
+    pub fn new(project: Entity<Project>, context: &mut Context<Self>) -> Self {
         Self {
             project,
-            waves,
+            waves: Rc::default(),
             step: Step::Options,
             options: ExportOptions::default(),
             selection: ExportSelection::default(),

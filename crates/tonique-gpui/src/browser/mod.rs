@@ -153,12 +153,12 @@ impl HoldsProject for BrowserPanel {
 }
 
 impl BrowserPanel {
-    pub fn new(
-        project: Entity<Project>,
-        waves: Rc<RefCell<WaveCache>>,
-        window: &mut Window,
-        context: &mut Context<Self>,
-    ) -> Self {
+    /// What its waveforms take.
+    pub fn wave_memory(&self) -> crate::wave::WaveMemory {
+        self.waves.borrow().memory()
+    }
+
+    pub fn new(project: Entity<Project>, window: &mut Window, context: &mut Context<Self>) -> Self {
         let config = Config::load();
         let mut files = FileList::new(context);
         files.set_roots(config.list_dirs(), config.collapsed_dirs());
@@ -176,7 +176,7 @@ impl BrowserPanel {
             .detach();
         let mut browser = Self {
             project,
-            waves,
+            waves: Rc::default(),
             files,
             labelled: FileList::new(context),
             labels_collapsed: Vec::new(),

@@ -93,10 +93,15 @@ impl HoldsProject for BottomPanel {
 }
 
 impl BottomPanel {
-    pub fn new(project: Entity<Project>, waves: Rc<RefCell<WaveCache>>) -> Self {
+    /// What its waveforms take.
+    pub fn wave_memory(&self) -> crate::wave::WaveMemory {
+        self.waves.borrow().memory()
+    }
+
+    pub fn new(project: Entity<Project>) -> Self {
         Self {
             project,
-            waves,
+            waves: Rc::default(),
             window_height: 0.,
             shown: Shown::default(),
             height: Splitter::new(Edge::Top, MIN_HEIGHT, MIN_HEIGHT, MAX_HEIGHT),

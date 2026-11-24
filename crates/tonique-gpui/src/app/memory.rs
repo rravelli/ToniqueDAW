@@ -78,11 +78,16 @@ impl Workspace {
         let theme = &*crate::theme::current(context);
         let sources = self.state(context).source_memory();
         let cache = AUDIO_ANALYSIS_CACHE.memory();
-        let waves = self
-            .waves
-            .iter()
-            .map(|cache| cache.borrow().memory())
-            .fold(WaveMemory::default(), WaveMemory::add);
+        // A cache per view: each lets go of the tiles it no longer draws
+        // as it renders, and a view not rendered keeps showing its own.
+        let waves = [
+            self.arrangement.read(context).wave_memory(),
+            self.browser.read(context).wave_memory(),
+            self.bottom.read(context).wave_memory(),
+            self.export.read(context).wave_memory(),
+        ]
+        .into_iter()
+        .fold(WaveMemory::default(), WaveMemory::add);
         let resident = self
             .menu_bar
             .resident_bytes()

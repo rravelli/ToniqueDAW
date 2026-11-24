@@ -133,10 +133,15 @@ impl HoldsProject for Arrangement {
 }
 
 impl Arrangement {
-    pub fn new(project: Entity<Project>, waves: Rc<RefCell<WaveCache>>) -> Self {
+    /// What its waveforms take.
+    pub fn wave_memory(&self) -> crate::wave::WaveMemory {
+        self.waves.borrow().memory()
+    }
+
+    pub fn new(project: Entity<Project>) -> Self {
         Self {
             project,
-            waves,
+            waves: Rc::default(),
             timeline: TimelineUi::default(),
             headers: HeadersUi::new(),
             window_width: 0.,

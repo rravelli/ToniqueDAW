@@ -18,7 +18,7 @@ mod project;
 mod settings;
 mod transport;
 
-use std::{cell::RefCell, path::PathBuf, rc::Rc, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use gpui::{
     Anchor, App, Context, DispatchPhase, Entity, FocusHandle, Global, MouseButton, MouseDownEvent,
@@ -46,7 +46,6 @@ use crate::{
     popup::PopupLayer,
     theme::{FONT_UI, Theme, ThemeLibrary, hsla, size},
     timeline::{Arrangement, ArrangementEvent},
-    wave::WaveCache,
     widgets::{Edge, Splitter, splitter_handle},
 };
 
@@ -67,8 +66,6 @@ pub struct Workspace {
     /// The audio graph, shown instead of the timeline when open.
     pub graph: Entity<GraphView>,
     pub browser: Entity<BrowserPanel>,
-    /// Each view's waveforms, for the memory they take.
-    waves: Vec<Rc<RefCell<WaveCache>>>,
     /// Whether the browser shows, as Tonique's left panel, and how wide.
     pub browser_open: bool,
     pub browser_width: Splitter,
@@ -143,36 +140,23 @@ impl Workspace {
         let files = ProjectFiles::new(&state);
         let title = WindowTitle::default();
         let project = context.new(|context| Project::new(state, context));
-        // A cache per view: each lets go of the tiles it no longer draws
-        // as it renders, and a view not rendered keeps showing its own.
-        let mut waves = Vec::new();
-        let mut new_cache = || {
-            let cache: Rc<RefCell<WaveCache>> = Rc::default();
-            waves.push(cache.clone());
-            cache
-        };
-        let (browser_waves, arrangement_waves, export_waves, bottom_waves) =
-            (new_cache(), new_cache(), new_cache(), new_cache());
-        let browser = context
-            .new(|context| BrowserPanel::new(project.clone(), browser_waves, window, context));
+        let browser = context.new(|context| BrowserPanel::new(project.clone(), window, context));
         let transport = context.new(|_| TransportBar::new(project.clone()));
         let transport_events = context.subscribe(&transport, Self::on_transport);
-        let arrangement = context.new(|_| Arrangement::new(project.clone(), arrangement_waves));
+        let arrangement = context.new(|_| Arrangement::new(project.clone()));
         let settings = context
             .new(|context| SettingsDialog::new(project.clone(), themes, theme_warnings, context));
         let settings_events = context.subscribe_in(&settings, window, Self::on_settings);
         let arrangement_events = context.subscribe(&arrangement, Self::on_arrangement);
-        let export =
-            context.new(|context| ExportDialog::new(project.clone(), export_waves, context));
+        let export = context.new(|context| ExportDialog::new(project.clone(), context));
         let export_events = context.subscribe_in(&export, window, Self::on_export);
         Self {
             browser,
             graph: context.new(|_| GraphView::new(project.clone())),
-            bottom: context.new(|_| BottomPanel::new(project.clone(), bottom_waves)),
+            bottom: context.new(|_| BottomPanel::new(project.clone())),
             arrangement,
             project,
             focus,
-            waves,
             browser_open: true,
             browser_width: Splitter::new(Edge::Right, BROWSER_WIDTH, BROWSER_MIN, BROWSER_MAX),
             transport,
