@@ -1,63 +1,28 @@
-//! New, open and save: file dialogs, the unsaved-changes prompt, the window
-//! title and closing the window.
+//! New, open and save as the core's `ProjectFiles` runs them; here, their
+//! dialogs: the file pickers, the unsaved-changes prompt, the notices,
+//! the window title and closing the window.
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::path::{Path, PathBuf};
 
 use egui::{Align, Key, Layout, Ui, ViewportCommand, vec2};
 use rfd::FileDialog;
 
+pub use crate::core::project_files::ProjectAction;
 use crate::{
-    config::{config_dir, recent::RecentProjects},
     core::{
-        project::{EXTENSION, ProjectFile, project_name},
+        project::EXTENSION,
+        project_files::{Ask, FileOutcome, Notice, ProjectFiles},
         state::ProjectState,
     },
     ui::{missing_files, widget::dialog},
 };
 
-/// What the user asked for.
-#[derive(Clone, Debug, PartialEq)]
-pub enum ProjectAction {
-    New,
-    /// Choose a project to open.
-    Open,
-    /// Open this recent project.
-    OpenRecent(PathBuf),
-    Save,
-    SaveAs,
-    ClearRecent,
-}
-
-/// Waiting for the unsaved-changes prompt.
-#[derive(Clone, Debug, PartialEq)]
-enum Pending {
-    New,
-    /// A project to open, or `None` to choose one.
-    Open(Option<PathBuf>),
-    Quit,
-}
-
-/// Shown until dismissed: what went wrong opening or saving.
-struct Notice {
-    title: String,
-    lines: Vec<String>,
-}
-
 pub struct ProjectManager {
-    /// `None` until first saved or opened.
-    path: Option<PathBuf>,
-    /// The project as last saved or opened: anything different is unsaved.
-    saved: ProjectFile,
-    pending: Option<Pending>,
+    files: ProjectFiles,
     notice: Option<Notice>,
     /// A project with missing files was opened: show them.
     show_missing: bool,
-    recent: RecentProjects,
-    /// Set once the user agreed to close, to let the next close through.
+    /// Set once the user agreed to close, to let the window go.
     closing: bool,
     title: String,
     /// Another project replaced the current one since last asked.
@@ -67,12 +32,9 @@ pub struct ProjectManager {
 impl ProjectManager {
     pub fn new(state: &ProjectState) -> Self {
         Self {
-            path: None,
-            saved: state.project(None),
-            pending: None,
+            files: ProjectFiles::new(state),
             notice: None,
             show_missing: false,
-            recent: RecentProjects::load(),
             closing: false,
             title: String::new(),
             replaced: false,
@@ -81,21 +43,16 @@ impl ProjectManager {
 
     /// The project's folder, once saved or opened.
     pub fn dir(&self) -> Option<&Path> {
-        self.path.as_deref().and_then(Path::parent)
+        self.files.dir()
     }
 
     /// Recently opened or saved projects, newest first.
     pub fn recent(&self) -> &[PathBuf] {
-        self.recent.paths()
-    }
-
-    fn remember(&mut self, path: &Path) {
-        self.recent.add(path);
-        self.recent.save();
+        self.files.recent()
     }
 
     pub fn name(&self) -> String {
-        self.path.as_deref().map_or("Untitled".into(), project_name)
+        self.files.name()
     }
 
     /// Whether another project replaced the current one since last asked:
@@ -104,165 +61,45 @@ impl ProjectManager {
         std::mem::take(&mut self.replaced)
     }
 
-    pub fn is_modified(&self, state: &ProjectState) -> bool {
-        state.project(self.dir()) != self.saved
-    }
-
     pub fn request(&mut self, action: ProjectAction, state: &mut ProjectState) {
-        match action {
-            ProjectAction::New => self.after_prompt(Pending::New, state),
-            ProjectAction::Open => self.after_prompt(Pending::Open(None), state),
-            ProjectAction::OpenRecent(path) => self.after_prompt(Pending::Open(Some(path)), state),
-            ProjectAction::ClearRecent => {
-                self.recent.clear();
-                self.recent.save();
-            }
-            ProjectAction::Save => {
-                self.save(state);
-            }
-            ProjectAction::SaveAs => {
-                self.save_as(state);
-            }
-        }
+        let outcome = self.files.request(action, state);
+        self.follow(outcome, state);
     }
 
-    /// Run `pending` now, or once the user answered the prompt about unsaved
-    /// changes.
-    fn after_prompt(&mut self, pending: Pending, state: &mut ProjectState) {
-        if self.is_modified(state) {
-            self.pending = Some(pending);
-        } else {
-            self.run(pending, state);
-        }
-    }
-
-    fn run(&mut self, pending: Pending, state: &mut ProjectState) {
-        match pending {
-            Pending::New => {
-                state.new_project();
-                self.replaced = true;
-                self.path = None;
-                self.saved = state.project(None);
-            }
-            Pending::Open(path) => self.open(path, state),
-            Pending::Quit => self.closing = true,
-        }
-    }
-
-    /// Open `path`, or the project the user picks.
-    fn open(&mut self, path: Option<PathBuf>, state: &mut ProjectState) {
-        let Some(path) = path.or_else(|| pick(project_dialog(self.dir()))) else {
-            return;
-        };
-        let project = match ProjectFile::read(&path) {
-            Ok(project) => project,
-            Err(error) => {
-                if !path.exists() {
-                    self.recent.remove(&path);
-                    self.recent.save();
-                }
-                self.notice = Some(Notice {
-                    title: format!("Couldn't open “{}”", project_name(&path)),
-                    lines: vec![error],
-                });
-                return;
-            }
-        };
-        let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-        let problems = state.load_project(&project, &dir);
-        self.show_missing = !state.missing_files().is_empty();
-        self.replaced = true;
-        self.saved = state.project(Some(&dir));
-        if !problems.is_empty() {
-            self.notice = Some(Notice {
-                title: format!("“{}” opened with problems", project_name(&path)),
-                lines: problems,
-            });
-        }
-        self.remember(&path);
-        self.path = Some(path);
-    }
-
-    /// Save to the current file, or ask where. Returns whether it saved.
-    fn save(&mut self, state: &ProjectState) -> bool {
-        match self.path.clone() {
-            Some(path) => self.write(&path, state),
-            None => self.save_as(state),
-        }
-    }
-
-    fn save_as(&mut self, state: &ProjectState) -> bool {
-        let Some(mut path) = pick_save(
-            project_dialog(self.dir()).set_file_name(format!("{}.{EXTENSION}", self.name())),
-        ) else {
-            return false;
-        };
-        if path.extension().is_none_or(|ext| ext != EXTENSION) {
-            path.set_extension(EXTENSION);
-        }
-        self.write(&path, state)
-    }
-
-    fn write(&mut self, path: &Path, state: &ProjectState) -> bool {
-        let project = state.project(path.parent());
-        match project.write(path) {
-            Ok(()) => {
-                self.remember(path);
-                self.path = Some(path.to_path_buf());
-                self.saved = project;
-                true
-            }
-            Err(error) => {
-                self.notice = Some(Notice {
-                    title: format!("Couldn't save “{}”", project_name(path)),
-                    lines: vec![error],
-                });
-                false
-            }
-        }
-    }
-
-    /// Save unsaved changes to a new file after a crash: next to the
-    /// project, or with the settings if it was never saved or that folder
-    /// can't be written. Returns where, or `None` if nothing was unsaved.
+    /// See [`ProjectFiles::save_recovery`].
     pub fn save_recovery(&self, state: &ProjectState) -> Result<Option<PathBuf>, String> {
-        if !self.is_modified(state) {
-            return Ok(None);
+        self.files.save_recovery(state)
+    }
+
+    /// Does what a step left to the UI; the native pickers answer at once.
+    fn follow(&mut self, outcome: FileOutcome, state: &mut ProjectState) {
+        self.replaced |= outcome.replaced;
+        self.show_missing |= outcome.missing_files > 0;
+        self.closing |= outcome.close;
+        if outcome.notice.is_some() {
+            self.notice = outcome.notice;
         }
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let file = format!("{} (recovered {stamp}).{EXTENSION}", self.name());
-        let dirs = self
-            .dir()
-            .map(Path::to_path_buf)
-            .into_iter()
-            .chain(config_dir().map(|dir| dir.join("recovery")));
-        let mut errors = Vec::new();
-        for dir in dirs {
-            let path = dir.join(&file);
-            let written = fs::create_dir_all(&dir)
-                .map_err(|e| e.to_string())
-                .and_then(|()| state.project(Some(&dir)).write(&path));
-            match written {
-                Ok(()) => return Ok(Some(path)),
-                Err(e) => errors.push(format!("{}: {e}", dir.display())),
+        let next = match outcome.ask {
+            // Drawn while the files wait for the answer.
+            None | Some(Ask::Unsaved) => return,
+            Some(Ask::ProjectToOpen { start_dir }) => {
+                let path = pick(project_dialog(&start_dir));
+                self.files.opened(path, state)
             }
-        }
-        if errors.is_empty() {
-            errors.push("no folder to save it in".into());
-        }
-        Err(errors.join("; "))
+            Some(Ask::SavePath {
+                start_dir,
+                file_name,
+            }) => {
+                let path = pick_save(project_dialog(&start_dir).set_file_name(file_name));
+                self.files.saved_to(path, state)
+            }
+        };
+        self.follow(next, state);
     }
 
     /// Window title, closing the window, the prompt and notices.
     pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
-        let modified = self.is_modified(state);
-        let title = format!(
-            "{}{} — Tonique",
-            self.name(),
-            if modified { " *" } else { "" }
-        );
+        let title = self.files.title(state);
         if title != self.title {
             ui.ctx()
                 .send_viewport_cmd(ViewportCommand::Title(title.clone()));
@@ -270,16 +107,15 @@ impl ProjectManager {
         }
 
         // Closing the window: ask first when there are unsaved changes.
-        if ui.input(|i| i.viewport().close_requested()) && modified && !self.closing {
+        if ui.input(|i| i.viewport().close_requested()) && !self.files.should_close(state) {
             ui.ctx().send_viewport_cmd(ViewportCommand::CancelClose);
-            self.pending = Some(Pending::Quit);
         }
         if self.closing {
             ui.ctx().send_viewport_cmd(ViewportCommand::Close);
         }
 
-        if let Some(pending) = self.pending.clone() {
-            self.prompt(ui, pending, state);
+        if self.files.asking_unsaved() {
+            self.prompt(ui, state);
         }
         self.notice(ui);
         if std::mem::take(&mut self.show_missing) {
@@ -287,8 +123,9 @@ impl ProjectManager {
         }
     }
 
-    fn prompt(&mut self, ui: &Ui, pending: Pending, state: &mut ProjectState) {
+    fn prompt(&mut self, ui: &Ui, state: &mut ProjectState) {
         let mut answer = None;
+        let mut cancel = false;
         let modal = dialog::modal(ui, "unsaved-changes").show(ui.ctx(), |ui| {
             ui.set_width(340.);
             ui.spacing_mut().item_spacing = vec2(8., 6.);
@@ -307,23 +144,18 @@ impl ProjectManager {
                         answer = Some(true);
                     }
                     if ui.add(dialog::button("Cancel")).clicked() {
-                        self.pending = None;
+                        cancel = true;
                     }
                 });
             });
         });
-        if modal.should_close() {
-            self.pending = None;
+        if cancel || modal.should_close() {
+            answer = None;
+        } else if answer.is_none() {
+            return;
         }
-        match answer {
-            // Saving can be cancelled (no file chosen) or fail: stay put.
-            Some(true) if !self.save(state) => self.pending = None,
-            Some(_) => {
-                self.pending = None;
-                self.run(pending, state);
-            }
-            None => {}
-        }
+        let outcome = self.files.answer_unsaved(answer, state);
+        self.follow(outcome, state);
     }
 
     fn notice(&mut self, ui: &Ui) {
@@ -364,37 +196,8 @@ fn pick_save(dialog: FileDialog) -> Option<PathBuf> {
     if cfg!(test) { None } else { dialog.save_file() }
 }
 
-fn project_dialog(dir: Option<&Path>) -> FileDialog {
-    let dialog = FileDialog::new().add_filter("Tonique project", &[EXTENSION]);
-    match dir {
-        Some(dir) => dialog.set_directory(dir),
-        None => dialog,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tonique_engine::engine::{Engine, EngineConfig};
-
-    /// After a crash, unsaved changes land in a new file next to the
-    /// project; nothing is written when there were none.
-    #[test]
-    fn recovery_saves_unsaved_changes_next_to_the_project() {
-        let dir = std::env::temp_dir().join(format!("tonique-recovery-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        let (engine, _processor) = Engine::new(EngineConfig::default());
-        let mut state = ProjectState::new(engine);
-        let mut manager = ProjectManager::new(&state);
-        manager.path = Some(dir.join(format!("song.{EXTENSION}")));
-        assert_eq!(manager.save_recovery(&state), Ok(None));
-
-        state.add_track();
-        let path = manager.save_recovery(&state).ok().flatten().expect("saved");
-        assert_eq!(path.parent(), Some(dir.as_path()));
-        assert!(path.to_string_lossy().contains("song (recovered"));
-        let recovered = ProjectFile::read(&path).unwrap();
-        assert_eq!(recovered, state.project(Some(&dir)));
-        let _ = fs::remove_dir_all(&dir);
-    }
+fn project_dialog(dir: &Path) -> FileDialog {
+    FileDialog::new()
+        .add_filter("Tonique project", &[EXTENSION])
+        .set_directory(dir)
 }

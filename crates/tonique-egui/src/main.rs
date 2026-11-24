@@ -1,39 +1,16 @@
 // Release builds on Windows are GUI apps: no console window behind them.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-use crate::{
-    audio::host::{engine_without_audio, start_audio},
-    config::settings::Settings,
-    ui::run,
-};
+use crate::{audio::host::Startup, config::settings::Settings, core::state::ProjectState, ui::run};
 
 mod ui;
 
 // The core, in its own crate, at the paths it had here.
 use tonique_core::{analysis, audio, bench, cache, config, core, file_match, file_tree, utils};
 fn main() {
-    // Audio output: the engine on the chosen device, or the default one if
-    // that fails (e.g. the device was unplugged)
-    let mut settings = Settings::load();
-    let started = start_audio(&settings).or_else(|e| {
-        eprintln!("Audio settings failed ({e}), using the default device");
-        settings = Settings {
-            ui_scale: settings.ui_scale,
-            metronome_level: settings.metronome_level,
-            ..Settings::default()
-        };
-        start_audio(&settings)
-    });
-    // Without any device the app still opens, and keeps trying
-    let (audio, engine) = match started {
-        Ok((audio, engine)) => (Ok(audio), engine),
-        Err(e) => {
-            eprintln!("No audio output: {e}");
-            (Err(e.to_string()), engine_without_audio(&settings))
-        }
-    };
+    let state = ProjectState::started(Startup::open(Settings::load()));
     // Ui thread (main thread). Opens the app window
-    if let Err(e) = run(engine, audio, settings) {
+    if let Err(e) = run(state) {
         eprintln!("Couldn't open the window: {e}");
         std::process::exit(1);
     }

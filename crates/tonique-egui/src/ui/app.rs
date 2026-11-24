@@ -3,8 +3,7 @@ use crate::ui::keymap::KeymapExt;
 use crate::ui::theme::ToColor;
 use crate::ui::widget::arrow_keys::holds_arrows;
 use crate::{
-    audio::host::AudioHost,
-    config::{keymap::Action, settings::Settings},
+    config::keymap::Action,
     core::state::{ActionOutcome, ProjectState},
     ui::{
         commands::Commands,
@@ -23,7 +22,6 @@ use crate::{
     },
 };
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-use tonique_engine::engine::Engine;
 
 pub struct ToniqueApp {
     state: ProjectState,
@@ -42,19 +40,11 @@ pub struct ToniqueApp {
 }
 
 impl ToniqueApp {
-    pub fn new(
-        engine: Engine,
-        audio: Result<AudioHost, String>,
-        settings: Settings,
-        cc: &eframe::CreationContext<'_>,
-    ) -> Self {
+    pub fn new(mut state: ProjectState, cc: &eframe::CreationContext<'_>) -> Self {
         let themes = ThemeLibrary::load();
-        let (theme, theme_warnings) = themes.resolve(&settings.theme);
-        let palette = theme.palette.clone();
+        let (theme, theme_warnings) = themes.resolve(&state.settings().theme);
+        state.set_track_palette(&project_palette(&theme.palette));
         theme.install(&cc.egui_ctx);
-        let mut state = ProjectState::new(engine);
-        state.set_track_palette(&project_palette(&palette));
-        state.attach_audio(audio, settings);
         let mut bench = Bench::from_env("egui");
         if let Some(bench) = &mut bench {
             bench.setup(&mut state);

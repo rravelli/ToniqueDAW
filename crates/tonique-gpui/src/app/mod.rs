@@ -24,23 +24,22 @@ use gpui::{
     Anchor, App, Context, DispatchPhase, Entity, FocusHandle, Global, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, Render, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
-use tonique_engine::{engine::Engine, time::BeatPos};
+use tonique_engine::time::BeatPos;
 
+use crate::core::project_files::ProjectFiles;
 pub use arrows::ArrowHolder;
 use dialog::Dialog;
 use export::{ExportDialog, ExportEvent};
 use menu_bar::MenuBarUi;
 pub use popup::PopupKind;
-use project::ProjectFiles;
+use project::WindowTitle;
 use settings::{SettingsDialog, SettingsEvent, SettingsTab};
 use transport::{Shows, TransportBar, TransportEvent};
 
 use crate::{
-    audio::host::AudioHost,
     bench::Bench,
     bottom::{BottomPanel, BottomView},
     browser::BrowserPanel,
-    config::settings::Settings,
     core::state::ProjectState,
     graph::GraphView,
     model::{HoldsProject, Project},
@@ -79,6 +78,7 @@ pub struct Workspace {
     menu_bar: MenuBarUi,
     /// The project's file, and the recent ones.
     files: ProjectFiles,
+    title: WindowTitle,
     /// The dialog open, if any, over everything.
     dialog: Option<Dialog>,
     settings: Entity<SettingsDialog>,
@@ -100,19 +100,11 @@ impl HoldsProject for Workspace {
 }
 
 impl Workspace {
-    pub fn new(
-        engine: Engine,
-        audio: Result<AudioHost, String>,
-        settings: Settings,
-        window: &mut Window,
-        context: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(mut state: ProjectState, window: &mut Window, context: &mut Context<Self>) -> Self {
         let themes = ThemeLibrary::load();
-        let (theme, theme_warnings) = themes.resolve(&settings.theme);
-        let mut state = ProjectState::new(engine);
+        let (theme, theme_warnings) = themes.resolve(&state.settings().theme);
         state.set_track_palette(&theme.palette);
         crate::theme::install(theme, context);
-        state.attach_audio(audio, settings);
         let mut bench = Bench::from_env("gpui-fast");
         match &mut bench {
             Some(bench) => bench.setup(&mut state),
@@ -149,6 +141,7 @@ impl Workspace {
                 .unwrap_or(true)
         });
         let files = ProjectFiles::new(&state);
+        let title = WindowTitle::default();
         let project = context.new(|context| Project::new(state, context));
         // A cache per view: each lets go of the tiles it no longer draws
         // as it renders, and a view not rendered keeps showing its own.
@@ -188,6 +181,7 @@ impl Workspace {
             settings,
             export,
             files,
+            title,
             popups: crate::popup::init(context),
             bench,
             _ticker: ticker,

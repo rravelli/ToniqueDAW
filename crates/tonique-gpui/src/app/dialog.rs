@@ -113,6 +113,10 @@ impl Workspace {
         if self.dialog == Some(Dialog::Export) && self.export_running(context) {
             return;
         }
+        if self.dialog == Some(Dialog::Unsaved) {
+            self.answer_unsaved(None, window, context);
+            return;
+        }
         self.dialog = None;
         window.focus(&self.focus, context);
     }

@@ -1,7 +1,7 @@
 //! The audio output and the settings it's opened with.
 
 use crate::{
-    audio::host::{AudioHost, probe_output, start_audio},
+    audio::host::{AudioHost, Startup, probe_output, start_audio},
     config::settings::Settings,
 };
 use std::{
@@ -70,6 +70,13 @@ impl AudioOutput {
 }
 
 impl ProjectState {
+    /// A new project on the audio the app started with.
+    pub fn started(startup: Startup) -> Self {
+        let mut state = Self::new(startup.engine);
+        state.attach_audio(startup.audio, startup.settings);
+        state
+    }
+
     /// Take over the running audio output and the settings it was opened
     /// with. Without one (no device worked), keep trying to open it.
     pub fn attach_audio(&mut self, audio: Result<AudioHost, String>, settings: Settings) {

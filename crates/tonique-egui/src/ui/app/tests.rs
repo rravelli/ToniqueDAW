@@ -17,9 +17,9 @@
 use super::ToniqueApp;
 use crate::{
     analysis::AudioInfo,
-    audio::host::engine_without_audio,
+    audio::host::Startup,
     config::{config_dir, settings::Settings},
-    core::{clip::AudioClip, effect::EffectKind},
+    core::{clip::AudioClip, effect::EffectKind, state::ProjectState},
     ui::font::fonts,
 };
 use egui::{Event, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, Vec2, pos2, vec2};
@@ -102,8 +102,7 @@ fn new_app(cc: &eframe::CreationContext<'_>, folder: &Path, settings: Settings) 
 
     cc.egui_ctx.set_fonts(fonts());
     egui_extras::install_image_loaders(&cc.egui_ctx);
-    let engine = engine_without_audio(&settings);
-    ToniqueApp::new(engine, Err("no audio in tests".into()), settings, cc)
+    ToniqueApp::new(ProjectState::started(Startup::without_audio(settings)), cc)
 }
 
 /// A folder of short sine waves (one in a subfolder, one mono), a file that

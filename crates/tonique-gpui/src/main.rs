@@ -23,33 +23,12 @@ mod widgets;
 
 use gpui::{App, Bounds, WindowBounds, WindowOptions, prelude::*, px, size};
 
-use crate::{
-    audio::host::{engine_without_audio, start_audio},
-    config::settings::Settings,
-};
+use crate::{audio::host::Startup, config::settings::Settings, core::state::ProjectState};
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
-    // As Tonique's `main`: the chosen device, else the default one, else
-    // no audio (the app still opens and keeps trying).
-    let mut settings = Settings::load();
-    let started = start_audio(&settings).or_else(|error| {
-        eprintln!("Audio settings failed ({error}), using the default device");
-        settings = Settings {
-            ui_scale: settings.ui_scale,
-            metronome_level: settings.metronome_level,
-            ..Settings::default()
-        };
-        start_audio(&settings)
-    });
-    let (audio, engine) = match started {
-        Ok((audio, engine)) => (Ok(audio), engine),
-        Err(error) => {
-            eprintln!("No audio output: {error}");
-            (Err(error.to_string()), engine_without_audio(&settings))
-        }
-    };
+    let state = ProjectState::started(Startup::open(Settings::load()));
 
     gpui_platform::application().run(move |context: &mut App| {
         theme::load_fonts(context);
@@ -84,9 +63,7 @@ fn main() {
                     }
                 },
                 move |window, context| {
-                    context.new(|context| {
-                        app::Workspace::new(engine, audio, settings, window, context)
-                    })
+                    context.new(|context| app::Workspace::new(state, window, context))
                 },
             )
             .expect("the window opens");

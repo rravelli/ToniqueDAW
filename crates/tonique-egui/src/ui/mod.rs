@@ -1,6 +1,5 @@
+use crate::core::state::ProjectState;
 use crate::ui::{app::ToniqueApp, font::fonts, window::native_options};
-use crate::{audio::host::AudioHost, config::settings::Settings};
-use tonique_engine::engine::Engine;
 mod about;
 mod app;
 mod arrangement;
@@ -42,19 +41,16 @@ impl RectSpan for egui::Rect {
 /// Recording isn't implemented yet: hides the record and arm buttons.
 const RECORDING: bool = false;
 
-pub fn run(
-    engine: Engine,
-    audio: Result<AudioHost, String>,
-    settings: Settings,
-) -> Result<(), eframe::Error> {
+pub fn run(state: ProjectState) -> Result<(), eframe::Error> {
+    let ui_scale = state.settings().ui_scale;
     eframe::run_native(
         "Tonique",
         native_options(),
         Box::new(|cc| {
             cc.egui_ctx.set_fonts(fonts());
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            cc.egui_ctx.set_zoom_factor(settings.ui_scale);
-            Ok(Box::new(ToniqueApp::new(engine, audio, settings, cc)))
+            cc.egui_ctx.set_zoom_factor(ui_scale);
+            Ok(Box::new(ToniqueApp::new(state, cc)))
         }),
     )
 }

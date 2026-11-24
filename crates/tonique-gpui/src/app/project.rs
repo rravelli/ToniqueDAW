@@ -1,129 +1,40 @@
-//! New, open and save, as the egui app's `ProjectManager`: file pickers,
-//! the prompt about unsaved changes (also on closing the window), notices
-//! about what went wrong, the recent projects and the window's title.
+//! New, open and save as the core's `ProjectFiles` runs them; here, their
+//! dialogs: the file pickers, the prompt about unsaved changes (also on
+//! closing the window), notices about what went wrong, and the window's
+//! title.
 
 use crate::model::HoldsProject;
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
 use gpui::{
-    App, Context, MouseButton, PathPromptOptions, PromptLevel, Stateful, Task, Window, div,
-    prelude::*, px,
+    App, Context, MouseButton, PathPromptOptions, PromptLevel, Stateful, Window, div, prelude::*,
+    px,
 };
 
+pub use crate::core::project_files::ProjectAction;
 use crate::{
     app::{Workspace, dialog::Dialog},
-    config::recent::RecentProjects,
-    core::{
-        project::{EXTENSION, ProjectFile, project_name},
-        state::ProjectState,
-    },
+    core::project_files::{Ask, FileOutcome},
     widgets::{dialog_body, dialog_button, dialog_frame, dialog_title},
 };
 
-/// What the user asked for.
-#[derive(Clone, Debug, PartialEq)]
-pub enum ProjectAction {
-    New,
-    /// Choose a project to open.
-    Open,
-    /// Open this recent project.
-    OpenRecent(PathBuf),
-    Save,
-    SaveAs,
-    ClearRecent,
-}
-
-/// What waits for the unsaved changes to be saved or let go.
-#[derive(Clone, Debug, PartialEq)]
-enum AfterPrompt {
-    New,
-    /// A project to open, or `None` to choose one.
-    Open(Option<PathBuf>),
-    Close,
-}
-
-pub struct ProjectFiles {
-    /// `None` until first saved or opened.
-    path: Option<PathBuf>,
-    /// The project as last saved or opened: anything different is unsaved.
-    saved: ProjectFile,
-    recent: RecentProjects,
-    /// What waits for the user's answer about unsaved changes.
-    pending: Option<AfterPrompt>,
-    /// The user agreed to close: let the window go.
-    closing: bool,
-    /// The window's title, as last set.
-    title: String,
-    /// When the title last looked for unsaved changes: comparing the
-    /// project with the saved one takes too long to do every frame.
-    title_checked: Option<Instant>,
+/// The window's title, as last set.
+#[derive(Default)]
+pub struct WindowTitle {
+    shown: String,
+    /// When it last looked for unsaved changes: comparing the project
+    /// with the saved one takes too long to do every frame.
+    checked: Option<Instant>,
 }
 
 /// How long the title's star may lag an edit.
 const TITLE_CHECK_INTERVAL: Duration = Duration::from_millis(250);
 
-impl ProjectFiles {
-    pub fn new(state: &ProjectState) -> Self {
-        Self {
-            path: None,
-            saved: state.project(None),
-            recent: RecentProjects::load(),
-            pending: None,
-            closing: false,
-            title: String::new(),
-            title_checked: None,
-        }
-    }
-
-    /// The project's folder, once saved or opened.
-    pub fn dir(&self) -> Option<&Path> {
-        self.path.as_deref().and_then(Path::parent)
-    }
-
-    /// Recently opened or saved projects, newest first.
-    pub fn recent(&self) -> &[PathBuf] {
-        self.recent.paths()
-    }
-
-    pub fn name(&self) -> String {
-        self.path.as_deref().map_or("Untitled".into(), project_name)
-    }
-
-    pub fn is_modified(&self, state: &ProjectState) -> bool {
-        state.project(self.dir()) != self.saved
-    }
-
-    /// `project` as saved or opened: the title shows it now.
-    fn set_saved(&mut self, project: ProjectFile) {
-        self.saved = project;
-        self.title_checked = None;
-    }
-
-    fn remember(&mut self, path: &Path) {
-        self.recent.add(path);
-        self.recent.save();
-    }
-
-    fn forget(&mut self, path: &Path) {
-        self.recent.remove(path);
-        self.recent.save();
-    }
-}
-
 /// The egui dialog's 340 wide content, with the frame's margins and border.
 const UNSAVED_WIDTH: f32 = 340. + 2. * 18. + 2.;
-
-/// Where file pickers start: the project's folder, else the home folder.
-fn start_dir(files: &ProjectFiles) -> PathBuf {
-    files
-        .dir()
-        .map(Path::to_path_buf)
-        .or_else(std::env::home_dir)
-        .unwrap_or_else(|| PathBuf::from("."))
-}
 
 impl Workspace {
     pub fn project_action(
@@ -132,69 +43,73 @@ impl Workspace {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        match action {
-            ProjectAction::New => self.after_prompt(AfterPrompt::New, window, context),
-            ProjectAction::Open => self.after_prompt(AfterPrompt::Open(None), window, context),
-            ProjectAction::OpenRecent(path) => {
-                self.after_prompt(AfterPrompt::Open(Some(path)), window, context)
-            }
-            ProjectAction::Save => self.save_project(window, context).detach(),
-            ProjectAction::SaveAs => self.save_project_as(window, context).detach(),
-            ProjectAction::ClearRecent => {
-                self.files.recent.clear();
-                self.files.recent.save();
-            }
-        }
+        let outcome = self
+            .files
+            .request(action, &mut self.project.state_mut(context));
+        self.follow_files(outcome, window, context);
     }
 
-    /// Runs `then` now, or once the user answered about unsaved changes:
-    /// save them, let them go, or cancel.
-    fn after_prompt(
+    /// Does what a step of the project's files left to the window.
+    fn follow_files(
         &mut self,
-        then: AfterPrompt,
+        outcome: FileOutcome,
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        if !self.files.is_modified(self.state(context)) {
-            self.run_after_prompt(then, window, context);
+        // Saved or opened: the title shows it now.
+        self.title.checked = None;
+        if outcome.replaced {
+            self.forget_old_project(context);
+        }
+        let mut notice = outcome.notice;
+        let missing = outcome.missing_files;
+        if missing > 0 {
+            self.show_missing_files(None, context);
+            let notice = notice.get_or_insert_with(|| crate::core::project_files::Notice {
+                title: format!("“{}” opened with problems", self.files.name()),
+                lines: Vec::new(),
+            });
+            notice.lines.push(format!(
+                "{missing} audio file{} not found: see the browser's Missing tab.",
+                if missing == 1 { " was" } else { "s were" }
+            ));
+        }
+        if let Some(notice) = notice {
+            self.notice(&notice.title, &notice.lines, window, context);
+        }
+        if outcome.close {
+            window.remove_window();
             return;
         }
-        self.files.pending = Some(then);
-        self.dialog = Some(Dialog::Unsaved);
-        // Enter answers it, not a focused list or field.
-        window.focus(&self.focus, context);
+        match outcome.ask {
+            None => {}
+            Some(Ask::Unsaved) => {
+                self.dialog = Some(Dialog::Unsaved);
+                // Enter answers it, not a focused list or field.
+                window.focus(&self.focus, context);
+            }
+            Some(Ask::ProjectToOpen { .. }) => self.pick_project(window, context),
+            Some(Ask::SavePath {
+                start_dir,
+                file_name,
+            }) => self.pick_save_path(start_dir, file_name, window, context),
+        }
     }
 
-    /// The answer about unsaved changes: save them first (`true`) or let
-    /// them go, then run what waited.
+    /// The answer about unsaved changes: save them first (`Some(true)`),
+    /// let them go (`Some(false)`), or cancel.
     pub(super) fn answer_unsaved(
         &mut self,
-        save: bool,
+        save: Option<bool>,
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
         self.dialog = None;
-        let Some(then) = self.files.pending.take() else {
-            return;
-        };
-        if !save {
-            self.run_after_prompt(then, window, context);
-            return;
-        }
-        let saved = self.save_project(window, context);
-        context
-            .spawn_in(window, async move |this, context| {
-                // Not saved (no file chosen, or it failed): stay.
-                if !saved.await {
-                    return;
-                }
-                this.update_in(context, |this, window, context| {
-                    this.run_after_prompt(then, window, context);
-                    context.notify();
-                })
-                .ok();
-            })
-            .detach();
+        window.focus(&self.focus, context);
+        let outcome = self
+            .files
+            .answer_unsaved(save, &mut self.project.state_mut(context));
+        self.follow_files(outcome, window, context);
     }
 
     /// The question about unsaved changes, as the egui app's: saving on
@@ -206,10 +121,7 @@ impl Workspace {
             button.on_mouse_down(
                 MouseButton::Left,
                 context.listener(move |this, _, window, context| {
-                    match save {
-                        Some(save) => this.answer_unsaved(save, window, context),
-                        None => this.close_dialog(window, context),
-                    }
+                    this.answer_unsaved(save, window, context);
                     context.notify();
                 }),
             )
@@ -245,28 +157,6 @@ impl Workspace {
             )
     }
 
-    fn run_after_prompt(
-        &mut self,
-        then: AfterPrompt,
-        window: &mut Window,
-        context: &mut Context<Self>,
-    ) {
-        match then {
-            AfterPrompt::New => {
-                self.state_mut(context).new_project();
-                self.files.path = None;
-                self.files.set_saved(self.state(context).project(None));
-                self.forget_old_project(context);
-            }
-            AfterPrompt::Open(Some(path)) => self.open_project(&path, window, context),
-            AfterPrompt::Open(None) => self.pick_project(window, context),
-            AfterPrompt::Close => {
-                self.files.closing = true;
-                window.remove_window();
-            }
-        }
-    }
-
     /// Lets the user pick a project, then opens it.
     fn pick_project(&mut self, window: &mut Window, context: &mut Context<Self>) {
         let picked = context.prompt_for_paths(PathPromptOptions {
@@ -277,14 +167,15 @@ impl Workspace {
         });
         context
             .spawn_in(window, async move |this, context| {
-                let Ok(Ok(Some(paths))) = picked.await else {
-                    return;
-                };
-                let Some(path) = paths.into_iter().next() else {
-                    return;
+                let path = match picked.await {
+                    Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                    _ => None,
                 };
                 this.update_in(context, |this, window, context| {
-                    this.open_project(&path, window, context);
+                    let outcome = this
+                        .files
+                        .opened(path, &mut this.project.state_mut(context));
+                    this.follow_files(outcome, window, context);
                     context.notify();
                 })
                 .ok();
@@ -292,88 +183,31 @@ impl Workspace {
             .detach();
     }
 
-    fn open_project(&mut self, path: &Path, window: &mut Window, context: &mut Context<Self>) {
-        let project = match ProjectFile::read(path) {
-            Ok(project) => project,
-            Err(error) => {
-                if !path.exists() {
-                    self.files.forget(path);
-                }
-                let title = format!("Couldn't open “{}”", project_name(path));
-                self.notice(&title, &[error], window, context);
-                return;
-            }
-        };
-        let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-        let mut problems = self.state_mut(context).load_project(&project, &dir);
-        self.files
-            .set_saved(self.state(context).project(Some(&dir)));
-        self.files.remember(path);
-        self.files.path = Some(path.to_path_buf());
-        self.forget_old_project(context);
-        let missing = self.state(context).missing_files().len();
-        if missing > 0 {
-            self.show_missing_files(None, context);
-            problems.push(format!(
-                "{missing} audio file{} not found: see the browser's Missing tab.",
-                if missing == 1 { " was" } else { "s were" }
-            ));
-        }
-        if !problems.is_empty() {
-            let title = format!("“{}” opened with problems", project_name(path));
-            self.notice(&title, &problems, window, context);
-        }
-    }
-
-    /// Saves to the project's file, or asks where. The task tells whether
-    /// it saved.
-    fn save_project(&mut self, window: &mut Window, context: &mut Context<Self>) -> Task<bool> {
-        match self.files.path.clone() {
-            Some(path) => Task::ready(self.write_project(&path, window, context)),
-            None => self.save_project_as(window, context),
-        }
-    }
-
-    fn save_project_as(&mut self, window: &mut Window, context: &mut Context<Self>) -> Task<bool> {
-        let name = format!("{}.{EXTENSION}", self.files.name());
-        let picked = context.prompt_for_new_path(&start_dir(&self.files), Some(&name));
-        context.spawn_in(window, async move |this, context| {
-            let Ok(Ok(Some(mut path))) = picked.await else {
-                return false;
-            };
-            if path
-                .extension()
-                .is_none_or(|extension| extension != EXTENSION)
-            {
-                path.set_extension(EXTENSION);
-            }
-            this.update_in(context, |this, window, context| {
-                this.write_project(&path, window, context)
-            })
-            .unwrap_or(false)
-        })
-    }
-
-    fn write_project(
+    /// Lets the user choose where to save, then saves there.
+    fn pick_save_path(
         &mut self,
-        path: &Path,
+        start_dir: PathBuf,
+        file_name: String,
         window: &mut Window,
         context: &mut Context<Self>,
-    ) -> bool {
-        let project = self.state(context).project(path.parent());
-        match project.write(path) {
-            Ok(()) => {
-                self.files.remember(path);
-                self.files.path = Some(path.to_path_buf());
-                self.files.set_saved(project);
-                true
-            }
-            Err(error) => {
-                let title = format!("Couldn't save “{}”", project_name(path));
-                self.notice(&title, &[error], window, context);
-                false
-            }
-        }
+    ) {
+        let picked = context.prompt_for_new_path(&start_dir, Some(&file_name));
+        context
+            .spawn_in(window, async move |this, context| {
+                let path = match picked.await {
+                    Ok(Ok(path)) => path,
+                    _ => None,
+                };
+                this.update_in(context, |this, window, context| {
+                    let outcome = this
+                        .files
+                        .saved_to(path, &mut this.project.state_mut(context));
+                    this.follow_files(outcome, window, context);
+                    context.notify();
+                })
+                .ok();
+            })
+            .detach();
     }
 
     /// Tells the user what went wrong, until dismissed.
@@ -410,22 +244,17 @@ impl Workspace {
     pub(super) fn update_title(&mut self, window: &mut Window, context: &mut App) {
         let now = Instant::now();
         if self
-            .files
-            .title_checked
+            .title
+            .checked
             .is_some_and(|checked| now - checked < TITLE_CHECK_INTERVAL)
         {
             return;
         }
-        self.files.title_checked = Some(now);
-        let modified = self.files.is_modified(self.state(context));
-        let title = format!(
-            "{}{} — Tonique",
-            self.files.name(),
-            if modified { " *" } else { "" }
-        );
-        if title != self.files.title {
+        self.title.checked = Some(now);
+        let title = self.files.title(self.state(context));
+        if title != self.title.shown {
             window.set_window_title(&title);
-            self.files.title = title;
+            self.title.shown = title;
         }
     }
 
@@ -436,10 +265,11 @@ impl Workspace {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> bool {
-        if self.files.closing || !self.files.is_modified(self.state(context)) {
+        if self.files.should_close(self.state(context)) {
             return true;
         }
-        self.after_prompt(AfterPrompt::Close, window, context);
+        self.dialog = Some(Dialog::Unsaved);
+        window.focus(&self.focus, context);
         false
     }
 }

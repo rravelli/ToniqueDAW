@@ -52,6 +52,50 @@ pub fn engine_without_audio(settings: &Settings) -> Engine {
     engine
 }
 
+/// What the app opens with: the settings, and the engine on their
+/// device, else on the default one (the device's settings let go, e.g.
+/// it was unplugged), else on none: the app still opens, and keeps trying.
+pub struct Startup {
+    pub settings: Settings,
+    pub engine: Engine,
+    pub audio: Result<AudioHost, String>,
+}
+
+impl Startup {
+    pub fn open(mut settings: Settings) -> Self {
+        let started = start_audio(&settings).or_else(|error| {
+            eprintln!("Audio settings failed ({error}), using the default device");
+            settings = Settings {
+                ui_scale: settings.ui_scale,
+                metronome_level: settings.metronome_level,
+                ..Settings::default()
+            };
+            start_audio(&settings)
+        });
+        let (audio, engine) = match started {
+            Ok((audio, engine)) => (Ok(audio), engine),
+            Err(error) => {
+                eprintln!("No audio output: {error}");
+                (Err(error.to_string()), engine_without_audio(&settings))
+            }
+        };
+        Self {
+            settings,
+            engine,
+            audio,
+        }
+    }
+
+    /// Without a device, as in tests.
+    pub fn without_audio(settings: Settings) -> Self {
+        Self {
+            engine: engine_without_audio(&settings),
+            audio: Err("no audio in tests".into()),
+            settings,
+        }
+    }
+}
+
 /// Start the engine on the output device chosen in `settings`.
 pub fn start_audio(settings: &Settings) -> Result<(AudioHost, Engine), DeviceError> {
     let device = open_output(&settings.device_options())?;

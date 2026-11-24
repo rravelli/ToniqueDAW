@@ -62,7 +62,7 @@ impl Workspace {
         match keystroke.key.as_str() {
             "escape" if self.dialog.is_some() => self.close_dialog(window, context),
             "enter" if self.dialog == Some(Dialog::Unsaved) => {
-                self.answer_unsaved(true, window, context);
+                self.answer_unsaved(Some(true), window, context);
             }
             "escape" if crate::popup::shown(context).is_some() => crate::popup::close(context),
             "escape" if crate::app::arrows::held(context).is_some() => {
