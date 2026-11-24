@@ -317,7 +317,7 @@ impl TransportBar {
         context: &mut Context<Self>,
     ) -> gpui::Div {
         let state = self.state(context);
-        let load = state.metrics.latency;
+        let load = state.metrics().latency;
         let load_color = if load >= USAGE_DANGER {
             theme.danger
         } else if load >= USAGE_WARNING {

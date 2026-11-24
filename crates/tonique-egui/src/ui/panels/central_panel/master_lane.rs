@@ -44,7 +44,7 @@ pub(super) fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect) {
         scope.center().y,
         Stroke::new(1.0, theme.separator),
     );
-    if let Some(m) = state.metrics.tracks.get(&MASTER_TRACK_ID) {
+    if let Some(m) = state.metrics().tracks.get(&MASTER_TRACK_ID) {
         paint_scope(&painter, m.scope(), scope, theme.accent);
     }
     // Over the waveform, on a veil.

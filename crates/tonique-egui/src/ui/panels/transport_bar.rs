@@ -485,7 +485,7 @@ impl TransportBar {
         let (rect, response) =
             ui.allocate_exact_size(vec2(USAGE_WIDTH, BUTTON_SIZE), Sense::hover());
         let theme = ui.app_theme();
-        let load = state.metrics.latency;
+        let load = state.metrics().latency;
         ui.painter_at(rect).text(
             rect.left_center() + vec2(USAGE_PADDING, 0.),
             Align2::LEFT_CENTER,
@@ -498,7 +498,7 @@ impl TransportBar {
 
     /// Shown while there's no audio output; opens the settings.
     fn no_audio_ui(&mut self, ui: &mut Ui, state: &ProjectState) -> Response {
-        let error = state.audio_error.as_deref().unwrap_or("no device");
+        let error = state.audio_error().unwrap_or("no device");
         ui.add(
             FlatButton::new(SPEAKER_SLASH)
                 .square(BUTTON_SIZE)

@@ -304,7 +304,7 @@ impl Arrangement {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> impl IntoElement {
-        let metrics = self.state(context).metrics.tracks.get(&id).cloned();
+        let metrics = self.state(context).metrics().tracks.get(&id).cloned();
         let canvas_theme = theme.clone();
         place(rect)
             .on_mouse_down(

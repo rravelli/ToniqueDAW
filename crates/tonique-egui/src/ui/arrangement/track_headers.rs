@@ -388,7 +388,7 @@ impl TrackHeaders {
                 painter.rect_filled(row, 2., theme.hover_overlay);
             }
             painter.rect_filled(bar, 1., color);
-            if let Some(metrics) = state.metrics.tracks.get(&track.id) {
+            if let Some(metrics) = state.metrics().tracks.get(&track.id) {
                 let mut meter_ui = ui.new_child(UiBuilder::new().max_rect(meter));
                 meter_ui.set_clip_rect(clip);
                 let meter = LevelMeter::new(meter.size(), metrics).disabled(track.is_silenced());

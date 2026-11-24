@@ -66,7 +66,7 @@ impl Project {
         let state = &self.state;
         state.playback_state() == PlaybackState::Playing
             || state.preview_playback_state() == PlaybackState::Playing
-            || state.metrics.tracks.values().any(crate::meter::is_live)
+            || state.metrics().tracks.values().any(crate::meter::is_live)
     }
 }
 
@@ -104,7 +104,7 @@ pub fn tick(project: &Entity<Project>, context: &mut App) -> bool {
         if playing || was_playing || preview != project.state.preview_playback_state() {
             tell(&project.playback, context);
         }
-        let load = (project.state.metrics.latency * 100.).round() as i32;
+        let load = (project.state.metrics().latency * 100.).round() as i32;
         if load != project.load_shown {
             project.load_shown = load;
             tell(&project.load, context);

@@ -4,16 +4,77 @@ use crate::{
     audio::host::{AudioHost, probe_output, start_audio},
     config::settings::Settings,
 };
-use std::{sync::mpsc::TryRecvError, time::Instant};
+use std::{
+    sync::mpsc::{Receiver, TryRecvError},
+    time::Instant,
+};
 
 use super::{AUDIO_RETRY, PlaybackState, ProjectState};
+
+/// The audio device, and reopening it after it's lost: a probe off the UI
+/// thread every few seconds, then [`ProjectState`] restarts the engine.
+#[derive(Default)]
+pub(super) struct AudioOutput {
+    /// `None` without an audio device (e.g. in tests).
+    pub(super) host: Option<AudioHost>,
+    /// Why the last audio restart failed, if it did.
+    pub(super) error: Option<String>,
+    /// When to try opening the output again, while there's none.
+    pub(super) reconnect_at: Option<Instant>,
+    /// Whether an output can be opened, checked off the UI thread before
+    /// reconnecting.
+    pub(super) probe: Option<Receiver<bool>>,
+}
+
+impl AudioOutput {
+    /// Whether there's no output: it was lost and is being reopened.
+    pub(super) fn lost(&self) -> bool {
+        self.reconnect_at.is_some()
+    }
+
+    /// Whether the device went away (e.g. unplugged) since it was opened.
+    fn disconnected(&self) -> bool {
+        self.host.as_ref().is_some_and(AudioHost::is_lost)
+    }
+
+    /// Without an output, for `error`: tried again in a moment.
+    fn lose(&mut self, error: String) {
+        self.host = None;
+        self.error = Some(error);
+        self.retry_later();
+    }
+
+    fn retry_later(&mut self) {
+        self.reconnect_at = Some(Instant::now() + AUDIO_RETRY);
+    }
+
+    fn reconnected(&mut self) {
+        self.reconnect_at = None;
+        self.error = None;
+    }
+
+    /// Probes for an output once it's time to try again; whether one can
+    /// be opened, once the probe answers.
+    fn poll_probe(&mut self, settings: &Settings) -> Option<bool> {
+        if self.probe.is_none() && self.reconnect_at.is_some_and(|at| Instant::now() >= at) {
+            self.probe = Some(probe_output(settings));
+        }
+        let available = match self.probe.as_ref()?.try_recv() {
+            Ok(available) => available,
+            Err(TryRecvError::Empty) => return None,
+            Err(TryRecvError::Disconnected) => false,
+        };
+        self.probe = None;
+        Some(available)
+    }
+}
 
 impl ProjectState {
     /// Take over the running audio output and the settings it was opened
     /// with. Without one (no device worked), keep trying to open it.
     pub fn attach_audio(&mut self, audio: Result<AudioHost, String>, settings: Settings) {
         match audio {
-            Ok(audio) => self.audio = Some(audio),
+            Ok(audio) => self.output.host = Some(audio),
             Err(e) => self.lose_audio(e),
         }
         self.settings = settings;
@@ -21,60 +82,50 @@ impl ProjectState {
     }
     /// Whether there's no audio output: it was lost and is being reopened.
     pub fn audio_lost(&self) -> bool {
-        self.reconnect_at.is_some()
+        self.output.lost()
     }
     /// Stop retrying the output tests don't have, so the app shows no
     /// warning about it (for screenshots).
     #[cfg(any(test, feature = "test-support"))]
     pub fn ignore_missing_audio(&mut self) {
-        self.reconnect_at = None;
-        self.probe = None;
-        self.audio_error = None;
+        self.output.reconnect_at = None;
+        self.output.probe = None;
+        self.output.error = None;
     }
     /// Notice a lost output (e.g. an unplugged device) and reopen one
     /// every few seconds, falling back to the default device.
     pub(super) fn watch_audio(&mut self) {
-        if self.audio.as_ref().is_some_and(AudioHost::is_lost) {
+        if self.output.disconnected() {
             self.lose_audio("the audio device was disconnected".into());
         }
-        if self.probe.is_none() && self.reconnect_at.is_some_and(|at| Instant::now() >= at) {
-            self.probe = Some(probe_output(&self.settings));
-        }
-        let Some(probe) = &self.probe else {
+        let Some(available) = self.output.poll_probe(&self.settings) else {
             return;
         };
-        let available = match probe.try_recv() {
-            Ok(available) => available,
-            Err(TryRecvError::Empty) => return,
-            Err(TryRecvError::Disconnected) => false,
-        };
-        self.probe = None;
-        if !self.audio_lost() {
+        if !self.output.lost() {
             // Reconnected meanwhile (e.g. from the settings).
             return;
         }
         if !available {
-            self.reconnect_at = Some(Instant::now() + AUDIO_RETRY);
+            self.output.retry_later();
             return;
         }
         match self.restart_audio() {
-            Ok(()) => {
-                self.reconnect_at = None;
-                self.audio_error = None;
-            }
+            Ok(()) => self.output.reconnected(),
             Err(e) => self.lose_audio(e),
         }
     }
     fn lose_audio(&mut self, error: String) {
-        if self.playback_state == PlaybackState::Playing {
+        if self.transport.is_playing() {
             self.stop();
         }
-        self.audio = None;
-        self.audio_error = Some(error);
-        self.reconnect_at = Some(Instant::now() + AUDIO_RETRY);
+        self.output.lose(error);
+    }
+    /// Why the last audio restart failed, if it did.
+    pub fn audio_error(&self) -> Option<&str> {
+        self.output.error.as_deref()
     }
     pub fn audio(&self) -> Option<&AudioHost> {
-        self.audio.as_ref()
+        self.output.host.as_ref()
     }
     pub fn settings(&self) -> &Settings {
         &self.settings
@@ -93,11 +144,11 @@ impl ProjectState {
     pub fn apply_settings(&mut self, settings: Settings) {
         let previous = std::mem::replace(&mut self.settings, settings);
         self.apply_metronome_level();
-        let has_output = self.audio.is_some() || self.audio_lost();
+        let has_output = self.output.host.is_some() || self.audio_lost();
         if has_output && previous.audio_differs(&self.settings) {
-            self.audio_error = None;
+            self.output.error = None;
             if let Err(e) = self.restart_audio() {
-                self.audio_error = Some(e);
+                self.output.error = Some(e);
                 let attempted = std::mem::replace(&mut self.settings, previous);
                 // Keep the non-audio changes.
                 self.settings.ui_scale = attempted.ui_scale;
@@ -105,13 +156,13 @@ impl ProjectState {
                 if let Err(e) = self.restart_audio() {
                     let error = format!(
                         "{}; restoring the previous device failed too: {e}",
-                        self.audio_error.take().unwrap_or_default()
+                        self.output.error.take().unwrap_or_default()
                     );
                     self.lose_audio(error);
                 }
             }
-            if self.audio.is_some() {
-                self.reconnect_at = None;
+            if self.output.host.is_some() {
+                self.output.reconnect_at = None;
             }
         }
         self.settings.save();
@@ -121,11 +172,11 @@ impl ProjectState {
     /// the current settings. Keeps the undo history and the playhead; keeps
     /// playing unless the sample rate changed (files are converted again).
     fn restart_audio(&mut self) -> Result<(), String> {
-        let position = self.playhead;
-        let playing = self.playback_state == PlaybackState::Playing;
+        let position = self.transport.playhead;
+        let playing = self.transport.playback == PlaybackState::Playing;
         self.pause_preview();
         // Release the device first: some drivers only allow one stream.
-        self.audio = None;
+        self.output.host = None;
         let (audio, engine) = start_audio(&self.settings).map_err(|e| e.to_string())?;
         let rate = engine.config().sample_rate;
         let rate_changed = rate != self.session.engine().config().sample_rate;
@@ -134,14 +185,14 @@ impl ProjectState {
             .replace_engine(engine)
             .map_err(|e| e.to_string())?;
         drop(old_engine);
-        self.audio = Some(audio);
+        self.output.host = Some(audio);
         self.sources.set_engine_rate(rate);
-        self.graph.reset();
+        self.diagnostics.graph.reset();
         self.seek(position);
         if playing && !rate_changed {
             self.play();
         } else {
-            self.playback_state = PlaybackState::Paused;
+            self.transport.playback = PlaybackState::Paused;
         }
         Ok(())
     }

@@ -185,7 +185,7 @@ impl ProjectState {
                 (self.first_clip_start(), self.edit().length()),
                 "The project has no clips to export.",
             ),
-            ExportRange::Loop => (self.loop_range, "The loop region is empty."),
+            ExportRange::Loop => (self.transport.loop_range, "The loop region is empty."),
             ExportRange::Custom(start, end) => ((start, end), "The range ends before it starts."),
         };
         if span.1.0 > span.0.0 {

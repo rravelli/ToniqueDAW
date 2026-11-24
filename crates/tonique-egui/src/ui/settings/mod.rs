@@ -352,7 +352,7 @@ impl SettingsWindow {
         });
 
         let config = state.engine_config();
-        let nodes = state.graph.topology().map_or(String::new(), |t| {
+        let nodes = state.graph().topology().map_or(String::new(), |t| {
             format!(" · {} graph nodes", t.nodes.len())
         });
         status(
@@ -388,7 +388,7 @@ impl SettingsWindow {
 
     fn audio_buttons(&mut self, ui: &mut Ui, state: &mut ProjectState) {
         let pending = state.settings().audio_differs(&self.draft);
-        if let Some(error) = &state.audio_error {
+        if let Some(error) = state.audio_error() {
             ui.label(
                 RichText::new(if state.audio_lost() {
                     format!("No audio output ({error}), retrying…")

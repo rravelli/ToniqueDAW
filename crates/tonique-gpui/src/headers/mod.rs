@@ -488,7 +488,7 @@ impl Arrangement {
         } else {
             track.color
         };
-        let metrics = self.state(context).metrics.tracks.get(&id).cloned();
+        let metrics = self.state(context).metrics().tracks.get(&id).cloned();
         let canvas_theme = theme.clone();
         let inset = 4.;
         div()

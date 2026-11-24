@@ -59,7 +59,7 @@ impl GraphView {
         // Levels move even with the transport stopped (e.g. previews).
         ui.ctx().request_repaint_after(Duration::from_millis(33));
 
-        let monitor = &state.graph;
+        let monitor = &state.graph();
         let Some(topology) = monitor.topology().cloned() else {
             painter.text(
                 viewport.center(),
@@ -138,7 +138,7 @@ impl GraphView {
             &theme,
             viewport,
             &topology,
-            state.metrics.latency,
+            state.metrics().latency,
             monitor,
         );
 
@@ -409,7 +409,7 @@ mod tests {
         state.add_track();
         state.set_monitor_graph(true);
         state.update(); // enables metering, picks up the topology
-        let topology = state.graph.topology().cloned().expect("graph published");
+        let topology = state.graph().topology().cloned().expect("graph published");
         assert!(topology.meters().is_enabled());
 
         let mut view = GraphView::new();

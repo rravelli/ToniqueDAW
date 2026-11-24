@@ -301,7 +301,7 @@ mod tests {
         state.add_track();
         state.set_monitor_graph(true);
         state.update();
-        let topology = state.graph.topology().cloned().expect("graph published");
+        let topology = state.graph().topology().cloned().expect("graph published");
 
         let owners = track_names(&state);
         let tracks: Vec<_> = state.tracks().collect();

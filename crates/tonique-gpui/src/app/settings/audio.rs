@@ -406,7 +406,7 @@ impl SettingsDialog {
         let config = self.state(context).engine_config();
         let nodes = self
             .state(context)
-            .graph
+            .graph()
             .topology()
             .map_or(String::new(), |topology| {
                 format!(" · {} graph nodes", topology.nodes.len())
@@ -431,7 +431,7 @@ impl SettingsDialog {
     /// defaults; above, what went wrong last.
     fn audio_buttons(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
         let pending = self.state(context).settings().audio_differs(&self.draft);
-        let error = self.state(context).audio_error.as_ref().map(|error| {
+        let error = self.state(context).audio_error().map(|error| {
             let text = if self.state(context).audio_lost() {
                 format!("No audio output ({error}), retrying…")
             } else {

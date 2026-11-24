@@ -173,7 +173,7 @@ impl Arrangement {
             playhead_lit: self.playhead_lit(context),
             footer_height: footer_height(state),
             scope: state
-                .metrics
+                .metrics()
                 .tracks
                 .get(&MASTER_TRACK_ID)
                 .map(|metrics| metrics.scope().iter().copied().collect())

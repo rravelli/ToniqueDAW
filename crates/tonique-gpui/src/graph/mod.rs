@@ -212,7 +212,7 @@ impl GraphView {
     fn scene(&mut self, window: &Window, context: &App) -> GraphScene {
         let theme = crate::theme::current(context);
         let state = self.state(context);
-        let Some(topology) = state.graph.topology().cloned() else {
+        let Some(topology) = state.graph().topology().cloned() else {
             return GraphScene::empty(theme);
         };
         let (positions, relaid) = self.positions(&topology);
@@ -231,7 +231,7 @@ impl GraphView {
             .then(|| self.camera.node_at(&positions, pointer))
             .flatten();
 
-        let monitor = &state.graph;
+        let monitor = &state.graph();
         let owners = track_names(state);
         let titles = topology
             .nodes
@@ -241,7 +241,7 @@ impl GraphView {
         let nodes_cpu: f32 = monitor.cpu.iter().sum();
         GraphScene {
             theme,
-            stats: stats_line(&topology, state.metrics.latency, nodes_cpu),
+            stats: stats_line(&topology, state.metrics().latency, nodes_cpu),
             topology: Some(topology),
             positions,
             pan: self.camera.pan,

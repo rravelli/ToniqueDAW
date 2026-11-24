@@ -15,9 +15,7 @@ use tonique_engine::{
     time::BeatPos,
 };
 
-use super::{
-    DEFAULT_BPM, DEFAULT_LOOP_BARS, MASTER_TRACK_ID, ProjectState, report, sources::SourceRegistry,
-};
+use super::{DEFAULT_BPM, MASTER_TRACK_ID, ProjectState, report, sources::SourceRegistry};
 use crate::{
     analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,
@@ -48,8 +46,6 @@ impl ProjectState {
         self.views = HashMap::from([(MASTER_TRACK_ID, master)]);
         self.collapsed_effects.clear();
         self.sources = SourceRegistry::new(self.session.engine().config().sample_rate);
-        self.playhead = BeatPos::ZERO;
-        self.edit_cursor = BeatPos::ZERO;
         self.selected_tracks.clear();
         self.clip_selection = Default::default();
         self.clear_selection_history();
@@ -59,13 +55,9 @@ impl ProjectState {
         self.grid.offset = Offset::ZERO;
         self.grid.settings = Default::default();
         self.sync_time_signature();
-        self.loop_range = (
-            BeatPos::ZERO,
-            BeatPos(DEFAULT_LOOP_BARS * self.grid.beats_per_bar()),
-        );
-        self.looping = false;
+        self.transport.reset(self.grid.beats_per_bar());
         self.sync_loop();
-        self.graph.reset();
+        self.diagnostics.graph.reset();
         // The metronome's level lives on the edit.
         self.apply_metronome_level();
     }
@@ -130,8 +122,8 @@ impl ProjectState {
             version: VERSION,
             bpm,
             time_signature: edit.tempo.time_signature.into(),
-            loop_range: (self.loop_range.0.0, self.loop_range.1.0),
-            looping: self.looping,
+            loop_range: (self.transport.loop_range.0.0, self.transport.loop_range.1.0),
+            looping: self.transport.looping,
             grid: self.grid.settings,
             master: self.channel_file(&edit.master),
             groups,

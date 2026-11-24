@@ -246,7 +246,7 @@ impl TrackHeader {
             });
             in_rect(ui, pan, |ui| pan_slider(ui, track, state, pan.size()));
         }
-        if let Some(metrics) = state.metrics.tracks.get(&track.id) {
+        if let Some(metrics) = state.metrics().tracks.get(&track.id) {
             let meter = LevelMeter::new(layout.meter.size(), metrics).disabled(silenced);
             if put(ui, layout.meter, meter).clicked() {
                 state.reset_meter_clip(track.id);

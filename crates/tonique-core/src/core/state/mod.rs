@@ -3,10 +3,12 @@ mod audio;
 mod clip_ops;
 mod clipboard;
 mod clips;
+mod diagnostics;
 mod effects;
 mod export;
 mod groups;
 mod mixer;
+mod preview;
 mod project;
 mod selection;
 mod sources;
@@ -15,13 +17,10 @@ mod tests;
 mod tracks;
 mod transport;
 use crate::{
-    audio::host::AudioHost,
     config::settings::Settings,
     core::{
         clip::AudioClip,
-        graph_monitor::GraphMonitor,
         grid::GridService,
-        metrics::GlobalMetrics,
         state::{clipboard::Clipboard, selection::ClipSelection, sources::SourceRegistry},
         track::{TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow, TrackSoloState, TrackView},
     },
@@ -30,14 +29,15 @@ use crate::{
 use std::{
     collections::{HashMap, HashSet},
     mem::take,
-    path::PathBuf,
-    sync::mpsc::Receiver,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub use actions::ActionOutcome;
+use audio::AudioOutput;
+use diagnostics::Diagnostics;
 pub use export::{ExportSelection, ExportSource};
 pub use groups::RowTarget;
+use preview::Preview;
 pub use selection::SelectionBounds;
 use tonique_engine::{
     edit::{
@@ -47,6 +47,7 @@ use tonique_engine::{
     engine::Engine,
     time::BeatPos,
 };
+use transport::Transport;
 
 /// The master strip, addressed like a track by the UI. The engine never
 /// hands out ID 0.
@@ -84,41 +85,23 @@ pub enum PlaybackState {
 
 /// The project as the UI sees it. The engine's [`EditSession`] owns the
 /// document and its undo history; this adds UI-only state (selection, track
-/// colors and heights, effect editors, meters) on top.
+/// colors and heights, effect editors) on top, and the parts sharing the
+/// engine with it, each with its own rules: the transport, the browser's
+/// preview, the audio output and the diagnostics. It runs what needs
+/// several of them (restarting the audio stops, seeks and plays again).
 pub struct ProjectState {
     session: EditSession,
     sources: SourceRegistry,
-    /// `None` without an audio device (e.g. in tests).
-    audio: Option<AudioHost>,
+    /// The audio device, and reopening it when lost.
+    output: AudioOutput,
     /// Applied preferences; change them with `apply_settings`.
     settings: Settings,
-    /// Why the last audio restart failed, if it did.
-    pub audio_error: Option<String>,
-    /// When to try opening the output again, while there's none.
-    reconnect_at: Option<Instant>,
-    /// Whether an output can be opened, checked off the UI thread before
-    /// reconnecting.
-    probe: Option<Receiver<bool>>,
-
-    /// Where the transport is, in beats (follows the engine while playing).
-    playhead: BeatPos,
-    /// Where the user last clicked in the arrangement, in beats. Playback
-    /// starts and returns here, and edits (cuts) happen here.
-    edit_cursor: BeatPos,
-    playback_state: PlaybackState,
-    /// Whether the timeline scrolls to keep the playhead in view.
-    follow_playhead: bool,
-    preview_playback_state: PlaybackState,
-    preview_position: usize,
-    /// The file last previewed.
-    preview_path: Option<PathBuf>,
-    /// Linear gain of the preview.
-    preview_gain: f32,
-    pub metrics: GlobalMetrics,
-    /// Live graph data for the graph view (measured only while it's shown).
-    pub graph: GraphMonitor,
-    /// Whether the graph monitor measures: only while the graph is shown.
-    monitor_graph: bool,
+    /// The playhead, the edit cursor, the loop and the metronome.
+    transport: Transport,
+    /// The browser's file preview.
+    preview: Preview,
+    /// The meters, and the graph view's measures.
+    diagnostics: Diagnostics,
 
     /// UI-only track fields; kept for deleted tracks so undo restores them.
     views: HashMap<TrackId, TrackView>,
@@ -141,10 +124,6 @@ pub struct ProjectState {
     batch_steps: Option<u64>,
 
     pub grid: GridService,
-    metronome: bool,
-    /// Loop region in beats; playback wraps over it while `looping`.
-    loop_range: (BeatPos, BeatPos),
-    looping: bool,
     /// An undo step was opened for a clip edit heard as it's made (see
     /// [`Self::edit_clip_live`]), to close when it's done.
     live_edit: bool,
@@ -167,22 +146,11 @@ impl ProjectState {
         Self {
             session,
             sources: SourceRegistry::new(sample_rate),
-            playhead: BeatPos::ZERO,
-            audio: None,
+            output: AudioOutput::default(),
             settings: Settings::default(),
-            audio_error: None,
-            reconnect_at: None,
-            probe: None,
-            edit_cursor: BeatPos::ZERO,
-            playback_state: PlaybackState::Paused,
-            follow_playhead: false,
-            preview_playback_state: PlaybackState::Paused,
-            preview_position: 0,
-            preview_path: None,
-            preview_gain: 1.,
-            metrics: GlobalMetrics::new(),
-            graph: GraphMonitor::new(),
-            monitor_graph: false,
+            transport: Transport::new(),
+            preview: Preview::default(),
+            diagnostics: Diagnostics::default(),
             views: HashMap::from([(MASTER_TRACK_ID, master)]),
             collapsed_effects: HashSet::new(),
             selected_tracks: Vec::new(),
@@ -195,14 +163,8 @@ impl ProjectState {
             batch_steps: None,
             resized_clip: None,
             grid: GridService::new(),
-            loop_range: (
-                BeatPos::ZERO,
-                BeatPos(DEFAULT_LOOP_BARS * GridService::new().beats_per_bar()),
-            ),
-            looping: false,
             live_edit: false,
             track_palette: Vec::new(),
-            metronome: false,
         }
     }
 
@@ -213,9 +175,9 @@ impl ProjectState {
     pub fn update(&mut self) -> bool {
         let handled = !self.pending_actions.is_empty();
         self.handle_pending_actions();
-        let audio = (self.audio_lost(), self.audio_error.clone());
+        let audio = (self.audio_lost(), self.output.error.clone());
         self.watch_audio();
-        let audio_changed = audio != (self.audio_lost(), self.audio_error.clone());
+        let audio_changed = audio != (self.audio_lost(), self.output.error.clone());
         let loaded = self.sources.poll_loaded();
         let any_loaded = !loaded.is_empty();
         for (id, data) in loaded {
@@ -223,27 +185,15 @@ impl ProjectState {
             report(result);
         }
         self.sync_time_signature();
-        if self.playback_state == PlaybackState::Playing {
-            self.playhead = self.session.position();
+        if self.transport.is_playing() {
+            self.transport.playhead = self.session.position();
         }
         let engine = self.session.engine();
-        if let Some(pos) = engine.preview_position() {
-            self.preview_position = pos;
-        }
-        if !engine.is_previewing() {
-            // Played to the end
-            self.preview_playback_state = PlaybackState::Paused;
-        }
-        self.update_metrics();
-        self.graph
-            .update(self.session.engine_mut(), self.monitor_graph);
+        self.preview
+            .follow(engine.preview_position(), engine.is_previewing());
+        self.diagnostics.update(&mut self.session);
         handled || audio_changed || any_loaded
     }
-    /// Measure the engine's graph (for the graph view) from the next update.
-    pub fn set_monitor_graph(&mut self, on: bool) {
-        self.monitor_graph = on;
-    }
-
     // Engine plumbing
     fn edit(&self) -> &Edit {
         self.session.edit()
@@ -403,19 +353,19 @@ impl ProjectState {
     /// clips not in `exclude`, the loop edges and the edit cursor.
     pub fn snap_targets(&self, exclude: &[ClipId]) -> Vec<BeatPos> {
         let bpm = self.bpm();
-        let (loop_start, loop_end) = self.loop_range;
+        let (loop_start, loop_end) = self.transport.loop_range;
         self.tracks()
             .flat_map(|t| t.clips)
             .filter(|c| !exclude.contains(&c.id))
             .flat_map(|c| [c.position, c.end(bpm)])
-            .chain([loop_start, loop_end, self.edit_cursor])
+            .chain([loop_start, loop_end, self.transport.edit_cursor])
             .collect()
     }
     /// Where the arrangement's content ends, in beats: the last clip end,
     /// the loop end while looping, or the playhead, whichever is furthest.
     pub fn arrangement_end(&self) -> BeatPos {
-        let loop_end = if self.looping {
-            self.loop_range.1
+        let loop_end = if self.transport.looping {
+            self.transport.loop_range.1
         } else {
             BeatPos::ZERO
         };
@@ -427,7 +377,7 @@ impl ProjectState {
             .flat_map(|track| &track.clips)
             .filter(|clip| self.has_clip_view(clip))
             .map(|clip| clip.start + clip.length)
-            .fold(self.playhead.max(loop_end), BeatPos::max)
+            .fold(self.transport.playhead.max(loop_end), BeatPos::max)
     }
     pub fn track_count(&self) -> usize {
         self.edit().tracks.len()
@@ -581,37 +531,6 @@ impl ProjectState {
     pub fn undo_history(&self) -> (usize, Option<&'static str>) {
         let undo = self.session.undo_manager();
         (undo.undo_len(), undo.undo_label())
-    }
-
-    /// Forget the clips (and held peaks) a track's meter shows.
-    pub fn reset_meter_clip(&mut self, id: TrackId) {
-        if id == MASTER_TRACK_ID {
-            self.metrics.master.reset_clip();
-        }
-        if let Some(metrics) = self.metrics.tracks.get_mut(&id) {
-            metrics.reset_clip();
-        }
-    }
-
-    fn update_metrics(&mut self) {
-        let edit = self.session.edit();
-        self.metrics.master.update(edit.master.meter(), true);
-        self.metrics
-            .tracks
-            .insert(MASTER_TRACK_ID, self.metrics.master.clone());
-        let channels = edit
-            .tracks
-            .iter()
-            .map(|t| (t.id, &t.channel))
-            .chain(edit.buses.iter().map(|b| (TrackId(b.id.0), &b.channel)));
-        for (id, channel) in channels {
-            self.metrics
-                .tracks
-                .entry(id)
-                .or_default()
-                .update(channel.meter(), false);
-        }
-        self.metrics.latency = self.session.engine().cpu_load();
     }
 
     /// To make sure some action do not conflict, pending actions are handled during state updates

@@ -1,18 +1,88 @@
-//! Tempo, time signature, playhead, transport, loop, metronome and the
-//! browser's preview.
-
-use crate::audio::preview::FilePreview;
-use std::path::PathBuf;
+//! Tempo, time signature, playhead, transport, loop and metronome.
 
 use tonique_engine::{
     edit::{
-        ClipContent, EditError, WarpMode,
+        ClipContent, WarpMode,
         commands::{ResizeClip, SetTempoMap},
     },
     time::{BeatPos, TimeSignature},
 };
 
-use super::{PlaybackState, ProjectState, report};
+use crate::core::grid::GridService;
+
+use super::{DEFAULT_LOOP_BARS, PlaybackState, ProjectState, report};
+
+/// Where playback is and what it does: the playhead, the edit cursor, the
+/// loop and the metronome. [`ProjectState`] hands its changes to the
+/// engine.
+pub(super) struct Transport {
+    /// Where the transport is, in beats (follows the engine while playing).
+    pub(super) playhead: BeatPos,
+    /// Where the user last clicked in the arrangement, in beats. Playback
+    /// starts and returns here, and edits (cuts) happen here.
+    pub(super) edit_cursor: BeatPos,
+    pub(super) playback: PlaybackState,
+    /// Whether the timeline scrolls to keep the playhead in view.
+    pub(super) follow_playhead: bool,
+    pub(super) metronome: bool,
+    /// Loop region in beats; playback wraps over it while `looping`.
+    pub(super) loop_range: (BeatPos, BeatPos),
+    pub(super) looping: bool,
+}
+
+impl Transport {
+    pub(super) fn new() -> Self {
+        Self {
+            playhead: BeatPos::ZERO,
+            edit_cursor: BeatPos::ZERO,
+            playback: PlaybackState::Paused,
+            follow_playhead: false,
+            metronome: false,
+            loop_range: Self::default_loop(GridService::new().beats_per_bar()),
+            looping: false,
+        }
+    }
+
+    /// The loop region of a new project, with `beats_per_bar`.
+    pub(super) fn default_loop(beats_per_bar: f64) -> (BeatPos, BeatPos) {
+        (BeatPos::ZERO, BeatPos(DEFAULT_LOOP_BARS * beats_per_bar))
+    }
+
+    /// Back to the start of a new project, not looping over its first
+    /// bars. The metronome and following the playhead are preferences:
+    /// kept.
+    pub(super) fn reset(&mut self, beats_per_bar: f64) {
+        self.playhead = BeatPos::ZERO;
+        self.edit_cursor = BeatPos::ZERO;
+        self.loop_range = Self::default_loop(beats_per_bar);
+        self.looping = false;
+    }
+
+    pub(super) fn is_playing(&self) -> bool {
+        self.playback == PlaybackState::Playing
+    }
+
+    /// What the engine loops over: the region, while looping.
+    pub(super) fn engine_loop(&self) -> Option<(BeatPos, BeatPos)> {
+        self.looping.then_some(self.loop_range)
+    }
+
+    /// Sets the loop region between `a` and `b`, in any order and not
+    /// before the start; whether it changed (empty regions are ignored).
+    pub(super) fn set_loop_between(&mut self, a: BeatPos, b: BeatPos) -> bool {
+        let (start, end) = (a.min(b).max(BeatPos::ZERO), a.max(b).max(BeatPos::ZERO));
+        if end <= start || (start, end) == self.loop_range {
+            return false;
+        }
+        self.loop_range = (start, end);
+        true
+    }
+
+    /// The metronome's level: `level` while it's on.
+    pub(super) fn metronome_gain(&self, level: f32) -> f32 {
+        if self.metronome { level } else { 0. }
+    }
+}
 
 impl ProjectState {
     pub fn set_bpm(&mut self, value: f32) {
@@ -80,135 +150,120 @@ impl ProjectState {
     // Playhead and edit cursor
     /// Move the playhead and the edit cursor there (ruler, playhead handle).
     pub fn seek(&mut self, beats: BeatPos) {
-        self.edit_cursor = beats.max(BeatPos::ZERO);
-        self.seek_playhead(self.edit_cursor);
+        self.transport.edit_cursor = beats.max(BeatPos::ZERO);
+        self.seek_playhead(self.transport.edit_cursor);
     }
     /// Place the edit cursor (a click in the arrangement). Doesn't interrupt
     /// playback; when stopped, the playhead follows so play starts there.
     pub fn set_edit_cursor(&mut self, beats: BeatPos) {
-        self.edit_cursor = beats.max(BeatPos::ZERO);
-        if self.playback_state != PlaybackState::Playing {
-            self.seek_playhead(self.edit_cursor);
+        self.transport.edit_cursor = beats.max(BeatPos::ZERO);
+        if !self.transport.is_playing() {
+            self.seek_playhead(self.transport.edit_cursor);
         }
     }
     fn seek_playhead(&mut self, beats: BeatPos) {
-        self.playhead = beats;
+        self.transport.playhead = beats;
         let result = self.session.seek(beats);
         report(result);
     }
     pub fn playhead(&self) -> BeatPos {
-        self.playhead
+        self.transport.playhead
     }
     pub fn edit_cursor(&self) -> BeatPos {
-        self.edit_cursor
+        self.transport.edit_cursor
     }
     pub fn follow_playhead(&self) -> bool {
-        self.follow_playhead
+        self.transport.follow_playhead
     }
     pub fn set_follow_playhead(&mut self, follow: bool) {
-        self.follow_playhead = follow;
+        self.transport.follow_playhead = follow;
     }
     // Transport state
     /// Stop playback and return the playhead to the edit cursor.
     pub fn stop(&mut self) {
-        self.playback_state = PlaybackState::Paused;
+        self.transport.playback = PlaybackState::Paused;
         let result = self.session.stop();
         report(result);
-        self.seek_playhead(self.edit_cursor);
+        self.seek_playhead(self.transport.edit_cursor);
     }
     pub fn play(&mut self) {
-        self.playback_state = PlaybackState::Playing;
+        self.transport.playback = PlaybackState::Playing;
         self.pause_preview();
         let result = self.session.play();
         report(result);
     }
-    pub fn pause_preview(&mut self) {
-        self.preview_playback_state = PlaybackState::Paused;
-        let result = self.session.engine_mut().preview_stop();
-        report(result.map_err(EditError::from));
-    }
-    /// Play a file from the start. Ignored while the transport plays.
-    pub fn play_preview(&mut self, path: PathBuf) {
-        if self.playback_state == PlaybackState::Playing {
-            return;
-        }
-        let Some(source) = FilePreview::open(path.clone()) else {
-            return;
-        };
-        self.preview_position = 0;
-        self.preview_path = Some(path.clone());
-        self.preview_playback_state = PlaybackState::Playing;
-        let engine = self.session.engine_mut();
-        engine.preview_set_gain(self.preview_gain);
-        let result = engine.preview_play(Box::new(source), 0);
-        report(result.map_err(EditError::from));
-    }
-    /// How loud the preview plays (linear), now and next time.
-    pub fn set_preview_gain(&mut self, gain: f32) {
-        self.preview_gain = gain;
-        self.session.engine_mut().preview_set_gain(gain);
-    }
-    /// Continue the last previewed file from `pos` (in frames of the file).
-    pub fn seek_preview(&mut self, pos: usize) {
-        self.preview_position = pos;
-        self.preview_playback_state = PlaybackState::Playing;
-        let result = self.session.engine_mut().preview_seek(pos);
-        report(result.map_err(EditError::from));
-    }
     // Loop
     pub fn looping(&self) -> bool {
-        self.looping
+        self.transport.looping
     }
     pub fn set_looping(&mut self, looping: bool) {
-        self.looping = looping;
+        self.transport.looping = looping;
         self.sync_loop();
     }
     pub fn loop_range(&self) -> (BeatPos, BeatPos) {
-        self.loop_range
+        self.transport.loop_range
     }
     /// Set the loop region (in any order). Empty regions are ignored.
     pub fn set_loop_range(&mut self, a: BeatPos, b: BeatPos) {
-        let (start, end) = (a.min(b).max(BeatPos::ZERO), a.max(b).max(BeatPos::ZERO));
-        if end > start && (start, end) != self.loop_range {
-            self.loop_range = (start, end);
+        if self.transport.set_loop_between(a, b) {
             self.sync_loop();
         }
     }
     /// Hand the loop to the engine, in beats: it keeps it on them through
     /// tempo changes, as it does the playhead.
     pub(super) fn sync_loop(&mut self) {
-        let range = self.looping.then_some(self.loop_range);
-        report(self.session.set_loop(range));
+        report(self.session.set_loop(self.transport.engine_loop()));
     }
     pub fn toggle_metronome(&mut self) {
-        self.metronome = !self.metronome;
+        self.transport.metronome = !self.transport.metronome;
         self.apply_metronome_level();
     }
     pub(super) fn apply_metronome_level(&self) {
-        let gain = if self.metronome {
-            self.settings.metronome_level
-        } else {
-            0.
-        };
+        let gain = self.transport.metronome_gain(self.settings.metronome_level);
         self.edit().metronome.set(gain, 0.);
     }
     pub fn metronome(&self) -> bool {
-        self.metronome
+        self.transport.metronome
     }
 
     pub fn playback_state(&self) -> PlaybackState {
-        self.playback_state
+        self.transport.playback
     }
-    pub fn preview_playback_state(&self) -> PlaybackState {
-        self.preview_playback_state
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loops_are_set_in_any_order_and_never_empty() {
+        let mut transport = Transport::new();
+        assert!(transport.set_loop_between(BeatPos(8.), BeatPos(2.)));
+        assert_eq!(transport.loop_range, (BeatPos(2.), BeatPos(8.)));
+        assert!(
+            !transport.set_loop_between(BeatPos(2.), BeatPos(8.)),
+            "unchanged"
+        );
+        assert!(
+            !transport.set_loop_between(BeatPos(-4.), BeatPos(-1.)),
+            "empty"
+        );
+        assert_eq!(transport.engine_loop(), None, "not looping");
+        transport.looping = true;
+        assert_eq!(transport.engine_loop(), Some((BeatPos(2.), BeatPos(8.))));
     }
-    pub fn preview_position(&self) -> usize {
-        self.preview_position
-    }
-    /// The file the preview is playing, if it is.
-    pub fn previewing(&self) -> Option<&std::path::Path> {
-        self.preview_path
-            .as_deref()
-            .filter(|_| self.preview_playback_state == PlaybackState::Playing)
+
+    #[test]
+    fn a_reset_keeps_the_preferences() {
+        let mut transport = Transport::new();
+        transport.metronome = true;
+        transport.follow_playhead = true;
+        transport.looping = true;
+        transport.playhead = BeatPos(9.);
+        transport.reset(3.);
+        assert_eq!(transport.playhead, BeatPos::ZERO);
+        assert_eq!(transport.loop_range, (BeatPos::ZERO, BeatPos(12.)));
+        assert!(!transport.looping);
+        assert!(transport.metronome && transport.follow_playhead);
     }
 }

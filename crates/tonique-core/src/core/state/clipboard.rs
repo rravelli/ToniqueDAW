@@ -107,7 +107,7 @@ impl ProjectState {
             .filter(|id| **id != MASTER_TRACK_ID)
             .and_then(|id| self.track_index(*id))
             .unwrap_or(self.clipboard.top_track);
-        let at = self.edit_cursor;
+        let at = self.transport.edit_cursor;
         let clipboard = self.clipboard.clone();
         let bpm = self.bpm();
         let mut pasted = Vec::new();

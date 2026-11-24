@@ -486,7 +486,7 @@ fn clips_play_through_the_engine_once_loaded() {
 
     state.update();
     // 0.4, in dBFS.
-    let [left, _] = state.metrics.tracks[&track].peak_db();
+    let [left, _] = state.metrics().tracks[&track].peak_db();
     assert!(left > -8., "track meter shows {left} dB");
     assert!(state.playhead().0 > 0.);
 }
@@ -1992,7 +1992,7 @@ fn starts_without_audio_and_waits_for_a_device() {
     state.attach_audio(Err("no device".into()), Settings::default());
     assert!(state.audio().is_none());
     assert!(state.audio_lost());
-    assert_eq!(state.audio_error.as_deref(), Some("no device"));
+    assert_eq!(state.audio_error(), Some("no device"));
     assert_eq!(state.playback_state(), PlaybackState::Paused);
 }
 
