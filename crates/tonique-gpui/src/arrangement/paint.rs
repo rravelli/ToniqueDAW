@@ -4,15 +4,15 @@
 use gpui::{Bounds, ContentMask, Pixels, Window, px};
 
 use crate::{
-    geometry::Rect,
-    theme::{Color, hsla, mix, mono, size, with_alpha},
-    timeline::{
+    arrangement::{
         BARS_HEIGHT, DROP_FILL_ALPHA, DROP_OUTLINE, LOOP_HEIGHT, ROW_GAP, RULER_HEIGHT,
         clip::{ClipPaint, paint_clip},
         footer::paint_footer,
         ruler::{paint_loop, paint_playhead},
         scene::Scene,
     },
+    geometry::Rect,
+    theme::{Color, hsla, mix, mono, size, with_alpha},
     wave::WaveCache,
     widgets::paint_text,
 };

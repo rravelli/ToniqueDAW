@@ -3,7 +3,7 @@
 //! Tonique's `ProjectState` and `GridService`, as in the egui app.
 //!
 //! The [`Arrangement`] is a view of its own: the timeline and, on its
-//! right, the track list (`crate::headers`), one per row and scrolled
+//! right, the track list ([`headers`]), one per row and scrolled
 //! together, so one view: they share the rows, the scroll, the hover and
 //! drags going from one to the other.
 //!
@@ -16,6 +16,7 @@ mod clip;
 mod drop;
 mod expand;
 mod footer;
+pub mod headers;
 mod input;
 mod menus;
 mod moving;
@@ -44,7 +45,7 @@ use tonique_engine::edit::{ClipId, TrackId};
 
 use crate::{
     app::PopupKind,
-    headers::HeadersUi,
+    arrangement::headers::HeadersUi,
     model::{HoldsProject, Project},
     popup::{self, MenuBuilder},
     theme::hsla,

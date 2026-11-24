@@ -4,8 +4,8 @@
 //! renamed in place, its menu on a right-click, and its height dragged
 //! from its bottom edge.
 
+use crate::arrangement::{Arrangement, ArrangementEvent};
 use crate::model::HoldsProject;
-use crate::timeline::{Arrangement, ArrangementEvent};
 use gpui::{
     Anchor, AnyElement, Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, canvas, div,
     prelude::*, px,
@@ -14,12 +14,12 @@ use tonique_engine::edit::TrackId;
 
 use crate::{
     app::{ArrowHolder, PopupKind},
+    arrangement::headers::{drag::Param, layout::HeaderLayout},
+    arrangement::{DROP_FILL_ALPHA, DROP_OUTLINE, ROW_GAP},
     geometry::Rect,
-    headers::{drag::Param, layout::HeaderLayout},
     icons,
     meter::paint_meter,
     theme::{Color, Theme, hsla, icon_fill, size, with_alpha},
-    timeline::{DROP_FILL_ALPHA, DROP_OUTLINE, ROW_GAP},
     widgets::paint_param_slider,
 };
 use tonique_core::{

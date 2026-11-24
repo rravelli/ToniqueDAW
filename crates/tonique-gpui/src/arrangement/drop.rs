@@ -3,14 +3,14 @@
 //! dropped on a lane or a header goes on its track, last; the track it
 //! would go on is lit while it's dragged over.
 
+use crate::arrangement::{Arrangement, ArrangementEvent};
 use crate::model::HoldsProject;
-use crate::timeline::{Arrangement, ArrangementEvent};
 use std::path::PathBuf;
 
 use gpui::{App, Context, DragMoveEvent, ExternalPaths, Pixels, Point, Stateful, prelude::*};
 use tonique_engine::{edit::TrackId, time::BeatPos};
 
-use crate::{bottom::DraggedEffect, browser::DraggedAudio, timeline::RULER_HEIGHT};
+use crate::{arrangement::RULER_HEIGHT, bottom::DraggedEffect, browser::DraggedAudio};
 use tonique_core::{
     analysis::AudioInfo,
     cache::AUDIO_ANALYSIS_CACHE,

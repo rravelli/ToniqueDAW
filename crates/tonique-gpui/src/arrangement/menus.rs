@@ -1,8 +1,8 @@
 //! The timeline's menus: the grid's settings (also the transport bar's),
 //! and a clip's.
 
+use crate::arrangement::{Arrangement, ArrangementEvent};
 use crate::model::HoldsProject;
-use crate::timeline::{Arrangement, ArrangementEvent};
 use gpui::Context;
 use tonique_engine::edit::ClipId;
 

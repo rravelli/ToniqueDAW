@@ -6,8 +6,8 @@
 //! edit put off screen; following the playhead during playback; and how
 //! far the scrollbars go.
 
+use crate::arrangement::Arrangement;
 use crate::model::HoldsProject;
-use crate::timeline::Arrangement;
 use std::time::{Duration, Instant};
 
 use tonique_engine::time::BeatPos;
@@ -15,8 +15,8 @@ use tonique_engine::time::BeatPos;
 use gpui::{App, Context, ScrollEvent, Window};
 
 use crate::{
+    arrangement::{RULER_HEIGHT, RowLayout},
     smooth_scroll::{SmoothScroll, WheelDelta},
-    timeline::{RULER_HEIGHT, RowLayout},
     widgets::{ScrollSpan, ScrollbarGrab},
 };
 use tonique_core::core::{state::PlaybackState, track::DEFAULT_TRACK_HEIGHT};

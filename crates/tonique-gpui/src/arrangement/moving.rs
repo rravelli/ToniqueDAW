@@ -4,8 +4,8 @@
 //! edit cursor; with Ctrl, copies of it do. Rows past the last one are
 //! added on drop.
 
+use crate::arrangement::Arrangement;
 use crate::model::HoldsProject;
-use crate::timeline::Arrangement;
 use gpui::{App, Modifiers, Pixels, Point};
 use tonique_engine::{
     edit::{ClipId, TrackId},

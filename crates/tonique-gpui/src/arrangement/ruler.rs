@@ -3,15 +3,15 @@
 //! move it, or the empty lane to draw a new one; click the bar to toggle
 //! looping), and the playhead's head, dragged to scrub.
 
+use crate::arrangement::Arrangement;
 use crate::model::HoldsProject;
-use crate::timeline::Arrangement;
 use gpui::{App, Corners, PathBuilder, Window, point, px};
 use tonique_engine::time::BeatPos;
 
 use crate::{
+    arrangement::{LOOP_HEIGHT, RULER_HEIGHT, input::TimelineDrag, paint::Canvas, scene::Scene},
     geometry::Rect,
     theme::{hsla, with_alpha},
-    timeline::{LOOP_HEIGHT, RULER_HEIGHT, input::TimelineDrag, paint::Canvas, scene::Scene},
 };
 
 /// The playhead's head: its width, its height to its point, and how far

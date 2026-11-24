@@ -4,12 +4,12 @@
 use gpui::{ContentMask, Window, px};
 
 use crate::{
+    arrangement::{rows::HEADER_HEIGHT, scene::SceneClip},
     geometry::Rect,
     icons,
     theme::{
         BLACK, Color, Theme, WHITE, contrast, hsla, icon_font, mix, mono, over, size, with_alpha,
     },
-    timeline::{rows::HEADER_HEIGHT, scene::SceneClip},
     wave::{WaveCache, paint_clip_waveform},
     widgets::paint_text,
 };

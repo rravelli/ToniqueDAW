@@ -1,23 +1,23 @@
 //! What the timeline shows this frame, taken out of the state so the
 //! canvas can paint it after the view is built.
 
+use crate::arrangement::Arrangement;
 use crate::model::HoldsProject;
-use crate::timeline::Arrangement;
 use gpui::App;
 use std::collections::HashSet;
 
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 use crate::{
-    geometry::Rect,
-    theme::{Color, Theme, with_alpha},
-    timeline::{
+    arrangement::{
         FOOTER_PADDING, RULER_HEIGHT, RowLayout, footer_height,
         input::TimelineDrag,
         moving::{ClipMove, DraggedClips},
         rows::{ClipPart, HEADER_HEIGHT, Span, handle_rect},
         ruler::LoopGrab,
     },
+    geometry::Rect,
+    theme::{Color, Theme, with_alpha},
 };
 use tonique_core::{
     core::{
@@ -300,7 +300,7 @@ impl Arrangement {
     /// What's inside a group, in a band as tall as a collapsed row at the
     /// top of its lane: a strip per track in it, in order, with that
     /// track's clips in its colour, faint so they don't pass for clips.
-    fn group_overview(&self, row: &crate::timeline::Row, context: &App) -> Vec<(Rect, Color)> {
+    fn group_overview(&self, row: &crate::arrangement::Row, context: &App) -> Vec<(Rect, Color)> {
         let state = self.state(context);
         let tracks = state.group_tracks(row.track.id);
         if tracks.is_empty() {

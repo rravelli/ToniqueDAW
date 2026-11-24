@@ -37,13 +37,13 @@ use tonique_core::core::project_files::ProjectFiles;
 use transport::{Shows, TransportBar, TransportEvent};
 
 use crate::{
+    arrangement::{Arrangement, ArrangementEvent},
     bottom::{BottomPanel, BottomView},
     browser::BrowserPanel,
     graph::GraphView,
     model::{HoldsProject, Project},
     popup::PopupLayer,
     theme::{FONT_UI, Theme, ThemeLibrary, hsla, size},
-    timeline::{Arrangement, ArrangementEvent},
     widgets::{Edge, Splitter, splitter_handle},
 };
 use tonique_core::{bench::Bench, core::state::ProjectState};

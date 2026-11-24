@@ -3,15 +3,15 @@
 //! width (its left edge, collapsing it when dragged well past its
 //! narrowest).
 
+use crate::arrangement::Arrangement;
 use crate::model::HoldsProject;
-use crate::timeline::Arrangement;
 use gpui::{App, Context, MouseDownEvent, MouseMoveEvent};
 use tonique_engine::edit::TrackId;
 
 use crate::{
     app::ArrowHolder,
-    headers::{COLLAPSE_PAST, MAX_ROW_HEIGHT},
-    timeline::{ROW_GAP, RULER_HEIGHT},
+    arrangement::headers::{COLLAPSE_PAST, MAX_ROW_HEIGHT},
+    arrangement::{ROW_GAP, RULER_HEIGHT},
     widgets::{Scale, SliderDrag},
 };
 use tonique_core::{

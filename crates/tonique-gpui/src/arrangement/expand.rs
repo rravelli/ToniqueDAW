@@ -3,12 +3,12 @@
 //! again once the pointer leaves the group. Dropping inside leaves it
 //! open, to show where things landed.
 
+use crate::arrangement::Arrangement;
 use crate::model::HoldsProject;
-use crate::timeline::Arrangement;
 use gpui::App;
 use tonique_engine::edit::TrackId;
 
-use crate::timeline::{ROW_GAP, RULER_HEIGHT};
+use crate::arrangement::{ROW_GAP, RULER_HEIGHT};
 
 impl Arrangement {
     /// Follows a drag with the pointer at `local_y` over the lanes (`None`

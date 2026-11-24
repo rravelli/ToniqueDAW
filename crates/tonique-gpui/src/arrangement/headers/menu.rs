@@ -1,8 +1,8 @@
 //! A track's or a group's menu, as its header's in the egui app, and
 //! renaming one in place.
 
+use crate::arrangement::Arrangement;
 use crate::model::HoldsProject;
-use crate::timeline::Arrangement;
 use gpui::{Context, KeyDownEvent, Window, div, prelude::*, px};
 use tonique_engine::edit::TrackId;
 

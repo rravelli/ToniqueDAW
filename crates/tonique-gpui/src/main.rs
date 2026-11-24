@@ -2,11 +2,11 @@
 //! own core, engine and file tree, to compare with the egui UI.
 
 mod app;
+mod arrangement;
 mod bottom;
 mod browser;
 mod geometry;
 mod graph;
-mod headers;
 mod icons;
 mod meter;
 mod model;
@@ -14,7 +14,6 @@ mod popup;
 mod profile;
 mod smooth_scroll;
 mod theme;
-mod timeline;
 mod wave;
 mod widgets;
 

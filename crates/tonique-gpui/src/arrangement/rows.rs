@@ -1,12 +1,12 @@
 //! Where things are on the timeline: its rows, the clips on them, and the
 //! beats under the pointer.
 
+use crate::arrangement::Arrangement;
 use crate::model::HoldsProject;
-use crate::timeline::Arrangement;
 use gpui::{App, Pixels, Point, Window};
 use tonique_engine::time::BeatPos;
 
-use crate::{geometry::Rect, timeline::RULER_HEIGHT};
+use crate::{arrangement::RULER_HEIGHT, geometry::Rect};
 use tonique_core::core::{
     clip::AudioClip,
     grid::Viewport,

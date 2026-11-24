@@ -5,9 +5,9 @@
 use gpui::{Window, px};
 
 use crate::{
+    arrangement::FOOTER_PADDING,
     geometry::Rect,
     theme::{Color, FONT_UI, Theme, hsla, size},
-    timeline::FOOTER_PADDING,
     widgets::paint_text,
 };
 use tonique_core::core::metrics::SCOPE_COLUMNS;

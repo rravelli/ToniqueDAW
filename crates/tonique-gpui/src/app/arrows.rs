@@ -10,8 +10,8 @@ use tonique_engine::edit::TrackId;
 
 use crate::{
     app::Workspace,
+    arrangement::headers::Param,
     bottom::{ClipArrows, KnobArrows},
-    headers::Param,
     widgets::arrow_press,
 };
 use tonique_core::utils::steps::Presses;

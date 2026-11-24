@@ -4,8 +4,8 @@
 //! a menu. The wheel is [`super::scroll`]'s, moving clips
 //! [`super::moving`]'s.
 
+use crate::arrangement::{Arrangement, ArrangementEvent};
 use crate::model::HoldsProject;
-use crate::timeline::{Arrangement, ArrangementEvent};
 use gpui::{
     Anchor, App, Context, Modifiers, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
     Window,
@@ -14,7 +14,7 @@ use tonique_engine::time::BeatPos;
 
 use crate::{
     app::{PopupKind, focus_main},
-    timeline::{LOOP_HEIGHT, RULER_HEIGHT, moving::ClipMove, rows::ClipPart, ruler::LoopGrab},
+    arrangement::{LOOP_HEIGHT, RULER_HEIGHT, moving::ClipMove, rows::ClipPart, ruler::LoopGrab},
 };
 use tonique_core::core::{clip::AudioClip, state::SelectionBounds};
 

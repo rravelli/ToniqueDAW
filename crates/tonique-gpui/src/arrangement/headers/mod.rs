@@ -12,8 +12,8 @@ mod menu;
 
 pub use drag::Param;
 
+use crate::arrangement::Arrangement;
 use crate::model::HoldsProject;
-use crate::timeline::Arrangement;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -27,13 +27,13 @@ use gpui::{
 use tonique_engine::edit::TrackId;
 
 use crate::{
+    arrangement::{FOOTER_PADDING, RULER_HEIGHT, RowLayout, footer_height},
     bottom::DraggedEffect,
     geometry::Rect,
     icons,
     meter::paint_meter,
     smooth_scroll::WheelDelta,
     theme::{Theme, hsla, size},
-    timeline::{FOOTER_PADDING, RULER_HEIGHT, RowLayout, footer_height},
     widgets::{Edge, Flat, SCROLLBAR_WIDTH, Splitter, TextField, glyph, splitter_handle},
 };
 use drag::{HeaderDrag, RowMarker};
@@ -495,7 +495,7 @@ impl Arrangement {
             .id(("collapsed-row", id.0 as usize))
             .flex_none()
             .w_full()
-            .h(px(track.height + crate::timeline::ROW_GAP))
+            .h(px(track.height + crate::arrangement::ROW_GAP))
             .flex()
             .justify_center()
             .gap(px(3.))
