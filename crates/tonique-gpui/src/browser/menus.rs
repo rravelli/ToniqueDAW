@@ -115,7 +115,7 @@ impl BrowserPanel {
                 context,
                 {
                     let path = owned.clone();
-                    move |_, _, context| context.open_with_system(&path)
+                    move |_, _, context| open_with_system(&path, context)
                 },
             )
             .submenu(
@@ -170,7 +170,7 @@ impl BrowserPanel {
             menu = menu.item(
                 MenuItem::new("Show in file manager").icon(icons::ARROW_SQUARE_OUT),
                 context,
-                move |_, _, context| context.open_with_system(&shown),
+                move |_, _, context| open_with_system(&shown, context),
             );
         }
         Some(menu.into_element())
@@ -319,4 +319,13 @@ impl BrowserPanel {
         crate::popup::close(context);
         window.focus(&self.list_focus, context);
     }
+}
+
+/// Opens `path` with the system's app for it: a folder in the file
+/// manager. Not in tests: gpui-fast's test platform has no system to ask.
+fn open_with_system(path: &std::path::Path, context: &gpui::App) {
+    if cfg!(test) {
+        return;
+    }
+    context.open_with_system(path);
 }

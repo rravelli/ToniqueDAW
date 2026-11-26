@@ -7,6 +7,7 @@ to target/fuzz/<seed>.log, and failures are summed up at the end.
 
     scripts/fuzz.py                  # seeds 0..99, 500 inputs each
     scripts/fuzz.py --seeds 200-299 --steps 1000 --jobs 2
+    scripts/fuzz.py --app gpui       # the gpui app's, logs in target/fuzz-gpui
 """
 
 import argparse
@@ -19,7 +20,11 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TEST = "ui::app::tests::random_input"
+# Each app's test binary, and its random-input test.
+APPS = {
+    "egui": (["--bin", "tonique_daw"], "tonique_daw", "ui::app::tests::random_input"),
+    "gpui": (["-p", "tonique-gpui", "--bin", "tonique-gpui"], "tonique_gpui", "fuzz::random_input"),
+}
 
 
 def seeds(text):
@@ -27,12 +32,13 @@ def seeds(text):
     return range(int(start), int(end or start) + 1)
 
 
-def test_binary():
+def test_binary(app):
+    target, name, _ = APPS[app]
     out = subprocess.run(
-        ["cargo", "test", "--bin", "tonique_daw", "--no-run", "--message-format=json"],
+        ["cargo", "test", *target, "--no-run", "--message-format=json"],
         cwd=ROOT, capture_output=True, text=True, check=True,
     ).stdout
-    found = re.findall(r'"executable":"([^"]+tonique_daw-[0-9a-f]+)"', out)
+    found = re.findall(r'"executable":"([^"]+' + name + r'-[0-9a-f]+)"', out)
     if not found:
         sys.exit("couldn't find the test binary")
     return found[-1]
@@ -43,10 +49,12 @@ def main():
     parser.add_argument("--seeds", type=seeds, default=seeds("0-99"), help="e.g. 0-99")
     parser.add_argument("--steps", type=int, default=500, help="inputs per seed")
     parser.add_argument("--jobs", type=int, default=4, help="runs at once")
+    parser.add_argument("--app", choices=APPS, default="egui", help="which app")
     args = parser.parse_args()
 
-    binary = test_binary()
-    logs = ROOT / "target" / "fuzz"
+    binary = test_binary(args.app)
+    test = APPS[args.app][2]
+    logs = ROOT / "target" / ("fuzz" if args.app == "egui" else f"fuzz-{args.app}")
     logs.mkdir(parents=True, exist_ok=True)
     pending = list(args.seeds)
     running = {}  # seed -> (process, log file)
@@ -60,7 +68,7 @@ def main():
                        TONIQUE_FUZZ_STEPS=str(args.steps), TONIQUE_FUZZ_TRACE="1",
                        RUST_BACKTRACE="1")
             process = subprocess.Popen(
-                [binary, TEST, "--nocapture"], cwd=ROOT, env=env,
+                [binary, test, "--nocapture"], cwd=ROOT, env=env,
                 stdout=log, stderr=subprocess.STDOUT,
             )
             running[seed] = (process, log)

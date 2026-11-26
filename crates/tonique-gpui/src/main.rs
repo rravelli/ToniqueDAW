@@ -5,6 +5,8 @@ mod app;
 mod arrangement;
 mod bottom;
 mod browser;
+#[cfg(test)]
+mod fuzz;
 mod geometry;
 mod graph;
 mod icons;
