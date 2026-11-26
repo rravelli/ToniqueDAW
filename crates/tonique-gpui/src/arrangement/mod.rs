@@ -223,7 +223,7 @@ impl Arrangement {
 
     fn cursor(&self, rows: &RowLayout, context: &App) -> CursorStyle {
         match &self.timeline.drag {
-            TimelineDrag::Move(press) if press.dragged.is_some() => return CursorStyle::ClosedHand,
+            TimelineDrag::Move(press) if press.moving.is_some() => return CursorStyle::ClosedHand,
             TimelineDrag::Zone { moved: true, .. } => return CursorStyle::IBeam,
             TimelineDrag::Trim { .. } | TimelineDrag::Scrub => return CursorStyle::ResizeLeftRight,
             TimelineDrag::Loop { grab, .. } => {

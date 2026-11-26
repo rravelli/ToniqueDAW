@@ -14,9 +14,15 @@ use tonique_engine::time::BeatPos;
 
 use crate::{
     app::{PopupKind, focus_main},
-    arrangement::{LOOP_HEIGHT, RULER_HEIGHT, moving::ClipMove, rows::ClipPart, ruler::LoopGrab},
+    arrangement::{LOOP_HEIGHT, RULER_HEIGHT, moving::ClipPress, rows::ClipPart, ruler::LoopGrab},
 };
-use tonique_core::{document::clip::AudioClip, project::SelectionBounds};
+use tonique_core::{
+    document::clip::AudioClip,
+    project::{
+        SelectionBounds,
+        clip_drag::{ClipEdge, ClipTrim},
+    },
+};
 
 /// Pixels the pointer moves before a press on a lane draws a zone.
 const ZONE_THRESHOLD: f64 = 3.;
@@ -41,10 +47,9 @@ pub enum TimelineDrag {
         start: Point<Pixels>,
         moved: bool,
     },
-    Move(ClipMove),
+    Move(ClipPress),
     Trim {
-        original: AudioClip,
-        start_edge: bool,
+        trim: ClipTrim,
         current: Option<AudioClip>,
     },
 }
@@ -54,7 +59,7 @@ impl TimelineDrag {
     pub fn scrolls(&self) -> bool {
         match self {
             Self::Zone { moved, .. } => *moved,
-            Self::Move(press) => press.dragged.is_some(),
+            Self::Move(press) => press.moving.is_some(),
             Self::Trim { .. } => true,
             _ => false,
         }
@@ -116,9 +121,13 @@ impl Arrangement {
         match hit {
             Some((row, clip, part @ (ClipPart::TrimStart | ClipPart::TrimEnd))) => {
                 self.state_mut(context).select_track(&rows[row].track.id);
+                let edge = if matches!(part, ClipPart::TrimStart) {
+                    ClipEdge::Start
+                } else {
+                    ClipEdge::End
+                };
                 TimelineDrag::Trim {
-                    original: clip,
-                    start_edge: matches!(part, ClipPart::TrimStart),
+                    trim: ClipTrim::new(clip, edge),
                     current: None,
                 }
             }
@@ -128,13 +137,12 @@ impl Arrangement {
                 if shift {
                     self.state_mut(context).toggle_clip_selected(clip.id);
                 }
-                TimelineDrag::Move(ClipMove {
+                TimelineDrag::Move(ClipPress {
                     id: clip.id,
-                    track_index: rows[row].track.first_track_index,
                     start: event.position,
                     grab: self.beats_at(local_x, context),
                     shift,
-                    dragged: None,
+                    moving: None,
                 })
             }
             hit => {
@@ -233,16 +241,18 @@ impl Arrangement {
             TimelineDrag::Move(press) => self
                 .follow_clip_move(press, position, modifiers, context)
                 .map_or(TimelineDrag::None, TimelineDrag::Move),
-            TimelineDrag::Trim {
-                original,
-                start_edge,
-                ..
-            } => {
-                let clip = self.trimmed(&original, start_edge, local_x, modifiers, context);
+            TimelineDrag::Trim { trim, .. } => {
+                let pointer = self.beats_at(local_x, context);
+                let clip = trim.at(
+                    self.state(context),
+                    self.timeline_view(context),
+                    pointer,
+                    modifiers.shift,
+                    modifiers.alt,
+                );
                 self.state_mut(context).resize_clip(clip.clone());
                 TimelineDrag::Trim {
-                    original,
-                    start_edge,
+                    trim,
                     current: Some(clip),
                 }
             }
@@ -272,39 +282,6 @@ impl Arrangement {
             .select_in_bounds(SelectionBounds::between(anchor, (track, beats)));
     }
 
-    /// `original` with an edge at the pointer, snapped to the grid or
-    /// other clips' edges, the loop and the edit cursor (unless Alt
-    /// inverts snapping). With Shift, stretched there instead: the same
-    /// audio, played faster or slower.
-    fn trimmed(
-        &self,
-        original: &AudioClip,
-        start_edge: bool,
-        local_x: f32,
-        modifiers: &Modifiers,
-        context: &App,
-    ) -> AudioClip {
-        let state = self.state(context);
-        let beats = self.beats_at(local_x, context);
-        let at = if state.grid().snaps(modifiers.alt) {
-            let targets = state.snap_targets(&[original.id]);
-            state
-                .grid()
-                .snap_to_targets(beats, &targets, self.timeline_view(context))
-                .0
-        } else {
-            beats
-        };
-        let (mut clip, bpm) = (original.clone(), state.bpm());
-        match (start_edge, modifiers.shift) {
-            (true, false) => clip.trim_start_at(at, bpm),
-            (false, false) => clip.trim_end_at(at, bpm),
-            (true, true) => clip.stretch_start_at(at, bpm),
-            (false, true) => clip.stretch_end_at(at, bpm),
-        }
-        clip
-    }
-
     pub fn timeline_drag_end(&mut self, event: &MouseUpEvent, context: &mut App) {
         self.timeline.pointer = None;
         match std::mem::take(&mut self.timeline.drag) {
@@ -329,17 +306,17 @@ impl Arrangement {
                 state.clear_clip_selection();
                 state.set_edit_cursor(cursor);
             }
-            TimelineDrag::Move(ClipMove {
-                dragged: Some(dragged),
+            TimelineDrag::Move(ClipPress {
+                moving: Some(moving),
                 ..
             }) => {
-                self.drop_clips(dragged, context);
+                self.land_clips(moving, context);
                 let over_lanes = self.timeline.bounds.get().contains(&event.position);
                 let (_, local_y) = self.local(event.position);
                 self.expand_on_hover(over_lanes.then_some(local_y), false, context);
             }
             // A click on a clip's header selects it alone.
-            TimelineDrag::Move(ClipMove {
+            TimelineDrag::Move(ClipPress {
                 id, shift: false, ..
             }) => self.state_mut(context).select_clips(vec![id]),
             TimelineDrag::Trim {

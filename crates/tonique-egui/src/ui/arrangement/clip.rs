@@ -20,7 +20,12 @@ use egui_phosphor::{
 };
 use std::{ops::Range, time::Duration};
 use tonique_core::{
-    document::clip::AudioClip, project::ProjectState, session::timeline_view::TimelineView,
+    document::clip::AudioClip,
+    project::{
+        ProjectState,
+        clip_drag::{ClipEdge, ClipTrim},
+    },
+    session::timeline_view::TimelineView,
 };
 use tonique_engine::time::BeatPos;
 
@@ -56,12 +61,6 @@ const SILENCED_WAVE_TINT: f32 = 0.5;
 /// The least contrast a black waveform needs with what it's drawn on (the
 /// WCAG ratio for graphics); on anything darker, it's drawn light.
 const WAVE_CONTRAST: f32 = 3.;
-#[derive(Clone, Copy)]
-enum Edge {
-    Start,
-    End,
-}
-
 const LOADING_REPAINT: Duration = Duration::from_millis(100);
 /// A clip on the timeline: a header to grab it by, trim handles at its
 /// edges, and its waveform. Shows it, and applies trims to `state`.
@@ -110,8 +109,8 @@ impl ClipView<'_> {
             pos2(pos.x + size.x - handle_width, pos.y),
             vec2(handle_width, size.y),
         );
-        let left_resize = self.trim_handle(ui, state, left, &mut clip_copy, Edge::Start);
-        let right_resize = self.trim_handle(ui, state, right, &mut clip_copy, Edge::End);
+        let left_resize = self.trim_handle(ui, state, left, &mut clip_copy, ClipEdge::Start);
+        let right_resize = self.trim_handle(ui, state, right, &mut clip_copy, ClipEdge::End);
 
         // Lights up under the pointer, like a button.
         self.paint(ui, state, response.hovered() || response.dragged());
@@ -349,17 +348,16 @@ impl ClipView<'_> {
         );
     }
 
-    /// A trim handle: dragging it moves that edge of `clip`, snapping to
-    /// the grid, other clips' edges, the loop and the edit cursor (when
-    /// snapping, which Alt inverts). With Shift, the clip is stretched to it instead
-    /// of trimmed: the same audio, played faster or slower.
+    /// A trim handle: dragging it moves that edge of `clip` as the core's
+    /// [`ClipTrim`] does (Alt inverts snapping; with Shift, the clip is
+    /// stretched to it instead of trimmed).
     fn trim_handle(
         &self,
         ui: &mut Ui,
         state: &ProjectState,
         rect: Rect,
         clip: &mut AudioClip,
-        edge: Edge,
+        edge: ClipEdge,
     ) -> Response {
         let id = Id::new(("clip-trim", clip.id, edge as u8));
         let response = ui
@@ -369,25 +367,17 @@ impl ClipView<'_> {
         if response.dragged()
             && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
         {
-            let beats = self
+            let pointer = self
                 .timeline_view
                 .x_to_beats(mouse_pos.x, self.viewport.span());
-            let beats = if state.grid().snaps(ui.input(|i| i.modifiers.alt)) {
-                let targets = state.snap_targets(&[clip.id]);
-                state
-                    .grid()
-                    .snap_to_targets(beats, &targets, self.timeline_view)
-                    .0
-            } else {
-                beats
-            };
-            let bpm = state.bpm();
-            match (edge, ui.input(|i| i.modifiers.shift)) {
-                (Edge::Start, false) => clip.trim_start_at(beats, bpm),
-                (Edge::End, false) => clip.trim_end_at(beats, bpm),
-                (Edge::Start, true) => clip.stretch_start_at(beats, bpm),
-                (Edge::End, true) => clip.stretch_end_at(beats, bpm),
-            }
+            let (stretch, alt) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
+            *clip = ClipTrim::new(clip.clone(), edge).at(
+                state,
+                self.timeline_view,
+                pointer,
+                stretch,
+                alt,
+            );
         }
         response
     }

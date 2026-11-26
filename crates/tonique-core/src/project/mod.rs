@@ -4,6 +4,7 @@
 //! and runs what involves several of them, one file per subject.
 
 mod actions;
+pub mod clip_drag;
 mod clipboard;
 mod clips;
 mod device;

@@ -12,7 +12,7 @@ use crate::{
     arrangement::{
         FOOTER_PADDING, RULER_HEIGHT, RowLayout, footer_height,
         input::TimelineDrag,
-        moving::{ClipMove, DraggedClips},
+        moving::ClipPress,
         rows::{ClipPart, HEADER_HEIGHT, Span, handle_rect},
         ruler::LoopGrab,
     },
@@ -22,7 +22,10 @@ use crate::{
 use tonique_core::{
     document::clip::AudioClip,
     document::track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackRow},
-    project::MASTER_TRACK_ID,
+    project::{
+        MASTER_TRACK_ID,
+        clip_drag::{ClipEdge, ClipMove},
+    },
     session::grid::GridLine,
     utils::format_time,
 };
@@ -231,12 +234,12 @@ impl Arrangement {
     }
 
     /// The clips being dragged, once they are.
-    fn dragged_clips(&self) -> Option<&DraggedClips> {
+    fn dragged_clips(&self) -> Option<&ClipMove> {
         match &self.timeline.drag {
-            TimelineDrag::Move(ClipMove {
-                dragged: Some(dragged),
+            TimelineDrag::Move(ClipPress {
+                moving: Some(moving),
                 ..
-            }) => Some(dragged),
+            }) => Some(moving),
             _ => None,
         }
     }
@@ -252,8 +255,7 @@ impl Arrangement {
         let state = self.state(context);
         let left_behind: HashSet<ClipId> = self
             .dragged_clips()
-            .filter(|dragged| !dragged.duplicate)
-            .map(|dragged| dragged.ids().into_iter().collect())
+            .map(|moving| moving.left_behind().into_iter().collect())
             .unwrap_or_default();
         let lit = self.lit_header(rows, context);
         let mut scene_rows = Vec::new();
@@ -469,16 +471,12 @@ impl Arrangement {
 
     /// The trim handle being dragged, or else under the pointer.
     fn lit_handle(&self, rows: &RowLayout, context: &App) -> Option<Rect> {
-        if let TimelineDrag::Trim {
-            original,
-            start_edge,
-            current,
-        } = &self.timeline.drag
-        {
-            let clip = current.as_ref().unwrap_or(original);
+        if let TimelineDrag::Trim { trim, current } = &self.timeline.drag {
+            let clip = current.as_ref().unwrap_or(&trim.original);
+            let start_edge = trim.edge == ClipEdge::Start;
             let (row, _) = self.state(context).clip_with_track(clip.id)?;
             let row = rows.iter().find(|shown| shown.track.id == row.id)?;
-            return Some(handle_rect(self.clip_rect(clip, row, context), *start_edge));
+            return Some(handle_rect(self.clip_rect(clip, row, context), start_edge));
         }
         let (TimelineDrag::None, Some((local_x, local_y))) =
             (&self.timeline.drag, self.timeline.hover)

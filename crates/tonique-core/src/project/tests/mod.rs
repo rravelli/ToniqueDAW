@@ -2509,3 +2509,4 @@ fn updates_tell_what_changed() {
     state.stop();
     assert!(!state.update().playback);
 }
+mod clip_drag;

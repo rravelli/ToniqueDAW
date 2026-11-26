@@ -6,7 +6,7 @@ use crate::{
         arrangement::clip::ClipView,
         arrangement::{
             row_layout::{RowLayout, RowSpans},
-            timeline::{drag::ClipDrag, selection::RubberBand},
+            timeline::selection::RubberBand,
             track_header::ROW_GAP,
         },
         commands::Commands,
@@ -22,7 +22,7 @@ use tonique_core::{
     document::track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow},
     library::analysis::AudioInfo,
     library::cache::AUDIO_ANALYSIS_CACHE,
-    project::ProjectState,
+    project::{ProjectState, clip_drag::ClipMove},
 };
 use tonique_engine::edit::{ClipId, TrackId};
 mod drag;
@@ -40,7 +40,7 @@ const START_LINE_WIDTH: f32 = 1.5;
 const SELECTED_LANE_ALPHA: u8 = 24;
 
 pub struct Timeline {
-    clip_drag: Option<ClipDrag>,
+    clip_drag: Option<ClipMove>,
     rubber_band: Option<RubberBand>,
     /// Collapsed groups expanded by dragging over them, to collapse again once
     /// left.
@@ -220,10 +220,10 @@ impl Timeline {
     ) {
         // The clip grabbed this frame, and its track's index.
         let mut grabbed = None;
-        let dragged_ids = self
+        let left_behind = self
             .clip_drag
             .as_ref()
-            .map_or(Vec::new(), |d| d.dragged_ids());
+            .map_or(Vec::new(), ClipMove::left_behind);
 
         for row in layout.rows() {
             let track = &row.track;
@@ -271,10 +271,10 @@ impl Timeline {
                     workspace,
                     viewport,
                     row.y().min,
-                    dragged_ids.contains(&clip.id),
+                    left_behind.contains(&clip.id),
                 );
                 if grabbed.is_none() && dragged {
-                    grabbed = Some((clip.clone(), track.first_track_index));
+                    grabbed = Some(clip.id);
                 }
             }
 
