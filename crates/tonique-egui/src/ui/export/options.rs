@@ -362,7 +362,8 @@ pub(super) fn destination_ui(
             .size(vec2(browse_width, CHOICE_HEIGHT))
             .font(FontId::proportional(font_size::BODY))
             .border_radius(3.);
-        if ui.add(browse).clicked() {
+        // Not in tests, where the native dialog would wait for a click.
+        if ui.add(browse).clicked() && !cfg!(test) {
             let mut dialog = FileDialog::new();
             if Path::new(dir.trim()).is_dir() {
                 dialog = dialog.set_directory(dir.trim());
