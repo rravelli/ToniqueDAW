@@ -314,7 +314,7 @@ impl ClipView<'_> {
             header_ink,
         );
         // Draw an overlay when audio not ready
-        if !clip.audio.data.is_ready() && !clip.audio.missing {
+        if !clip.playable && !clip.audio.missing {
             painter.rect_filled(sample_rect, 1.0, theme.shadow);
             // Show the waveform growing while the file decodes.
             ui.ctx().request_repaint_after(LOADING_REPAINT);

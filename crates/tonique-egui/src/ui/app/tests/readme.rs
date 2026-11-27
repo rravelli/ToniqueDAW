@@ -86,7 +86,7 @@ fn wait_for_audio(harness: &mut Harness<'_, ToniqueApp>) {
             .state
             .tracks()
             .flat_map(|track| track.clips)
-            .filter(|clip| !clip.audio.data.is_ready())
+            .filter(|clip| !clip.playable)
             .map(|clip| clip.audio.name.clone())
             .collect();
         if pending.is_empty() {

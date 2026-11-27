@@ -210,7 +210,7 @@ impl Bench {
                 let ready = state
                     .tracks()
                     .flat_map(|t| t.clips)
-                    .all(|c| c.audio.missing || c.audio.data.is_ready());
+                    .all(|c| c.audio.missing || c.playable);
                 if ready || since.elapsed() > LOAD_TIMEOUT {
                     if !ready {
                         eprintln!("bench: audio still loading, starting anyway");

@@ -128,6 +128,11 @@ impl AudioData {
         self.samples.get().is_some()
     }
 
+    /// Whether a decode failed: the samples won't come.
+    pub fn failed(&self) -> bool {
+        self.failed.load(Ordering::Acquire)
+    }
+
     pub fn peaks_complete(&self) -> bool {
         self.peaks_complete.load(Ordering::Acquire)
     }

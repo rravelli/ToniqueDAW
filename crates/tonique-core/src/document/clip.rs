@@ -71,6 +71,9 @@ pub struct AudioClip {
     pub detune: f32,
     /// How it's stretched, warped.
     pub stretch: StretchSettings,
+    /// Whether the engine has its file's audio: it plays. Not yet while
+    /// the file decodes, then while it's converted to the engine's rate.
+    pub playable: bool,
 }
 
 /// A stretch of a clip playing one stretch of its file, without a jump.
@@ -103,6 +106,7 @@ impl AudioClip {
             transpose: 0,
             detune: 0.,
             stretch: StretchSettings::default(),
+            playable: false,
         };
         clip.length = clip.source_beats(bpm);
         clip

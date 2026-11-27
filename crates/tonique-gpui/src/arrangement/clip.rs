@@ -214,7 +214,7 @@ pub fn paint_clip(painter: &mut ClipPaint, scene_clip: &SceneClip, ghost: bool) 
     paint_name(painter, scene_clip, rect, look.ink);
     // Still loading: shaded.
     let missing = scene_clip.clip.audio.missing;
-    if !scene_clip.clip.audio.data.is_ready() && !missing {
+    if !scene_clip.clip.playable && !missing {
         painter.window.paint_quad(gpui::fill(
             wave.intersect(painter.lanes).bounds(),
             hsla(painter.theme.shadow),

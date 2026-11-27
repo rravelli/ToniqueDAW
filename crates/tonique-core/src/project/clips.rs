@@ -369,6 +369,7 @@ impl ProjectState {
             transpose: semitones,
             detune: cents,
             stretch,
+            playable: self.sources.playable(source),
         })
     }
 
