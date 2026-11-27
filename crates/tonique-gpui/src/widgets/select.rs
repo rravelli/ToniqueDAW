@@ -11,8 +11,9 @@ use gpui::{
 };
 
 use crate::{
-    app::{PopupKind, Tonique},
+    app::PopupKind,
     icons,
+    popup::{self, MenuBuilder},
     theme::{Theme, hsla, icon_fill, size},
 };
 
@@ -22,15 +23,18 @@ const CARET_SIZE: f32 = 9.;
 /// Between the box and its menu.
 const MENU_OFFSET: f32 = 2.;
 
-/// The box, `width` wide, showing `label`; `open` while its menu is.
-pub fn select(
+/// The box, `width` wide, showing `label`; `open` while its menu, `kind`
+/// built by `build`, is.
+#[allow(clippy::too_many_arguments)]
+pub fn select<V: 'static>(
     id: &'static str,
     label: impl Into<SharedString>,
     width: f32,
     kind: PopupKind,
+    build: MenuBuilder,
     open: bool,
     theme: &Theme,
-    context: &mut Context<Tonique>,
+    context: &mut Context<V>,
 ) -> Stateful<gpui::Div> {
     let bounds: Rc<Cell<Bounds<Pixels>>> = Rc::default();
     let slot = bounds.clone();
@@ -77,12 +81,11 @@ pub fn select(
         .text_size(px(size::BODY))
         .on_mouse_down(
             MouseButton::Left,
-            context.listener(move |this, _, _, context| {
+            context.listener(move |_, _, _, context| {
                 context.stop_propagation();
                 let below = bounds.get();
                 let at = point(below.left(), below.bottom() + px(MENU_OFFSET));
-                this.toggle_popup(kind, at, Anchor::TopLeft);
-                context.notify();
+                popup::toggle(kind, at, Anchor::TopLeft, build.clone(), context);
             }),
         )
 }

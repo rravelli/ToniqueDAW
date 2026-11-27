@@ -5,15 +5,15 @@ use std::cmp::Ordering;
 use gpui::{Context, MouseButton, PathBuilder, canvas, div, point, prelude::*, px};
 
 use crate::{
-    app::Tonique,
-    core::export::{
-        Export, ExportFile, Waveform,
-        format::{duration, file_name, peak},
-    },
+    app::export::ExportDialog,
     geometry::Rect,
     icons,
     theme::{Color, Theme, hsla, size},
     widgets::{dialog_button, dialog_frame, glyph},
+};
+use tonique_core::files::export::{
+    Export, ExportFile, Waveform,
+    format::{duration, file_name, peak},
 };
 
 use super::{
@@ -30,13 +30,9 @@ const THUMBNAIL_HEIGHT: f32 = 26.;
 const FILE_LABEL_WIDTH: f32 = 150.;
 const PROGRESS_HEIGHT: f32 = 4.;
 
-impl Tonique {
-    pub(super) fn export_running(
-        &self,
-        running: &Export,
-        context: &mut Context<Self>,
-    ) -> gpui::Div {
-        let theme = &self.theme;
+impl ExportDialog {
+    pub(super) fn running_view(&self, running: &Export, context: &mut Context<Self>) -> gpui::Div {
+        let theme = &*crate::theme::current(context);
         let files = running.files();
         let count = files.len();
         let current = running.current().min(count.saturating_sub(1));
@@ -80,7 +76,7 @@ impl Tonique {
             MouseButton::Left,
             context.listener(|this, _, _, context| {
                 context.stop_propagation();
-                if let super::Step::Running(running) = &this.export.step {
+                if let super::Step::Running(running) = &this.step {
                     running.cancel();
                 }
                 context.notify();
@@ -107,14 +103,14 @@ impl Tonique {
             )
     }
 
-    pub(super) fn export_done(
+    pub(super) fn done_view(
         &self,
         files: &[ExportFile],
         waveforms: &[Waveform],
         seconds: f64,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let folder = files
             .first()
             .and_then(|file| file.path.parent())
@@ -168,16 +164,16 @@ impl Tonique {
                 theme.text_muted,
             ));
         }
-        dialog.child(self.export_ok(theme, context))
+        dialog.child(self.ok_button(theme, context))
     }
 
-    pub(super) fn export_failed(
+    pub(super) fn failed_view(
         &self,
         title: &str,
         detail: &str,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         dialog_frame(NARROW_WIDTH, theme)
             .flex()
             .flex_col()
@@ -188,16 +184,16 @@ impl Tonique {
                     .text_color(hsla(theme.text_muted))
                     .child(detail.to_string()),
             )
-            .child(self.export_ok(theme, context))
+            .child(self.ok_button(theme, context))
     }
 
     /// The button closing the result, on the right.
-    fn export_ok(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
+    fn ok_button(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
         let ok = dialog_button("export-ok", "OK", true, theme).on_mouse_down(
             MouseButton::Left,
             context.listener(|this, _, window, context| {
                 context.stop_propagation();
-                this.close_export(window, context);
+                this.close(window, context);
                 context.notify();
             }),
         );

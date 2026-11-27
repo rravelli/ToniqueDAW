@@ -6,32 +6,29 @@ mod tests;
 use crate::ui::font::semibold;
 use crate::ui::keymap::KeymapExt;
 
-use crate::{
-    config::keymap::Action,
-    core::{
-        grid::Offset,
-        state::{MASTER_TRACK_ID, PlaybackState, ProjectState},
+use crate::ui::{
+    arrangement::{
+        row_layout::RowLayout,
+        ruler::Ruler,
+        timeline::Timeline,
+        track_headers::{FOOTER_PADDING, TrackHeaders, content_height, paint_drop_target},
     },
-    ui::{
-        arrangement::{
-            row_layout::RowLayout,
-            ruler::Ruler,
-            timeline::Timeline,
-            track_headers::{FOOTER_PADDING, TrackHeaders, content_height, paint_drop_target},
-        },
-        commands::Commands,
-        graph::GraphView,
-        theme::{ThemeExt, font_size, with_alpha},
-        widget::{
-            logo::logo,
-            scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
-        },
-        workspace::{MainView, Workspace},
+    commands::Commands,
+    graph::GraphView,
+    theme::{ThemeExt, font_size, with_alpha},
+    widget::{
+        logo::logo,
+        scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
     },
+    workspace::{MainView, Workspace},
 };
 use egui::{
     Align2, Color32, FontId, Frame, Margin, Pos2, Rangef, Rect, Sense, Shape, Stroke, Ui, Vec2,
     pos2, vec2,
+};
+use tonique_core::{
+    config::keymap::Action, project::MASTER_TRACK_ID, project::PlaybackState,
+    project::ProjectState, session::timeline_view::Offset, session::timeline_view::TimelineView,
 };
 
 use master_lane::master_lane_ui;
@@ -120,7 +117,7 @@ impl CentralPanel {
         }
         let available_rect = ui.available_rect_before_wrap();
         // Draw navigation bar on top
-        self.ruler.ui(ui, state);
+        self.ruler.ui(ui, state, &mut workspace.timeline_view);
 
         let (area, _) = ui.allocate_exact_size(ui.available_size(), Sense::all());
         // The tracks scroll above a footer holding the master.
@@ -131,7 +128,7 @@ impl CentralPanel {
         ui.set_clip_rect(viewport);
 
         let timeline_viewport = viewport;
-        let mut layout = RowLayout::new(state, viewport.top(), state.grid.offset.y);
+        let mut layout = RowLayout::new(state, viewport.top(), workspace.timeline_view.offset.y);
         // Draw timeline
         self.timeline.ui(
             ui,
@@ -158,12 +155,12 @@ impl CentralPanel {
 
         // The timeline spans the content plus some room to add more, and
         // never shrinks under the part being looked at.
-        let slack = TIMELINE_SLACK_BARS * state.grid.beats_per_bar();
-        let visible_end = state
-            .grid
-            .width_to_beats(state.grid.offset.x + timeline_viewport.width());
+        let slack = TIMELINE_SLACK_BARS * state.grid().beats_per_bar();
+        let visible_end = workspace
+            .timeline_view
+            .width_to_beats(workspace.timeline_view.offset.x + timeline_viewport.width());
         let end = (state.arrangement_end() + slack).0.max(visible_end);
-        ui.set_width(state.grid.beats_to_width(end));
+        ui.set_width(workspace.timeline_view.beats_to_width(end));
         // The track list is a panel of its own, so its rows don't size this
         // ui: scroll as far down as they go. The footer isn't content.
         // Both from the screen's origin, as the viewport's edges are.
@@ -180,24 +177,43 @@ impl CentralPanel {
             let over = |rect| ui.ctx().rect_contains_pointer(ui.layer_id(), rect);
             if over(timeline_viewport) {
                 scrolled_x |= delta.x != 0.;
-                state.grid.offset.x -= delta.x;
+                workspace.timeline_view.offset.x -= delta.x;
                 let max_x = (content_size.x - timeline_viewport.right()).max(0.);
-                state.grid.offset.x = state.grid.offset.x.clamp(0., max_x);
+                workspace.timeline_view.offset.x =
+                    workspace.timeline_view.offset.x.clamp(0., max_x);
             }
             if over(viewport) || over(self.tracks.rows_rect()) {
-                state.grid.offset.y -= delta.y;
+                workspace.timeline_view.offset.y -= delta.y;
                 let max_y = (content_size.y - viewport.bottom()).max(0.);
-                state.grid.offset.y = state.grid.offset.y.clamp(0., max_y);
+                workspace.timeline_view.offset.y =
+                    workspace.timeline_view.offset.y.clamp(0., max_y);
             }
         }
-        scrolled_x |= self.scrollbars_ui(ui, viewport, content_size, &mut state.grid.offset);
-        self.follow_playhead(ui, state, timeline_viewport, scrolled_x);
+        scrolled_x |= self.scrollbars_ui(
+            ui,
+            viewport,
+            content_size,
+            &mut workspace.timeline_view.offset,
+        );
+        self.follow_playhead(
+            ui,
+            state,
+            &mut workspace.timeline_view,
+            timeline_viewport,
+            scrolled_x,
+        );
         // From the ruler's top, for the playhead's handle, to the footer.
         let cursors = Rect::from_min_max(
             available_rect.min,
             pos2(timeline_viewport.right(), timeline_viewport.bottom()),
         );
-        self.cursors_ui(ui, state, cursors, timeline_viewport);
+        self.cursors_ui(
+            ui,
+            state,
+            &workspace.timeline_view,
+            cursors,
+            timeline_viewport,
+        );
     }
 
     /// Keep the playhead in the middle of the view during playback. Near the
@@ -207,6 +223,7 @@ impl CentralPanel {
         &mut self,
         ui: &Ui,
         state: &mut ProjectState,
+        view: &mut TimelineView,
         viewport: Rect,
         scrolled_by_hand: bool,
     ) {
@@ -226,8 +243,8 @@ impl CentralPanel {
         {
             return;
         }
-        let x = state.grid.beats_to_width(state.playhead().0);
-        state.grid.offset.x = (x - viewport.width() / 2.).max(0.);
+        let x = view.beats_to_width(state.playhead().0);
+        view.offset.x = (x - viewport.width() / 2.).max(0.);
     }
 
     /// The timeline's scrollbars, when the content overflows: along the
@@ -282,27 +299,34 @@ impl CentralPanel {
     /// only while it differs from the playhead) and playhead with its
     /// draggable handle. `rect` spans the ruler and the timeline, `lanes`
     /// the timeline alone.
-    fn cursors_ui(&self, ui: &mut Ui, state: &mut ProjectState, rect: Rect, lanes: Rect) {
+    fn cursors_ui(
+        &self,
+        ui: &mut Ui,
+        state: &mut ProjectState,
+        view: &TimelineView,
+        rect: Rect,
+        lanes: Rect,
+    ) {
         ui.set_clip_rect(rect);
         let theme = ui.app_theme();
         let painter = ui.painter();
         if state.looping() {
             let (start, end) = state.loop_range();
             for beats in [start, end] {
-                let x = state.grid.beats_to_x(beats, rect.span());
+                let x = view.beats_to_x(beats, rect.span());
                 painter.vline(x, rect.y_range(), Stroke::new(1.0, theme.loop_region));
             }
         }
         if state.edit_cursor() != state.playhead() {
             // An arrow on the ruler, pointing down at the timeline.
-            let x = state.grid.beats_to_x(state.edit_cursor(), rect.span());
+            let x = view.beats_to_x(state.edit_cursor(), rect.span());
             painter.add(Shape::convex_polygon(
                 edit_cursor_arrow(x, lanes.top()).to_vec(),
                 theme.edit_cursor,
                 Stroke::NONE,
             ));
         }
-        let playhead_x = state.grid.beats_to_x(state.playhead(), rect.span());
+        let playhead_x = view.beats_to_x(state.playhead(), rect.span());
         let line_stroke = Stroke::new(2.0, with_alpha(theme.playhead, 160));
 
         // Draw vertical playhead line
@@ -361,7 +385,7 @@ impl CentralPanel {
         if handle_response.dragged()
             && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
         {
-            state.seek(state.grid.x_to_beats(mouse_pos.x, rect.span()));
+            state.seek(view.x_to_beats(mouse_pos.x, rect.span()));
         }
     }
 }

@@ -3,10 +3,7 @@
 
 use gpui::{Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, div, prelude::*, px};
 
-use crate::{
-    app::Tonique,
-    theme::{Theme, hsla},
-};
+use crate::theme::{Theme, hsla};
 
 /// The grip's width, inside the panel's edge.
 pub const HANDLE_WIDTH: f32 = 5.;
@@ -82,12 +79,12 @@ impl Splitter {
 
 /// The grip of the splitter `get` finds, along its panel's edge: the panel
 /// must be `relative`.
-pub fn splitter_handle(
+pub fn splitter_handle<V: 'static>(
     id: &'static str,
     splitter: &Splitter,
     theme: &Theme,
-    context: &mut Context<Tonique>,
-    get: fn(&mut Tonique) -> &mut Splitter,
+    context: &mut Context<V>,
+    get: fn(&mut V) -> &mut Splitter,
 ) -> Stateful<gpui::Div> {
     let accent = hsla(theme.accent);
     let edge = splitter.edge;

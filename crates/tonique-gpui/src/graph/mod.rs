@@ -4,29 +4,32 @@
 //! the wheel pans, Ctrl+wheel zooms around the pointer, a double click
 //! fits.
 //!
-//! Each frame, `graph_view` takes what's shown into a [`paint::GraphScene`];
-//! the canvas paints it.
+//! A view of its own: each frame it takes what's shown into a
+//! [`paint::GraphScene`]; the canvas paints it.
 
 mod paint;
 
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
-    Bounds, ContentMask, Context, CursorStyle, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels,
-    ScrollEvent, Task, Window, canvas, div, prelude::*,
+    App, Bounds, ContentMask, Context, CursorStyle, Entity, MouseButton, MouseDownEvent,
+    MouseMoveEvent, Pixels, ScrollEvent, Task, Window, canvas, div, prelude::*,
 };
 use tonique_engine::graph::GraphTopology;
 
 use crate::{
-    app::Tonique,
-    config::keymap::Action,
-    core::graph_layout::{
-        NODE_HEIGHT, NODE_WIDTH, bounds, layout, node_title, stats_line, track_names,
-    },
     geometry::Rect,
+    model::{HoldsProject, Project},
     smooth_scroll::WheelDelta,
+    widgets::follow_drag,
 };
 use paint::GraphScene;
+use tonique_core::{
+    config::keymap::Action,
+    monitor::graph_layout::{
+        NODE_HEIGHT, NODE_WIDTH, bounds, layout, node_title, stats_line, track_names,
+    },
+};
 
 /// Around the graph when it's fitted.
 const FIT_MARGIN: f32 = 40.;
@@ -44,13 +47,12 @@ const REFRESH: Duration = Duration::from_millis(33);
 /// Node positions (graph units), by node index.
 pub type Positions = Rc<Vec<(f32, f32)>>;
 
-pub struct GraphUi {
+pub struct GraphView {
+    project: Entity<Project>,
     open: bool,
     /// Node positions (graph units) for the topology they were computed for.
     layout: Option<(Arc<GraphTopology>, Positions)>,
-    /// Graph units added to node positions before zooming.
-    pan: (f32, f32),
-    zoom: f32,
+    camera: Camera,
     /// Refit whenever the graph changes, until the user pans or zooms.
     auto_fit: bool,
     /// Fit once the view's size is known.
@@ -58,21 +60,24 @@ pub struct GraphUi {
     bounds: Rc<Cell<Bounds<Pixels>>>,
     /// Where the pointer was last while dragging, in the window.
     drag: Option<(f32, f32)>,
+    /// The pointer over the view, not under a menu or a dialog.
+    pointer_over: bool,
     /// Redraws the view while it's shown.
     _ticker: Option<Task<()>>,
 }
 
-impl GraphUi {
-    pub fn new() -> Self {
+impl GraphView {
+    pub fn new(project: Entity<Project>) -> Self {
         Self {
+            project,
             open: false,
             layout: None,
-            pan: (0., 0.),
-            zoom: 1.,
+            camera: Camera::default(),
             auto_fit: true,
             fit_pending: false,
             bounds: Rc::default(),
             drag: None,
+            pointer_over: false,
             _ticker: None,
         }
     }
@@ -99,6 +104,35 @@ impl GraphUi {
         (positions, true)
     }
 
+    fn view_size(&self) -> (f32, f32) {
+        let bounds = Rect::of(self.bounds.get());
+        (bounds.width, bounds.height)
+    }
+
+    /// The pointer at `(x, y)` in the window, local to the view.
+    fn local(&self, (x, y): (f32, f32)) -> (f32, f32) {
+        let bounds = Rect::of(self.bounds.get());
+        (x - bounds.left, y - bounds.top)
+    }
+}
+
+/// Where the view looks at the graph from.
+struct Camera {
+    /// Graph units added to node positions before zooming.
+    pan: (f32, f32),
+    zoom: f32,
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Self {
+            pan: (0., 0.),
+            zoom: 1.,
+        }
+    }
+}
+
+impl Camera {
     /// Zoom and pan so the whole graph is visible in `(width, height)`,
     /// or, if that would make it unreadable, show it from the sources
     /// (left) at a readable size.
@@ -118,17 +152,6 @@ impl GraphUi {
         if graph_width * self.zoom > room_x {
             self.pan.0 = FIT_MARGIN / self.zoom - left;
         }
-    }
-
-    fn view_size(&self) -> (f32, f32) {
-        let bounds = Rect::of(self.bounds.get());
-        (bounds.width, bounds.height)
-    }
-
-    /// The pointer at `(x, y)` in the window, local to the view.
-    fn local(&self, (x, y): (f32, f32)) -> (f32, f32) {
-        let bounds = Rect::of(self.bounds.get());
-        (x - bounds.left, y - bounds.top)
     }
 
     /// The node under `(x, y)`, local to the view.
@@ -153,18 +176,24 @@ impl GraphUi {
             anchor_x / self.zoom - graph_x,
             anchor_y / self.zoom - graph_y,
         );
-        self.auto_fit = false;
     }
 }
 
-impl Tonique {
+impl HoldsProject for GraphView {
+    fn project(&self) -> &Entity<Project> {
+        &self.project
+    }
+}
+
+impl GraphView {
     /// Between the timeline and the graph, in builds that have it (debug
     /// ones). The engine measures its nodes only while the graph shows.
-    pub fn toggle_graph(&mut self, context: &mut Context<Self>) {
-        let graph = &mut self.graph;
-        graph.open = !graph.open && Action::ToggleGraphView.is_available();
-        graph.drag = None;
-        graph._ticker = graph.open.then(|| {
+    pub fn toggle(&mut self, context: &mut Context<Self>) {
+        self.open = !self.open && Action::ToggleGraphView.is_available();
+        self.drag = None;
+        let open = self.open;
+        self.state_mut(context).set_monitor_graph(open);
+        self._ticker = open.then(|| {
             context.spawn(async move |this, context| {
                 loop {
                     context.background_executor().timer(REFRESH).await;
@@ -174,19 +203,114 @@ impl Tonique {
                 }
             })
         });
-        if graph.open {
-            graph.fit_pending |= graph.auto_fit;
+        if open {
+            self.fit_pending |= self.auto_fit;
+        }
+        context.notify();
+    }
+
+    /// What the canvas paints this frame, fitting the graph first when it
+    /// changed or was just shown.
+    fn scene(&mut self, window: &Window, context: &App) -> GraphScene {
+        let theme = crate::theme::current(context);
+        let state = self.state(context);
+        let Some(topology) = state.graph().topology().cloned() else {
+            return GraphScene::empty(theme);
+        };
+        let (positions, relaid) = self.positions(&topology);
+        self.fit_pending |= relaid && self.auto_fit;
+        let size = self.view_size();
+        // The size is known from the second frame on.
+        if self.fit_pending && size.0 > 0. && size.1 > 0. {
+            self.camera.fit(size, &positions);
+            self.fit_pending = false;
+        }
+
+        let pointer = window.mouse_position();
+        let pointer = self.local((f32::from(pointer.x), f32::from(pointer.y)));
+        let hovered = self
+            .pointer_over
+            .then(|| self.camera.node_at(&positions, pointer))
+            .flatten();
+
+        let monitor = &state.graph();
+        let owners = track_names(state);
+        let titles = topology
+            .nodes
+            .iter()
+            .map(|node| node_title(node, &owners))
+            .collect();
+        let nodes_cpu: f32 = monitor.cpu.iter().sum();
+        GraphScene {
+            theme,
+            stats: stats_line(&topology, state.metrics().latency, nodes_cpu),
+            topology: Some(topology),
+            positions,
+            pan: self.camera.pan,
+            zoom: self.camera.zoom,
+            titles,
+            levels: monitor.levels.clone(),
+            cpu: monitor.cpu.clone(),
+            hovered: hovered.map(|node| (node, pointer)),
         }
     }
 
-    pub fn graph_view(
-        &mut self,
-        window: &mut Window,
-        context: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let scene = self.graph_scene(window);
-        let slot = self.graph.bounds.clone();
-        let cursor = if self.graph.is_dragging() {
+    fn on_down(&mut self, event: &MouseDownEvent, _: &mut Window, context: &mut Context<Self>) {
+        if event.click_count == 2 {
+            if let Some((_, positions)) = &self.layout {
+                let positions = positions.clone();
+                let size = self.view_size();
+                self.camera.fit(size, &positions);
+            }
+            self.auto_fit = true;
+        } else {
+            self.drag = Some((f32::from(event.position.x), f32::from(event.position.y)));
+        }
+        context.notify();
+    }
+
+    /// The wheel pans (across with Shift held); with Ctrl held, it zooms
+    /// around the pointer.
+    fn on_scroll(&mut self, event: &ScrollEvent, _: &mut Window, context: &mut Context<Self>) {
+        let wheel = WheelDelta::of(event.delta);
+        if event.modifiers.control || event.modifiers.platform {
+            let anchor = self.local((f32::from(event.position.x), f32::from(event.position.y)));
+            self.camera
+                .zoom_by((wheel.vertical / ZOOM_WHEEL).exp(), anchor);
+        } else {
+            let (across, down) = if event.modifiers.shift {
+                (wheel.vertical, 0.)
+            } else {
+                (wheel.horizontal, wheel.vertical)
+            };
+            let camera = &mut self.camera;
+            camera.pan.0 += across / camera.zoom;
+            camera.pan.1 += down / camera.zoom;
+        }
+        self.auto_fit = false;
+        context.notify();
+    }
+
+    /// Follows a pan by dragging.
+    fn drag_to(&mut self, event: &MouseMoveEvent, _: &mut Context<Self>) {
+        let Some((last_x, last_y)) = self.drag else {
+            return;
+        };
+        let (x, y) = (f32::from(event.position.x), f32::from(event.position.y));
+        let camera = &mut self.camera;
+        camera.pan.0 += (x - last_x) / camera.zoom;
+        camera.pan.1 += (y - last_y) / camera.zoom;
+        self.drag = Some((x, y));
+        self.auto_fit = false;
+    }
+}
+
+impl Render for GraphView {
+    fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
+        let scene = self.scene(window, context);
+        let slot = self.bounds.clone();
+        let dragging = self.is_dragging();
+        let cursor = if dragging {
             CursorStyle::ClosedHand
         } else {
             CursorStyle::Arrow
@@ -198,8 +322,12 @@ impl Tonique {
             .min_w_0()
             .h_full()
             .cursor(cursor)
-            .on_mouse_down(MouseButton::Left, context.listener(Self::on_graph_down))
-            .on_scroll(context.listener(Self::on_graph_scroll))
+            .on_hover(context.listener(|this, hovered: &bool, _, context| {
+                this.pointer_over = *hovered;
+                context.notify();
+            }))
+            .on_mouse_down(MouseButton::Left, context.listener(Self::on_down))
+            .on_scroll(context.listener(Self::on_scroll))
             .child(
                 canvas(
                     move |bounds, _, _| slot.set(bounds),
@@ -213,115 +341,14 @@ impl Tonique {
                 )
                 .size_full(),
             )
-    }
-
-    /// What the canvas paints this frame, fitting the graph first when it
-    /// changed or was just shown.
-    fn graph_scene(&mut self, window: &Window) -> GraphScene {
-        let theme = self.theme.clone();
-        let Some(topology) = self.state.graph.topology().cloned() else {
-            return GraphScene::empty(theme);
-        };
-        let graph = &mut self.graph;
-        let (positions, relaid) = graph.positions(&topology);
-        graph.fit_pending |= relaid && graph.auto_fit;
-        let size = graph.view_size();
-        // The size is known from the second frame on.
-        if graph.fit_pending && size.0 > 0. && size.1 > 0. {
-            graph.fit(size, &positions);
-            graph.fit_pending = false;
-        }
-
-        let pointer = window.mouse_position();
-        let pointer = graph.local((f32::from(pointer.x), f32::from(pointer.y)));
-        let inside = (0. ..size.0).contains(&pointer.0) && (0. ..size.1).contains(&pointer.1);
-        let hovered = (inside && self.popup.is_none())
-            .then(|| graph.node_at(&positions, pointer))
-            .flatten();
-
-        let monitor = &self.state.graph;
-        let owners = track_names(&self.state);
-        let titles = topology
-            .nodes
-            .iter()
-            .map(|node| node_title(node, &owners))
-            .collect();
-        let nodes_cpu: f32 = monitor.cpu.iter().sum();
-        GraphScene {
-            theme,
-            stats: stats_line(&topology, self.state.metrics.latency, nodes_cpu),
-            topology: Some(topology),
-            positions,
-            pan: graph.pan,
-            zoom: graph.zoom,
-            titles,
-            levels: monitor.levels.clone(),
-            cpu: monitor.cpu.clone(),
-            hovered: hovered.map(|node| (node, pointer)),
-        }
-    }
-
-    fn on_graph_down(
-        &mut self,
-        event: &MouseDownEvent,
-        _: &mut Window,
-        context: &mut Context<Self>,
-    ) {
-        let graph = &mut self.graph;
-        if event.click_count == 2 {
-            if let Some((_, positions)) = &graph.layout {
-                let positions = positions.clone();
-                graph.fit(graph.view_size(), &positions);
-            }
-            graph.auto_fit = true;
-        } else {
-            graph.drag = Some((f32::from(event.position.x), f32::from(event.position.y)));
-        }
-        context.notify();
-    }
-
-    /// The wheel pans (across with Shift held); with Ctrl held, it zooms
-    /// around the pointer.
-    fn on_graph_scroll(
-        &mut self,
-        event: &ScrollEvent,
-        _: &mut Window,
-        context: &mut Context<Self>,
-    ) {
-        let wheel = WheelDelta::of(event.delta);
-        let graph = &mut self.graph;
-        if event.modifiers.control || event.modifiers.platform {
-            let anchor = graph.local((f32::from(event.position.x), f32::from(event.position.y)));
-            graph.zoom_by((wheel.vertical / ZOOM_WHEEL).exp(), anchor);
-        } else {
-            let (across, down) = if event.modifiers.shift {
-                (wheel.vertical, 0.)
-            } else {
-                (wheel.horizontal, wheel.vertical)
-            };
-            graph.pan.0 += across / graph.zoom;
-            graph.pan.1 += down / graph.zoom;
-            graph.auto_fit = false;
-        }
-        context.notify();
-    }
-
-    /// Follows a pan by dragging. Returns whether one is going on.
-    pub(crate) fn graph_drag_move(&mut self, event: &MouseMoveEvent) -> bool {
-        let graph = &mut self.graph;
-        let Some((last_x, last_y)) = graph.drag else {
-            return false;
-        };
-        let (x, y) = (f32::from(event.position.x), f32::from(event.position.y));
-        graph.pan.0 += (x - last_x) / graph.zoom;
-        graph.pan.1 += (y - last_y) / graph.zoom;
-        graph.drag = Some((x, y));
-        graph.auto_fit = false;
-        true
-    }
-
-    pub(crate) fn graph_drag_end(&mut self) {
-        self.graph.drag = None;
+            // A pan follows the pointer anywhere in the window.
+            .when(dragging, |element| {
+                element.child(follow_drag(
+                    context.weak_entity(),
+                    Self::drag_to,
+                    |this, _, _| this.drag = None,
+                ))
+            })
     }
 }
 
@@ -332,13 +359,13 @@ mod tests {
     #[test]
     fn fitting_shows_every_node() {
         let positions = [(0., -72.), (0., 72.), (240., 0.), (480., 0.)];
-        let mut graph = GraphUi::new();
+        let mut camera = Camera::default();
         let size = (1200., 800.);
-        graph.fit(size, &positions);
+        camera.fit(size, &positions);
         for &position in &positions {
-            let (left, top) = graph.to_view(position);
+            let (left, top) = camera.to_view(position);
             let (right, bottom) =
-                graph.to_view((position.0 + NODE_WIDTH, position.1 + NODE_HEIGHT));
+                camera.to_view((position.0 + NODE_WIDTH, position.1 + NODE_HEIGHT));
             assert!(left >= 0. && top >= 0., "{position:?} off the top left");
             assert!(
                 right <= size.0 && bottom <= size.1,
@@ -346,25 +373,27 @@ mod tests {
             );
         }
         assert_eq!(
-            graph.node_at(&positions, graph.to_view((250., 10.))),
+            camera.node_at(&positions, camera.to_view((250., 10.))),
             Some(2)
         );
-        assert_eq!(graph.node_at(&positions, graph.to_view((-50., 0.))), None);
+        assert_eq!(camera.node_at(&positions, camera.to_view((-50., 0.))), None);
     }
 
     #[test]
     fn zooming_keeps_the_point_under_the_pointer() {
-        let mut graph = GraphUi::new();
-        graph.pan = (30., -20.);
+        let mut camera = Camera {
+            pan: (30., -20.),
+            ..Camera::default()
+        };
         let anchor = (400., 300.);
         let before = (
-            anchor.0 / graph.zoom - graph.pan.0,
-            anchor.1 / graph.zoom - graph.pan.1,
+            anchor.0 / camera.zoom - camera.pan.0,
+            anchor.1 / camera.zoom - camera.pan.1,
         );
-        graph.zoom_by(1.5, anchor);
-        let after = graph.to_view(before);
+        camera.zoom_by(1.5, anchor);
+        let after = camera.to_view(before);
         assert!((after.0 - anchor.0).abs() < 1e-3 && (after.1 - anchor.1).abs() < 1e-3);
-        graph.zoom_by(100., anchor);
-        assert_eq!(graph.zoom, MAX_ZOOM);
+        camera.zoom_by(100., anchor);
+        assert_eq!(camera.zoom, MAX_ZOOM);
     }
 }

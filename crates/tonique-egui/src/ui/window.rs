@@ -17,7 +17,7 @@ pub fn native_options() -> NativeOptions {
     options.viewport.min_inner_size = Some(MIN_SIZE.into());
     options.window_builder = Some(Box::new(|vb| vb.with_title_shown(false)));
     // Benched UIs are compared at the same size: the whole screen.
-    if crate::bench::Bench::requested() {
+    if tonique_core::dev::bench::Bench::requested() {
         options.viewport.fullscreen = Some(true);
     }
     options

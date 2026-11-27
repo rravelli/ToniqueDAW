@@ -11,7 +11,7 @@ use gpui::{
 };
 
 use crate::{
-    app::{Popup, PopupKind, Tonique, memory},
+    app::{PopupKind, Workspace, memory},
     theme::{Theme, hsla, size},
 };
 
@@ -109,33 +109,30 @@ impl MenuBarUi {
     }
 }
 
-impl Tonique {
+impl Workspace {
     /// Opens `menu` below its title; pressed again, closes it.
-    fn open_bar_menu(&mut self, menu: BarMenu, toggle: bool) {
+    fn open_bar_menu(&mut self, menu: BarMenu, toggle: bool, context: &mut Context<Self>) {
         let Some(title) = self.menu_bar.titles.borrow().get(&menu).copied() else {
             return;
         };
         let at = point(title.origin.x, title.bottom() + px(MENU_OFFSET));
         if toggle {
-            self.toggle_popup(PopupKind::Bar(menu), at, Anchor::TopLeft);
+            self.toggle_popup(PopupKind::Bar(menu), at, Anchor::TopLeft, context);
         } else {
-            self.popup = Some(Popup {
-                kind: PopupKind::Bar(menu),
-                at,
-                anchor: Anchor::TopLeft,
-                submenu: None,
-            });
+            let kind = PopupKind::Bar(menu);
+            let build = self.menu_builder(kind, context);
+            crate::popup::open(kind, at, Anchor::TopLeft, build, context);
         }
     }
 
     /// Whether a menu of the bar is open.
-    fn bar_menu_open(&self) -> bool {
-        let open = self.popup.as_ref().map(|popup| popup.kind);
+    fn bar_menu_open(&self, context: &gpui::App) -> bool {
+        let open = crate::popup::shown(context);
         open.is_some_and(|open| BarMenu::ALL.iter().any(|menu| menu.shows(open)))
     }
 
     pub(super) fn menu_bar(&self, context: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let titles = BarMenu::ALL.map(|menu| self.bar_title(menu, theme, context));
         div()
             .id("menu-bar")
@@ -153,8 +150,8 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(|this, _, _, context| {
-                    if this.bar_menu_open() {
-                        this.popup = None;
+                    if this.bar_menu_open(context) {
+                        crate::popup::close(context);
                         context.notify();
                     }
                 }),
@@ -168,12 +165,9 @@ impl Tonique {
 
     /// The frame rate and memory; clicked, the memory's details.
     fn debug_info(&self, context: &mut Context<Self>) -> Option<Stateful<gpui::Div>> {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let text = self.menu_bar.debug_text()?;
-        let open = self
-            .popup
-            .as_ref()
-            .is_some_and(|popup| popup.kind == PopupKind::Memory);
+        let open = crate::popup::shown(context) == Some(PopupKind::Memory);
         let slot = self.menu_bar.debug_bounds.clone();
         Some(
             div()
@@ -209,7 +203,7 @@ impl Tonique {
                             return;
                         };
                         let at = point(bounds.right(), bounds.bottom() + px(MENU_OFFSET));
-                        this.toggle_popup(PopupKind::Memory, at, Anchor::TopRight);
+                        this.toggle_popup(PopupKind::Memory, at, Anchor::TopRight, context);
                         context.notify();
                     }),
                 ),
@@ -222,10 +216,7 @@ impl Tonique {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> Stateful<gpui::Div> {
-        let open = self
-            .popup
-            .as_ref()
-            .is_some_and(|popup| menu.shows(popup.kind));
+        let open = crate::popup::shown(context).is_some_and(|open| menu.shows(open));
         let slot = self.menu_bar.titles.clone();
         div()
             .id(menu.name())
@@ -253,17 +244,14 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, _, _, context| {
                     context.stop_propagation();
-                    this.open_bar_menu(menu, true);
+                    this.open_bar_menu(menu, true, context);
                     context.notify();
                 }),
             )
             .on_hover(context.listener(move |this, hovered: &bool, _, context| {
-                let elsewhere = !this
-                    .popup
-                    .as_ref()
-                    .is_some_and(|popup| menu.shows(popup.kind));
-                if *hovered && this.bar_menu_open() && elsewhere {
-                    this.open_bar_menu(menu, false);
+                let elsewhere = !crate::popup::shown(context).is_some_and(|open| menu.shows(open));
+                if *hovered && this.bar_menu_open(context) && elsewhere {
+                    this.open_bar_menu(menu, false, context);
                     context.notify();
                 }
             }))

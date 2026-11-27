@@ -5,7 +5,7 @@ use crate::ui::{
     theme::ThemeExt,
     widget::arrow_keys::{arrow_presses, paint_outline},
 };
-use crate::utils::steps::KeyStep;
+use tonique_core::utils::steps::KeyStep;
 
 const HEIGHT: f32 = 18.;
 const TRACK_HEIGHT: f32 = 4.;

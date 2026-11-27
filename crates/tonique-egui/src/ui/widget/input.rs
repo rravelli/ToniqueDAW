@@ -6,7 +6,7 @@ use egui::{
 use egui_phosphor::fill::{CARET_DOWN, CARET_UP};
 
 use crate::ui::{theme::ThemeExt, widget::arrow_keys::arrow_presses};
-use crate::utils::steps;
+use tonique_core::utils::steps;
 
 const BUTTON_SIZE: Vec2 = Vec2::new(14., 8.0);
 

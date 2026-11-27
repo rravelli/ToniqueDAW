@@ -11,15 +11,14 @@ use tonique_engine::{
     time::{BeatPos, TimeSignature},
 };
 
-use crate::{
-    core::{
-        clip::{AudioClip, MIN_LENGTH},
-        state::{ClipParam, ProjectState},
-    },
-    ui::{
-        theme::{ThemeExt, font_size},
-        widget::{flat_button::FlatButton, param_slider::SliderEdit, step_field::StepField},
-    },
+use crate::ui::{
+    theme::{ThemeExt, font_size},
+    widget::{flat_button::FlatButton, param_slider::SliderEdit, step_field::StepField},
+};
+use tonique_core::{
+    document::clip::{AudioClip, MIN_LENGTH},
+    project::ClipParam,
+    project::ProjectState,
     utils::{format_bars, format_time, parse_bars, parse_parts, steps},
 };
 

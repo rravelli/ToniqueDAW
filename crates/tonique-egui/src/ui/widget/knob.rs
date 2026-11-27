@@ -4,7 +4,6 @@
 use crate::ui::theme::ThemeExt;
 use crate::ui::theme::font_size;
 use crate::ui::widget::arrow_keys::arrow_presses;
-use crate::utils::steps::step_ratio;
 use egui::{
     Align2, CursorIcon, FontId, Pos2, Response, Sense, Shape, Stroke, Ui, Vec2, Widget, vec2,
 };
@@ -12,6 +11,7 @@ use std::{
     f32::consts::{FRAC_PI_4, PI},
     ops::RangeInclusive,
 };
+use tonique_core::utils::steps::step_ratio;
 
 const RADIUS: f32 = 11.;
 const SIZE: Vec2 = vec2(Knob::WIDTH, Knob::HEIGHT);

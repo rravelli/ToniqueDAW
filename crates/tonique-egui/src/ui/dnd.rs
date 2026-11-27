@@ -1,8 +1,7 @@
 //! What can be dragged across panels.
 
-use crate::{
-    analysis::AudioInfo,
-    core::{effect::EffectKind, state::ProjectState},
+use tonique_core::{
+    document::effect::EffectKind, library::analysis::AudioInfo, project::ProjectState,
 };
 use tonique_engine::edit::{PluginId, TrackId};
 

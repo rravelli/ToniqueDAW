@@ -4,19 +4,18 @@
 //! settings, so both apps share them. Shortcuts the app handles itself
 //! (copy, paste, zoom) are listed muted and can't be changed.
 
-use gpui::{Context, MouseButton, ScrollHandle, Window, div, prelude::*, px};
+use super::SettingsDialog;
+use crate::model::HoldsProject;
+use gpui::{App, Context, MouseButton, ScrollHandle, Window, div, prelude::*, px};
 
 use crate::{
-    app::{
-        Tonique,
-        settings::{ROW_GAP, button_row, section_header, status},
-    },
-    config::keymap::{
-        Action, FIXED_SHORTCUTS, Key, Keymap, Mods, Shortcut, format_shortcut, reserved_by,
-    },
+    app::settings::{ROW_GAP, button_row, section_header, status},
     icons,
     theme::{Theme, hsla},
     widgets::{Flat, ScrollbarGrab, dialog_button, glyph, handle_scrollbar, tooltip},
+};
+use tonique_core::config::keymap::{
+    Action, FIXED_SHORTCUTS, Key, Keymap, Mods, Shortcut, format_shortcut, reserved_by,
 };
 
 const GROUPS: [&str; 5] = ["File", "Transport", "Edit", "Grid", "View"];
@@ -97,56 +96,49 @@ impl ShortcutsForm {
     }
 }
 
-impl Tonique {
-    /// Whether a key press goes to the shortcut being recorded.
-    pub(in crate::app) fn records_shortcut(&self) -> bool {
-        self.dialog == Some(crate::app::dialog::Dialog::Settings)
-            && self.settings.shortcuts.is_recording()
-    }
-
+impl SettingsDialog {
     /// Binds the shortcut pressed, `key` with `modifiers`, to what's being
     /// recorded.
-    pub(in crate::app) fn record_shortcut(&mut self, key: Key, modifiers: Mods) {
-        let mut keymap = self.state.settings().keymap.clone();
-        self.settings
-            .shortcuts
+    pub(super) fn record_shortcut(&mut self, key: Key, modifiers: Mods, context: &mut App) {
+        let mut keymap = self.state(context).settings().keymap.clone();
+        self.shortcuts
             .record(&mut keymap, Shortcut::new(modifiers, key));
-        self.set_keymap(keymap);
+        self.set_keymap(keymap, context);
     }
 
     /// Applies and saves `keymap`, when it changed.
-    fn set_keymap(&mut self, keymap: Keymap) {
-        if keymap == self.state.settings().keymap {
+    fn set_keymap(&mut self, keymap: Keymap, context: &mut App) {
+        if keymap == self.state(context).settings().keymap {
             return;
         }
-        let mut settings = self.state.settings().clone();
+        let mut settings = self.state(context).settings().clone();
         settings.keymap = keymap.clone();
-        self.settings.draft.keymap = keymap;
-        self.state.apply_settings(settings);
+        self.draft.keymap = keymap;
+        self.state_mut(context).apply_settings(settings);
     }
 
     /// Changes the keymap in use by `change`, and stops recording.
-    fn edit_keymap(&mut self, change: impl FnOnce(&mut Keymap)) {
-        let mut keymap = self.state.settings().keymap.clone();
+    fn edit_keymap(&mut self, change: impl FnOnce(&mut Keymap), context: &mut App) {
+        let mut keymap = self.state(context).settings().keymap.clone();
         change(&mut keymap);
-        self.settings.shortcuts.cancel();
-        self.set_keymap(keymap);
+        self.shortcuts.cancel();
+        self.set_keymap(keymap, context);
     }
 
-    /// Records the next key press as `recording`. The app's own focus
-    /// takes the keyboard, so a field typed in doesn't get it.
+    /// Records the next key press as `recording`. The dialog takes the
+    /// keyboard, before a field typed in and the window's shortcuts.
     fn start_recording(
         &mut self,
         recording: Recording,
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        self.settings.shortcuts.start(recording);
-        window.focus(&self.focus, context);
+        self.shortcuts.start(recording);
+        window.focus(&self.recording_focus, context);
     }
 
     pub(super) fn shortcuts_tab(&self, theme: &Theme, context: &mut Context<Self>) -> gpui::Div {
-        let keymap = &self.state.settings().keymap;
+        let keymap = &self.state(context).settings().keymap.clone();
         let groups = GROUPS.into_iter().map(|group| {
             let actions = Action::ALL
                 .into_iter()
@@ -176,7 +168,7 @@ impl Tonique {
             .id("shortcut-list")
             .size_full()
             .overflow_y_scroll()
-            .track_scroll(&self.settings.shortcuts.scroll)
+            .track_scroll(&self.shortcuts.scroll)
             .pr(px(SCROLLBAR_ROOM))
             .flex()
             .flex_col()
@@ -188,14 +180,14 @@ impl Tonique {
             .min_h_0()
             .child(list)
             .child(handle_scrollbar(
-                &self.settings.shortcuts.scroll,
-                &self.settings.shortcuts.scrollbar,
+                &self.shortcuts.scroll,
+                &self.shortcuts.scrollbar,
                 0.,
                 theme,
                 context,
             ));
 
-        let form = &self.settings.shortcuts;
+        let form = &self.shortcuts;
         let hint = if form.is_recording() {
             "Press the new shortcut, or Esc to cancel."
         } else {
@@ -210,7 +202,7 @@ impl Tonique {
             reset_all.on_mouse_down(
                 MouseButton::Left,
                 context.listener(|this, _, _, context| {
-                    this.edit_keymap(|keymap| *keymap = Keymap::default());
+                    this.edit_keymap(|keymap| *keymap = Keymap::default(), context);
                     context.notify();
                 }),
             )
@@ -232,7 +224,7 @@ impl Tonique {
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let recording = self.settings.shortcuts.recording;
+        let recording = self.shortcuts.recording;
         let id = action.id();
         let mut chips: Vec<gpui::AnyElement> = Vec::new();
         for (index, shortcut) in keymap.bindings(action).iter().enumerate() {
@@ -257,7 +249,7 @@ impl Tonique {
                 .on_mouse_down(
                     MouseButton::Right,
                     context.listener(move |this, _, _, context| {
-                        this.edit_keymap(|keymap| keymap.remove(action, index));
+                        this.edit_keymap(|keymap| keymap.remove(action, index), context);
                         context.notify();
                     }),
                 );
@@ -289,7 +281,7 @@ impl Tonique {
                 .on_mouse_down(
                     MouseButton::Left,
                     context.listener(move |this, _, _, context| {
-                        this.edit_keymap(|keymap| keymap.reset(action));
+                        this.edit_keymap(|keymap| keymap.reset(action), context);
                         context.notify();
                     }),
                 );

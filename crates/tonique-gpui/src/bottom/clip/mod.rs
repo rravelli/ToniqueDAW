@@ -15,22 +15,19 @@ mod markers;
 
 pub use arrows::ClipArrows;
 
+use crate::bottom::BottomPanel;
+use crate::model::HoldsProject;
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    Anchor, AnyElement, Bounds, Context, CursorStyle, MouseButton, MouseDownEvent, MouseMoveEvent,
-    Pixels, ScrollEvent, Window, canvas, div, prelude::*, px,
+    Anchor, AnyElement, App, Bounds, Context, CursorStyle, MouseButton, MouseDownEvent,
+    MouseMoveEvent, Pixels, ScrollEvent, Window, canvas, div, prelude::*, px,
 };
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
 use crate::{
-    app::{PopupKind, Tonique},
+    app::PopupKind,
     bottom::paint::{Align, fill, fill_rounded, text},
-    core::{
-        clip::AudioClip,
-        grid::{GridLine, GridService, Span},
-        track::TrackRow,
-    },
     geometry::Rect,
     smooth_scroll::WheelDelta,
     theme::{Color, Theme, hsla, mono, size, with_alpha},
@@ -41,6 +38,14 @@ use crate::{
 };
 use inspector::{Field, Panels, RAIL_WIDTH};
 use markers::{Area, Handle, TrimEdge};
+use tonique_core::{
+    document::clip::AudioClip,
+    document::track::TrackRow,
+    session::{
+        grid::{Grid, GridLine},
+        timeline_view::{Span, TimelineView},
+    },
+};
 
 const PADDING: f32 = 8.;
 /// The least the waveform's view is given, the inspector taking the rest.
@@ -81,7 +86,9 @@ enum ClipDrag {
 
 pub struct ClipDetails {
     /// The view's zoom and scroll, in beats from `origin`.
-    grid: GridService,
+    timeline_view: TimelineView,
+    /// The project's grid, as last drawn, at this view's zoom.
+    grid: Grid,
     /// The clip the view was fitted to: another one refits it.
     fitted: Option<ClipId>,
     clip: Option<ClipId>,
@@ -128,7 +135,8 @@ impl ClipDetails {
     pub fn new() -> Self {
         Self {
             // Shows what's before the start marker, in the file.
-            grid: GridService::new().with_negative_offset(),
+            timeline_view: TimelineView::new().with_negative_offset(),
+            grid: Grid::default(),
             fitted: None,
             clip: None,
             origin: 0.,
@@ -178,14 +186,18 @@ impl ClipDetails {
 
     /// Where `file` seconds into the file are drawn.
     fn x(&self, file: f64, bpm: f32, span: Span) -> f32 {
-        self.grid
+        self.timeline_view
             .beats_to_x(BeatPos(self.beats(file - self.origin, bpm)), span)
     }
 
     /// The time in the file drawn at `x`, snapped to the grid when
     /// snapping, which Alt inverts.
     fn file_at_x(&self, x: f32, bpm: f32, span: Span, alt: bool) -> f64 {
-        let beats = self.grid.snap(self.grid.x_to_beats(x, span), alt);
+        let beats = self.grid.snap(
+            self.timeline_view.x_to_beats(x, span),
+            alt,
+            &self.timeline_view,
+        );
         self.origin + self.seconds(beats.0, bpm)
     }
 
@@ -201,7 +213,7 @@ impl ClipDetails {
     fn fit(&mut self, clip: &AudioClip, bpm: f32, width: f32) {
         let (start, end) = played(clip, bpm);
         let margin = (end - start) * FIT_MARGIN;
-        self.grid.fit(
+        self.timeline_view.fit(
             BeatPos(clip.file_beats(start - self.origin, bpm) - margin),
             BeatPos(clip.file_beats(end - self.origin, bpm) + margin),
             width,
@@ -212,9 +224,9 @@ impl ClipDetails {
     fn scroll_range(&self, clip: &AudioClip, bpm: f32, width: f32) -> (f32, f32) {
         let file_start = clip.file_beats(-self.origin, bpm);
         let half = width / 2.;
-        let min = self.grid.beats_to_width(file_start) - half;
+        let min = self.timeline_view.beats_to_width(file_start) - half;
         let max = self
-            .grid
+            .timeline_view
             .beats_to_width(file_start + clip.source_beats(bpm))
             - half;
         (min, max.max(min))
@@ -222,14 +234,14 @@ impl ClipDetails {
 
     fn clamp_scroll(&mut self, clip: &AudioClip, bpm: f32, width: f32) {
         let (min, max) = self.scroll_range(clip, bpm, width);
-        self.grid.offset.x = self.grid.offset.x.clamp(min, max);
+        self.timeline_view.offset.x = self.timeline_view.offset.x.clamp(min, max);
     }
 
     /// The scroll for the scrollbar, counted from the range's start.
     fn scroll_span(&self, clip: &AudioClip, bpm: f32, width: f32) -> ScrollSpan {
         let (min, max) = self.scroll_range(clip, bpm, width);
         ScrollSpan {
-            offset: self.grid.offset.x - min,
+            offset: self.timeline_view.offset.x - min,
             max: max - min,
             view: width,
         }
@@ -237,21 +249,31 @@ impl ClipDetails {
 
     /// The grid lines and the bar labels in view, inside the file.
     fn marks(&self, clip: &AudioClip, bpm: f32, span: Span) -> Marks {
-        let (from, to) = self.grid.visible_beats(span);
+        let (from, to) = self.timeline_view.visible_beats(span);
         let (file_left, file_right) = self.file_x(clip, bpm, span);
         let inside = |x: f32| x >= file_left - 0.5 && x <= file_right + 0.5;
         let lines = self
             .grid
-            .lines(from, to, self.grid.line_step())
+            .lines(from, to, self.grid.line_step(&self.timeline_view))
             .into_iter()
-            .map(|(beat, line)| (self.grid.beats_to_x(beat, span), is_bar(&line)))
+            .map(|(beat, line)| (self.timeline_view.beats_to_x(beat, span), is_bar(&line)))
             .filter(|(x, _)| inside(*x))
             .collect();
         let labels = self
             .grid
-            .lines(from, to, self.grid.label_step(from, to))
+            .lines(
+                from,
+                to,
+                self.grid.label_step(from, to, &self.timeline_view),
+            )
             .into_iter()
-            .map(|(beat, line)| (self.grid.beats_to_x(beat, span), label(line), is_bar(&line)))
+            .map(|(beat, line)| {
+                (
+                    self.timeline_view.beats_to_x(beat, span),
+                    label(line),
+                    is_bar(&line),
+                )
+            })
             .filter(|(x, ..)| inside(*x))
             .collect();
         Marks { lines, labels }
@@ -297,7 +319,7 @@ struct Marks {
 
 /// What the view's canvas paints, local to the view.
 struct ClipScene {
-    theme: Theme,
+    theme: std::rc::Rc<Theme>,
     color: Color,
     clip: AudioClip,
     layout: Layout,
@@ -311,7 +333,7 @@ struct ClipScene {
     lit: Option<Area>,
 }
 
-impl Tonique {
+impl BottomPanel {
     pub(super) fn clip_details_view(
         &mut self,
         clip: &AudioClip,
@@ -319,22 +341,22 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> AnyElement {
-        let bpm = self.state.bpm();
-        let details = &mut self.bottom.clip;
+        let state = self.state(context);
+        let (bpm, grid) = (state.bpm(), *state.grid());
+        let details = &mut self.clip;
         if details.clip != Some(clip.id) {
             details.typing = None;
             details.clip = Some(clip.id);
         }
-        details.grid.set_time_signature(self.state.time_signature());
-        // The arrangement's grid settings, at this view's zoom.
-        details.grid.settings = self.state.grid.settings;
+        // The project's grid, at this view's zoom.
+        details.grid = grid;
         // Played faster or slower: the file spans fewer or more beats, the
         // view kept as it was.
         details.speed = clip.speed(bpm);
         if details.fitted == Some(clip.id) && clip.origin != details.origin {
             // Bar 1 moved: the grid follows, the audio stays on screen.
-            details.grid.offset.x -= details
-                .grid
+            details.timeline_view.offset.x -= details
+                .timeline_view
                 .beats_to_width(clip.file_beats(clip.origin - details.origin, bpm));
         }
         details.origin = clip.origin;
@@ -351,11 +373,18 @@ impl Tonique {
         details.clamp_scroll(clip, bpm, layout.width);
 
         // As being dragged, here or in the timeline.
-        let shown = self.state.shown_clip(clip);
-        let scene = self.clip_scene(&shown, track.color, layout, window);
+        let shown = self.state(context).shown_clip(clip);
+        let scene = self.clip_scene(
+            &shown,
+            track.color,
+            layout,
+            crate::theme::current(context),
+            window,
+            context,
+        );
         let cursor = self.clip_cursor(scene.lit.as_ref(), window);
         let waves = self.waves.clone();
-        let slot = self.bottom.clip.view.clone();
+        let slot = self.clip.view.clone();
         let painting = canvas(
             move |bounds, _, _| slot.set(bounds),
             move |bounds, _, window, context| {
@@ -372,17 +401,17 @@ impl Tonique {
         )
         .size_full();
         let id = clip.id;
-        let span = self.bottom.clip.scroll_span(clip, bpm, layout.width);
-        let (min, _) = self.bottom.clip.scroll_range(clip, bpm, layout.width);
+        let span = self.clip.scroll_span(clip, bpm, layout.width);
+        let (min, _) = self.clip.scroll_range(clip, bpm, layout.width);
         let this = context.weak_entity();
         let across_bar = scrollbar(
             Axis::Horizontal,
-            &self.bottom.clip.scrollbar,
-            &self.theme,
+            &self.clip.scrollbar,
+            &crate::theme::current(context),
             move |_| Some(span),
             move |offset, _, app| {
                 let _ = this.update(app, |this, context| {
-                    this.bottom.clip.grid.offset.x = min + offset;
+                    this.clip.timeline_view.offset.x = min + offset;
                     context.notify();
                 });
             },
@@ -404,29 +433,28 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
-                    this.clip_view_press(id, event);
+                    this.clip_view_press(id, event, context);
                     context.notify();
                 }),
             )
             .on_mouse_down(
                 MouseButton::Right,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
-                    this.clip_ruler_menu(id, event);
+                    this.clip_ruler_menu(id, event, context);
                     context.notify();
                 }),
             )
             .on_scroll(
                 context.listener(move |this, event: &ScrollEvent, _, context| {
-                    this.clip_view_scroll(id, event);
+                    this.clip_view_scroll(id, event, context);
                     context.notify();
                 }),
             );
 
         // The waveform gives way to the inspector, down to its least; then
         // the inspector's panels scroll.
-        let room = f32::from(self.bottom.bounds.get().size.width) - 3. * PADDING;
+        let room = f32::from(self.bounds.get().size.width) - 3. * PADDING;
         let inspector_width = self
-            .bottom
             .clip
             .panels
             .width()
@@ -450,14 +478,16 @@ impl Tonique {
         shown: &AudioClip,
         color: Color,
         layout: Layout,
+        theme: std::rc::Rc<Theme>,
         window: &Window,
+        context: &App,
     ) -> ClipScene {
-        let details = &self.bottom.clip;
-        let bpm = self.state.bpm();
+        let details = &self.clip;
+        let bpm = self.state(context).bpm();
         let span = layout.span();
         let x = |file: f64| details.x(file, bpm, span);
         let (start, end) = played(shown, bpm);
-        let playhead = self.state.playhead();
+        let playhead = self.state(context).playhead();
         let playhead = (shown.position <= playhead && playhead < shown.end(bpm))
             .then(|| x(shown.file_at(playhead - shown.position, bpm)));
         let mut markers = vec![(TrimEdge::Start, x(shown.offset))];
@@ -471,11 +501,11 @@ impl Tonique {
             Some(ClipDrag::Handle(drag)) => Some(drag.area),
             _ => {
                 let (pointer_x, pointer_y) = details.local(window.mouse_position());
-                self.handle_at(shown, layout, pointer_x, pointer_y)
+                self.handle_at(shown, layout, pointer_x, pointer_y, context)
             }
         };
         ClipScene {
-            theme: self.theme.clone(),
+            theme,
             color,
             clip: shown.clone(),
             layout,
@@ -492,7 +522,7 @@ impl Tonique {
     }
 
     fn clip_cursor(&self, lit: Option<&Area>, window: &Window) -> CursorStyle {
-        let details = &self.bottom.clip;
+        let details = &self.clip;
         match &details.drag {
             Some(ClipDrag::Pan { .. }) => return CursorStyle::ClosedHand,
             Some(ClipDrag::Handle(drag)) if drag.area.handle == Handle::Loop => {
@@ -520,32 +550,32 @@ impl Tonique {
     /// panned (or, double-clicked, the playhead sent where that part of the
     /// file plays first), or the ruler double-clicked to fit the clip
     /// again.
-    fn clip_view_press(&mut self, id: ClipId, event: &MouseDownEvent) {
-        let Some((_, clip)) = self.state.clip_with_track(id) else {
+    fn clip_view_press(&mut self, id: ClipId, event: &MouseDownEvent, context: &mut App) {
+        let Some((_, clip)) = self.state(context).clip_with_track(id) else {
             return;
         };
-        let shown = self.state.shown_clip(&clip);
-        let bpm = self.state.bpm();
-        let details = &self.bottom.clip;
+        let shown = self.state(context).shown_clip(&clip);
+        let bpm = self.state(context).bpm();
+        let details = &self.clip;
         let layout = details.layout();
         let (pointer_x, pointer_y) = details.local(event.position);
-        if let Some(area) = self.handle_at(&shown, layout, pointer_x, pointer_y) {
-            self.bottom.clip.drag = Some(ClipDrag::Handle(markers::HandleDrag {
+        if let Some(area) = self.handle_at(&shown, layout, pointer_x, pointer_y, context) {
+            self.clip.drag = Some(ClipDrag::Handle(markers::HandleDrag {
                 area,
                 press_x: pointer_x,
                 grabbed: shown.looped,
             }));
             return;
         }
-        let details = &mut self.bottom.clip;
+        let details = &mut self.clip;
         if pointer_y < layout.lane.0 {
             if event.click_count >= 2 {
                 details.fit(&clip, bpm, layout.width);
             }
         } else if pointer_y < layout.lane.1 {
             if event.click_count >= 2 {
-                let beats = details.grid.x_to_beats(pointer_x, layout.span());
-                self.state.seek(clip.position + beats.0);
+                let beats = details.timeline_view.x_to_beats(pointer_x, layout.span());
+                self.state_mut(context).seek(clip.position + beats.0);
             } else {
                 details.drag = Some(ClipDrag::Pan { last_x: pointer_x });
             }
@@ -553,41 +583,44 @@ impl Tonique {
     }
 
     /// A right-click on the ruler: where to put bar 1.
-    fn clip_ruler_menu(&mut self, id: ClipId, event: &MouseDownEvent) {
-        let details = &self.bottom.clip;
+    fn clip_ruler_menu(&mut self, id: ClipId, event: &MouseDownEvent, context: &mut Context<Self>) {
+        let details = &self.clip;
         let (pointer_x, pointer_y) = details.local(event.position);
         if pointer_y >= RULER_HEIGHT {
             return;
         }
         // Where the pointer is, not snapped: the grid being moved.
-        let beats = details.grid.x_to_beats(pointer_x, details.layout().span());
-        let at = details.origin + details.seconds(beats.0, self.state.bpm());
+        let beats = details
+            .timeline_view
+            .x_to_beats(pointer_x, details.layout().span());
+        let at = details.origin + details.seconds(beats.0, self.state(context).bpm());
         self.toggle_popup(
             PopupKind::ClipRuler(id, at),
             event.position,
             Anchor::TopLeft,
+            context,
         );
     }
 
     /// Ctrl+wheel zooms, like the timeline, and so does the wheel over the
     /// ruler; elsewhere it scrolls across.
-    fn clip_view_scroll(&mut self, id: ClipId, event: &ScrollEvent) {
-        let Some((_, clip)) = self.state.clip_with_track(id) else {
+    fn clip_view_scroll(&mut self, id: ClipId, event: &ScrollEvent, context: &mut App) {
+        let Some((_, clip)) = self.state(context).clip_with_track(id) else {
             return;
         };
-        let bpm = self.state.bpm();
+        let bpm = self.state(context).bpm();
         let wheel = WheelDelta::of(event.delta);
-        let details = &mut self.bottom.clip;
+        let details = &mut self.clip;
         let layout = details.layout();
         let (pointer_x, pointer_y) = details.local(event.position);
         let command = event.modifiers.control || event.modifiers.platform;
         if command || pointer_y < RULER_HEIGHT {
             details
-                .grid
+                .timeline_view
                 .zoom_around(-wheel.vertical, pointer_x, layout.span());
         } else {
             // Only across here: the vertical wheel too.
-            details.grid.offset.x -= if wheel.horizontal != 0. {
+            details.timeline_view.offset.x -= if wheel.horizontal != 0. {
                 wheel.horizontal
             } else {
                 wheel.vertical
@@ -604,79 +637,93 @@ impl Tonique {
         at: f64,
         context: &mut Context<Self>,
     ) -> Option<gpui::Div> {
-        let (_, clip) = self.state.clip_with_track(id)?;
+        let (_, clip) = self.state(context).clip_with_track(id)?;
         let offset = clip.offset;
         Some(
-            Menu::new(&self.theme)
-                .item(MenuItem::new("Bar 1 here"), context, move |this, _, _| {
-                    this.state.set_clip_origin(id, at)
-                })
+            Menu::new(&crate::theme::current(context))
+                .item(
+                    MenuItem::new("Bar 1 here"),
+                    context,
+                    move |this, _, context| this.state_mut(context).set_clip_origin(id, at),
+                )
                 .item(
                     MenuItem::new("Bar 1 at the start marker"),
                     context,
-                    move |this, _, _| this.state.set_clip_origin(id, offset),
+                    move |this, _, context| this.state_mut(context).set_clip_origin(id, offset),
                 )
                 .item(
                     MenuItem::new("Bar 1 at the file's start"),
                     context,
-                    move |this, _, _| this.state.set_clip_origin(id, 0.),
+                    move |this, _, context| this.state_mut(context).set_clip_origin(id, 0.),
                 )
                 .into_element(),
         )
     }
 
-    pub(super) fn clip_drag_move(&mut self, event: &MouseMoveEvent) -> bool {
-        let Some(id) = self.bottom.clip.clip else {
+    pub(super) fn clip_drag_move(&mut self, event: &MouseMoveEvent, context: &mut App) -> bool {
+        let Some(id) = self.clip.clip else {
             return false;
         };
-        if self.bottom.clip.drag.is_none() {
+        if self.clip.drag.is_none() {
             return false;
         }
-        let Some((_, clip)) = self.state.clip_with_track(id) else {
-            self.bottom.clip.drag = None;
+        let Some((_, clip)) = self.state(context).clip_with_track(id) else {
+            self.clip.drag = None;
             return false;
         };
-        let bpm = self.state.bpm();
-        let (pointer_x, _) = self.bottom.clip.local(event.position);
-        let details = &mut self.bottom.clip;
+        let bpm = self.state(context).bpm();
+        let (pointer_x, _) = self.clip.local(event.position);
+        let details = &mut self.clip;
         let layout = details.layout();
         match details.drag.as_mut() {
             Some(ClipDrag::Pan { last_x }) => {
-                details.grid.offset.x -= pointer_x - *last_x;
+                details.timeline_view.offset.x -= pointer_x - *last_x;
                 *last_x = pointer_x;
                 details.clamp_scroll(&clip, bpm, layout.width);
             }
-            Some(ClipDrag::Handle(_)) => self.follow_handle(&clip, pointer_x, event.modifiers.alt),
-            Some(ClipDrag::Field { .. }) => {
-                self.follow_field(&clip, f32::from(event.position.x), event.modifiers.alt)
+            Some(ClipDrag::Handle(_)) => {
+                self.follow_handle(&clip, pointer_x, event.modifiers.alt, context)
             }
-            Some(ClipDrag::Slider { .. }) => {
-                self.follow_slider(&clip, f32::from(event.position.x), event.modifiers.shift)
-            }
+            Some(ClipDrag::Field { .. }) => self.follow_field(
+                &clip,
+                f32::from(event.position.x),
+                event.modifiers.alt,
+                context,
+            ),
+            Some(ClipDrag::Slider { .. }) => self.follow_slider(
+                &clip,
+                f32::from(event.position.x),
+                event.modifiers.shift,
+                context,
+            ),
             None => return false,
         }
         true
     }
 
-    pub(super) fn clip_drag_end(&mut self) {
-        let Some(drag) = self.bottom.clip.drag.take() else {
+    pub(super) fn clip_drag_end(&mut self, context: &mut App) {
+        let Some(drag) = self.clip.drag.take() else {
             return;
         };
-        let Some(id) = self.bottom.clip.clip else {
+        let Some(id) = self.clip.clip else {
             return;
         };
-        let Some((_, clip)) = self.state.clip_with_track(id) else {
+        let Some((_, clip)) = self.state(context).clip_with_track(id) else {
             return;
         };
         match drag {
-            ClipDrag::Handle(_) => self.state.commit_resize_clip(self.state.shown_clip(&clip)),
+            ClipDrag::Handle(_) => {
+                let shown = self.state(context).shown_clip(&clip);
+                self.state_mut(context).commit_resize_clip(shown);
+            }
             // Clicked, it took the arrow keys; a double-click types it.
             ClipDrag::Field { moved, .. } => {
                 if moved {
-                    self.state.commit_resize_clip(self.state.shown_clip(&clip));
+                    let shown = self.state(context).shown_clip(&clip);
+                    self.state_mut(context).commit_resize_clip(shown);
                 }
             }
-            ClipDrag::Slider { slider, drag, .. } => self.end_slider(&clip, slider, drag),
+            ClipDrag::Slider { slider, drag, .. } => self.end_slider(&clip, slider, drag, context),
             ClipDrag::Pan { .. } => {}
         }
     }

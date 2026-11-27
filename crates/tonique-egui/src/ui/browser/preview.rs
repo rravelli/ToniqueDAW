@@ -13,16 +13,13 @@ use egui_phosphor::{
     regular::{HEADPHONES, SPEAKER_LOW, SPEAKER_SLASH},
 };
 
-use crate::{
-    analysis::AudioInfo,
-    core::state::{PlaybackState, ProjectState},
-    ui::{
-        font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
-        theme::{ThemeExt, with_alpha},
-        waveform::paint_waveform,
-        widget::flat_button::FlatButton,
-    },
+use crate::ui::{
+    font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
+    theme::{ThemeExt, with_alpha},
+    waveform::paint_waveform,
+    widget::flat_button::FlatButton,
 };
+use tonique_core::{library::analysis::AudioInfo, project::PlaybackState, project::ProjectState};
 
 /// Height of the preview.
 pub const PREVIEW_HEIGHT: f32 = 102.;

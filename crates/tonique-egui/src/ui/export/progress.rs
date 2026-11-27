@@ -5,14 +5,12 @@ use egui::{
 };
 use egui_phosphor::regular::{CHECK, CIRCLE, CIRCLE_NOTCH};
 
-use crate::{
-    core::export::{Export, ExportFile, ExportOutcome, Waveform},
-    ui::{
-        font::PHOSPHOR_REGULAR,
-        theme::{ThemeExt, font_size},
-        widget::dialog::{self, button},
-    },
+use crate::ui::{
+    font::PHOSPHOR_REGULAR,
+    theme::{ThemeExt, font_size},
+    widget::dialog::{self, button},
 };
+use tonique_core::files::export::{Export, ExportFile, ExportOutcome, Waveform};
 
 use super::{
     LANE_PADDING, Step,

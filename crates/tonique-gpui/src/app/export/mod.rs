@@ -12,18 +12,27 @@ mod parts;
 mod preview;
 mod progress;
 
-use std::{cell::Cell, collections::HashSet, path::PathBuf, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashSet,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
-use gpui::{Bounds, Context, MouseDownEvent, MouseMoveEvent, Pixels, Window};
+use gpui::{
+    App, Bounds, Context, Entity, EventEmitter, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    Pixels, Render, Window, div, prelude::*,
+};
 use tonique_engine::time::BeatPos;
 
 use crate::{
-    app::{Tonique, dialog::Dialog},
-    core::{
-        export::{Export, ExportFile, ExportOptions, ExportOutcome, ExportRange, Waveform},
-        state::ExportSelection,
-    },
-    widgets::TextField,
+    model::{HoldsProject, Project},
+    wave::WaveCache,
+    widgets::{TextField, follow_drag},
+};
+use tonique_core::{
+    files::export::{Export, ExportFile, ExportOptions, ExportOutcome, ExportRange, Waveform},
+    project::ExportSelection,
 };
 
 /// Room for a rendered file's waveform, and around the preview's lanes.
@@ -52,7 +61,11 @@ enum Bound {
     End,
 }
 
-pub struct ExportUi {
+/// The dialog, a view of its own.
+pub struct ExportDialog {
+    project: Entity<Project>,
+    /// The clips' waveforms, shared with the timeline, for the preview.
+    waves: Rc<RefCell<WaveCache>>,
     step: Step,
     /// Kept between exports, as what's chosen.
     options: ExportOptions,
@@ -75,9 +88,29 @@ pub struct ExportUi {
     dragged_bound: Option<Bound>,
 }
 
-impl ExportUi {
-    pub fn new(context: &mut Context<Tonique>) -> Self {
+/// What the dialog asks of the window.
+pub enum ExportEvent {
+    Close,
+}
+
+impl EventEmitter<ExportEvent> for ExportDialog {}
+
+impl HoldsProject for ExportDialog {
+    fn project(&self) -> &Entity<Project> {
+        &self.project
+    }
+}
+
+impl ExportDialog {
+    /// What its waveforms take.
+    pub fn wave_memory(&self) -> crate::wave::WaveMemory {
+        self.waves.borrow().memory()
+    }
+
+    pub fn new(project: Entity<Project>, context: &mut Context<Self>) -> Self {
         Self {
+            project,
+            waves: Rc::default(),
             step: Step::Options,
             options: ExportOptions::default(),
             selection: ExportSelection::default(),
@@ -95,7 +128,7 @@ impl ExportUi {
         matches!(self.step, Step::Running(_))
     }
 
-    pub fn is_dragging(&self) -> bool {
+    fn is_dragging(&self) -> bool {
         self.dragged_bound.is_some()
     }
 
@@ -108,63 +141,54 @@ impl ExportUi {
     }
 }
 
-impl Tonique {
-    /// Asks what to export. Ignored while an export runs.
-    pub fn open_export(&mut self, window: &mut Window, context: &mut Context<Self>) {
-        let export = &mut self.export;
-        if export.is_running() {
+impl ExportDialog {
+    /// Asks what to export, into files named `name` in `dir` unless
+    /// another folder was chosen. Ignored while an export runs.
+    pub fn open(&mut self, name: String, dir: Option<&Path>) {
+        if self.is_running() {
             return;
         }
-        export.name.text = self.project.name();
-        if let Some(dir) = self.project.dir() {
-            export.folder.text = dir.display().to_string();
+        self.name.text = name;
+        if let Some(dir) = dir {
+            self.folder.text = dir.display().to_string();
         }
-        export.existing = None;
-        export.typing = None;
-        export.step = Step::Options;
-        self.popup = None;
-        self.dialog = Some(Dialog::Export);
-        window.focus(&self.focus, context);
+        self.existing = None;
+        self.typing = None;
+        self.step = Step::Options;
     }
 
-    /// Whether the export dialog may close: not while files render.
-    pub(super) fn export_closes(&self) -> bool {
-        !self.export.is_running()
+    /// Lets go of a bound being typed: the window closes the dialog.
+    fn close(&mut self, window: &mut Window, context: &mut Context<Self>) {
+        self.typing = None;
+        crate::app::focus_main(window, context);
+        context.emit(ExportEvent::Close);
     }
 
-    fn close_export(&mut self, window: &mut Window, context: &mut Context<Self>) {
-        self.dialog = None;
-        self.export.typing = None;
-        window.focus(&self.focus, context);
-    }
-
-    fn start_export(&mut self, window: &mut Window, context: &mut Context<Self>) {
-        let export = &mut self.export;
-        let sources = export.selection.sources(&self.state);
-        let dir = PathBuf::from(export.folder.text.trim());
-        let started = self
-            .state
-            .export(&dir, &export.name.text, &sources, export.options);
-        export.step = match started {
+    fn start(&mut self, window: &mut Window, context: &mut Context<Self>) {
+        let state = self.state(context);
+        let sources = self.selection.sources(state);
+        let dir = PathBuf::from(self.folder.text.trim());
+        let started = state.export(&dir, &self.name.text, &sources, self.options);
+        self.step = match started {
             Ok(running) => Step::Running(running),
             Err(detail) => Step::Failed {
                 title: "Couldn't export".into(),
                 detail,
             },
         };
-        export.typing = None;
-        window.focus(&self.focus, context);
+        self.typing = None;
+        crate::app::focus_main(window, context);
     }
 
     /// Goes on to the result once the files are rendered.
-    fn poll_export(&mut self) {
-        let Step::Running(running) = &mut self.export.step else {
+    fn poll(&mut self) {
+        let Step::Running(running) = &mut self.step else {
             return;
         };
         let Some(outcome) = running.outcome().cloned() else {
             return;
         };
-        self.export.step = match outcome {
+        self.step = match outcome {
             ExportOutcome::Done => Step::Done {
                 files: running.files().to_vec(),
                 waveforms: running.waveforms(),
@@ -178,70 +202,78 @@ impl Tonique {
         };
     }
 
-    /// The export dialog at its step.
-    pub(super) fn export_dialog(
-        &mut self,
-        window: &Window,
-        context: &mut Context<Self>,
-    ) -> gpui::Div {
-        self.poll_export();
-        match &self.export.step {
-            Step::Options => self.export_options(window, context),
-            Step::Running(running) => self.export_running(running, context),
-            Step::Done {
-                files,
-                waveforms,
-                seconds,
-            } => self.export_done(files, waveforms, *seconds, context),
-            Step::Failed { title, detail } => self.export_failed(title, detail, context),
-        }
-    }
-
     /// Starts moving the exported part's bound nearest the pointer, which
     /// goes there: the range becomes a custom one.
-    fn preview_down(&mut self, event: &MouseDownEvent) {
-        let Some(at) = self.preview_beat(f32::from(event.position.x)) else {
+    fn preview_down(&mut self, event: &MouseDownEvent, context: &mut App) {
+        let Some(at) = self.preview_beat(f32::from(event.position.x), context) else {
             return;
         };
         let (start, end) = self
-            .state
-            .export_span(self.export.options.range)
+            .state(context)
+            .export_span(self.options.range)
             .ok()
-            .or(self.export.custom)
+            .or(self.custom)
             .unwrap_or_default();
         let bound = if (at.0 - start.0).abs() <= (at.0 - end.0).abs() {
             Bound::Start
         } else {
             Bound::End
         };
-        self.export.custom = Some((start, end));
-        self.export.options.range = ExportRange::Custom(start, end);
-        self.export.dragged_bound = Some(bound);
+        self.custom = Some((start, end));
+        self.options.range = ExportRange::Custom(start, end);
+        self.dragged_bound = Some(bound);
         self.move_bound(bound, at);
     }
 
-    /// Follows a drag in the preview. Returns whether it's one.
-    pub(super) fn export_drag_move(&mut self, event: &MouseMoveEvent) -> bool {
-        let Some(bound) = self.export.dragged_bound else {
-            return false;
+    /// Follows a drag in the preview.
+    fn drag_move(&mut self, event: &MouseMoveEvent, context: &mut Context<Self>) {
+        let Some(bound) = self.dragged_bound else {
+            return;
         };
-        if let Some(at) = self.preview_beat(f32::from(event.position.x)) {
+        if let Some(at) = self.preview_beat(f32::from(event.position.x), context) {
             self.move_bound(bound, at);
         }
-        true
     }
 
     /// Moves one bound of the custom range to `at`, kept a beat from the
     /// other.
     fn move_bound(&mut self, bound: Bound, at: BeatPos) {
-        let (start, end) = self.export.custom.unwrap_or_default();
-        self.export.set_custom(match bound {
+        let (start, end) = self.custom.unwrap_or_default();
+        self.set_custom(match bound {
             Bound::Start => (BeatPos(at.0.min(end.0 - 1.).max(0.)), end),
             Bound::End => (start, BeatPos(at.0.max(start.0 + 1.))),
         });
     }
 
-    pub(super) fn export_drag_end(&mut self) {
-        self.export.dragged_bound = None;
+    fn drag_end(&mut self, _: &MouseUpEvent, _: &mut Context<Self>) {
+        self.dragged_bound = None;
+    }
+}
+
+impl Render for ExportDialog {
+    fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
+        self.waves.borrow_mut().start_frame(window);
+        self.poll();
+        // The files draw themselves as they render.
+        if self.is_running() {
+            window.request_animation_frame();
+        }
+        let content = match &self.step {
+            Step::Options => self.options_view(window, context),
+            Step::Running(running) => self.running_view(running, context),
+            Step::Done {
+                files,
+                waveforms,
+                seconds,
+            } => self.done_view(files, waveforms, *seconds, context),
+            Step::Failed { title, detail } => self.failed_view(title, detail, context),
+        };
+        div().child(content).when(self.is_dragging(), |element| {
+            element.child(follow_drag(
+                context.weak_entity(),
+                Self::drag_move,
+                Self::drag_end,
+            ))
+        })
     }
 }

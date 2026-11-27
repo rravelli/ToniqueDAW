@@ -1,12 +1,8 @@
 use crate::ui::theme::ToColor;
-use crate::{
-    core::state::ProjectState,
-    ui::{
-        font::PHOSPHOR_REGULAR,
-        theme::{COLORS, Theme, ThemeExt, ThemeLibrary},
-        widget::{flat_button::FlatButton, section::SectionHeader, select::Select},
-    },
-    utils::color::format_color,
+use crate::ui::{
+    font::PHOSPHOR_REGULAR,
+    theme::{COLORS, Theme, ThemeExt, ThemeLibrary},
+    widget::{flat_button::FlatButton, section::SectionHeader, select::Select},
 };
 use egui::{
     Color32, FontFamily, FontId, Grid, RichText, ScrollArea, TextEdit, Ui,
@@ -14,6 +10,7 @@ use egui::{
     vec2,
 };
 use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, ARROWS_CLOCKWISE, COPY, PLUS, WARNING};
+use tonique_core::{project::ProjectState, utils::color::format_color};
 
 const LABEL_WIDTH: f32 = 110.;
 const CONTROL_WIDTH: f32 = 240.;

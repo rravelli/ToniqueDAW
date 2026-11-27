@@ -16,17 +16,17 @@ use egui::{Align, Layout, Ui, vec2};
 use egui_phosphor::regular::WARNING;
 use tonique_engine::time::BeatPos;
 
-use crate::{
-    core::{
-        export::{Export, ExportFile, ExportOptions, ExportRange, Waveform, format},
-        state::{ExportSelection, ExportSource, ProjectState},
-    },
-    ui::{
-        project::ProjectManager,
-        taskbar::TaskbarProgress,
-        theme::ThemeExt,
-        widget::dialog::{self, button},
-    },
+use crate::ui::{
+    project::ProjectManager,
+    taskbar::TaskbarProgress,
+    theme::ThemeExt,
+    widget::dialog::{self, button},
+};
+use tonique_core::{
+    files::export::{Export, ExportFile, ExportOptions, ExportRange, Waveform, format},
+    project::ExportSelection,
+    project::ExportSource,
+    project::ProjectState,
 };
 
 use format::{audio_format, duration};

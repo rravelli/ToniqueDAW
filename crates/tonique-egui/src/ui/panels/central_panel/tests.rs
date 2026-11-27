@@ -1,5 +1,6 @@
 use super::*;
 use crate::ui::RectSpan;
+use crate::ui::arrangement::row_layout::RowSpans;
 
 #[test]
 fn the_edit_cursor_points_down_at_the_timeline() {
@@ -67,6 +68,8 @@ fn the_wheel_scrolls_tracks_vertically() {
     let mut panel = CentralPanel::new();
     // A dialog over everything.
     let modal = std::cell::Cell::new(false);
+    // Kept across frames, as the app's: the view scrolls and zooms.
+    let workspace = std::cell::RefCell::new(Workspace::default());
     let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
@@ -77,7 +80,7 @@ fn the_wheel_scrolls_tracks_vertically() {
             panel.show(
                 ui,
                 state,
-                &mut Workspace::default(),
+                &mut workspace.borrow_mut(),
                 &mut Commands::default(),
             );
             if modal.get() {
@@ -108,31 +111,47 @@ fn the_wheel_scrolls_tracks_vertically() {
     let headers = Pos2::new(1150., 300.);
 
     scroll_over(&mut state, lanes, -200.);
-    assert!(state.grid.offset.y > 0., "scrolls over the lanes");
+    assert!(
+        workspace.borrow().timeline_view.offset.y > 0.,
+        "scrolls over the lanes"
+    );
     scroll_over(&mut state, lanes, 200.);
-    assert_eq!(state.grid.offset.y, 0., "and back up");
+    assert_eq!(workspace.borrow().timeline_view.offset.y, 0., "and back up");
     scroll_over(&mut state, headers, -200.);
-    assert!(state.grid.offset.y > 0., "scrolls over the headers");
+    assert!(
+        workspace.borrow().timeline_view.offset.y > 0.,
+        "scrolls over the headers"
+    );
 
     scroll_over(&mut state, lanes, -100_000.);
     let rows = RowLayout::new(&state, 0., 0.).height();
-    assert!(state.grid.offset.y > rows - 800., "down to the last track");
-    assert!(state.grid.offset.y < rows, "but no further");
+    assert!(
+        workspace.borrow().timeline_view.offset.y > rows - 800.,
+        "down to the last track"
+    );
+    assert!(
+        workspace.borrow().timeline_view.offset.y < rows,
+        "but no further"
+    );
 
     // Not through a dialog.
     modal.set(true);
-    let offset = state.grid.offset;
+    let offset = workspace.borrow().timeline_view.offset;
     scroll_over(&mut state, lanes, 200.);
     scroll_over(&mut state, headers, 200.);
-    assert_eq!(state.grid.offset, offset, "a dialog is open");
+    assert_eq!(
+        workspace.borrow().timeline_view.offset,
+        offset,
+        "a dialog is open"
+    );
 }
 
 /// A long clip can be zoomed out to whole, and scrolled to its end with
 /// a panel left of the timeline.
 #[test]
 fn the_wheel_scrolls_to_the_end_of_a_long_clip() {
-    use crate::{analysis::AudioInfo, core::clip::AudioClip};
     use egui::{Event, MouseWheelUnit, Pos2, TouchPhase};
+    use tonique_core::{document::clip::AudioClip, library::analysis::AudioInfo};
     use tonique_engine::time::BeatPos;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
@@ -147,6 +166,8 @@ fn the_wheel_scrolls_to_the_end_of_a_long_clip() {
     ctx.set_fonts(crate::ui::font::fonts());
     let mut panel = CentralPanel::new();
     // The lanes where they were drawn.
+    // Kept across frames, as the app's: the view scrolls and zooms.
+    let workspace = std::cell::RefCell::new(Workspace::default());
     let mut frame = |state: &mut ProjectState, events: Vec<Event>| -> Rect {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
@@ -160,7 +181,7 @@ fn the_wheel_scrolls_to_the_end_of_a_long_clip() {
             panel.show(
                 ui,
                 state,
-                &mut Workspace::default(),
+                &mut workspace.borrow_mut(),
                 &mut Commands::default(),
             );
         });
@@ -168,13 +189,19 @@ fn the_wheel_scrolls_to_the_end_of_a_long_clip() {
         panel.tracks.lanes()
     };
     let lanes = frame(&mut state, Vec::new());
-    state.grid.fit(BeatPos::ZERO, end, lanes.width());
+    workspace
+        .borrow_mut()
+        .timeline_view
+        .fit(BeatPos::ZERO, end, lanes.width());
     assert!(
-        state.grid.beats_to_width(end.0) <= lanes.width(),
+        workspace.borrow().timeline_view.beats_to_width(end.0) <= lanes.width(),
         "the whole clip fits"
     );
 
-    state.grid.zoom_by(20., lanes.left(), lanes.span());
+    workspace
+        .borrow_mut()
+        .timeline_view
+        .zoom_by(20., lanes.left(), lanes.span());
     frame(&mut state, vec![Event::PointerMoved(lanes.center())]);
     frame(
         &mut state,
@@ -189,7 +216,11 @@ fn the_wheel_scrolls_to_the_end_of_a_long_clip() {
         frame(&mut state, Vec::new());
     }
     assert!(
-        state.grid.beats_to_x(end, lanes.span()) <= lanes.right(),
+        workspace
+            .borrow()
+            .timeline_view
+            .beats_to_x(end, lanes.span())
+            <= lanes.right(),
         "scrolls to the clip's end"
     );
 }
@@ -199,8 +230,9 @@ fn the_wheel_scrolls_to_the_end_of_a_long_clip() {
 #[test]
 fn collapsed_groups_expand_while_dragging_over_them() {
     use crate::ui::arrangement::ruler::RULER_HEIGHT;
-    use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
+    use crate::ui::dnd::DragPayload;
     use egui::{Event, PointerButton, Pos2};
+    use tonique_core::library::analysis::AudioInfo;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
@@ -278,8 +310,9 @@ fn collapsed_groups_expand_while_dragging_over_them() {
 /// before the timeline, shows what the timeline found the frame before.
 #[test]
 fn dragging_past_the_last_track_shows_a_ghost_track() {
-    use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
+    use crate::ui::dnd::DragPayload;
     use egui::{Event, Pos2};
+    use tonique_core::library::analysis::AudioInfo;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
@@ -331,8 +364,9 @@ fn dragging_past_the_last_track_shows_a_ghost_track() {
 /// ghost was, and the ghost is gone: no frame without it.
 #[test]
 fn dropping_past_the_last_track_shows_its_header_at_once() {
-    use crate::{analysis::AudioInfo, ui::dnd::DragPayload};
+    use crate::ui::dnd::DragPayload;
     use egui::{Event, PointerButton, Pos2};
+    use tonique_core::library::analysis::AudioInfo;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
@@ -395,13 +429,15 @@ fn rubber_bands_start_where_pressed() {
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
-    state.grid.settings.snap = false;
+    state.grid_mut().settings.snap = false;
     state.add_track();
     state.add_track();
     let ctx = egui::Context::default();
     ctx.set_fonts(crate::ui::font::fonts());
     let mut panel = CentralPanel::new();
     let mut time = 0.;
+    // Kept across frames, as the app's: the view scrolls and zooms.
+    let workspace = std::cell::RefCell::new(Workspace::default());
     let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
         time += 0.05;
         let input = egui::RawInput {
@@ -414,7 +450,7 @@ fn rubber_bands_start_where_pressed() {
             panel.show(
                 ui,
                 state,
-                &mut Workspace::default(),
+                &mut workspace.borrow_mut(),
                 &mut Commands::default(),
             )
         });
@@ -428,7 +464,7 @@ fn rubber_bands_start_where_pressed() {
     };
     frame(&mut state, Vec::new()); // lay out once
     // Halfway between two beats, in the first lane.
-    let ppb = state.grid.pixels_per_beat();
+    let ppb = workspace.borrow().timeline_view.pixels_per_beat();
     let from = Pos2::new(2.5 * ppb, RULER_HEIGHT + 20.);
     frame(
         &mut state,
@@ -450,8 +486,9 @@ fn rubber_bands_start_where_pressed() {
 /// footer, goes on the master.
 #[test]
 fn effects_drop_on_the_master() {
-    use crate::{core::effect::EffectKind, ui::dnd::DragPayload};
+    use crate::ui::dnd::DragPayload;
     use egui::{Event, PointerButton, Pos2};
+    use tonique_core::document::effect::EffectKind;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
@@ -554,8 +591,8 @@ fn rename_shortcut_renames_the_selected_track() {
 #[test]
 fn ctrl_wheel_zooms_over_clip_headers() {
     use crate::ui::arrangement::ruler::RULER_HEIGHT;
-    use crate::{analysis::AudioInfo, core::clip::AudioClip};
     use egui::{Event, Modifiers, MouseWheelUnit, Pos2, TouchPhase};
+    use tonique_core::{document::clip::AudioClip, library::analysis::AudioInfo};
     use tonique_engine::time::BeatPos;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
@@ -570,6 +607,8 @@ fn ctrl_wheel_zooms_over_clip_headers() {
     let ctx = egui::Context::default();
     ctx.set_fonts(crate::ui::font::fonts());
     let mut panel = CentralPanel::new();
+    // Kept across frames, as the app's: the view scrolls and zooms.
+    let workspace = std::cell::RefCell::new(Workspace::default());
     let mut frame = |state: &mut ProjectState, events: Vec<Event>| {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200., 800.))),
@@ -580,7 +619,7 @@ fn ctrl_wheel_zooms_over_clip_headers() {
             panel.show(
                 ui,
                 state,
-                &mut Workspace::default(),
+                &mut workspace.borrow_mut(),
                 &mut Commands::default(),
             )
         });
@@ -589,7 +628,7 @@ fn ctrl_wheel_zooms_over_clip_headers() {
     // The clip's header, at the top of the first lane.
     let header = Pos2::new(100., RULER_HEIGHT + 6.);
     frame(&mut state, vec![Event::PointerMoved(header)]);
-    let before = state.grid.beats_to_width(1.);
+    let before = workspace.borrow().timeline_view.beats_to_width(1.);
     frame(
         &mut state,
         vec![Event::MouseWheel {
@@ -602,7 +641,7 @@ fn ctrl_wheel_zooms_over_clip_headers() {
     for _ in 0..30 {
         frame(&mut state, Vec::new());
     }
-    assert!(state.grid.beats_to_width(1.) > before);
+    assert!(workspace.borrow().timeline_view.beats_to_width(1.) > before);
 }
 
 /// An effect from a track's chain dragged to another track's header or
@@ -610,8 +649,9 @@ fn ctrl_wheel_zooms_over_clip_headers() {
 #[test]
 fn effects_are_moved_to_other_tracks() {
     use crate::ui::arrangement::ruler::RULER_HEIGHT;
-    use crate::{core::effect::EffectKind, ui::dnd::DragPayload};
+    use crate::ui::dnd::DragPayload;
     use egui::{Event, PointerButton, Pos2};
+    use tonique_core::document::effect::EffectKind;
 
     let (engine, _processor) = Engine::new(EngineConfig::default());
     let mut state = ProjectState::new(engine);
@@ -638,7 +678,7 @@ fn effects_are_moved_to_other_tracks() {
     };
     frame(&mut state, Vec::new()); // lay out once
     let layout = RowLayout::new(&state, RULER_HEIGHT, 0.);
-    let on = |index: usize, x: f32| Pos2::new(x, layout.rows()[index].y.center());
+    let on = |index: usize, x: f32| Pos2::new(x, layout.rows()[index].y().center());
     let (first_lane, first_header) = (on(0, 300.), on(0, 1100.));
     let (second_lane, second_header) = (on(1, 300.), on(1, 1100.));
     let mut drop_at = |state: &mut ProjectState, from: tonique_engine::edit::TrackId, at: Pos2| {

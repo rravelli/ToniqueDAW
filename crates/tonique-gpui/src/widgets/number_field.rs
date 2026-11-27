@@ -11,11 +11,11 @@ use gpui::{
 };
 
 use crate::{
-    app::{ArrowHolder, Tonique},
+    app::{ArrowHolder, arrows::stepper, focus_main},
     theme::{Theme, hsla},
-    utils::steps::{self, Presses},
     widgets::text_field::{FieldKey, TextField},
 };
+use tonique_core::utils::steps::{self, Presses};
 
 /// Pixels of sideways drag per step.
 const PIXELS_PER_STEP: f32 = 3.;
@@ -159,19 +159,19 @@ impl NumberField {
     }
 
     /// The field, `width` by `height`, showing `value`, outlined when `held`
-    /// (holding the arrow keys). `get` finds it in the app, `set` takes a
+    /// (holding the arrow keys). `get` finds it in its view, `set` takes a
     /// new value.
     #[allow(clippy::too_many_arguments)]
-    pub fn view(
+    pub fn view<V: 'static>(
         &self,
         id: &'static str,
         (value, held): (f32, bool),
         (width, height): (f32, f32),
         theme: &Theme,
         window: &Window,
-        context: &mut Context<Tonique>,
-        get: fn(&mut Tonique) -> &mut NumberField,
-        set: fn(&mut Tonique, f32),
+        context: &mut Context<V>,
+        get: fn(&mut V) -> &mut NumberField,
+        set: fn(&mut V, f32, &mut Context<V>),
     ) -> AnyElement {
         let field = div()
             .id(id)
@@ -186,12 +186,12 @@ impl NumberField {
             .whitespace_nowrap();
         if let Some(edit) = &self.edit {
             // Leaving it, by Enter or a click elsewhere, takes the value.
-            let finish = move |this: &mut Tonique, keep: bool| {
+            let finish = move |this: &mut V, keep: bool, context: &mut Context<V>| {
                 let field = get(this);
                 let value = field.typed().filter(|_| keep);
                 field.edit = None;
                 if let Some(value) = value {
-                    set(this, value);
+                    set(this, value, context);
                 }
             };
             return field
@@ -205,20 +205,20 @@ impl NumberField {
                             return;
                         };
                         match edit.key(event) {
-                            FieldKey::Submit => finish(this, true),
-                            FieldKey::Cancel => finish(this, false),
+                            FieldKey::Submit => finish(this, true, context),
+                            FieldKey::Cancel => finish(this, false, context),
                             FieldKey::Edited => {}
                             FieldKey::Ignored => return,
                         }
                         if get(this).edit.is_none() {
-                            window.focus(&this.focus, context);
+                            focus_main(window, context);
                         }
                         context.stop_propagation();
                         context.notify();
                     },
                 ))
                 .on_mouse_down_out(context.listener(move |this, _, _, context| {
-                    finish(this, true);
+                    finish(this, true, context);
                     context.notify();
                 }))
                 .into_any_element();
@@ -226,7 +226,11 @@ impl NumberField {
         self.shown.set(value);
         let text = format!("{}{}", self.spec.format(value), self.spec.suffix);
         let dragging = self.is_dragging();
-        let holder = ArrowHolder::Number { id, get, set };
+        let step = stepper(context.weak_entity(), move |this, presses, context| {
+            if let Some(value) = get(this).stepped(presses) {
+                set(this, value, context);
+            }
+        });
         let accent = hsla(theme.accent);
         field
             .when(held, |element| element.border_1().border_color(accent))
@@ -238,7 +242,7 @@ impl NumberField {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, window, context| {
                     context.stop_propagation();
-                    this.hold_arrows(holder.clone());
+                    crate::app::arrows::hold(ArrowHolder::Number(id), step.clone(), context);
                     let field = get(this);
                     if event.click_count >= 2 {
                         field.drag = None;

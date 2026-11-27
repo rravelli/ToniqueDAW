@@ -11,14 +11,17 @@ mod tests;
 use egui::{CursorIcon, Rect, Response, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 use tonique_engine::{edit::ClipId, time::BeatPos};
 
-use crate::{
-    core::{clip::AudioClip, grid::GridService, state::ProjectState, track::TrackRow},
-    ui::{
-        arrangement::grid::PaintGrid,
-        theme::{Theme, ThemeExt, with_alpha},
-        waveform::paint_waveform,
-        widget::scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
-    },
+use crate::ui::{
+    arrangement::grid::ZoomedGrid,
+    theme::{Theme, ThemeExt, with_alpha},
+    waveform::paint_waveform,
+    widget::scroll_bar::{Axis, SCROLLBAR_WIDTH, ScrollBar},
+};
+use tonique_core::{
+    document::clip::AudioClip,
+    document::track::TrackRow,
+    project::ProjectState,
+    session::{grid::Grid, timeline_view::TimelineView},
 };
 
 use inspector::{Panels, RAIL_WIDTH, inspector_ui};
@@ -43,7 +46,9 @@ const FIT_MARGIN: f64 = 0.02;
 /// a bracket the loop; all can be dragged.
 pub struct ClipDetails {
     /// The view's zoom and scroll, in beats from [`Self::origin`].
-    grid: GridService,
+    timeline_view: TimelineView,
+    /// The project's grid, as last drawn, at this view's zoom.
+    grid: Grid,
     /// The clip the view was fitted to: another one refits it.
     fitted: Option<ClipId>,
     /// Where bar 1 is in the file, in seconds: the clip's, as last drawn.
@@ -60,7 +65,8 @@ impl ClipDetails {
     pub fn new() -> Self {
         Self {
             // Shows what's before the start marker, in the file.
-            grid: GridService::new().with_negative_offset(),
+            timeline_view: TimelineView::new().with_negative_offset(),
+            grid: Grid::default(),
             fitted: None,
             origin: 0.,
             speed: 1.,
@@ -98,18 +104,16 @@ impl ClipDetails {
         }
 
         let bpm = state.bpm();
-        // Bars as the project counts them.
-        self.grid.set_time_signature(state.time_signature());
-        // The arrangement's grid settings, at this view's zoom.
-        self.grid.settings = state.grid.settings;
+        // The project's grid (its bars, its settings), at this view's zoom.
+        self.grid = *state.grid();
         // Played faster or slower: the file spans fewer or more beats, the
         // view kept as it was (its zoom and scroll, in beats).
         self.speed = clip.speed(bpm);
         if self.fitted == Some(clip.id) && clip.origin != self.origin {
             // Bar 1 moved: the grid follows, and the audio stays where it
             // was on screen.
-            self.grid.offset.x -= self
-                .grid
+            self.timeline_view.offset.x -= self
+                .timeline_view
                 .beats_to_width(clip.file_beats(clip.origin - self.origin, bpm));
         }
         self.origin = clip.origin;
@@ -135,8 +139,11 @@ impl ClipDetails {
             pos2(ruler.right(), ruler.bottom() - FLAG_SIZE.y),
         );
         let labels = ruler.intersect(Rect::from_x_y_ranges(file, ruler.y_range()));
-        self.grid
-            .paint_bar_labels(&ui.painter_at(labels), bars, &theme);
+        ZoomedGrid::new(&self.grid, &self.timeline_view).paint_bar_labels(
+            &ui.painter_at(labels),
+            bars,
+            &theme,
+        );
         self.paint_lane(ui, lane, &shown, track, state, &theme);
         self.paint_markers(ui, ruler, lane, &shown, track.color.to_egui(), bpm, &theme);
 
@@ -158,15 +165,17 @@ impl ClipDetails {
 
     /// Where `file` seconds into the file are drawn.
     fn x(&self, file: f64, bpm: f32, lane: Rect) -> f32 {
-        self.grid
+        self.timeline_view
             .beats_to_x(BeatPos(self.beats(file - self.origin, bpm)), lane.span())
     }
 
     /// The time in the file drawn at `x`, snapped to the grid (counted from
     /// the start marker) when snapping, which Alt inverts.
     fn file_at_x(&self, ui: &Ui, x: f32, bpm: f32, lane: Rect) -> f64 {
-        let beats = self.grid.x_to_beats(x, lane.span());
-        let beats = self.grid.snap(beats, ui.input(|i| i.modifiers.alt));
+        let beats = self.timeline_view.x_to_beats(x, lane.span());
+        let beats = self
+            .grid
+            .snap(beats, ui.input(|i| i.modifiers.alt), &self.timeline_view);
         self.origin + self.seconds(beats.0, bpm)
     }
 
@@ -180,7 +189,7 @@ impl ClipDetails {
     fn fit(&mut self, clip: &AudioClip, bpm: f32, width: f32) {
         let (start, end) = played(clip, bpm);
         let margin = (end - start) * FIT_MARGIN;
-        self.grid.fit(
+        self.timeline_view.fit(
             BeatPos(clip.file_beats(start - self.origin, bpm) - margin),
             BeatPos(clip.file_beats(end - self.origin, bpm) + margin),
             width,
@@ -212,17 +221,18 @@ impl ClipDetails {
         let scroll = ui.input(|i| i.smooth_scroll_delta);
         if let Some(pointer) = pointer.filter(|_| over_ruler || over_lane) {
             if zoom != 1. {
-                self.grid.zoom_by(zoom, pointer.x, lane.span());
+                self.timeline_view.zoom_by(zoom, pointer.x, lane.span());
             } else if over_ruler && scroll.y != 0. {
-                self.grid.zoom_around(scroll.y, pointer.x, lane.span());
+                self.timeline_view
+                    .zoom_around(scroll.y, pointer.x, lane.span());
             } else if over_lane {
                 // Only horizontal scrolling here: use the vertical wheel too.
-                self.grid.offset.x -= if scroll.x != 0. { scroll.x } else { scroll.y };
+                self.timeline_view.offset.x -= if scroll.x != 0. { scroll.x } else { scroll.y };
             }
         }
         if response.dragged() {
             ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-            self.grid.offset.x -= response.drag_delta().x;
+            self.timeline_view.offset.x -= response.drag_delta().x;
         }
         let ruler_response = ui.interact(ruler, ui.id().with("clip-ruler"), Sense::click());
         if ruler_response.double_clicked() {
@@ -232,10 +242,10 @@ impl ClipDetails {
             .double_clicked()
             .then(|| response.interact_pointer_pos())
             .flatten()
-            .map(|p| clip.position + self.grid.x_to_beats(p.x, lane.span()).0);
+            .map(|p| clip.position + self.timeline_view.x_to_beats(p.x, lane.span()).0);
 
         let (min, max) = self.scroll_range(clip, bpm, lane);
-        self.grid.offset.x = self.grid.offset.x.clamp(min, max);
+        self.timeline_view.offset.x = self.timeline_view.offset.x.clamp(min, max);
         (seek, ruler_response)
     }
 
@@ -255,7 +265,8 @@ impl ClipDetails {
             && let Some(pos) = ruler.interact_pointer_pos()
         {
             // Where the pointer is, not snapped: the grid being moved.
-            let at = self.origin + self.seconds(self.grid.x_to_beats(pos.x, lane.span()).0, bpm);
+            let at = self.origin
+                + self.seconds(self.timeline_view.x_to_beats(pos.x, lane.span()).0, bpm);
             ui.data_mut(|d| d.insert_temp(clicked, at));
         }
         ruler.context_menu(|ui| {
@@ -282,9 +293,9 @@ impl ClipDetails {
     fn scroll_range(&self, clip: &AudioClip, bpm: f32, lane: Rect) -> (f32, f32) {
         let file_start = clip.file_beats(-self.origin, bpm);
         let half = lane.width() / 2.;
-        let min = self.grid.beats_to_width(file_start) - half;
+        let min = self.timeline_view.beats_to_width(file_start) - half;
         let max = self
-            .grid
+            .timeline_view
             .beats_to_width(file_start + clip.source_beats(bpm))
             - half;
         (min, max.max(min))
@@ -297,7 +308,7 @@ impl ClipDetails {
         if range <= 0. {
             return;
         }
-        let mut scroll = self.grid.offset.x - min;
+        let mut scroll = self.timeline_view.offset.x - min;
         ui.add(ScrollBar::new(
             "clip-hscroll",
             Axis::Horizontal,
@@ -306,7 +317,7 @@ impl ClipDetails {
             range,
             lane.width() / (range + lane.width()),
         ));
-        self.grid.offset.x = scroll + min;
+        self.timeline_view.offset.x = scroll + min;
     }
 
     /// The file's waveform on the grid, dimmed outside what the clip plays,
@@ -325,8 +336,11 @@ impl ClipDetails {
         let painter = ui.painter_at(lane);
         painter.rect_filled(lane, 0., theme.bg_deep);
         let file = Rect::from_x_y_ranges(self.file_x(clip, bpm, lane), lane.y_range());
-        self.grid
-            .paint_grid(&ui.painter_at(lane.intersect(file)), lane, theme);
+        ZoomedGrid::new(&self.grid, &self.timeline_view).paint_grid(
+            &ui.painter_at(lane.intersect(file)),
+            lane,
+            theme,
+        );
         if let Some(l) = clip.active_loop() {
             let (left, right) = (self.x(l.start_s, bpm, lane), self.x(l.end_s, bpm, lane));
             painter.rect_filled(

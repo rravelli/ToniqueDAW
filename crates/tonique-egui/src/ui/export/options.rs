@@ -14,17 +14,16 @@ use egui_phosphor::regular::{CHECK_SQUARE, FOLDER_SIMPLE, SQUARE, WAVEFORM};
 use rfd::FileDialog;
 use tonique_engine::{sample::WavFormat, time::BeatPos};
 
-use crate::{
-    core::{
-        export::{ExportFile, ExportOptions, ExportRange},
-        state::{ExportSelection, ProjectState},
-        track::{TrackKind, TrackRow},
-    },
-    ui::{
-        font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
-        theme::{ThemeExt, font_size},
-        widget::{flat_button::FlatButton, section::SectionHeader},
-    },
+use crate::ui::{
+    font::{PHOSPHOR_FILL, PHOSPHOR_REGULAR},
+    theme::{ThemeExt, font_size},
+    widget::{flat_button::FlatButton, section::SectionHeader},
+};
+use tonique_core::{
+    document::track::{TrackKind, TrackRow},
+    files::export::{ExportFile, ExportOptions, ExportRange},
+    project::ExportSelection,
+    project::ProjectState,
     utils::{display_name, format_bars, parse_bars},
 };
 
@@ -363,7 +362,8 @@ pub(super) fn destination_ui(
             .size(vec2(browse_width, CHOICE_HEIGHT))
             .font(FontId::proportional(font_size::BODY))
             .border_radius(3.);
-        if ui.add(browse).clicked() {
+        // Not in tests, where the native dialog would wait for a click.
+        if ui.add(browse).clicked() && !cfg!(test) {
             let mut dialog = FileDialog::new();
             if Path::new(dir.trim()).is_dir() {
                 dialog = dialog.set_directory(dir.trim());

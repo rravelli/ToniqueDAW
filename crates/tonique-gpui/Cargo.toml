@@ -20,3 +20,9 @@ tonique-engine.workspace = true
 # Waveform tiles are drawn into images (`src/wave.rs`), gpui-fast's image type.
 image = { version = "0.25", default-features = false }
 toml = "1"
+
+[dev-dependencies]
+# The fuzz test opens the app on gpui-fast's test platform.
+gpui = { package = "gpui-fast", version = "0.1.17", features = ["test-support"] }
+# Its tests' configuration and no audio devices, as the egui app's tests.
+tonique-core = { workspace = true, features = ["test-support"] }

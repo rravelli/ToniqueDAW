@@ -1,16 +1,23 @@
 //! Keyboard shortcuts: Tonique's keymap (the user's, from its settings)
-//! turned into actions, run as the egui app runs them.
+//! turned into actions, run by the core when they only change the project.
 
-use gpui::{Context, KeyDownEvent, Keystroke, Window};
+use crate::model::HoldsProject;
+use gpui::{App, Context, KeyDownEvent, Keystroke, Window};
 use tonique_engine::time::BeatPos;
 
-use crate::{
-    app::{Tonique, dialog::Dialog, project::ProjectAction},
+use crate::app::{
+    Workspace,
+    command::{self, Command},
+    dialog::Dialog,
+    project::ProjectAction,
+};
+use tonique_core::{
     config::keymap::{Action, Key, Mods, format_shortcut},
+    project::ActionOutcome,
 };
 
 /// The keymap's key and modifiers for a keystroke.
-fn shortcut(keystroke: &Keystroke) -> Option<(Key, Mods)> {
+pub fn shortcut(keystroke: &Keystroke) -> Option<(Key, Mods)> {
     // gpui names keys in lower case: `space`, `left`, `a`.
     let mut name = keystroke.key.clone();
     if let Some(first) = name.get_mut(..1) {
@@ -32,11 +39,11 @@ fn is_clipboard(keystroke: &Keystroke) -> bool {
     (modifiers.control || modifiers.platform) && !modifiers.alt && !modifiers.shift
 }
 
-impl Tonique {
+impl Workspace {
     /// `action`'s first shortcut, as written in settings (`Ctrl+S`), for
     /// menus; empty when it has none.
-    pub(super) fn shortcut_text(&self, action: Action) -> String {
-        let bindings = self.state.settings().keymap.bindings(action);
+    pub(super) fn shortcut_text(&self, action: Action, context: &App) -> String {
+        let bindings = self.state(context).settings().keymap.bindings(action);
         bindings.first().map(format_shortcut).unwrap_or_default()
     }
 
@@ -47,21 +54,6 @@ impl Tonique {
         context: &mut Context<Self>,
     ) {
         let keystroke = &event.keystroke;
-        // A shortcut being recorded in settings takes every key, Esc
-        // included, so nothing else runs.
-        if self.records_shortcut() {
-            if !event.is_held
-                && let Some((key, modifiers)) = shortcut(keystroke)
-            {
-                self.record_shortcut(key, modifiers);
-            }
-            context.notify();
-            return;
-        }
-        // The browser's list takes the arrows and Enter while focused.
-        if self.browser.list_focus.is_focused(window) && self.browser_key(event, context) {
-            return;
-        }
         // A clicked value control takes the arrows.
         if self.arrow_key(keystroke, window, context) {
             context.notify();
@@ -70,25 +62,25 @@ impl Tonique {
         match keystroke.key.as_str() {
             "escape" if self.dialog.is_some() => self.close_dialog(window, context),
             "enter" if self.dialog == Some(Dialog::Unsaved) => {
-                self.answer_unsaved(true, window, context);
+                self.answer_unsaved(Some(true), window, context);
             }
-            "escape" if self.popup.is_some() => self.popup = None,
-            "escape" if self.arrows.is_some() => self.release_arrows(),
-            "escape" => self.state.clear_clip_selection(),
-            "home" => self.state.seek(BeatPos::ZERO),
+            "escape" if crate::popup::shown(context).is_some() => crate::popup::close(context),
+            "escape" if crate::app::arrows::held(context).is_some() => {
+                crate::app::arrows::release(context)
+            }
+            "escape" => self.state_mut(context).clear_clip_selection(),
+            "home" => self.state_mut(context).seek(BeatPos::ZERO),
             "c" | "x" | "v" if is_clipboard(keystroke) && self.has_keyboard(window, context) => {
-                self.clipboard(keystroke.key.as_str());
+                self.clipboard(keystroke.key.as_str(), context);
             }
             _ => {
-                let keymap = &self.state.settings().keymap;
+                let keymap = &self.state(context).settings().keymap;
                 let Some(action) = shortcut(keystroke)
                     .and_then(|(key, modifiers)| keymap.action_for(key, modifiers))
                 else {
                     return;
                 };
-                if !self.bottom_action(action, window, context) {
-                    self.run(action, window, context);
-                }
+                command::dispatch(action, window, context);
             }
         }
         context.notify();
@@ -103,99 +95,81 @@ impl Tonique {
 
     /// Ctrl+C, X or V on the clips: copied (cropped to the zone), cut, or
     /// pasted at the edit cursor, revealed.
-    fn clipboard(&mut self, key: &str) {
-        let state = &mut self.state;
+    fn clipboard(&mut self, key: &str, context: &mut App) {
+        let mut state = self.state_mut(context);
         match key {
             "c" => {
                 state.copy_selection();
             }
             "x" => state.cut_selection(),
             _ => {
-                state.paste();
-                self.reveal_selection();
+                if let ActionOutcome::Reveal(start, end) = state.paste_and_reveal() {
+                    drop(state);
+                    self.arrangement.update(context, |arrangement, context| {
+                        arrangement.reveal((start, end), context);
+                        context.notify();
+                    });
+                }
             }
         }
     }
 
-    /// Runs `action`, as the egui app's `dispatch` and its timeline do.
+    /// Runs a command reaching the window: the bottom panel's first.
+    pub(super) fn on_command(
+        &mut self,
+        Command(action): &Command,
+        window: &mut Window,
+        context: &mut Context<Self>,
+    ) {
+        let taken = self.bottom.update(context, |bottom, context| {
+            bottom.bottom_action(*action, window, context)
+        });
+        if !taken {
+            self.run(*action, window, context);
+        }
+        context.notify();
+    }
+
+    /// Runs `action`: the project's part in the core, the rest here.
     fn run(&mut self, action: Action, window: &mut Window, context: &mut Context<Self>) {
-        let state = &mut self.state;
+        let view = *self.timeline_view.read(context);
+        let outcome = self.state_mut(context).run_action(action, &view);
+        match outcome {
+            ActionOutcome::Done => return,
+            ActionOutcome::Reveal(start, end) => {
+                self.arrangement.update(context, |arrangement, context| {
+                    arrangement.reveal((start, end), context);
+                    context.notify();
+                });
+                return;
+            }
+            ActionOutcome::Unhandled => {}
+        }
         match action {
-            Action::PlayStop => self.toggle_play(),
-            // Loop the selection, or toggle looping.
-            Action::Loop => {
-                if !state.loop_selection() {
-                    state.set_looping(!state.looping());
-                }
-            }
-            Action::ToggleMetronome => state.toggle_metronome(),
-            Action::ToggleFollowPlayhead => state.set_follow_playhead(!state.follow_playhead()),
-            Action::NarrowGrid => state.grid.narrow(),
-            Action::WidenGrid => state.grid.widen(),
-            Action::ToggleTripletGrid => state.grid.settings.triplet ^= true,
-            Action::ToggleAdaptiveGrid => state.grid.toggle_adaptive(),
-            Action::ToggleSnap => state.grid.settings.snap ^= true,
-            Action::Undo => state.undo(),
-            Action::Redo => state.redo(),
-            Action::AddTrack => {
-                state.add_track_below_selection();
-            }
             Action::ToggleBrowser => self.browser_open = !self.browser_open,
-            Action::ToggleTrackList => self.headers.toggle_list(),
-            Action::SelectAll => state.select_all_clips(),
-            // Nudge the selected clips by a grid step, or move the edit
-            // cursor when nothing is selected.
-            Action::NudgeLeft | Action::NudgeRight => {
-                let direction = if action == Action::NudgeLeft { -1. } else { 1. };
-                let step = direction * state.grid.snap_step();
-                if state.selected_clips().is_empty() {
-                    let cursor = state.grid.snap_to_step(state.edit_cursor() + step);
-                    state.set_edit_cursor(cursor);
-                    self.reveal((cursor, cursor));
-                } else {
-                    state.nudge_selection(step);
-                    self.reveal_selection();
-                }
-            }
-            Action::MoveTrackUp => state.move_selection_tracks(-1),
-            Action::MoveTrackDown => state.move_selection_tracks(1),
-            Action::Duplicate => {
-                if !state.selected_clips().is_empty() {
-                    state.duplicate_selected_clips();
-                    self.reveal_selection();
-                } else if let Some(selected) = state.selected_track() {
-                    state.duplicate_track(&selected.id);
-                }
-            }
-            Action::Delete => {
-                if !state.selected_clips().is_empty() {
-                    state.delete_selected_clips();
-                } else if let Some(selected) = state.selected_track() {
-                    state.delete_track(&selected.id);
-                }
-            }
-            Action::SplitAtCursor => {
-                for id in state.selected_tracks().clone() {
-                    state.cut_clip_at(&id, state.edit_cursor());
-                }
-            }
+            Action::ToggleTrackList => self.arrangement.update(context, |arrangement, context| {
+                arrangement.headers.toggle_list();
+                context.notify();
+            }),
             Action::Rename => {
-                if let Some(track) = state.selected_track() {
-                    self.rename_track(track.id, window, context);
+                if let Some(track) = self.state(context).selected_track() {
+                    self.arrangement.update(context, |arrangement, context| {
+                        arrangement.rename_track(track.id, window, context);
+                    });
                 }
             }
             Action::NewProject => self.project_action(ProjectAction::New, window, context),
             Action::OpenProject => self.project_action(ProjectAction::Open, window, context),
             Action::SaveProject => self.project_action(ProjectAction::Save, window, context),
             Action::SaveProjectAs => self.project_action(ProjectAction::SaveAs, window, context),
-            Action::OpenSettings => self.toggle_settings(),
-            Action::ToggleEffectsPanel => self.bottom.toggle(),
-            Action::GroupTracks => {
-                let selected = state.selected_tracks().clone();
-                state.group(&selected);
-            }
+            Action::OpenSettings => self.toggle_settings(context),
+            Action::ToggleEffectsPanel => self.bottom.update(context, |bottom, context| {
+                bottom.toggle();
+                context.notify();
+            }),
             Action::ExportAudio => self.open_export(window, context),
             Action::ToggleGraphView => self.toggle_graph(context),
+            _ => {}
         }
     }
 }

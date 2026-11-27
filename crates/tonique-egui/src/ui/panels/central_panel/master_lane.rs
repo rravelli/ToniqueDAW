@@ -1,17 +1,14 @@
 //! The footer, along the master's header: its output scope.
 
-use crate::{
-    core::{
-        metrics::SCOPE_COLUMNS,
-        state::{MASTER_TRACK_ID, ProjectState},
-    },
-    ui::{
-        arrangement::track_headers::FOOTER_PADDING,
-        theme::{ThemeExt, font_size},
-    },
+use crate::ui::{
+    arrangement::track_headers::FOOTER_PADDING,
+    theme::{ThemeExt, font_size},
 };
 use egui::{Align2, Color32, FontId, Rect, Stroke, Ui, pos2, vec2};
 use std::collections::VecDeque;
+use tonique_core::{
+    monitor::metrics::SCOPE_COLUMNS, project::MASTER_TRACK_ID, project::ProjectState,
+};
 
 use super::SCOPE_WIDTH;
 
@@ -44,7 +41,7 @@ pub(super) fn master_lane_ui(ui: &Ui, state: &ProjectState, footer: Rect) {
         scope.center().y,
         Stroke::new(1.0, theme.separator),
     );
-    if let Some(m) = state.metrics.tracks.get(&MASTER_TRACK_ID) {
+    if let Some(m) = state.metrics().tracks.get(&MASTER_TRACK_ID) {
         paint_scope(&painter, m.scope(), scope, theme.accent);
     }
     // Over the waveform, on a veil.

@@ -2,17 +2,21 @@
 //! label's), a folder, an audio file to drag onto the timeline, or another
 //! file, dimmed; and the row ending the folders, adding one.
 
+use super::BrowserPanel;
+use crate::model::HoldsProject;
 use gpui::{
-    Anchor, AnyElement, Context, MouseButton, MouseDownEvent, Stateful, div, prelude::*, px,
+    Anchor, AnyElement, App, Context, MouseButton, MouseDownEvent, Stateful, div, prelude::*, px,
 };
 
 use crate::{
-    app::{PopupKind, Tonique},
+    app::PopupKind,
     browser::{DragGhost, DraggedAudio, ListKind},
-    core::state::PlaybackState,
-    file_tree::{FileKind, FileNode, file_kind},
     icons,
     theme::{Theme, hsla, icon, mix, size},
+};
+use tonique_core::{
+    library::file_tree::{FileKind, FileNode, file_kind},
+    project::PlaybackState,
 };
 
 pub(super) const ROW_HEIGHT: f32 = 22.;
@@ -35,7 +39,7 @@ pub(super) fn dot(color: crate::theme::Color, diameter: f32) -> gpui::Div {
         .bg(hsla(color))
 }
 
-impl Tonique {
+impl BrowserPanel {
     /// Row `index` of `kind`; `pinned` over the list, at its top.
     pub(super) fn browser_row(
         &self,
@@ -44,7 +48,7 @@ impl Tonique {
         pinned: bool,
         context: &mut Context<Self>,
     ) -> AnyElement {
-        let list = self.browser.list(kind);
+        let list = self.list(kind);
         let item = list.tree.items[index].clone();
         let selected = list.selected == Some(index);
         let open = list.is_open(index);
@@ -53,7 +57,7 @@ impl Tonique {
         } else {
             ("row", index)
         };
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let base = if item.depth == 0 {
             theme.bg_raised
         } else {
@@ -79,16 +83,16 @@ impl Tonique {
             .on_mouse_down(
                 MouseButton::Left,
                 context.listener(move |this, _: &MouseDownEvent, window, context| {
-                    window.focus(&this.browser.list_focus, context);
-                    this.browser_select(kind, index, true);
+                    window.focus(&this.list_focus, context);
+                    this.browser_select(kind, index, true, context);
                     context.notify();
                 }),
             )
             .on_mouse_down(
                 MouseButton::Right,
                 context.listener(move |this, event: &MouseDownEvent, window, context| {
-                    window.focus(&this.browser.list_focus, context);
-                    this.browser.list_mut(kind).selected = Some(index);
+                    window.focus(&this.list_focus, context);
+                    this.list_mut(kind).selected = Some(index);
                     this.open_row_menu(kind, index, event, window, context);
                     context.notify();
                 }),
@@ -97,7 +101,7 @@ impl Tonique {
         if item.depth == 0 {
             self.header_row(row, kind, index, &item, context)
         } else {
-            self.item_row(row, &item, open)
+            self.item_row(row, &item, open, context)
         }
     }
 
@@ -112,11 +116,11 @@ impl Tonique {
         context: &mut Context<Self>,
     ) {
         let menu = PopupKind::BrowserRow(kind, index);
-        self.toggle_popup(menu, event.position, Anchor::TopLeft);
-        let opened = self.popup.is_some_and(|popup| popup.kind == menu);
+        self.toggle_popup(menu, event.position, Anchor::TopLeft, context);
+        let opened = crate::popup::shown(context) == Some(menu);
         if opened && let Some((label, _)) = self.row_section(kind, index) {
-            let name = self.browser.labels[label].name.clone();
-            self.browser.label_name.start(name, window, context);
+            let name = self.labels[label].name.clone();
+            self.label_name.start(name, window, context);
         }
     }
 
@@ -131,27 +135,23 @@ impl Tonique {
         item: &FileNode,
         context: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = &self.theme;
-        let list = self.browser.list(kind);
-        let section = self.browser.sections.get(&item.path).copied();
+        let theme = &*crate::theme::current(context);
+        let list = self.list(kind);
+        let section = self.sections.get(&item.path).copied();
         let scoped = kind == ListKind::Files && list.scope.as_ref() == Some(&item.path);
         let name = match section {
-            Some((label, _)) => self
-                .browser
-                .labels
-                .get(label)
-                .map(|label| label.name.clone()),
+            Some((label, _)) => self.labels.get(label).map(|label| label.name.clone()),
             None => list.names.get(&item.path).cloned(),
         }
         .unwrap_or_default()
         .to_uppercase();
         let empty = section.is_some_and(|(_, count)| count == 0);
         let section_color = section
-            .and_then(|(label, _)| self.browser.labels.get(label))
+            .and_then(|(label, _)| self.labels.get(label))
             .map(|label| label.color);
         let folder_label = section
             .is_none()
-            .then(|| self.browser.label_of(&item.path))
+            .then(|| self.label_of(&item.path))
             .flatten();
         let menu_button = div()
             .id("header-menu")
@@ -235,16 +235,22 @@ impl Tonique {
 
     /// A folder or file inside a section: its icon (a speaker while it's
     /// previewed), its name, and its label's dot.
-    fn item_row(&self, row: Stateful<gpui::Div>, item: &FileNode, open: bool) -> AnyElement {
-        let theme = self.theme.clone();
+    fn item_row(
+        &self,
+        row: Stateful<gpui::Div>,
+        item: &FileNode,
+        open: bool,
+        context: &App,
+    ) -> AnyElement {
+        let theme = crate::theme::current(context);
         let name = item.path.file_name().map_or_else(
             || item.path.display().to_string(),
             |file_name| file_name.to_string_lossy().into_owned(),
         );
         let kind = (!item.is_dir).then(|| file_kind(&item.path)).flatten();
         let audio = kind == Some(FileKind::Audio);
-        let previewing = self.state.previewing() == Some(item.path.as_path())
-            && self.state.preview_playback_state() == PlaybackState::Playing;
+        let previewing = self.state(context).previewing() == Some(item.path.as_path())
+            && self.state(context).preview_playback_state() == PlaybackState::Playing;
         let glyph = match (item.is_dir, open, kind) {
             _ if previewing => icons::SPEAKER_HIGH,
             (true, true, _) => icons::FOLDER_OPEN,
@@ -264,7 +270,7 @@ impl Tonique {
         } else {
             theme.text_disabled
         };
-        let label = self.browser.label_of(&item.path);
+        let label = self.label_of(&item.path);
         let row = row
             .pl(px(8. + item.depth as f32 * INDENT))
             .text_color(hsla(color))
@@ -286,7 +292,6 @@ impl Tonique {
         row.on_drag(dragged, move |_, _, _, context| {
             context.new(|_| DragGhost {
                 name: name.clone().into(),
-                theme: theme.clone(),
             })
         })
         .into_any_element()
@@ -294,7 +299,7 @@ impl Tonique {
 
     /// The row ending the folders: adds one, picked on disk.
     pub(super) fn add_folder_row(&self, context: &mut Context<Self>) -> AnyElement {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         div()
             .id("add-folder")
             .h(px(ROW_HEIGHT))

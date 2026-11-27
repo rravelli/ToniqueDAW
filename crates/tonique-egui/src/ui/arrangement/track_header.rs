@@ -1,25 +1,18 @@
 use crate::ui::font::semibold;
 use crate::ui::theme::font_size;
 use crate::ui::theme::{ToColor, ToEgui};
-use crate::{
-    core::{
-        state::{MASTER_TRACK_ID, MIN_EXPANDED_HEIGHT, ProjectState},
-        track::{TrackKind, TrackRow},
+use crate::ui::{
+    RECORDING,
+    font::PHOSPHOR_FILL,
+    theme::{Theme, ThemeExt, with_alpha},
+    widget::{
+        color_select::ColorSelect,
+        context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
+        flat_button::FlatButton,
+        meter::LevelMeter,
+        param_slider::{ParamSlider, SliderEdit},
+        text_edit::select_all,
     },
-    ui::{
-        RECORDING,
-        font::PHOSPHOR_FILL,
-        theme::{Theme, ThemeExt, with_alpha},
-        widget::{
-            color_select::ColorSelect,
-            context_menu::{ContextMenuButton, ContextMenuLabel, ContextMenuSeparator},
-            flat_button::FlatButton,
-            meter::LevelMeter,
-            param_slider::{ParamSlider, SliderEdit},
-            text_edit::select_all,
-        },
-    },
-    utils::display_name,
 };
 use egui::{
     Align, Color32, FontId, Frame, Label, Layout, Margin, Rect, Response, RichText, Sense, Stroke,
@@ -30,6 +23,13 @@ use egui_phosphor::{
     regular::{MUSIC_NOTE_SIMPLE, TEXT_T},
 };
 use std::ops::RangeInclusive;
+use tonique_core::{
+    document::track::{TrackKind, TrackRow},
+    project::MASTER_TRACK_ID,
+    project::MIN_EXPANDED_HEIGHT,
+    project::ProjectState,
+    utils::display_name,
+};
 
 /// Space between a header's edges and its content.
 const PADDING: f32 = 4.;
@@ -45,7 +45,7 @@ const SLIDER_HEIGHT: f32 = 16.;
 const PAN_WIDTH: f32 = 34.;
 /// Wide enough for the volume to show its unit.
 const VOLUME_UNIT_WIDTH: f32 = 64.;
-pub const ROW_GAP: f32 = 3.0;
+pub use tonique_core::session::row_layout::ROW_GAP;
 /// Indentation per level of groups, up to [`MAX_INDENT_LEVELS`] (deeper
 /// rows line up with the deepest shown level).
 const INDENT: f32 = 8.;
@@ -163,7 +163,10 @@ impl TrackHeader {
 
         let is_group = track.kind == TrackKind::Group;
         let silenced = track.is_silenced();
-        let is_solo = matches!(track.solo, crate::core::track::TrackSoloState::Solo);
+        let is_solo = matches!(
+            track.solo,
+            tonique_core::document::track::TrackSoloState::Solo
+        );
         let is_master = track.id == MASTER_TRACK_ID;
         // Groups and the master have no arm button; the master no solo.
         let armable = RECORDING && !is_group && !is_master;
@@ -246,7 +249,7 @@ impl TrackHeader {
             });
             in_rect(ui, pan, |ui| pan_slider(ui, track, state, pan.size()));
         }
-        if let Some(metrics) = state.metrics.tracks.get(&track.id) {
+        if let Some(metrics) = state.metrics().tracks.get(&track.id) {
             let meter = LevelMeter::new(layout.meter.size(), metrics).disabled(silenced);
             if put(ui, layout.meter, meter).clicked() {
                 state.reset_meter_clip(track.id);

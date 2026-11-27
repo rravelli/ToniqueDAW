@@ -1,6 +1,5 @@
 use crate::ui::{app::ToniqueApp, font::fonts, window::native_options};
-use crate::{audio::host::AudioHost, config::settings::Settings};
-use tonique_engine::engine::Engine;
+use tonique_core::project::ProjectState;
 mod about;
 mod app;
 mod arrangement;
@@ -25,14 +24,14 @@ mod window;
 mod workspace;
 
 /// The grid maps beats onto a view's left and right edges: an egui
-/// rectangle's, as the core's [`Span`](crate::core::grid::Span).
+/// rectangle's, as the core's [`Span`](tonique_core::session::timeline_view::Span).
 pub trait RectSpan {
-    fn span(&self) -> crate::core::grid::Span;
+    fn span(&self) -> tonique_core::session::timeline_view::Span;
 }
 
 impl RectSpan for egui::Rect {
-    fn span(&self) -> crate::core::grid::Span {
-        crate::core::grid::Span {
+    fn span(&self) -> tonique_core::session::timeline_view::Span {
+        tonique_core::session::timeline_view::Span {
             left: self.min.x,
             right: self.max.x,
         }
@@ -42,19 +41,16 @@ impl RectSpan for egui::Rect {
 /// Recording isn't implemented yet: hides the record and arm buttons.
 const RECORDING: bool = false;
 
-pub fn run(
-    engine: Engine,
-    audio: Result<AudioHost, String>,
-    settings: Settings,
-) -> Result<(), eframe::Error> {
+pub fn run(state: ProjectState) -> Result<(), eframe::Error> {
+    let ui_scale = state.settings().ui_scale;
     eframe::run_native(
         "Tonique",
         native_options(),
         Box::new(|cc| {
             cc.egui_ctx.set_fonts(fonts());
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            cc.egui_ctx.set_zoom_factor(settings.ui_scale);
-            Ok(Box::new(ToniqueApp::new(engine, audio, settings, cc)))
+            cc.egui_ctx.set_zoom_factor(ui_scale);
+            Ok(Box::new(ToniqueApp::new(state, cc)))
         }),
     )
 }

@@ -15,7 +15,6 @@ use gpui::{
 };
 
 use crate::{
-    app::Tonique,
     geometry::Rect,
     theme::{Theme, hsla},
 };
@@ -178,12 +177,12 @@ pub fn scrollbar(
 /// A scrollbar down the right edge of what `handle` scrolls (an element
 /// its parent, positioned, has the size of), `inset` from it: gpui's own
 /// scrolling, which shows none.
-pub fn handle_scrollbar(
+pub fn handle_scrollbar<V: 'static>(
     handle: &ScrollHandle,
     grab: &ScrollbarGrab,
     inset: f32,
     theme: &Theme,
-    context: &Context<Tonique>,
+    context: &Context<V>,
 ) -> impl IntoElement {
     let (read, write) = (handle.clone(), handle.clone());
     let this = context.weak_entity();

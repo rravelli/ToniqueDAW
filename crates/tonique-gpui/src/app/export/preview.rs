@@ -1,22 +1,24 @@
 //! The project in miniature, above the options.
 
+use crate::model::HoldsProject;
 use gpui::{
-    ContentMask, Context, CursorStyle, MouseButton, MouseDownEvent, Window, canvas, prelude::*, px,
+    App, ContentMask, Context, CursorStyle, MouseButton, MouseDownEvent, Window, canvas,
+    prelude::*, px,
 };
 use tonique_engine::time::BeatPos;
 
 use crate::{
-    app::Tonique,
-    core::{
-        clip::AudioClip,
-        export::{ExportRange, format::duration},
-        state::ProjectState,
-        track::{TrackKind, TrackRow},
-    },
+    app::export::ExportDialog,
     geometry::Rect,
     theme::{Color, Theme, hsla, mono, with_alpha},
     wave::paint_waveform,
     widgets::{paint_line, shape},
+};
+use tonique_core::{
+    document::clip::AudioClip,
+    document::track::{TrackKind, TrackRow},
+    files::export::{ExportRange, format::duration},
+    project::ProjectState,
 };
 
 use super::{LANE_PADDING, parts::card};
@@ -50,12 +52,12 @@ fn lanes_rect(rect: Rect) -> Rect {
     )
 }
 
-impl Tonique {
+impl ExportDialog {
     /// The whole beat under `pointer_x` in the preview, if it shows the
     /// project.
-    pub(super) fn preview_beat(&self, pointer_x: f32) -> Option<BeatPos> {
-        let shown = preview_beats(&self.state, self.export.options.range);
-        let inner = lanes_rect(Rect::of(self.export.preview_bounds.get()));
+    pub(super) fn preview_beat(&self, pointer_x: f32, context: &App) -> Option<BeatPos> {
+        let shown = preview_beats(self.state(context), self.options.range);
+        let inner = lanes_rect(Rect::of(self.preview_bounds.get()));
         if shown <= 0. || inner.width <= 0. {
             return None;
         }
@@ -67,14 +69,13 @@ impl Tonique {
     /// their waveform, the tracks and the part of the timeline left out
     /// dimmed, and the exported part's bounds marked. Dragging in it moves
     /// the bound nearest the pointer.
-    pub(super) fn export_preview(
+    pub(super) fn preview(
         &self,
         rows: &[TrackRow],
         theme: &Theme,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let state = &self.state;
-        let export = &self.export;
+        let state = self.state(context);
         let frame = card(PREVIEW_HEIGHT, theme);
         if state.export_span(ExportRange::Project).is_err() {
             return frame
@@ -84,14 +85,14 @@ impl Tonique {
                 .text_color(hsla(theme.text_muted))
                 .child("Nothing to export yet: add clips to the timeline");
         }
-        let shown = preview_beats(state, export.options.range);
+        let shown = preview_beats(state, self.options.range);
         let bpm = state.bpm();
-        let chosen = state.export_span(export.options.range).ok();
+        let chosen = state.export_span(self.options.range).ok();
         let lanes: Vec<(Color, Vec<AudioClip>)> = rows
             .iter()
             .filter(|track| track.kind == TrackKind::Audio && !track.clips.is_empty())
             .map(|track| {
-                let color = if export.selection.includes(state, track) {
+                let color = if self.selection.includes(state, track) {
                     track.color
                 } else {
                     with_alpha(track.color, (track.color.a as f32 * 0.3) as u8)
@@ -99,7 +100,7 @@ impl Tonique {
                 (color, track.clips.clone())
             })
             .collect();
-        let slot = export.preview_bounds.clone();
+        let slot = self.preview_bounds.clone();
         let waves = self.waves.clone();
         let theme = theme.clone();
         let painting = canvas(
@@ -176,7 +177,7 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(|this, event: &MouseDownEvent, _, context| {
                     context.stop_propagation();
-                    this.preview_down(event);
+                    this.preview_down(event, context);
                     context.notify();
                 }),
             )

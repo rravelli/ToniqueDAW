@@ -1,19 +1,12 @@
 use crate::ui::RectSpan;
 use crate::ui::theme::ToEgui;
 use crate::{
-    analysis::AudioInfo,
-    cache::AUDIO_ANALYSIS_CACHE,
-    core::{
-        clip::AudioClip,
-        state::ProjectState,
-        track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow},
-    },
-    ui::arrangement::{grid::PaintGrid, grid_menu::grid_menu},
+    ui::arrangement::{grid::ZoomedGrid, grid_menu::grid_menu},
     ui::{
         arrangement::clip::ClipView,
         arrangement::{
-            row_layout::RowLayout,
-            timeline::{drag::ClipDrag, selection::RubberBand},
+            row_layout::{RowLayout, RowSpans},
+            timeline::selection::RubberBand,
             track_header::ROW_GAP,
         },
         commands::Commands,
@@ -23,6 +16,14 @@ use crate::{
     },
 };
 use egui::{Color32, DragAndDrop, Rangef, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use tonique_core::session::timeline_view::TimelineView;
+use tonique_core::{
+    document::clip::AudioClip,
+    document::track::{DEFAULT_TRACK_HEIGHT, TRACK_COLLAPSED_HEIGHT, TrackKind, TrackRow},
+    library::analysis::AudioInfo,
+    library::cache::AUDIO_ANALYSIS_CACHE,
+    project::{ProjectState, clip_drag::ClipMove},
+};
 use tonique_engine::edit::{ClipId, TrackId};
 mod drag;
 mod keys;
@@ -39,7 +40,7 @@ const START_LINE_WIDTH: f32 = 1.5;
 const SELECTED_LANE_ALPHA: u8 = 24;
 
 pub struct Timeline {
-    clip_drag: Option<ClipDrag>,
+    clip_drag: Option<ClipMove>,
     rubber_band: Option<RubberBand>,
     /// Collapsed groups expanded by dragging over them, to collapse again once
     /// left.
@@ -76,34 +77,44 @@ impl Timeline {
         self.new_tracks.clear();
         let track_count = state.track_count();
         // First the actions on the selection
-        self.run_actions(ui, state, commands, viewport);
+        self.run_actions(ui, state, &mut workspace.timeline_view, commands, viewport);
         // Create timeline area
         let timeline_res = ui.allocate_rect(viewport, Sense::all());
         timeline_res.context_menu(|ui| grid_menu(ui, state));
         let painter = ui.painter_at(viewport);
         // Handle interactions in the timeline area
-        self.interact(ui, &timeline_res, state, viewport);
+        self.interact(
+            ui,
+            &timeline_res,
+            state,
+            &mut workspace.timeline_view,
+            viewport,
+        );
 
         // Rendering
         // First render the grid
-        state.grid.paint_grid(&painter, viewport, &ui.app_theme());
+        ZoomedGrid::new(state.grid(), &workspace.timeline_view).paint_grid(
+            &painter,
+            viewport,
+            &ui.app_theme(),
+        );
         if self.expand_on_hover(ui, state, layout, viewport) {
             layout.rebuild(state);
         }
         // The multiselect zone: drawn, and its veil under the clips, which
         // light up their own part of it.
-        self.rubber_band_ui(ui, state, layout, &timeline_res);
+        self.rubber_band_ui(ui, state, &workspace.timeline_view, layout, &timeline_res);
         // Render all clips (except dragged clips)
         self.clips_ui(ui, state, workspace, layout, viewport);
 
         if let Some(drag) = dragged_audio(&timeline_res) {
-            self.preview_clip_ui(ui, viewport, layout, drag, state);
+            self.preview_clip_ui(ui, viewport, layout, drag, state, &workspace.timeline_view);
         }
 
-        self.handle_dropped_audio(ui, viewport, state);
+        self.handle_dropped_audio(ui, viewport, state, &workspace.timeline_view);
 
         // The zone's outline, over the clips.
-        self.paint_zone_outline(ui, state, layout, viewport);
+        self.paint_zone_outline(ui, state, &workspace.timeline_view, layout, viewport);
 
         let hovered_files = ui.input(|i| i.raw.hovered_files.clone());
         if !hovered_files.is_empty() {
@@ -124,15 +135,16 @@ impl Timeline {
         ui: &mut Ui,
         response: &Response,
         state: &mut ProjectState,
+        view: &mut TimelineView,
         viewport: Rect,
     ) {
         if response.clicked()
             && let Some(mouse_pos) = response.interact_pointer_pos()
         {
             state.clear_clip_selection();
-            let beats = state.grid.x_to_beats(mouse_pos.x, viewport.span());
+            let beats = view.x_to_beats(mouse_pos.x, viewport.span());
             let alt = ui.input(|i| i.modifiers.alt);
-            state.set_edit_cursor(state.grid.snap(beats, alt));
+            state.set_edit_cursor(state.grid().snap(beats, alt, view));
         }
         // Ctrl+wheel (and pinch) zooms; egui reports it as a zoom factor.
         // Anywhere over the lanes, clips included (they take the hover from
@@ -142,7 +154,7 @@ impl Timeline {
             && ui.ctx().rect_contains_pointer(ui.layer_id(), viewport)
             && let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos())
         {
-            state.grid.zoom_by(zoom, mouse_pos.x, viewport.span());
+            view.zoom_by(zoom, mouse_pos.x, viewport.span());
         }
     }
 
@@ -166,7 +178,7 @@ impl Timeline {
         if dragging && let Some(p) = pointer.filter(|p| viewport.contains(*p)) {
             for row in layout.rows() {
                 let track = &row.track;
-                if track.kind == TrackKind::Group && track.collapsed && row.y.contains(p.y) {
+                if track.kind == TrackKind::Group && track.collapsed && row.y().contains(p.y) {
                     state.set_collapsed(&track.id, false);
                     self.hover_expanded.push(track.id);
                     changed = true;
@@ -176,7 +188,7 @@ impl Timeline {
         // A group's span runs to the end of its last row.
         let scope = |id: TrackId| {
             let row = layout.rows().iter().find(|r| r.track.id == id)?;
-            Some(Rangef::new(row.scope.min, row.scope.max + ROW_GAP))
+            Some(Rangef::new(row.scope().min, row.scope().max + ROW_GAP))
         };
         self.hover_expanded.retain(|group| {
             let inside = pointer
@@ -206,21 +218,21 @@ impl Timeline {
         layout: &RowLayout,
         viewport: Rect,
     ) {
-        let mut dragged_track_index = None;
-        let mut dragged_clip = None;
-        let dragged_ids = self
+        // The clip grabbed this frame, and its track's index.
+        let mut grabbed = None;
+        let left_behind = self
             .clip_drag
             .as_ref()
-            .map_or(Vec::new(), |d| d.dragged_ids());
+            .map_or(Vec::new(), ClipMove::left_behind);
 
         for row in layout.rows() {
             let track = &row.track;
             // Skip if track is entirely outside the visible vertical range
-            if row.y.max < viewport.top() || row.y.min > viewport.bottom() {
+            if row.y().max < viewport.top() || row.y().min > viewport.bottom() {
                 continue;
             }
 
-            let track_rect = Rect::from_x_y_ranges(viewport.x_range(), row.y);
+            let track_rect = Rect::from_x_y_ranges(viewport.x_range(), row.y());
 
             if ui.input(|i| {
                 i.pointer.primary_pressed()
@@ -241,7 +253,7 @@ impl Timeline {
 
             // A group's lane: an overview of everything inside.
             let mut clips = if track.kind == TrackKind::Group {
-                paint_group_overview(ui, state, track, track_rect);
+                paint_group_overview(ui, state, &workspace.timeline_view, track, track_rect);
                 Vec::new()
             } else {
                 track.clips.clone()
@@ -258,29 +270,28 @@ impl Timeline {
                     state,
                     workspace,
                     viewport,
-                    row.y.min,
-                    dragged_ids.contains(&clip.id),
+                    row.y().min,
+                    left_behind.contains(&clip.id),
                 );
-                if dragged_clip.is_none() && dragged {
-                    dragged_clip = Some(clip.clone());
-                    dragged_track_index = Some(track.first_track_index)
+                if grabbed.is_none() && dragged {
+                    grabbed = Some(clip.id);
                 }
             }
 
             if track.selected {
-                paint_start_line(ui, state, track_rect);
+                paint_start_line(ui, state, &workspace.timeline_view, track_rect);
             }
             self.handle_track_hover(ui, state, workspace, track, track_rect);
-            self.paint_track_separator(ui, viewport, row.y.max);
+            self.paint_track_separator(ui, viewport, row.y().max);
         }
 
         self.handle_dragged_clips(
             ui,
             layout,
-            dragged_track_index,
+            grabbed,
             viewport,
-            dragged_clip,
             state,
+            &mut workspace.timeline_view,
         );
     }
 
@@ -318,8 +329,10 @@ impl Timeline {
         top: f32,
         dragged: bool,
     ) -> bool {
-        let x = state.grid.beats_to_x(clip.position, viewport.span());
-        let width = state.grid.beats_to_width(clip.length);
+        let x = workspace
+            .timeline_view
+            .beats_to_x(clip.position, viewport.span());
+        let width = workspace.timeline_view.beats_to_width(clip.length);
 
         if x + width < viewport.left()
             || x > viewport.right()
@@ -340,6 +353,7 @@ impl Timeline {
             clip,
             rect: Rect::from_min_size(pos, size),
             viewport,
+            timeline_view: &workspace.timeline_view,
             color,
             // With a zone, only its part is selected: lit inside the clip.
             selected: !dragged
@@ -397,7 +411,13 @@ impl Timeline {
         }
     }
 
-    fn handle_dropped_audio(&mut self, ui: &mut Ui, viewport: Rect, state: &mut ProjectState) {
+    fn handle_dropped_audio(
+        &mut self,
+        ui: &mut Ui,
+        viewport: Rect,
+        state: &mut ProjectState,
+        view: &TimelineView,
+    ) {
         let dropped_files = ui.input(|i| i.raw.dropped_files.clone());
         state.begin_batch();
         if !dropped_files.is_empty() {
@@ -410,9 +430,9 @@ impl Timeline {
                     && viewport.contains(mouse_pos)
                 {
                     // Convert x to beats and snap to grid
-                    let position = state.grid.x_to_beats(mouse_pos.x, viewport.span());
+                    let position = view.x_to_beats(mouse_pos.x, viewport.span());
                     let alt = ui.input(|i| i.modifiers.alt);
-                    let snapped_position = state.grid.snap(position, alt);
+                    let snapped_position = state.grid().snap(position, alt, view);
 
                     let track = state.add_track();
                     let clip = AudioClip::placed(
@@ -435,6 +455,7 @@ impl Timeline {
         layout: &RowLayout,
         drag: AudioDrag,
         state: &mut ProjectState,
+        view: &TimelineView,
     ) {
         let dropped = matches!(drag, AudioDrag::Dropped(_));
         let (AudioDrag::Over(audio_info) | AudioDrag::Dropped(audio_info)) = drag;
@@ -450,10 +471,10 @@ impl Timeline {
             && viewport.contains(mouse_pos)
         {
             // Calculate grid position in beats
-            let position = state.grid.x_to_beats(mouse_pos.x, viewport.span());
+            let position = view.x_to_beats(mouse_pos.x, viewport.span());
             let alt = ui.input(|i| i.modifiers.alt);
-            let snapped_position = state.grid.snap(position, alt);
-            let x = state.grid.beats_to_x(snapped_position, viewport.span());
+            let snapped_position = state.grid().snap(position, alt, view);
+            let x = view.beats_to_x(snapped_position, viewport.span());
             let mouse_y = mouse_pos.y;
 
             // Find corresponding track
@@ -478,7 +499,7 @@ impl Timeline {
             // Placeholder ID: the clip only gets a real one when dropped.
             // At the length it will get: its file's tempo, once known.
             let clip = AudioClip::placed(ClipId(0), audio_info, snapped_position, state.bpm());
-            let width = state.grid.beats_to_width(clip.length);
+            let width = view.beats_to_width(clip.length);
 
             let pos = pos2(x, y);
             let size = Vec2::new(width, height);
@@ -487,6 +508,7 @@ impl Timeline {
                 clip: &clip,
                 rect: Rect::from_min_size(pos, size),
                 viewport,
+                timeline_view: view,
                 color,
                 selected: false,
                 zone: None,
@@ -513,7 +535,13 @@ impl Timeline {
 /// A group's content, in a band the height of a collapsed group at the top of
 /// its lane: a strip per track inside it, in order, with that track's clips
 /// in its colour, faint so they don't pass for real clips.
-fn paint_group_overview(ui: &Ui, state: &ProjectState, group: &TrackRow, lane: Rect) {
+fn paint_group_overview(
+    ui: &Ui,
+    state: &ProjectState,
+    view: &TimelineView,
+    group: &TrackRow,
+    lane: Rect,
+) {
     let tracks = state.group_tracks(group.id);
     if tracks.is_empty() {
         return;
@@ -539,8 +567,8 @@ fn paint_group_overview(ui: &Ui, state: &ProjectState, group: &TrackRow, lane: R
         };
         let color = with_alpha(track.color.to_egui(), alpha);
         for clip in &track.clips {
-            let x = state.grid.beats_to_x(clip.position, lane.span())
-                ..=state.grid.beats_to_x(clip.end(bpm), lane.span());
+            let x = view.beats_to_x(clip.position, lane.span())
+                ..=view.beats_to_x(clip.end(bpm), lane.span());
             painter.rect_filled(Rect::from_x_y_ranges(x, rows.clone()), 1., color);
         }
     }
@@ -622,8 +650,8 @@ fn paint_new_track_lanes(
 }
 
 /// A line down `lane`, over its clips, where playback will start from.
-fn paint_start_line(ui: &Ui, state: &ProjectState, lane: Rect) {
-    let x = state.grid.beats_to_x(state.edit_cursor(), lane.span());
+fn paint_start_line(ui: &Ui, state: &ProjectState, view: &TimelineView, lane: Rect) {
+    let x = view.beats_to_x(state.edit_cursor(), lane.span());
     ui.painter_at(lane).vline(
         x,
         lane.y_range(),

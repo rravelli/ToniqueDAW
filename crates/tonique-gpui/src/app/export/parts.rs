@@ -3,7 +3,7 @@
 use gpui::{Context, SharedString, div, prelude::*, px};
 
 use crate::{
-    app::Tonique,
+    app::export::ExportDialog,
     theme::{Color, Theme, hsla, size},
     widgets::{Flat, dialog_title, glyph},
 };
@@ -61,8 +61,8 @@ pub(super) fn choices<T: Copy + PartialEq + 'static>(
     value: T,
     options: Vec<(T, String)>,
     theme: &Theme,
-    context: &mut Context<Tonique>,
-    set: fn(&mut Tonique, T),
+    context: &mut Context<ExportDialog>,
+    set: fn(&mut ExportDialog, T),
 ) -> gpui::Div {
     let buttons = options
         .into_iter()

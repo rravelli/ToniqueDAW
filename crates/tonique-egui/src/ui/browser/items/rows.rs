@@ -1,24 +1,24 @@
 //! The list's rows: the sections' headers, and their files and folders.
 
 use crate::ui::theme::font_size;
-use crate::{
-    cache::AUDIO_ANALYSIS_CACHE,
-    core::state::ProjectState,
-    file_tree::{FileKind, FileNode, file_kind},
-    ui::{
-        dnd::DragPayload,
-        font::PHOSPHOR_REGULAR,
-        theme::{ThemeExt, with_alpha},
-        widget::{
-            context_menu::ContextMenuButton,
-            flat_button::FlatButton,
-            list_row::{ListRow, SLOT, dot_center},
-        },
+use crate::ui::{
+    dnd::DragPayload,
+    font::PHOSPHOR_REGULAR,
+    theme::{ThemeExt, with_alpha},
+    widget::{
+        context_menu::ContextMenuButton,
+        flat_button::FlatButton,
+        list_row::{ListRow, SLOT, dot_center},
     },
 };
 use egui::{Align2, FontId, Key, Popup, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use egui_phosphor::regular::{ARROW_SQUARE_OUT, DOTS_THREE, MAGNIFYING_GLASS, X};
 use std::ffi::OsStr;
+use tonique_core::{
+    library::cache::AUDIO_ANALYSIS_CACHE,
+    library::file_tree::{FileKind, FileNode, file_kind},
+    project::ProjectState,
+};
 
 use super::{FileList, FolderAction, ROW_HEIGHT};
 

@@ -2,6 +2,8 @@
 //! for cutoff and resonance dragged anywhere on it, the mode, and cutoff and
 //! Q knobs.
 
+use crate::bottom::BottomPanel;
+use crate::model::HoldsProject;
 use std::{cell::Cell, f32::consts::PI, ops::RangeInclusive, rc::Rc};
 
 use gpui::{
@@ -15,7 +17,6 @@ use tonique_engine::{
 };
 
 use crate::{
-    app::Tonique,
     bottom::{
         paint::{Align, circle, curve, fill_rounded, text},
         rack::{
@@ -26,11 +27,11 @@ use crate::{
             knob::KNOB_HEIGHT,
         },
     },
-    core::effect::Setting,
     geometry::Rect,
     theme::{Theme, size, with_alpha},
     widgets::Flat,
 };
+use tonique_core::document::effect::Setting;
 
 /// Gain range of the graph, in dB.
 const TOP_DB: f32 = 24.;
@@ -166,7 +167,7 @@ pub struct GraphDrag {
     pub graph: Rc<Cell<Bounds<Pixels>>>,
 }
 
-impl Tonique {
+impl BottomPanel {
     pub(super) fn filter_body(
         &self,
         input: &EditorInput,
@@ -190,7 +191,7 @@ impl Tonique {
             _ => return div().into_any_element(),
         };
         let dragging = matches!(
-            &self.bottom.rack.drag,
+            &self.rack.drag,
             Some(RackDrag::Graph(drag)) if drag.cutoff.id == cutoff.id
         );
         let initial = (
@@ -311,17 +312,17 @@ impl Tonique {
                     let (cutoff, q) = (press_cutoff.clone(), press_q.clone());
                     let before = (cutoff.get(), q.get());
                     if event.click_count >= 2 {
-                        this.bottom.rack.drag = None;
+                        this.rack.drag = None;
                         if let (Some(first), Some(second)) = initial {
                             cutoff.set(first);
                             q.set(second);
-                            this.state.commit_params(&[
+                            this.state_mut(context).commit_params(&[
                                 (cutoff.id, before.0, cutoff.get()),
                                 (q.id, before.1, q.get()),
                             ]);
                         }
                     } else {
-                        this.bottom.rack.drag = Some(RackDrag::Graph(GraphDrag {
+                        this.rack.drag = Some(RackDrag::Graph(GraphDrag {
                             cutoff,
                             q,
                             before,
@@ -342,9 +343,9 @@ impl Tonique {
                         div().text_size(px(size::SMALL)).child(name),
                         theme,
                         context,
-                        move |this, _| {
+                        move |this, context| {
                             if mode != option {
-                                this.state.set_effect_setting(
+                                this.state_mut(context).set_effect_setting(
                                     &track,
                                     plugin,
                                     Setting::Mode(option),
@@ -393,7 +394,7 @@ impl Tonique {
                 theme,
                 context,
                 move |this, _| {
-                    if let Some(slot) = this.bottom.rack.slots.get(&plugin)
+                    if let Some(slot) = this.rack.slots.get(&plugin)
                         && let Editor::Filter(filter) = &mut *slot.editor.borrow_mut()
                     {
                         filter.tap = tap;

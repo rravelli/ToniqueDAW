@@ -6,21 +6,19 @@
 //! keys step it: 0.5 dB (6 with Shift), a fiftieth of a side (ten), or a
 //! step (a big one).
 
-use crate::{
-    ui::{
-        theme::{ThemeExt, font_size},
-        widget::arrow_keys::{arrow_presses, paint_outline},
-    },
-    utils::{
-        format_pan, snap_to_centre,
-        steps::{KeyStep, Presses, step_gain, step_pan},
-    },
+use crate::ui::{
+    theme::{ThemeExt, font_size},
+    widget::arrow_keys::{arrow_presses, paint_outline},
 };
 use egui::{
     Align2, Color32, CursorIcon, FontId, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, pos2,
     vec2,
 };
 use std::ops::RangeInclusive;
+use tonique_core::utils::{
+    format_pan, snap_to_centre,
+    steps::{KeyStep, Presses, step_gain, step_pan},
+};
 
 /// How much of the colour a field's level has, mixed into its background:
 /// enough to read as a level, little enough for the value on it to read.

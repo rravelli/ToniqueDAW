@@ -1,4 +1,4 @@
-//! Editor of [`EffectKind::Spectrum`](crate::core::effect::EffectKind::Spectrum):
+//! Editor of [`EffectKind::Spectrum`](tonique_core::document::effect::EffectKind::Spectrum):
 //! the spectrum of the audio where it sits in the chain, with a readout of
 //! the frequency and level under the pointer.
 

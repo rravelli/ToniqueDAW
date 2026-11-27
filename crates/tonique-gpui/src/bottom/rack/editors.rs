@@ -3,6 +3,8 @@
 //! edited. What an editor keeps (an analyser's spectrum) is in its
 //! [`Editor`], shared with the canvases drawing it.
 
+use crate::bottom::BottomPanel;
+use crate::model::HoldsProject;
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use gpui::{AnyElement, Context, Stateful, canvas, div, prelude::*, px};
@@ -13,7 +15,6 @@ use tonique_engine::{
 };
 
 use crate::{
-    app::Tonique,
     bottom::{
         paint::{Align, curve, fill, fill_rounded, text},
         rack::{
@@ -23,11 +24,11 @@ use crate::{
             knob::{KNOB_HEIGHT, Knob, KnobScale, KnobTarget},
         },
     },
-    core::effect::{ECHO_TIME, ECHO_TIMES, Effect, EffectKind},
     geometry::Rect,
     theme::{Theme, size},
     widgets::Flat,
 };
+use tonique_core::document::effect::{ECHO_TIME, ECHO_TIMES, Effect, EffectKind};
 
 /// Size of a parameter's switch.
 const TOGGLE_SIZE: (f32, f32) = (30., 20.);
@@ -130,7 +131,7 @@ impl EditorInput<'_> {
     }
 }
 
-impl Tonique {
+impl BottomPanel {
     /// The controls of `input`'s effect, filling its frame's body.
     pub(super) fn editor_body(
         &self,
@@ -191,10 +192,11 @@ impl Tonique {
             Flat::new(param, TOGGLE_SIZE.1)
                 .width(TOGGLE_SIZE.0)
                 .selected(on)
-                .show(label, theme, context, move |this, _| {
+                .show(label, theme, context, move |this, context| {
                     let (old, new) = (parameter.get(), if on { 0. } else { 1. });
                     parameter.set(new);
-                    this.state.commit_params(&[(parameter.id, old, new)]);
+                    this.state_mut(context)
+                        .commit_params(&[(parameter.id, old, new)]);
                 }),
         )
     }

@@ -10,7 +10,7 @@ use gpui::{
 };
 
 use crate::{
-    app::Tonique,
+    app::Workspace,
     theme::{Theme, hsla, size},
     widgets::{dialog_body, dialog_button, dialog_frame, dialog_title},
 };
@@ -59,7 +59,7 @@ static LOGO: LazyLock<Arc<Image>> = LazyLock::new(|| {
     Arc::new(Image::from_bytes(ImageFormat::Svg, svg.to_vec()))
 });
 
-impl Tonique {
+impl Workspace {
     /// The open dialog over the dimmed window.
     pub(super) fn dialog_view(
         &mut self,
@@ -67,15 +67,15 @@ impl Tonique {
         context: &mut Context<Self>,
     ) -> Option<AnyElement> {
         // A running export stays in sight until it ends.
-        if self.export.is_running() {
+        if self.export_running(context) {
             self.dialog = Some(Dialog::Export);
         }
         let dialog = self.dialog?;
-        let theme = self.theme.clone();
+        let theme = crate::theme::current(context);
         let content = match dialog {
             Dialog::About => about(&theme, context),
-            Dialog::Settings => self.settings_dialog(window, context),
-            Dialog::Export => self.export_dialog(window, context),
+            Dialog::Settings => div().child(self.settings.clone()),
+            Dialog::Export => div().child(self.export.clone()),
             Dialog::Unsaved => self.unsaved_dialog(context),
         };
         let size = window.viewport_size();
@@ -106,11 +106,15 @@ impl Tonique {
     }
 }
 
-impl Tonique {
+impl Workspace {
     /// Closes the open dialog, the keyboard going back to the app; not an
     /// export while it runs.
     pub(super) fn close_dialog(&mut self, window: &mut Window, context: &mut Context<Self>) {
-        if self.dialog == Some(Dialog::Export) && !self.export_closes() {
+        if self.dialog == Some(Dialog::Export) && self.export_running(context) {
+            return;
+        }
+        if self.dialog == Some(Dialog::Unsaved) {
+            self.answer_unsaved(None, window, context);
             return;
         }
         self.dialog = None;
@@ -119,7 +123,7 @@ impl Tonique {
 }
 
 /// The logo, the app's name and version, and the credits.
-fn about(theme: &Theme, context: &mut Context<Tonique>) -> gpui::Div {
+fn about(theme: &Theme, context: &mut Context<Workspace>) -> gpui::Div {
     let version = format!("gpui-fast prototype, version {}", env!("CARGO_PKG_VERSION"));
     let credits = CREDITS.iter().map(|(work, credit)| {
         div()

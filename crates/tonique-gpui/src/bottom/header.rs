@@ -1,18 +1,17 @@
 //! The panel's header: the track's name (and the clip's, when showing
 //! one) on the track's colour, and the Clip and Effects tabs on its right.
 
+use crate::bottom::BottomPanel;
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use gpui::{Context, MouseButton, canvas, div, prelude::*, px};
 use tonique_engine::edit::ClipId;
 
 use crate::{
-    app::Tonique,
     bottom::{BottomView, paint::polygon},
-    core::{clip::AudioClip, track::TrackRow},
     theme::{Color, hsla, size, with_alpha},
-    utils::display_name,
 };
+use tonique_core::{document::clip::AudioClip, document::track::TrackRow, utils::display_name};
 
 /// Height of the header's row: the track's name, and tabs.
 const HEADER_ROW: f32 = 14.;
@@ -23,7 +22,7 @@ const TAB_RADIUS: f32 = 4.;
 /// From the header's top to a selected tab's.
 const TAB_TOP: f32 = 2.;
 
-impl Tonique {
+impl BottomPanel {
     /// Track name, and the clip's when showing one. With `tabs` (the view
     /// shown, and a clip of the track), Clip and Effects tabs on the right
     /// switch between them.
@@ -34,7 +33,7 @@ impl Tonique {
         tabs: Option<(BottomView, ClipId)>,
         context: &mut Context<Self>,
     ) -> gpui::Div {
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let color = track.color;
         let ink = theme.text_on(color);
         let mut title = display_name(&track.name, track.first_track_index);
@@ -120,7 +119,7 @@ impl Tonique {
                             MouseButton::Left,
                             context.listener(move |this, _, _, context| {
                                 context.stop_propagation();
-                                this.show_bottom_view(view);
+                                this.show_bottom_view(view, context);
                                 context.notify();
                             }),
                         )

@@ -19,11 +19,16 @@ mod missing;
 mod preview;
 mod rows;
 
-use std::{cell::Cell, collections::HashMap, path::PathBuf, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    path::PathBuf,
+    rc::Rc,
+};
 
 use gpui::{
-    Bounds, Context, FocusHandle, MouseButton, Pixels, Render, SharedString, Window, div,
-    prelude::*, px,
+    App, Bounds, Context, Entity, FocusHandle, MouseButton, Pixels, Render, SharedString, Window,
+    div, prelude::*, px,
 };
 
 use list::FileList;
@@ -31,14 +36,13 @@ pub use list::ListKind;
 use missing::MissingView;
 
 use crate::{
-    analysis::AudioInfo,
-    app::Tonique,
-    config::Config,
-    core::state::ProjectState,
     icons,
+    model::{HoldsProject, Project},
     theme::{Color, FONT_UI, Theme, hsla, icon, size},
-    widgets::{TextField, icon_rail},
+    wave::WaveCache,
+    widgets::{Recheck, TextField, follow_drag, icon_rail},
 };
+use tonique_core::{config::Config, library::analysis::AudioInfo, project::PlaybackState};
 
 /// Side of the rail's buttons, and so its width.
 const RAIL_WIDTH: f32 = 28.;
@@ -54,12 +58,11 @@ pub struct DraggedAudio {
 /// What follows the pointer while a file is dragged.
 struct DragGhost {
     name: SharedString,
-    theme: Theme,
 }
 
 impl Render for DragGhost {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.theme;
+    fn render(&mut self, _: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
+        let theme = &*crate::theme::current(context);
         div()
             .px_2()
             .py_1()
@@ -102,7 +105,10 @@ pub struct LabelView {
     pub color: Color,
 }
 
-pub struct Browser {
+pub struct BrowserPanel {
+    project: Entity<Project>,
+    /// The waveforms drawn, shared with the other views.
+    waves: Rc<RefCell<WaveCache>>,
     /// Tonique's config: the folders, which are collapsed, the labels and
     /// the preview's settings, saved as they change.
     config: Config,
@@ -134,15 +140,41 @@ pub struct Browser {
     volume_bounds: Rc<Cell<Bounds<Pixels>>>,
     pub drag: BrowserDrag,
     pub source: BrowserSource,
+    /// Looks again while the selected file decodes or the folders are read.
+    recheck: Recheck,
 }
 
-impl Browser {
-    pub fn new(state: &mut ProjectState, context: &mut Context<Tonique>) -> Self {
+impl HoldsProject for BrowserPanel {
+    fn project(&self) -> &Entity<Project> {
+        &self.project
+    }
+}
+
+impl BrowserPanel {
+    /// What its waveforms take.
+    pub fn wave_memory(&self) -> crate::wave::WaveMemory {
+        self.waves.borrow().memory()
+    }
+
+    pub fn new(project: Entity<Project>, window: &mut Window, context: &mut Context<Self>) -> Self {
         let config = Config::load();
         let mut files = FileList::new(context);
         files.set_roots(config.list_dirs(), config.collapsed_dirs());
-        state.set_preview_gain(preview::preview_gain(config.preview_volume()));
+        project
+            .state_mut(context)
+            .set_preview_gain(preview::preview_gain(config.preview_volume()));
+        // The folders are read again when the window gets the focus back.
+        context
+            .observe_window_activation(window, |this, window, context| {
+                if window.is_window_active() {
+                    this.refresh_browser(context);
+                    context.notify();
+                }
+            })
+            .detach();
         let mut browser = Self {
+            project,
+            waves: Rc::default(),
             files,
             labelled: FileList::new(context),
             labels_collapsed: Vec::new(),
@@ -162,6 +194,7 @@ impl Browser {
             volume_bounds: Rc::default(),
             drag: BrowserDrag::None,
             source: BrowserSource::Files,
+            recheck: Recheck::default(),
             config,
         };
         browser.refresh_labels();
@@ -197,42 +230,59 @@ impl Browser {
     }
 }
 
-impl Tonique {
+impl BrowserPanel {
     /// Shows the missing files' tab, `path`'s selected if given (a missing
     /// clip's).
-    pub fn show_missing_files(&mut self, path: Option<PathBuf>) {
-        self.browser_open = true;
+    pub fn show_missing_files(&mut self, path: Option<PathBuf>, context: &mut App) {
         self.set_browser_source(BrowserSource::Missing);
         if let Some(path) = path {
-            self.browser.missing.select_path(&self.state, &path);
+            let state = self.state(context);
+            self.missing.select_path(state, &path);
         }
     }
 
     fn set_browser_source(&mut self, source: BrowserSource) {
-        if self.browser.source != source {
-            self.browser.source = source;
-            self.browser.audio = None;
+        if self.source != source {
+            self.source = source;
+            self.audio = None;
         }
     }
+}
 
-    pub fn browser_view(
-        &mut self,
-        window: &mut Window,
-        context: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let theme = self.theme.clone();
+impl Render for BrowserPanel {
+    fn render(&mut self, window: &mut Window, context: &mut Context<Self>) -> impl IntoElement {
+        self.waves.borrow_mut().start_frame(window);
+        // The preview's playhead, while it plays.
+        if self.state(context).preview_playback_state() == PlaybackState::Playing {
+            self.watch_playback(context);
+        }
+        // The selected file's waveform and tempo, the files found for the
+        // missing ones, as they come.
+        let decoding = self
+            .audio
+            .as_ref()
+            .is_some_and(|audio| audio.data.is_loading());
+        let scanning = self.source == BrowserSource::Missing && self.missing.index.is_scanning();
+        if decoding || scanning {
+            self.recheck.soon(context);
+        }
+        if !context.has_active_drag() {
+            self.folders_over = false;
+        }
+        let theme = crate::theme::current(context);
         let mut sources = vec![
             (BrowserSource::Files, icons::FOLDER_SIMPLE, "Files"),
             (BrowserSource::Labels, icons::TAG, "Labels"),
             (BrowserSource::Effects, icons::MAGIC_WAND, "Effects"),
         ];
         // Missing files below the rest, while there are (or shown).
-        if !self.state.missing_files().is_empty() || self.browser.source == BrowserSource::Missing {
+        if !self.state(context).missing_files().is_empty() || self.source == BrowserSource::Missing
+        {
             sources.push((BrowserSource::Missing, icons::WARNING, "Missing files"));
         }
         let rail = icon_rail(
             &sources,
-            self.browser.source,
+            self.source,
             RAIL_WIDTH,
             &theme,
             context,
@@ -240,10 +290,10 @@ impl Tonique {
         )
         .pt(px(RAIL_TOP));
         let panel = div().flex_1().min_w_0().flex().flex_col();
-        let content = match self.browser.source {
+        let content = match self.source {
             BrowserSource::Effects => panel
                 .child(self.effect_search_bar(&theme, window, context))
-                .child(self.effects_list())
+                .child(self.effects_list(context))
                 .into_any_element(),
             BrowserSource::Missing => panel
                 .child(self.missing_view(window, context))
@@ -266,8 +316,20 @@ impl Tonique {
             .child(rail)
             .child(div().flex_none().w(px(1.)).bg(hsla(theme.separator)))
             .child(content)
+            // A preview's seek or volume drag follows the pointer anywhere.
+            .when(self.drag != BrowserDrag::None, |element| {
+                element.child(follow_drag(
+                    context.weak_entity(),
+                    |this, event, context| {
+                        this.browser_drag_move(event, context);
+                    },
+                    |this, _, _| this.browser_drag_end(),
+                ))
+            })
     }
+}
 
+impl BrowserPanel {
     /// A search field, `placeholder` in it while empty; `key` takes its
     /// keys, `clear` empties it.
     #[allow(clippy::too_many_arguments)]

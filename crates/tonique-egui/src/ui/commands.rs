@@ -3,7 +3,7 @@
 //! panel, then the timeline), and the app runs the rest at the end of the
 //! frame.
 
-use crate::config::keymap::Action;
+use tonique_core::config::keymap::Action;
 
 /// This frame's actions, in the order asked for.
 #[derive(Default)]

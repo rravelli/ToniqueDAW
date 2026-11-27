@@ -2,7 +2,9 @@ use crate::ui::RectSpan;
 use egui::{CursorIcon, Painter, Rect, Sense, Stroke, Ui, vec2};
 use tonique_engine::time::BeatPos;
 
-use crate::{core::state::ProjectState, ui::arrangement::grid::PaintGrid, ui::theme::ThemeExt};
+use crate::{ui::arrangement::grid::ZoomedGrid, ui::theme::ThemeExt};
+use tonique_core::project::ProjectState;
+use tonique_core::session::timeline_view::TimelineView;
 
 /// The loop lane, then the bars, then the time: a row each.
 pub const RULER_HEIGHT: f32 = 3. * ROW_HEIGHT;
@@ -40,7 +42,7 @@ impl Ruler {
         Self { loop_drag: None }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState) {
+    pub fn ui(&mut self, ui: &mut Ui, state: &mut ProjectState, view: &mut TimelineView) {
         ui.spacing_mut().interact_size.y = 0.;
         ui.horizontal(|ui| {
             // ColorBar for zoom control. None in a window too narrow for it.
@@ -56,17 +58,20 @@ impl Ruler {
             painter.rect_filled(ruler_rect, 0.0, ui.app_theme().bg_raised);
             // Draw Labels, under the loop lane
             let labels = ruler_rect.with_min_y(ruler_rect.top() + LOOP_LANE_HEIGHT);
-            state
-                .grid
-                .paint_labels(&painter, labels, state.bpm(), &ui.app_theme());
+            ZoomedGrid::new(state.grid(), view).paint_labels(
+                &painter,
+                labels,
+                state.bpm(),
+                &ui.app_theme(),
+            );
             let loop_lane =
                 Rect::from_min_size(ruler_rect.min, vec2(ruler_rect.width(), LOOP_LANE_HEIGHT));
-            let clicked_lane = self.loop_lane(ui, &painter, state, loop_lane);
+            let clicked_lane = self.loop_lane(ui, &painter, state, view, loop_lane);
             // Seek on click, scrub on drag
             if (nav_bar_response.clicked() || nav_bar_response.dragged() || clicked_lane)
                 && let Some(mouse_pos) = ui.input(|i| i.pointer.interact_pos())
             {
-                state.seek(state.grid.x_to_beats(mouse_pos.x, ruler_rect.span()));
+                state.seek(view.x_to_beats(mouse_pos.x, ruler_rect.span()));
             }
             // Zoom (the loop lane covers part of the bar, so don't rely on
             // the bar's own hover)
@@ -75,9 +80,7 @@ impl Ruler {
                 && ui.rect_contains_pointer(ruler_rect)
             {
                 let delta = ui.input(|i| i.smooth_scroll_delta.y);
-                state
-                    .grid
-                    .zoom_around(delta, mouse_pos.x, ruler_rect.span());
+                view.zoom_around(delta, mouse_pos.x, ruler_rect.span());
             }
         });
     }
@@ -90,15 +93,16 @@ impl Ruler {
         ui: &mut Ui,
         painter: &Painter,
         state: &mut ProjectState,
+        view: &TimelineView,
         lane: Rect,
     ) -> bool {
         let response = ui.interact(lane, ui.id().with("loop_lane"), Sense::click_and_drag());
         let (start, end) = state.loop_range();
         let (x0, x1) = (
-            state.grid.beats_to_x(start, lane.span()),
-            state.grid.beats_to_x(end, lane.span()),
+            view.beats_to_x(start, lane.span()),
+            view.beats_to_x(end, lane.span()),
         );
-        let pixels_per_beat = state.grid.pixels_per_beat();
+        let pixels_per_beat = view.pixels_per_beat();
         let grab_at = |x: f32| -> Option<LoopDrag> {
             let (d0, d1) = ((x - x0).abs(), (x - x1).abs());
             if d0.min(d1) <= EDGE_GRAB {
@@ -122,22 +126,25 @@ impl Ruler {
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         {
             let anchor = state
-                .grid
-                .snap(state.grid.x_to_beats(origin.x, lane.span()), alt);
+                .grid()
+                .snap(view.x_to_beats(origin.x, lane.span()), alt, view);
             self.loop_drag = Some(grab_at(origin.x).unwrap_or(LoopDrag::Create { anchor }));
         }
         if response.dragged()
             && let Some(drag) = self.loop_drag
             && let Some(pos) = response.interact_pointer_pos()
         {
-            let beats = state.grid.x_to_beats(pos.x, lane.span());
-            let snapped = state.grid.snap(beats, alt);
-            let step = state.grid.snap_step();
+            let beats = view.x_to_beats(pos.x, lane.span());
+            let snapped = state.grid().snap(beats, alt, view);
+            let step = state.grid().snap_step(view);
             match drag {
                 LoopDrag::Start => state.set_loop_range(snapped.min(end - step), end),
                 LoopDrag::End => state.set_loop_range(start, snapped.max(start + step)),
                 LoopDrag::Move { offset } => {
-                    let new_start = state.grid.snap(beats - offset, alt).max(BeatPos::ZERO);
+                    let new_start = state
+                        .grid()
+                        .snap(beats - offset, alt, view)
+                        .max(BeatPos::ZERO);
                     state.set_loop_range(new_start, new_start + (end - start));
                 }
                 LoopDrag::Create { anchor } => {
@@ -175,8 +182,7 @@ impl Ruler {
 
         // Paint with the range as it is after this frame's edits.
         let (start, end) = state.loop_range();
-        let x_range =
-            state.grid.beats_to_x(start, lane.span())..=state.grid.beats_to_x(end, lane.span());
+        let x_range = view.beats_to_x(start, lane.span())..=view.beats_to_x(end, lane.span());
         self.paint_loop(
             ui,
             painter,

@@ -1,22 +1,23 @@
 use crate::ui::theme::font_size;
-use crate::{
-    config::{Config, keymap::Action},
-    core::state::{PlaybackState, ProjectState},
-    ui::{
-        browser::{
-            items::{FileList, FolderAction, LabelView},
-            preview::{PREVIEW_HEIGHT, PreviewSettings, preview_ui},
-        },
-        commands::Commands,
-        theme::{ThemeExt, with_alpha},
-        widget::flat_button::FlatButton,
+use crate::ui::{
+    browser::{
+        items::{FileList, FolderAction, LabelView},
+        preview::{PREVIEW_HEIGHT, PreviewSettings, preview_ui},
     },
+    commands::Commands,
+    theme::{ThemeExt, with_alpha},
+    widget::flat_button::FlatButton,
 };
 use egui::{Color32, FontId, Rect, RichText, Stroke, Ui};
 use rfd::FileDialog;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+};
+use tonique_core::{
+    config::{Config, keymap::Action},
+    project::PlaybackState,
+    project::ProjectState,
 };
 
 mod items;

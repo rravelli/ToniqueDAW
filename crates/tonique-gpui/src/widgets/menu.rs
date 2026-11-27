@@ -12,8 +12,9 @@ use gpui::{
 };
 
 use crate::{
-    app::{PopupKind, Tonique},
+    app::PopupKind,
     icons,
+    popup::{self, MenuBuilder},
     theme::{Color, FONT_UI, Theme, hsla, icon, size},
 };
 
@@ -168,11 +169,11 @@ impl Menu {
 
     /// An item running `action` when pressed. Hovered, it closes the
     /// submenu shown beside another item.
-    pub fn item(
+    pub fn item<V: 'static>(
         self,
         item: MenuItem,
-        context: &mut Context<Tonique>,
-        action: impl Fn(&mut Tonique, &mut Window, &mut Context<Tonique>) + 'static,
+        context: &mut Context<V>,
+        action: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
     ) -> Self {
         let keep_open = item.keep_open;
         let enabled = item.enabled;
@@ -180,12 +181,11 @@ impl Menu {
         let row = if self.is_submenu {
             row
         } else {
-            row.on_hover(context.listener(|this, hovered: &bool, _, context| {
+            row.on_hover(|hovered: &bool, _, context| {
                 if *hovered {
-                    this.close_submenu();
-                    context.notify();
+                    popup::close_submenu(context);
                 }
-            }))
+            })
         };
         let row = if !enabled {
             row
@@ -194,12 +194,12 @@ impl Menu {
                 MouseButton::Left,
                 context.listener(move |this, _, window, context| {
                     context.stop_propagation();
-                    let shown = this.popup.as_ref().map(|popup| popup.kind);
+                    let shown = popup::shown(context);
                     action(this, window, context);
                     // Unless the action opened another menu in its place.
-                    let replaced = this.popup.as_ref().map(|popup| popup.kind) != shown;
+                    let replaced = popup::shown(context) != shown;
                     if !keep_open && !replaced {
-                        this.popup = None;
+                        popup::close(context);
                     }
                     context.notify();
                 }),
@@ -211,22 +211,28 @@ impl Menu {
         }
     }
 
-    /// An item showing `kind`'s menu beside it while hovered or pressed;
-    /// `open` while it does.
-    pub fn submenu(
+    /// An item running the keymap's `action`, as its shortcut does.
+    pub fn command<V: 'static>(
         self,
         item: MenuItem,
-        kind: PopupKind,
-        open: bool,
-        context: &mut Context<Tonique>,
+        action: tonique_core::config::keymap::Action,
+        context: &mut Context<V>,
     ) -> Self {
+        self.item(item, context, move |_, window, context| {
+            crate::app::command::dispatch(action, window, context);
+        })
+    }
+
+    /// An item showing `kind`'s menu, built by `build`, beside it while
+    /// hovered or pressed; `open` while it does.
+    pub fn submenu(self, item: MenuItem, kind: PopupKind, open: bool, build: MenuBuilder) -> Self {
         let bounds: Rc<Cell<Bounds<Pixels>>> = Rc::default();
         let slot = bounds.clone();
-        let open_beside = move |this: &mut Tonique| {
+        let open_beside = move |context: &mut gpui::App| {
             let item = bounds.get();
             // Its first item level with this one.
             let top = item.top() - px(MENU_PADDING + 1.);
-            this.open_submenu(kind, point(item.right(), top));
+            popup::open_submenu(kind, point(item.right(), top), build.clone(), context);
         };
         let row = self
             .row(item, Some(icons::CARET_RIGHT))
@@ -238,23 +244,18 @@ impl Menu {
                     .absolute()
                     .size_full(),
             )
-            .on_hover(context.listener({
+            .on_hover({
                 let open_beside = open_beside.clone();
-                move |this, hovered: &bool, _, context| {
+                move |hovered: &bool, _, context| {
                     if *hovered {
-                        open_beside(this);
-                        context.notify();
+                        open_beside(context);
                     }
                 }
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                context.listener(move |this, _, _, context| {
-                    context.stop_propagation();
-                    open_beside(this);
-                    context.notify();
-                }),
-            );
+            })
+            .on_mouse_down(MouseButton::Left, move |_, _, context| {
+                context.stop_propagation();
+                open_beside(context);
+            });
         Self {
             element: self.element.child(row),
             ..self

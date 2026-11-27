@@ -4,16 +4,15 @@ use crate::ui::theme::ToEgui;
 use egui::{Align2, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
 use tonique_engine::time::BeatPos;
 
-use crate::{
-    core::{
-        export::ExportRange,
-        state::{ExportSelection, ProjectState},
-        track::{TrackKind, TrackRow},
-    },
-    ui::{
-        theme::{ThemeExt, with_alpha},
-        waveform::paint_waveform,
-    },
+use crate::ui::{
+    theme::{ThemeExt, with_alpha},
+    waveform::paint_waveform,
+};
+use tonique_core::{
+    document::track::{TrackKind, TrackRow},
+    files::export::ExportRange,
+    project::ExportSelection,
+    project::ProjectState,
 };
 
 use super::{LANE_PADDING, format::duration, widgets::card};

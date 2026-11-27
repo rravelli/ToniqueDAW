@@ -15,7 +15,8 @@ use tonique_engine::{
     sample::SampleBuffer,
 };
 
-use crate::{analysis::AudioData, core::clip::AudioClip, geometry::Rect};
+use crate::geometry::Rect;
+use tonique_core::{document::clip::AudioClip, library::analysis::AudioData};
 
 /// Columns per cached tile.
 const TILE: usize = 256;
@@ -68,6 +69,18 @@ pub struct WaveMemory {
     pub image_bytes: usize,
 }
 
+impl WaveMemory {
+    /// Both caches' together.
+    pub fn add(self, other: Self) -> Self {
+        Self {
+            tiles: self.tiles + other.tiles,
+            tile_bytes: self.tile_bytes + other.tile_bytes,
+            images: self.images + other.images,
+            image_bytes: self.image_bytes + other.image_bytes,
+        }
+    }
+}
+
 impl WaveCache {
     pub fn memory(&self) -> WaveMemory {
         let image_bytes = |image: &RenderImage| {
@@ -90,6 +103,8 @@ impl WaveCache {
         }
     }
 
+    /// Lets go of the tiles not drawn since the last frame: called as the
+    /// view drawing them renders, its canvases painting them again after.
     pub fn start_frame(&mut self, window: &mut Window) {
         self.frame += 1;
         let frame = self.frame;

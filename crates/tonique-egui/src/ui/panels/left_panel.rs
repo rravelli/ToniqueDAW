@@ -1,18 +1,16 @@
 use crate::ui::theme::font_size;
-use crate::{
-    core::{effect::EffectKind, state::ProjectState},
-    ui::{
-        browser::FileBrowser,
-        commands::Commands,
-        dnd::DragPayload,
-        missing_files::{self, MissingFilesView},
-        theme::ThemeExt,
-        widget::{icon_rail::IconRail, list_row::ListRow, search_bar::SearchBar},
-        workspace::Workspace,
-    },
+use crate::ui::{
+    browser::FileBrowser,
+    commands::Commands,
+    dnd::DragPayload,
+    missing_files::{self, MissingFilesView},
+    theme::ThemeExt,
+    widget::{icon_rail::IconRail, list_row::ListRow, search_bar::SearchBar},
+    workspace::Workspace,
 };
 use egui::{Frame, Margin, RichText, Stroke, Ui, UiBuilder};
 use egui_phosphor::regular as icons;
+use tonique_core::{document::effect::EffectKind, project::ProjectState};
 
 /// Space around the search bar, and above the rail.
 const HEADER_SPACING: f32 = 4.;

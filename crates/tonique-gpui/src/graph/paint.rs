@@ -10,12 +10,12 @@ use tonique_engine::graph::{GraphTopology, TopologyNode};
 use super::Positions;
 use crate::{
     bottom::paint::{Align, fill, fill_rounded, text},
-    core::graph_layout::{
-        NODE_HEIGHT, NODE_WIDTH, elide, meter_unit, node_details, node_palette_slot,
-    },
     geometry::Rect,
     theme::{Color, Theme, hsla, mix, mono, size},
     widgets::{paint_line, shape},
+};
+use tonique_core::monitor::graph_layout::{
+    NODE_HEIGHT, NODE_WIDTH, elide, meter_unit, node_details, node_palette_slot,
 };
 
 /// Below this zoom, node text is unreadable: skip it.
@@ -26,7 +26,7 @@ const HINT: &str = "Drag to pan · Ctrl+scroll to zoom · Double-click to fit";
 
 /// What's shown, taken out of the app for one frame.
 pub struct GraphScene {
-    pub theme: Theme,
+    pub theme: std::rc::Rc<Theme>,
     /// `None` until the engine publishes its graph.
     pub topology: Option<Arc<GraphTopology>>,
     pub positions: Positions,
@@ -42,7 +42,7 @@ pub struct GraphScene {
 }
 
 impl GraphScene {
-    pub fn empty(theme: Theme) -> Self {
+    pub fn empty(theme: std::rc::Rc<Theme>) -> Self {
         Self {
             theme,
             topology: None,

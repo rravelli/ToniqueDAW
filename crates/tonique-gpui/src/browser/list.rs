@@ -3,22 +3,25 @@
 //! scrolled into folders, the way down to the first row shown stays
 //! pinned at the top; a scrollbar runs down the right.
 
+use super::BrowserPanel;
+use crate::model::HoldsProject;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
 
 use gpui::{
-    AnyElement, Context, KeyDownEvent, ScrollStrategy, Task, UniformListScrollHandle, Window, div,
-    prelude::*, px, uniform_list,
+    AnyElement, App, Context, KeyDownEvent, ScrollStrategy, Task, UniformListScrollHandle, Window,
+    div, prelude::*, px, uniform_list,
 };
 
 use crate::{
-    app::Tonique,
-    cache::AUDIO_ANALYSIS_CACHE,
-    file_tree::{FileTree, is_audio_file, pinned},
     theme::hsla,
     widgets::{FieldKey, HANDLE_WIDTH, ScrollbarGrab, TextField, handle_scrollbar},
+};
+use tonique_core::{
+    library::cache::AUDIO_ANALYSIS_CACHE,
+    library::file_tree::{FileTree, is_audio_file, pinned},
 };
 
 use super::rows::ROW_HEIGHT;
@@ -51,7 +54,7 @@ pub struct FileList {
 }
 
 impl FileList {
-    pub fn new(context: &mut Context<Tonique>) -> Self {
+    pub fn new(context: &mut Context<BrowserPanel>) -> Self {
         Self {
             tree: FileTree::new(),
             selected: None,
@@ -130,11 +133,17 @@ fn folder_names(roots: &[PathBuf]) -> HashMap<PathBuf, String> {
         .collect()
 }
 
-impl Tonique {
+impl BrowserPanel {
     /// Select row `index` of `kind`: open or close a folder, or select (and
     /// preview) a file.
-    pub(super) fn browser_select(&mut self, kind: ListKind, index: usize, toggle_folder: bool) {
-        let list = self.browser.list_mut(kind);
+    pub(super) fn browser_select(
+        &mut self,
+        kind: ListKind,
+        index: usize,
+        toggle_folder: bool,
+        context: &mut App,
+    ) {
+        let list = self.list_mut(kind);
         let Some(item) = list.tree.items.get(index).cloned() else {
             return;
         };
@@ -146,31 +155,31 @@ impl Tonique {
             }
             return;
         }
-        self.browser.audio = None;
+        self.audio = None;
         if !is_audio_file(&item.path) {
             return;
         }
-        self.browser.audio = AUDIO_ANALYSIS_CACHE.get_or_analyze(item.path.clone());
-        if let Some(audio) = &self.browser.audio {
+        self.audio = AUDIO_ANALYSIS_CACHE.get_or_analyze(item.path.clone());
+        if let Some(audio) = &self.audio {
             audio.load_peaks();
         }
-        if self.browser.auto_preview {
-            self.state.play_preview(item.path);
-        } else if self.state.previewing().is_some() {
+        if self.auto_preview {
+            self.state_mut(context).play_preview(item.path);
+        } else if self.state(context).previewing().is_some() {
             // Another file's.
-            self.state.pause_preview();
+            self.state_mut(context).pause_preview();
         }
     }
 
     /// Folders opened or closed: remembered for next time (the labels'
     /// sections until the app closes).
     pub(super) fn remember_collapsed(&mut self, kind: ListKind) {
-        let Some(collapsed) = self.browser.list(kind).tree.collapsed_roots() else {
+        let Some(collapsed) = self.list(kind).tree.collapsed_roots() else {
             return;
         };
         match kind {
-            ListKind::Files => self.browser.config.set_collapsed_dirs(collapsed),
-            ListKind::Labels => self.browser.labels_collapsed = collapsed,
+            ListKind::Files => self.config.set_collapsed_dirs(collapsed),
+            ListKind::Labels => self.labels_collapsed = collapsed,
         }
     }
 
@@ -178,7 +187,7 @@ impl Tonique {
     /// Enter, 0 to 7 for labels and F5. Returns whether the key was the
     /// list's.
     pub fn browser_key(&mut self, event: &KeyDownEvent, context: &mut Context<Self>) -> bool {
-        let Some(kind) = self.browser.shown_list() else {
+        let Some(kind) = self.shown_list() else {
             return false;
         };
         let keystroke = &event.keystroke;
@@ -197,28 +206,30 @@ impl Tonique {
             context.notify();
             return taken;
         }
-        let len = self.browser.list(kind).tree.items.len();
+        let len = self.list(kind).tree.items.len();
         if len == 0 || !matches!(key, "down" | "up" | "right" | "left" | "enter") {
             return false;
         }
-        let selected = self.browser.list(kind).selected;
+        let selected = self.list(kind).selected;
         match key {
             "down" => self.browser_select(
                 kind,
                 selected.map_or(0, |index| (index + 1).min(len - 1)),
                 false,
+                context,
             ),
             "up" => self.browser_select(
                 kind,
                 selected.map_or(0, |index| index.saturating_sub(1)),
                 false,
+                context,
             ),
             _ => {
                 let Some(index) = selected else { return true };
-                self.browser_open_key(kind, index, key);
+                self.browser_open_key(kind, index, key, context);
             }
         }
-        let list = self.browser.list(kind);
+        let list = self.list(kind);
         if let Some(index) = list.selected {
             list.scroll.scroll_to_item(index, ScrollStrategy::Center);
         }
@@ -228,8 +239,8 @@ impl Tonique {
 
     /// Right opens a folder, Left closes it (or goes to the folder a file
     /// is in), Enter toggles a folder or plays or stops a file.
-    fn browser_open_key(&mut self, kind: ListKind, index: usize, key: &str) {
-        let list = self.browser.list_mut(kind);
+    fn browser_open_key(&mut self, kind: ListKind, index: usize, key: &str, context: &mut App) {
+        let list = self.list_mut(kind);
         let Some(node) = list.tree.items.get(index).cloned() else {
             return;
         };
@@ -251,10 +262,10 @@ impl Tonique {
             "left" => select_parent(list, index, node.depth),
             "enter" if is_audio_file(&node.path) => {
                 // Whether or not selecting plays.
-                if self.state.previewing() == Some(node.path.as_path()) {
-                    self.state.pause_preview();
+                if self.state(context).previewing() == Some(node.path.as_path()) {
+                    self.state_mut(context).pause_preview();
                 } else {
-                    self.state.play_preview(node.path);
+                    self.state_mut(context).play_preview(node.path);
                 }
             }
             _ => {}
@@ -268,15 +279,15 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        let search = &mut self.browser.list_mut(kind).search;
+        let search = &mut self.list_mut(kind).search;
         match event.keystroke.key.as_str() {
-            "down" => window.focus(&self.browser.list_focus, context),
+            "down" => window.focus(&self.list_focus, context),
             _ => match search.key(event) {
                 FieldKey::Edited => self.run_search(kind, context),
-                FieldKey::Submit => window.focus(&self.browser.list_focus, context),
+                FieldKey::Submit => window.focus(&self.list_focus, context),
                 FieldKey::Cancel => {
                     search.text.clear();
-                    window.focus(&self.browser.list_focus, context);
+                    window.focus(&self.list_focus, context);
                     self.run_search(kind, context);
                 }
                 FieldKey::Ignored => return,
@@ -307,7 +318,7 @@ impl Tonique {
     /// Search `kind`'s folders (or the one searched in) in the background;
     /// the latest search wins.
     pub(super) fn run_search(&mut self, kind: ListKind, context: &mut Context<Self>) {
-        let list = self.browser.list_mut(kind);
+        let list = self.list_mut(kind);
         let query = list.query();
         list.selected = None;
         if query.is_empty() {
@@ -327,7 +338,7 @@ impl Tonique {
                 })
                 .await;
             this.update(context, |this, context| {
-                let list = this.browser.list_mut(kind);
+                let list = this.list_mut(kind);
                 if list.query() == query {
                     list.tree.finish_search(&query, search);
                     list.search_task = None;
@@ -340,24 +351,24 @@ impl Tonique {
 
     /// Search again if a search is on: what's listed changed.
     pub(super) fn search_again(&mut self, kind: ListKind, context: &mut Context<Self>) {
-        if !self.browser.list(kind).query().is_empty() {
+        if !self.list(kind).query().is_empty() {
             self.run_search(kind, context);
         }
     }
 
     /// Search in `scope` only, or (`None`) in every folder.
     pub(super) fn set_search_scope(&mut self, scope: Option<PathBuf>, context: &mut Context<Self>) {
-        self.browser.files.scope = scope;
+        self.files.scope = scope;
         self.search_again(ListKind::Files, context);
     }
 
     fn clear_files_search(&mut self, context: &mut Context<Self>) {
-        self.browser.files.search.text.clear();
+        self.files.search.text.clear();
         self.run_search(ListKind::Files, context);
     }
 
     fn clear_labels_search(&mut self, context: &mut Context<Self>) {
-        self.browser.labelled.search.text.clear();
+        self.labelled.search.text.clear();
         self.run_search(ListKind::Labels, context);
     }
 
@@ -368,8 +379,8 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.theme.clone();
-        let list = self.browser.list(kind);
+        let theme = crate::theme::current(context);
+        let list = self.list(kind);
         let (placeholder, key, clear): (String, _, fn(&mut Self, &mut Context<Self>)) = match kind {
             ListKind::Files => (
                 match list.scope_name() {
@@ -401,7 +412,7 @@ impl Tonique {
             key,
             clear,
         );
-        let body = if kind == ListKind::Files && self.browser.config.list_dirs().is_empty() {
+        let body = if kind == ListKind::Files && self.config.list_dirs().is_empty() {
             self.no_folders_view(context)
         } else if list.tree.items.is_empty() && !list.query().is_empty() && !list.is_searching() {
             self.nothing_found_view(kind, context)
@@ -420,7 +431,14 @@ impl Tonique {
                         ListKind::Files => "file-list",
                         ListKind::Labels => "label-list",
                     })
-                    .track_focus(&self.browser.list_focus)
+                    .track_focus(&self.list_focus)
+                    // Focused, the list takes the arrows, Enter, labels'
+                    // digits and F5 before the window's shortcuts.
+                    .on_key_down(context.listener(|this, event: &KeyDownEvent, _, context| {
+                        if this.browser_key(event, context) {
+                            context.stop_propagation();
+                        }
+                    }))
                     .flex_1()
                     .min_h_0()
                     .flex()
@@ -433,8 +451,8 @@ impl Tonique {
     /// A search found nothing: says so, and in a folder, offers to search
     /// them all.
     fn nothing_found_view(&self, kind: ListKind, context: &mut Context<Self>) -> AnyElement {
-        let theme = &self.theme;
-        let scope = self.browser.list(kind).scope_name();
+        let theme = &*crate::theme::current(context);
+        let scope = self.list(kind).scope_name();
         let text = match &scope {
             Some(folder) => format!("No files match in {folder}"),
             None => "No files match".into(),
@@ -467,7 +485,7 @@ impl Tonique {
     /// The rows, the last one adding a folder (in the files' list, unless
     /// it shows search results), and the folders pinned over them.
     fn rows_view(&self, kind: ListKind, context: &mut Context<Self>) -> AnyElement {
-        let list = self.browser.list(kind);
+        let list = self.list(kind);
         let count = list.tree.items.len();
         let add_row = kind == ListKind::Files && list.query().is_empty();
         let rows = uniform_list(
@@ -501,7 +519,7 @@ impl Tonique {
                 &list.scrollbar,
                 // Clear of the browser's resize grip, down the same edge.
                 HANDLE_WIDTH,
-                &self.theme,
+                &crate::theme::current(context),
                 context,
             ))
             .into_any_element()
@@ -511,7 +529,7 @@ impl Tonique {
     /// folder's header, the subfolders it's in) at the top, each pushed up
     /// by the first row after its contents.
     fn pinned_rows(&self, kind: ListKind, context: &mut Context<Self>) -> Vec<AnyElement> {
-        let list = self.browser.list(kind);
+        let list = self.list(kind);
         let items = &list.tree.items;
         let offset = f32::from(list.scroll.0.borrow().base_handle.offset().y);
         let first = (-offset / ROW_HEIGHT).floor().max(0.) as usize;
@@ -542,11 +560,11 @@ impl Tonique {
                     .left_0()
                     .right_0()
                     .top(px(tops[level]))
-                    .bg(hsla(self.theme.bg_panel))
+                    .bg(hsla(crate::theme::current(context).bg_panel))
                     .when(level == last, |element| {
                         element
                             .border_b_1()
-                            .border_color(hsla(self.theme.separator))
+                            .border_color(hsla(crate::theme::current(context).separator))
                     })
                     .child(self.browser_row(kind, index, true, context))
                     .into_any_element()

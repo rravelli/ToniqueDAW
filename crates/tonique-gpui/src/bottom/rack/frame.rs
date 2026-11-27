@@ -4,6 +4,8 @@
 //! header (the whole strip) is dragged to move the effect, double-clicked
 //! to fold it, and right-clicked for its menu.
 
+use crate::bottom::BottomPanel;
+use crate::model::HoldsProject;
 use gpui::{
     Anchor, AnyElement, Context, CursorStyle, MouseButton, MouseDownEvent, Stateful, Window,
     canvas, div, prelude::*, px,
@@ -11,15 +13,15 @@ use gpui::{
 use tonique_engine::edit::{PluginId, TrackId};
 
 use crate::{
-    app::{PopupKind, Tonique},
+    app::{PopupKind, focus_main},
     bottom::rack::{RackDrag, editors::Editor, editors::EditorInput},
-    core::{effect::Effect, metrics::AudioMetrics},
     geometry::Rect,
     icons,
     meter::paint_meter,
     theme::{Theme, hsla, size},
     widgets::{Flat, Menu, MenuItem, TextField, glyph, typing_view},
 };
+use tonique_core::{document::effect::Effect, monitor::metrics::AudioMetrics};
 
 const HEADER_HEIGHT: f32 = 20.;
 /// The output meter outside the frame, low at its right, and the space
@@ -32,7 +34,7 @@ const STRIP_WIDTH: f32 = 24.;
 const BUTTON: f32 = 15.;
 const ICON_SIZE: f32 = 10.;
 
-impl Tonique {
+impl BottomPanel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn effect_frame(
         &self,
@@ -130,7 +132,7 @@ impl Tonique {
                 glyph(icons::CARET_RIGHT, ICON_SIZE, false),
                 theme,
                 context,
-                move |this, _| this.state.set_effect_collapsed(plugin, false),
+                move |this, context| this.state_mut(context).set_effect_collapsed(plugin, false),
             ))
             .child(
                 div()
@@ -152,7 +154,7 @@ impl Tonique {
 
     /// The effect's element, its bounds kept for selecting and dropping.
     fn recorded(&self, index: usize, plugin: PluginId) -> Stateful<gpui::Div> {
-        let frames = self.bottom.rack.frames.clone();
+        let frames = self.rack.frames.clone();
         div()
             .id(("effect", plugin.0 as usize))
             .relative()
@@ -187,11 +189,12 @@ impl Tonique {
                 MouseButton::Left,
                 context.listener(move |this, event: &MouseDownEvent, _, context| {
                     if event.click_count >= 2 {
-                        this.bottom.rack.drag = None;
-                        this.state.set_effect_collapsed(plugin, !collapsed);
+                        this.rack.drag = None;
+                        this.state_mut(context)
+                            .set_effect_collapsed(plugin, !collapsed);
                     } else {
                         let pointer_x = f32::from(event.position.x);
-                        this.bottom.rack.drag = Some(RackDrag::Move {
+                        this.rack.drag = Some(RackDrag::Move {
                             plugin,
                             from: index,
                             start_x: pointer_x,
@@ -210,6 +213,7 @@ impl Tonique {
                         PopupKind::Effect(track, plugin),
                         event.position,
                         Anchor::TopLeft,
+                        context,
                     );
                     context.notify();
                 }),
@@ -228,7 +232,10 @@ impl Tonique {
             glyph(icons::POWER, ICON_SIZE, false),
             theme,
             context,
-            move |this, _| this.state.set_effect_enabled(&track, plugin, !enabled),
+            move |this, context| {
+                this.state_mut(context)
+                    .set_effect_enabled(&track, plugin, !enabled)
+            },
         )
     }
 
@@ -248,13 +255,13 @@ impl Tonique {
         } else {
             theme.text_muted
         };
-        let name = match &self.bottom.rack.renaming {
+        let name = match &self.rack.renaming {
             Some((_, renaming, field)) if *renaming == plugin => typing_view(
                 "effect-rename",
                 field,
                 theme,
                 context,
-                |this| this.bottom.rack.renaming.as_mut().map(|(.., field)| field),
+                |this| this.rack.renaming.as_mut().map(|(.., field)| field),
                 Self::finish_effect_rename,
             )
             .h(px(HEADER_HEIGHT - 4.))
@@ -289,7 +296,7 @@ impl Tonique {
                 glyph(icons::CARET_DOWN, ICON_SIZE, false),
                 theme,
                 context,
-                move |this, _| this.state.set_effect_collapsed(plugin, true),
+                move |this, context| this.state_mut(context).set_effect_collapsed(plugin, true),
             ))
             .child(div().flex_1().min_w_0().ml(px(2.)).mr(px(1.)).child(name));
         self.grabbed(header, index, plugin, track, false, context)
@@ -305,7 +312,7 @@ impl Tonique {
         context: &mut Context<Self>,
     ) {
         let Some(effect) = self
-            .state
+            .state(context)
             .effects(&track)
             .into_iter()
             .find(|effect| effect.plugin.id == plugin)
@@ -313,11 +320,11 @@ impl Tonique {
             return;
         };
         if effect.collapsed {
-            self.state.set_effect_collapsed(plugin, false);
+            self.state_mut(context).set_effect_collapsed(plugin, false);
         }
         let mut field = TextField::new(context);
         field.start(effect.name().to_string(), window, context);
-        self.bottom.rack.renaming = Some((track, plugin, field));
+        self.rack.renaming = Some((track, plugin, field));
     }
 
     fn finish_effect_rename(
@@ -326,14 +333,17 @@ impl Tonique {
         window: &mut Window,
         context: &mut Context<Self>,
     ) {
-        let Some((track, plugin, field)) = self.bottom.rack.renaming.take() else {
+        let Some((track, plugin, field)) = self.rack.renaming.take() else {
             return;
         };
         if keep {
-            self.state
-                .rename_effect(&track, plugin, Some(field.text.trim().to_string()));
+            self.state_mut(context).rename_effect(
+                &track,
+                plugin,
+                Some(field.text.trim().to_string()),
+            );
         }
-        window.focus(&self.focus, context);
+        focus_main(window, context);
     }
 
     /// An effect's menu, while it exists.
@@ -343,12 +353,12 @@ impl Tonique {
         plugin: PluginId,
         context: &mut Context<Self>,
     ) -> Option<gpui::Div> {
-        let effects = self.state.effects(&track);
+        let effects = self.state(context).effects(&track);
         let index = effects
             .iter()
             .position(|effect| effect.plugin.id == plugin)?;
         let effect = &effects[index];
-        let theme = &self.theme;
+        let theme = &*crate::theme::current(context);
         let collapsed = effect.collapsed;
         let (icon, text) = if collapsed {
             (icons::CARET_RIGHT, "Expand")
@@ -366,13 +376,17 @@ impl Tonique {
                 .item(
                     MenuItem::new(text).icon(icon),
                     context,
-                    move |this, _, _| this.state.set_effect_collapsed(plugin, !collapsed),
+                    move |this, _, context| {
+                        this.state_mut(context)
+                            .set_effect_collapsed(plugin, !collapsed)
+                    },
                 )
                 .item(
                     MenuItem::new("Duplicate").icon(icons::COPY),
                     context,
-                    move |this, _, _| {
-                        this.bottom.rack.selected = this.state.duplicate_effects(&track, &[index]);
+                    move |this, _, context| {
+                        this.rack.selected =
+                            this.state_mut(context).duplicate_effects(&track, &[index]);
                     },
                 )
                 .separator()
@@ -381,9 +395,9 @@ impl Tonique {
                         .icon(icons::TRASH)
                         .color(theme.danger),
                     context,
-                    move |this, _, _| {
-                        this.state.remove_effects(&track, &[index]);
-                        this.bottom.rack.selected.clear();
+                    move |this, _, context| {
+                        this.state_mut(context).remove_effects(&track, &[index]);
+                        this.rack.selected.clear();
                     },
                 )
                 .into_element(),

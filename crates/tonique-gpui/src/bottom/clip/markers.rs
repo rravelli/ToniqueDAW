@@ -1,17 +1,19 @@
 //! Dragging the markers and the loop, and the clip edits they make.
 
+use crate::bottom::BottomPanel;
+use crate::model::HoldsProject;
+use gpui::App;
 use tonique_engine::{edit::ClipLoop, time::BeatPos};
 
 use crate::{
-    app::Tonique,
     bottom::{
         clip::{ClipDrag, ClipScene, LOOP_BAR_HEIGHT, Layout, RULER_HEIGHT},
         paint::{fill, polygon},
     },
-    core::clip::{AudioClip, MIN_LENGTH},
     geometry::Rect,
     theme::with_alpha,
 };
+use tonique_core::document::clip::{AudioClip, MIN_LENGTH};
 
 /// Half the width of the area grabbing a marker or a loop edge.
 const HANDLE_REACH: f32 = 4.;
@@ -78,7 +80,7 @@ pub(super) struct HandleDrag {
     pub grabbed: Option<ClipLoop>,
 }
 
-impl Tonique {
+impl BottomPanel {
     /// The handle at `(x, y)` in the view, if any: the markers by their
     /// flags (or the lines under them), the loop's bracket by its edges or
     /// its middle.
@@ -88,9 +90,10 @@ impl Tonique {
         layout: Layout,
         x: f32,
         y: f32,
+        context: &App,
     ) -> Option<Area> {
-        let details = &self.bottom.clip;
-        let bpm = self.state.bpm();
+        let details = &self.clip;
+        let bpm = self.state(context).bpm();
         let span = layout.span();
         let at = |file: f64| details.x(file, bpm, span);
         let mut areas = Vec::new();
@@ -152,13 +155,19 @@ impl Tonique {
 
     /// Follows a handle dragged to `pointer_x`: the edit shows while
     /// dragged, and applies as one undo step on release.
-    pub(super) fn follow_handle(&mut self, clip: &AudioClip, pointer_x: f32, alt: bool) {
-        let Some(ClipDrag::Handle(drag)) = &self.bottom.clip.drag else {
+    pub(super) fn follow_handle(
+        &mut self,
+        clip: &AudioClip,
+        pointer_x: f32,
+        alt: bool,
+        context: &mut App,
+    ) {
+        let Some(ClipDrag::Handle(drag)) = &self.clip.drag else {
             return;
         };
-        let bpm = self.state.bpm();
-        let shown = self.state.shown_clip(clip);
-        let details = &self.bottom.clip;
+        let bpm = self.state(context).bpm();
+        let shown = self.state(context).shown_clip(clip);
+        let details = &self.clip;
         let span = details.layout().span();
         let at = details.file_at_x(pointer_x, bpm, span, alt);
         let edited = match drag.area.handle {
@@ -191,7 +200,7 @@ impl Tonique {
             }
         };
         if let Some(edited) = edited {
-            self.state.resize_clip(edited);
+            self.state_mut(context).resize_clip(edited);
         }
     }
 }

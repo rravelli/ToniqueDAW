@@ -10,18 +10,13 @@ use egui_phosphor::regular::{
 use tonique_engine::edit::TrackId;
 
 use crate::{
-    config::keymap::Action,
-    core::{
-        state::{ProjectState, RowTarget, TRACK_NAME},
-        track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackRow, TrackSoloState},
-    },
     ui::theme::{ThemeExt, font_size, with_alpha},
     ui::{
         arrangement::track_header::{
             COLOR_BAR_WIDTH, HEADER_INSET, ROW_GAP, TrackHeader, color_bar_x, ghost_header,
         },
         arrangement::{
-            row_layout::{Row, RowLayout},
+            row_layout::{Row, RowLayout, RowSpans},
             ruler::RULER_HEIGHT,
         },
         dnd::DragPayload,
@@ -32,6 +27,13 @@ use crate::{
         },
         workspace::{BottomView, Workspace},
     },
+};
+use tonique_core::{
+    config::keymap::Action,
+    document::track::{DEFAULT_TRACK_HEIGHT, TrackKind, TrackRow, TrackSoloState},
+    project::ProjectState,
+    project::RowTarget,
+    project::TRACK_NAME,
     utils::display_name,
 };
 
@@ -177,7 +179,7 @@ impl TrackHeaders {
         let footer_top = rect.bottom() - footer_height;
         self.rows = Rect::from_x_y_ranges(rect.x_range(), head.bottom()..=footer_top);
         let footer = Rect::from_x_y_ranges(rect.x_range(), footer_top..=rect.bottom());
-        let layout = RowLayout::new(state, self.rows.top(), state.grid.offset.y);
+        let layout = RowLayout::new(state, self.rows.top(), workspace.timeline_view.offset.y);
 
         let theme = ui.app_theme();
         for y in [head.bottom(), footer.top()] {
@@ -214,7 +216,7 @@ impl TrackHeaders {
             UiBuilder::new()
                 .max_rect(Rect::from_x_y_ranges(
                     x.clone(),
-                    self.rows.top() - state.grid.offset.y..=self.rows.bottom(),
+                    self.rows.top() - workspace.timeline_view.offset.y..=self.rows.bottom(),
                 ))
                 .id_salt("track-area"),
         );
@@ -352,7 +354,7 @@ impl TrackHeaders {
         let rows = layout
             .rows()
             .iter()
-            .map(|row| (&row.track, row.y, self.rows))
+            .map(|row| (&row.track, row.y(), self.rows))
             .chain([(&master, footer_row, footer)]);
         // A bar of the track's colour, and its meter.
         let left =
@@ -388,7 +390,7 @@ impl TrackHeaders {
                 painter.rect_filled(row, 2., theme.hover_overlay);
             }
             painter.rect_filled(bar, 1., color);
-            if let Some(metrics) = state.metrics.tracks.get(&track.id) {
+            if let Some(metrics) = state.metrics().tracks.get(&track.id) {
                 let mut meter_ui = ui.new_child(UiBuilder::new().max_rect(meter));
                 meter_ui.set_clip_rect(clip);
                 let meter = LevelMeter::new(meter.size(), metrics).disabled(track.is_silenced());
@@ -422,7 +424,7 @@ impl TrackHeaders {
             for row in layout.rows() {
                 let track = &row.track;
                 // Skip if track is entirely outside the visible vertical range
-                if row.y.max < viewport.top() || row.y.min > viewport.bottom() {
+                if row.y().max < viewport.top() || row.y().min > viewport.bottom() {
                     ui.add_space(track.height + ROW_GAP);
                     continue;
                 }
@@ -446,7 +448,7 @@ impl TrackHeaders {
                     workspace.bottom_view = BottomView::Effects;
                 }
                 // The timeline takes drops on the lane itself.
-                let lane = Rect::from_x_y_ranges(self.lanes.x_range(), row.y);
+                let lane = Rect::from_x_y_ranges(self.lanes.x_range(), row.y());
                 target =
                     effect_drop(ui, state, workspace, track.id, &response, lane, false).or(target);
             }
@@ -581,14 +583,14 @@ pub fn paint_drop_target(ui: &Ui, rect: Rect) {
 /// Where a row dropped at `y` lands, and where to mark it: the row's rect
 /// for dropping into a group, else a line at the rect's top.
 fn drop_target(rows: &[Row], x: Rangef, y: f32) -> Option<(RowTarget, Rect)> {
-    let rect = |row: &Row| Rect::from_x_y_ranges(x, row.y);
+    let rect = |row: &Row| Rect::from_x_y_ranges(x, row.y());
     let below = |rect: Rect| rect.translate(vec2(0., rect.height()));
     for (i, row) in rows.iter().enumerate() {
-        if y > row.y.max + ROW_GAP {
+        if y > row.y().max + ROW_GAP {
             continue;
         }
         let track = &row.track;
-        let share = (y - row.y.min) / row.y.span().max(1.);
+        let share = (y - row.y().min) / row.y().span().max(1.);
         let target = if track.kind == TrackKind::Group && share > ABOVE_GROUP {
             (RowTarget::Into(track.id), rect(row))
         } else if track.kind == TrackKind::Group || share < 0.5 {
@@ -611,13 +613,13 @@ fn paint_group_scopes(ui: &Ui, rows: &[Row], x: Rangef) {
     for row in rows {
         let group = &row.track;
         // Only expanded groups with something inside.
-        if group.kind != TrackKind::Group || group.collapsed || row.scope == row.y {
+        if group.kind != TrackKind::Group || group.collapsed || row.scope() == row.y() {
             continue;
         }
         let x = color_bar_x(x.min, group.depth);
         let bar = Rect::from_min_max(
-            pos2(x, row.y.min + HEADER_INSET),
-            pos2(x + COLOR_BAR_WIDTH, row.scope.max - HEADER_INSET),
+            pos2(x, row.y().min + HEADER_INSET),
+            pos2(x + COLOR_BAR_WIDTH, row.scope().max - HEADER_INSET),
         );
         let color = if group.is_silenced() {
             theme.text_disabled

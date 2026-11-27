@@ -4,11 +4,9 @@
 //! behind the RMS level, the highest recent peak as a line, and clips as a
 //! lamp above each bar until the meter is clicked.
 
-use crate::{
-    core::metrics::AudioMetrics,
-    ui::theme::{Theme, ThemeExt, font_size},
-};
+use crate::ui::theme::{Theme, ThemeExt, font_size};
 use egui::{Color32, Mesh, Rect, Response, RichText, Sense, Vec2, Widget};
+use tonique_core::monitor::metrics::AudioMetrics;
 
 /// Between the two channels' bars.
 const CHANNEL_GAP: f32 = 1.;

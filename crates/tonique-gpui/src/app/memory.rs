@@ -2,15 +2,17 @@
 //! the audio files' data and the waveform tiles hold. Opened by clicking
 //! the frame rate in the menu bar.
 
+use crate::model::HoldsProject;
 use gpui::{Context, SharedString, div, prelude::*, px};
-use tonique_core::memory::AudioMemory;
+use tonique_core::dev::memory::AudioMemory;
 
 use crate::{
-    app::Tonique,
-    cache::AUDIO_ANALYSIS_CACHE,
+    app::Workspace,
     theme::{Theme, hsla},
+    wave::WaveMemory,
     widgets::Menu,
 };
+use tonique_core::library::cache::AUDIO_ANALYSIS_CACHE;
 
 /// Between a row's name and its value.
 const VALUE_GAP: f32 = 24.;
@@ -71,12 +73,21 @@ fn audio_rows(menu: Menu, theme: &Theme, memory: &AudioMemory) -> Menu {
         ))
 }
 
-impl Tonique {
-    pub(super) fn memory_popup(&self, _context: &mut Context<Self>) -> gpui::Div {
-        let theme = &self.theme;
-        let sources = self.state.source_memory();
+impl Workspace {
+    pub(super) fn memory_popup(&self, context: &mut Context<Self>) -> gpui::Div {
+        let theme = &*crate::theme::current(context);
+        let sources = self.state(context).source_memory();
         let cache = AUDIO_ANALYSIS_CACHE.memory();
-        let waves = self.waves.borrow().memory();
+        // A cache per view: each lets go of the tiles it no longer draws
+        // as it renders, and a view not rendered keeps showing its own.
+        let waves = [
+            self.arrangement.read(context).wave_memory(),
+            self.browser.read(context).wave_memory(),
+            self.bottom.read(context).wave_memory(),
+            self.export.read(context).wave_memory(),
+        ]
+        .into_iter()
+        .fold(WaveMemory::default(), WaveMemory::add);
         let resident = self
             .menu_bar
             .resident_bytes()

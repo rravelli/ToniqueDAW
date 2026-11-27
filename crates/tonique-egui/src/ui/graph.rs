@@ -1,21 +1,19 @@
 use crate::ui::theme::ToEgui;
 use crate::ui::theme::font_size;
-use crate::{
-    core::{
-        graph_layout::{
-            self, NODE_HEIGHT, NODE_WIDTH, elide, meter_unit, node_details, node_palette_slot,
-            node_title, stats_line, track_names,
-        },
-        graph_monitor::GraphMonitor,
-        state::ProjectState,
-    },
-    ui::theme::{Theme, ThemeExt},
-};
+use crate::ui::theme::{Theme, ThemeExt};
 use egui::{
     Align2, Color32, CornerRadius, FontId, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind,
     Ui, Vec2, epaint::CubicBezierShape, pos2, vec2,
 };
 use std::{sync::Arc, time::Duration};
+use tonique_core::{
+    monitor::graph_layout::{
+        self, NODE_HEIGHT, NODE_WIDTH, elide, meter_unit, node_details, node_palette_slot,
+        node_title, stats_line, track_names,
+    },
+    monitor::graph_monitor::GraphMonitor,
+    project::ProjectState,
+};
 use tonique_engine::graph::{GraphTopology, TopologyNode};
 
 // Sizes in graph units (scaled by the zoom).
@@ -59,7 +57,7 @@ impl GraphView {
         // Levels move even with the transport stopped (e.g. previews).
         ui.ctx().request_repaint_after(Duration::from_millis(33));
 
-        let monitor = &state.graph;
+        let monitor = &state.graph();
         let Some(topology) = monitor.topology().cloned() else {
             painter.text(
                 viewport.center(),
@@ -138,7 +136,7 @@ impl GraphView {
             &theme,
             viewport,
             &topology,
-            state.metrics.latency,
+            state.metrics().latency,
             monitor,
         );
 
@@ -395,11 +393,12 @@ mod tests {
 
     #[test]
     fn draws_the_live_graph_headless() {
-        use crate::{core::state::ProjectState, ui::theme::Theme};
+        use crate::ui::theme::Theme;
+        use tonique_core::project::ProjectState;
 
         let (engine, _p) = Engine::new(EngineConfig::default());
         let mut state = ProjectState::new(engine);
-        let palette: Vec<crate::utils::color::Color> = Theme::dark()
+        let palette: Vec<tonique_core::utils::color::Color> = Theme::dark()
             .palette
             .iter()
             .map(|&c| c.to_color())
@@ -409,7 +408,7 @@ mod tests {
         state.add_track();
         state.set_monitor_graph(true);
         state.update(); // enables metering, picks up the topology
-        let topology = state.graph.topology().cloned().expect("graph published");
+        let topology = state.graph().topology().cloned().expect("graph published");
         assert!(topology.meters().is_enabled());
 
         let mut view = GraphView::new();

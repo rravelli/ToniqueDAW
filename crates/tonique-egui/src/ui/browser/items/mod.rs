@@ -15,13 +15,13 @@ use std::{
 use egui::{FontId, Key, Rect, RichText, ScrollArea, Stroke, Ui, pos2, vec2};
 use egui_phosphor::regular::PLUS;
 
-use crate::{
-    analysis::AudioInfo,
-    cache::AUDIO_ANALYSIS_CACHE,
+use crate::ui::{theme::ThemeExt, widget::flat_button::FlatButton};
+use tonique_core::{
     config::keymap::Action,
-    core::state::ProjectState,
-    file_tree::{FileNode, FileTree, is_audio_file, pinned},
-    ui::{theme::ThemeExt, widget::flat_button::FlatButton},
+    library::analysis::AudioInfo,
+    library::cache::AUDIO_ANALYSIS_CACHE,
+    library::file_tree::{FileNode, FileTree, is_audio_file, pinned},
+    project::ProjectState,
 };
 
 /// Width of a label's menu: its name's field and its colours'.

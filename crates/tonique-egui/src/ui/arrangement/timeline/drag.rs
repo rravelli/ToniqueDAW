@@ -1,169 +1,58 @@
 use crate::ui::RectSpan;
 use crate::ui::theme::ToEgui;
-use crate::{
-    core::{clip::AudioClip, state::ProjectState, track::DEFAULT_TRACK_HEIGHT},
-    ui::{
-        arrangement::clip::ClipView,
-        arrangement::{
-            row_layout::RowLayout,
-            timeline::{Timeline, scroll::autoscroll},
-        },
-        theme::ThemeExt,
+use crate::ui::{
+    arrangement::clip::ClipView,
+    arrangement::{
+        row_layout::RowLayout,
+        timeline::{Timeline, scroll::autoscroll},
     },
+    theme::ThemeExt,
 };
 use egui::{Rect, Stroke, Ui, pos2, vec2};
-use tonique_engine::{edit::ClipId, time::BeatPos};
-
-#[derive(Clone)]
-pub struct ClipDrag {
-    pub clips: Vec<DraggedClip>,
-    pub duplicate: bool,
-    pub min_track_delta: i32,
-}
-#[derive(Clone)]
-pub struct DraggedClip {
-    pub clip: AudioClip,
-    /// From the clip's start to the pointer, horizontally.
-    pub grab_x: f32,
-    pub track_index_delta: i32,
-}
-
-impl ClipDrag {
-    pub fn dragged_ids(&self) -> Vec<ClipId> {
-        self.clips.iter().map(|e| e.clip.id).collect()
-    }
-}
+use tonique_core::session::timeline_view::TimelineView;
+use tonique_core::{
+    document::track::DEFAULT_TRACK_HEIGHT,
+    project::{ProjectState, clip_drag::ClipMove},
+};
+use tonique_engine::edit::ClipId;
 
 impl Timeline {
+    /// Clips dragged by their header: the core's [`ClipMove`] decides where
+    /// they land and what landing does; this draws them there. With Ctrl,
+    /// copies of the selection move.
     pub fn handle_dragged_clips(
         &mut self,
         ui: &mut Ui,
         layout: &RowLayout,
-        dragged_track_index: Option<usize>,
+        grabbed_clip: Option<ClipId>,
         viewport: Rect,
-        dragged_clip: Option<AudioClip>,
         state: &mut ProjectState,
+        view: &mut TimelineView,
     ) {
         let mouse_pos = ui.ctx().input(|i| i.pointer.hover_pos());
-        // Create dragging objects
         if self.clip_drag.is_none()
-            && let Some(clip) = dragged_clip
+            && let Some(clip) = grabbed_clip
             && let Some(mouse_pos) = mouse_pos
-            && let Some(old_track) = dragged_track_index
         {
-            // Grabbing a clip outside the selection (or outside its zone)
-            // drags that clip alone.
-            let grabbed = state.grid.x_to_beats(mouse_pos.x, viewport.span());
-            let outside_zone = state
-                .selection_bounds()
-                .is_some_and(|b| grabbed < b.start_pos || grabbed > b.end_pos);
-            if !state.is_clip_selected(clip.id) || outside_zone {
-                state.select_clips(vec![clip.id]);
-            }
-            // With a zone, only its part of the clips moves.
-            let zone = state.selection_bounds();
-            let bpm = state.bpm();
-            let mut clips = Vec::new();
-            let mut new_selected_clips = Vec::new();
+            let grab = view.x_to_beats(mouse_pos.x, viewport.span());
             let duplicate = ui.input(|i| i.modifiers.ctrl);
-            let mut min_track_delta = 0;
-            let tracks: Vec<_> = state.tracks().collect();
-            for track in tracks {
-                for clip in track.clips.iter() {
-                    if state.is_clip_selected(clip.id) {
-                        // Create a clone
-                        let mut new_clip = if duplicate {
-                            clip.with_id(state.new_clip_id())
-                        } else {
-                            clip.clone()
-                        };
-                        if let Some(b) = zone {
-                            new_clip.crop(b.start_pos, b.end_pos, bpm);
-                        }
-                        // Update selected clips
-                        new_selected_clips.push(new_clip.clone().id);
-                        let track_index_delta = track.first_track_index as i32 - old_track as i32;
-                        min_track_delta = min_track_delta.min(track_index_delta);
-                        let x = state.grid.beats_to_x(new_clip.position, viewport.span());
-                        clips.push(DraggedClip {
-                            clip: new_clip,
-                            grab_x: mouse_pos.x - x,
-                            track_index_delta,
-                        });
-                    }
-                }
-            }
-            // Copies get selected. Moved clips already are, and keep their
-            // zone until dropped, to split the clips at it.
-            if duplicate {
-                state.select_clips(new_selected_clips);
-            }
-            self.clip_drag = Some(ClipDrag {
-                clips,
-                duplicate,
-                min_track_delta,
-            });
+            self.clip_drag = Some(ClipMove::start(state, clip, grab, duplicate));
         }
 
-        // Render clips while dragging
-        if let Some(mut clip_drag) = self.clip_drag.take()
+        if let Some(mut moving) = self.clip_drag.take()
             && let Some(mouse_pos) = mouse_pos
         {
-            // Find track at mouse position
-            // Index of the track at mouse position
-            let mouse_track_index = layout
+            // Below the last row: on tracks a drop adds.
+            let pointer_track = layout
                 .track_at(mouse_pos.y)
-                .map_or(state.track_count(), |(index, _)| index)
-                .max(-clip_drag.min_track_delta as usize)
-                as i32;
+                .map_or(state.track_count(), |(index, _)| index);
+            let pointer = view.x_to_beats(mouse_pos.x, viewport.span());
+            let alt = ui.input(|i| i.modifiers.alt);
+            moving.place(state, view, pointer, pointer_track, alt);
 
-            // Snap the nearest clip edge: starts to the grid or to snap
-            // targets (other clips, loop, edit cursor), ends to targets only.
-            // Only when snapping, which Alt inverts.
-            let mut beat_delta = f64::INFINITY;
-            let mut snapped_to = None;
-            if state.grid.snaps(ui.input(|i| i.modifiers.alt)) {
-                let targets = state.snap_targets(&clip_drag.dragged_ids());
-                let bpm = state.bpm();
-                for dragged in clip_drag.clips.iter() {
-                    let start = state
-                        .grid
-                        .x_to_beats(mouse_pos.x - dragged.grab_x, viewport.span());
-                    let end = start + (dragged.clip.end(bpm) - dragged.clip.position);
-                    let candidates = [
-                        Some((state.grid.snap_to_targets(start, &targets), start)),
-                        Some((state.grid.snap_to_targets(end, &targets), end))
-                            .filter(|((_, target), _)| *target),
-                    ];
-                    for ((pos, target), edge) in candidates.into_iter().flatten() {
-                        if (pos - edge).abs() < beat_delta.abs() {
-                            beat_delta = pos - edge;
-                            snapped_to = target.then_some(pos);
-                        }
-                    }
-                }
-            }
-            // No clip are snapped
-            if beat_delta == f64::INFINITY {
-                beat_delta = 0.;
-            }
-            // Keep the group from starting before the first beat.
-            let first = clip_drag
-                .clips
-                .iter()
-                .map(|e| {
-                    state
-                        .grid
-                        .x_to_beats(mouse_pos.x - e.grab_x, viewport.span())
-                })
-                .fold(BeatPos(f64::INFINITY), BeatPos::min);
-            if -first.0 > beat_delta {
-                beat_delta = -first.0;
-                snapped_to = None;
-            }
             // Show what the clips snapped to.
-            if let Some(beats) = snapped_to {
-                let x = state.grid.beats_to_x(beats, viewport.span());
+            if let Some(beats) = moving.snapped_to {
+                let x = view.beats_to_x(beats, viewport.span());
                 ui.painter_at(viewport).vline(
                     x,
                     viewport.y_range(),
@@ -173,108 +62,47 @@ impl Timeline {
 
             // Tracks a drop will add past the last one, with the colours
             // they'll get: the clips going there are shown on them.
-            let added = clip_drag
-                .clips
-                .iter()
-                .map(|d| (mouse_track_index + d.track_index_delta).max(0) as usize + 1)
-                .max()
-                .unwrap_or(0)
-                .saturating_sub(state.track_count());
+            let added = moving.added_tracks(state.track_count());
             let new_colors = self.new_track_lanes(ui, state, layout, viewport, added);
-            let mut track_indexes = Vec::new();
-            for dragged in clip_drag.clips.iter_mut() {
-                {
-                    // Calculate track index
-                    let track_index =
-                        (mouse_track_index + dragged.track_index_delta).max(0) as usize;
-
-                    track_indexes.push(track_index);
-                    // Calculate y pos
-                    let y = layout.track_top(track_index);
-                    // Calculate width
-                    let width = state.grid.beats_to_width(dragged.clip.length);
-                    // Calculate x pos
-                    let new_position = state
-                        .grid
-                        .x_to_beats(mouse_pos.x - dragged.grab_x, viewport.span())
-                        + beat_delta;
-                    dragged.clip.position = new_position;
-                    let x = state.grid.beats_to_x(new_position, viewport.span());
-
-                    let mut collapsed = false;
-                    let mut color = track_index
-                        .checked_sub(state.track_count())
-                        .and_then(|new| new_colors.get(new).copied())
-                        .unwrap_or(ui.app_theme().text_muted);
-                    let mut height = DEFAULT_TRACK_HEIGHT;
-                    let mut silenced = false;
-                    if let Some(t) = state.track_from_index(track_index) {
-                        collapsed = t.collapsed;
-                        silenced = t.is_silenced();
-                        color = t.color.to_egui();
-                        height = t.height;
-                    }
-                    let pos = pos2(x, y);
-                    let size = vec2(width, height);
-                    // Render Clip
-                    ClipView {
-                        clip: &dragged.clip,
-                        rect: Rect::from_min_size(pos, size),
-                        viewport,
-                        color,
-                        selected: true,
-                        zone: None,
-                        collapsed,
-                        silenced,
-                        ghost: false,
-                    }
-                    .preview(ui, state);
+            for moved in &moving.clips {
+                let track_index = moved.track_index;
+                let y = layout.track_top(track_index);
+                let width = view.beats_to_width(moved.clip.length);
+                let x = view.beats_to_x(moved.clip.position, viewport.span());
+                let mut collapsed = false;
+                let mut color = track_index
+                    .checked_sub(state.track_count())
+                    .and_then(|new| new_colors.get(new).copied())
+                    .unwrap_or(ui.app_theme().text_muted);
+                let mut height = DEFAULT_TRACK_HEIGHT;
+                let mut silenced = false;
+                if let Some(track) = state.track_from_index(track_index) {
+                    collapsed = track.collapsed;
+                    silenced = track.is_silenced();
+                    color = track.color.to_egui();
+                    height = track.height;
                 }
+                ClipView {
+                    clip: &moved.clip,
+                    rect: Rect::from_min_size(pos2(x, y), vec2(width, height)),
+                    viewport,
+                    timeline_view: view,
+                    color,
+                    selected: true,
+                    zone: None,
+                    collapsed,
+                    silenced,
+                    ghost: false,
+                }
+                .preview(ui, state);
             }
 
-            // Update state on mouse released
             if !ui.input(|i| i.pointer.primary_down()) {
-                self.commit_drag(state, clip_drag, track_indexes);
-            } else if !clip_drag.duplicate || ui.input(|i| i.modifiers.ctrl) {
-                self.clip_drag = Some(clip_drag);
-                autoscroll(ui, state, layout, viewport, mouse_pos);
+                moving.land(state);
+            } else if !moving.duplicate || ui.input(|i| i.modifiers.ctrl) {
+                self.clip_drag = Some(moving);
+                autoscroll(ui, view, layout, viewport, mouse_pos);
             }
         }
-    }
-
-    fn commit_drag(
-        &mut self,
-        state: &mut ProjectState,
-        clip_drag: ClipDrag,
-        track_indexes: Vec<usize>,
-    ) {
-        let ids = clip_drag.dragged_ids();
-
-        let mut tracks: Vec<_> = state.tracks().map(|t| t.id).collect();
-        state.begin_batch();
-        if !clip_drag.duplicate {
-            // Only the zone's part moves: it keeps the clips' ids.
-            state.split_at_zone();
-        }
-        for (i, dragged) in clip_drag.clips.iter().enumerate() {
-            let track_index = track_indexes[i];
-            // Create missing tracks
-            while tracks.len() <= track_index {
-                tracks.push(state.add_track());
-            }
-
-            let clone = dragged.clip.clone();
-
-            let track_id = tracks[track_index];
-            if clip_drag.duplicate {
-                state.add_clips(&track_id, vec![clone]);
-            } else {
-                state.move_clip(&clone.id, &track_id, clone.position, &ids);
-            }
-        }
-        state.commit_batch();
-        // The zone stayed behind: keep the moved clips selected without it.
-        state.select_clips(ids);
-        self.clip_drag = None;
     }
 }

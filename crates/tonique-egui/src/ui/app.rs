@@ -1,29 +1,27 @@
-use crate::bench::Bench;
 use crate::ui::keymap::KeymapExt;
 use crate::ui::theme::ToColor;
 use crate::ui::widget::arrow_keys::holds_arrows;
-use crate::{
-    audio::host::AudioHost,
-    config::{keymap::Action, settings::Settings},
-    core::state::{PlaybackState, ProjectState},
-    ui::{
-        commands::Commands,
-        export::ExportWindow,
-        panels::{
-            bottom_panel::BottomPanel,
-            central_panel::CentralPanel,
-            left_panel::LeftPanel,
-            menu_bar::{AppMenuBar, set_ui_scale},
-            transport_bar::TransportBar,
-        },
-        project::{ProjectAction, ProjectManager},
-        settings::SettingsWindow,
-        theme::{ThemeExt, ThemeLibrary},
-        workspace::{BottomView, MainView, Workspace},
+use crate::ui::{
+    commands::Commands,
+    export::ExportWindow,
+    panels::{
+        bottom_panel::BottomPanel,
+        central_panel::CentralPanel,
+        left_panel::LeftPanel,
+        menu_bar::{AppMenuBar, set_ui_scale},
+        transport_bar::TransportBar,
     },
+    project::{ProjectAction, ProjectManager},
+    settings::SettingsWindow,
+    theme::{ThemeExt, ThemeLibrary},
+    workspace::{BottomView, MainView, Workspace},
 };
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-use tonique_engine::engine::Engine;
+use tonique_core::dev::bench::Bench;
+use tonique_core::{
+    config::keymap::Action, project::ActionOutcome, project::ProjectState,
+    session::timeline_view::Offset,
+};
 
 pub struct ToniqueApp {
     state: ProjectState,
@@ -42,19 +40,11 @@ pub struct ToniqueApp {
 }
 
 impl ToniqueApp {
-    pub fn new(
-        engine: Engine,
-        audio: Result<AudioHost, String>,
-        settings: Settings,
-        cc: &eframe::CreationContext<'_>,
-    ) -> Self {
+    pub fn new(mut state: ProjectState, cc: &eframe::CreationContext<'_>) -> Self {
         let themes = ThemeLibrary::load();
-        let (theme, theme_warnings) = themes.resolve(&settings.theme);
-        let palette = theme.palette.clone();
+        let (theme, theme_warnings) = themes.resolve(&state.settings().theme);
+        state.set_track_palette(&project_palette(&theme.palette));
         theme.install(&cc.egui_ctx);
-        let mut state = ProjectState::new(engine);
-        state.set_track_palette(&project_palette(&palette));
-        state.attach_audio(audio, settings);
         let mut bench = Bench::from_env("egui");
         if let Some(bench) = &mut bench {
             bench.setup(&mut state);
@@ -107,7 +97,7 @@ impl ToniqueApp {
 
     fn update_state(&mut self, ctx: &egui::Context) {
         if let Some(bench) = &mut self.bench {
-            bench.frame(&mut self.state);
+            bench.frame(&mut self.state, &mut self.workspace.timeline_view);
         }
         // Update state
         self.state
@@ -144,6 +134,8 @@ impl ToniqueApp {
         self.project.ui(ui, &mut self.state);
         if self.project.take_replaced() {
             self.workspace.bottom_view = BottomView::Effects;
+            // Another project: back to its start.
+            self.workspace.timeline_view.offset = Offset::ZERO;
         }
         self.export_window.show(ui, &self.state);
     }
@@ -166,37 +158,12 @@ impl ToniqueApp {
     /// selection ([`Action::is_timeline`]) do nothing while it's hidden.
     fn dispatch(&mut self, action: Action) {
         let state = &mut self.state;
+        let view = &self.workspace.timeline_view;
+        if action.is_timeline() || state.run_action(action, view) != ActionOutcome::Unhandled {
+            return;
+        }
         let workspace = &mut self.workspace;
         match action {
-            Action::PlayStop => {
-                if state.playback_state() == PlaybackState::Playing {
-                    state.stop();
-                } else {
-                    state.play();
-                }
-            }
-            // Loop the selection, or toggle looping
-            Action::Loop => {
-                if !state.loop_selection() {
-                    state.set_looping(!state.looping());
-                }
-            }
-            Action::ToggleMetronome => state.toggle_metronome(),
-            Action::ToggleFollowPlayhead => state.set_follow_playhead(!state.follow_playhead()),
-            Action::NarrowGrid => state.grid.narrow(),
-            Action::WidenGrid => state.grid.widen(),
-            Action::ToggleTripletGrid => state.grid.settings.triplet ^= true,
-            Action::ToggleAdaptiveGrid => state.grid.toggle_adaptive(),
-            Action::ToggleSnap => state.grid.settings.snap ^= true,
-            Action::Undo => state.undo(),
-            Action::Redo => state.redo(),
-            Action::AddTrack => {
-                state.add_track_below_selection();
-            }
-            Action::GroupTracks => {
-                let selected = state.selected_tracks().clone();
-                state.group(&selected);
-            }
             Action::ToggleBrowser => workspace.left_panel_open = !workspace.left_panel_open,
             Action::ToggleEffectsPanel => {
                 workspace.bottom_panel_open = !workspace.bottom_panel_open
@@ -209,15 +176,8 @@ impl ToniqueApp {
             Action::SaveProject => self.project.request(ProjectAction::Save, state),
             Action::SaveProjectAs => self.project.request(ProjectAction::SaveAs, state),
             Action::ExportAudio => self.export_window.open(&self.project),
-            Action::SelectAll
-            | Action::Duplicate
-            | Action::Rename
-            | Action::Delete
-            | Action::SplitAtCursor
-            | Action::NudgeLeft
-            | Action::NudgeRight
-            | Action::MoveTrackUp
-            | Action::MoveTrackDown => {}
+            // Renaming in place is the track list's.
+            _ => {}
         }
     }
 }
@@ -226,6 +186,6 @@ impl ToniqueApp {
 mod tests;
 
 /// The theme's palette, as the project gives it to new tracks.
-fn project_palette(palette: &[egui::Color32]) -> Vec<crate::utils::color::Color> {
+fn project_palette(palette: &[egui::Color32]) -> Vec<tonique_core::utils::color::Color> {
     palette.iter().map(|&c| c.to_color()).collect()
 }

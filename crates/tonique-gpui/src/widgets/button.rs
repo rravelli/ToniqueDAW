@@ -1,18 +1,15 @@
-//! Buttons: Tonique's `FlatButton`, a toggle lit in the accent, and the
+//! Buttons: V's `FlatButton`, a toggle lit in the accent, and the
 //! press handler they share.
 
 use gpui::{Context, MouseButton, Stateful, div, prelude::*, px};
 
-use crate::{
-    app::Tonique,
-    theme::{Color, Theme, WHITE, hsla, icon, icon_fill, mix, with_alpha},
-};
+use crate::theme::{Color, Theme, WHITE, hsla, icon, icon_fill, mix, with_alpha};
 
 /// Runs `action` on mouse down, and redraws.
-pub fn on_press(
+pub fn on_press<V: 'static>(
     element: Stateful<gpui::Div>,
-    context: &mut Context<Tonique>,
-    action: impl Fn(&mut Tonique, &mut Context<Tonique>) + 'static,
+    context: &mut Context<V>,
+    action: impl Fn(&mut V, &mut Context<V>) + 'static,
 ) -> Stateful<gpui::Div> {
     element.on_mouse_down(
         MouseButton::Left,
@@ -35,13 +32,13 @@ pub fn glyph(glyph_name: &'static str, size: f32, fill: bool) -> gpui::Div {
 }
 
 /// A button lit in the accent while `on`.
-pub fn toggle_button(
+pub fn toggle_button<V: 'static>(
     id: &'static str,
     label: impl IntoElement,
     on: bool,
     theme: &Theme,
-    context: &mut Context<Tonique>,
-    action: impl Fn(&mut Tonique, &mut Context<Tonique>) + 'static,
+    context: &mut Context<V>,
+    action: impl Fn(&mut V, &mut Context<V>) + 'static,
 ) -> Stateful<gpui::Div> {
     let (background, foreground, hover) = if on {
         (
@@ -70,7 +67,7 @@ pub fn toggle_button(
     on_press(element, context, action)
 }
 
-/// Tonique's `FlatButton`: a solid control fill (the accent while
+/// V's `FlatButton`: a solid control fill (the accent while
 /// `selected`), or for a `ghost` no fill until hovered and muted text (the
 /// accent's while `selected`). `color` overrides the text's. Disabled, it
 /// shows at half strength and does nothing.
@@ -180,12 +177,12 @@ impl Flat {
     }
 
     /// The button around `label`, running `action` when pressed.
-    pub fn show(
+    pub fn show<V: 'static>(
         self,
         label: impl IntoElement,
         theme: &Theme,
-        context: &mut Context<Tonique>,
-        action: impl Fn(&mut Tonique, &mut Context<Tonique>) + 'static,
+        context: &mut Context<V>,
+        action: impl Fn(&mut V, &mut Context<V>) + 'static,
     ) -> Stateful<gpui::Div> {
         let enabled = self.enabled;
         let element = self.element(label, theme);

@@ -352,7 +352,7 @@ pub trait ToEgui {
     fn to_egui(self) -> Color32;
 }
 
-impl ToEgui for crate::utils::color::Color {
+impl ToEgui for tonique_core::utils::color::Color {
     fn to_egui(self) -> Color32 {
         Color32::from_rgba_unmultiplied(self.r, self.g, self.b, self.a)
     }
@@ -360,13 +360,13 @@ impl ToEgui for crate::utils::color::Color {
 
 /// egui's colours (the theme's palette) given to the project.
 pub trait ToColor {
-    fn to_color(self) -> crate::utils::color::Color;
+    fn to_color(self) -> tonique_core::utils::color::Color;
 }
 
 impl ToColor for Color32 {
-    fn to_color(self) -> crate::utils::color::Color {
+    fn to_color(self) -> tonique_core::utils::color::Color {
         let [r, g, b, a] = self.to_srgba_unmultiplied();
-        crate::utils::color::Color::rgba(r, g, b, a)
+        tonique_core::utils::color::Color::rgba(r, g, b, a)
     }
 }
 
